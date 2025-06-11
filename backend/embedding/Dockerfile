@@ -18,6 +18,8 @@ RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding
 # Stage 2: Main app
 FROM python:3.11-slim
 
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV GRPC_HEALTH_PROBE_VERSION=v0.4.38
 
@@ -50,6 +52,7 @@ COPY --from=model-builder /model/traced_model.pt .
 
 EXPOSE 50051
 
-#HEALTHCHECK CMD ["/usr/bin/grpc_health_probe", "-addr=localhost:50051"]
+# Switch to the non-root user before running the application
+USER appuser
 
 ENTRYPOINT ["python3", "model_server.py"]
