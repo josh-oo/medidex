@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, UploadFile, File, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
@@ -9,6 +9,11 @@ import os
 import grpc
 import embedding_pb2
 import embedding_pb2_grpc
+
+from rispy.parser import RisParser
+import rispy
+import nbib
+import io
 
 load_dotenv()
 
@@ -33,6 +38,53 @@ class EmbeddingInput(BaseModel):
 @app.get("/readyz")
 def check():
     return "Ready"
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    class CgiParser(RisParser):
+        START_TAG = "DB"
+
+    def add_end_tag(text: str) -> str:
+        return '\n'.join(
+            line if line.strip() else "ER  -  \n\n"
+            for line in text.splitlines()
+        )
+    
+    if file.filename.endswith(".ris"):
+        try:
+            content = await file.read()
+            text_stream = io.StringIO(content.decode('utf-8'))  # RIS is plain text
+            entries = rispy.load(text_stream)  # returns a list of dicts
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to parse .ris: {str(e)}")
+        
+    elif file.filename.endswith(".cgi"):
+        try:
+            content = await file.read()
+            text_stream = io.StringIO(add_end_tag(content.decode('utf-8')))  # RIS is plain text
+            entries = rispy.load(text_stream, implementation=CgiParser, skip_unknown_tags=True)  # returns a list of dicts
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to parse .cgi: {str(e)}")
+        
+    elif file.filename.endswith(".nbib"):
+        try:
+            content = await file.read()
+            decoded = content.decode("utf-8")
+            entries = nbib.read(decoded)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to parse .nbib: {str(e)}")
+
+    else:
+        raise HTTPException(status_code=400, detail="Only .ris and .nbib files are accepted")
+
+    results = []
+    for entry in entries:
+        title = entry.get('primary_title', None)
+        if not title:
+            title = entry.get('title', None)
+        results.append({'title':title, 'abstract':entry.get('abstract', None)})
+
+    return results
 
 @app.post("/similarity_search/tags/{type}")
 async def similarity_search_tags(type: str, embedding: EmbeddingInput):
