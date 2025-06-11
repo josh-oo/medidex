@@ -20,3 +20,18 @@ If you leave the `qdrant` folder empty the app starts indexing the reports after
 
 6. Run `docker compose up` (it may take a while building all the images)  
 7. If it is done you can use the tool at http://localhost:8051
+   
+# Services
+The application is divided into multiple services to facilitate hosting on different machines later
+## frontend
+This is just a prototype to visualize and test the applications features.  
+## backend / logic
+This services manages the incoming requests from the frontend and calls the appropriate sub-services in the backend
+## database
+Currently this service hosts the meerkat (sql) database and provides a simple REST interface to execute queries. However, in future it might make more sense to run this service, where the meerkat data is actually hosted, so that we don't need a copy of meerkat data in this app.
+## embedding
+This service is used to transform plain text into vector embeddings using a self-trained model. Currently this service runs on a CPU machine. Depending on the workload it might make sense to move this service to a GPU machine later.
+## qdrant
+This is where all the vectores are stored to index the meerkat reports based on their similarity.
+## routines
+This service hosts routínes like searching for unindexed reports in meerkat to add them to the index properly.
