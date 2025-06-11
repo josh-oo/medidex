@@ -1,6 +1,7 @@
 FROM python:3.13-alpine
 
-ENV STREAMLIT_HOME /tmp/streamlit
+ENV STREAMLIT_CONFIG_DIR=/app/.streamlit
+ENV STREAMLIT_CACHE_DIR=/app/.streamlit/cache
 
 WORKDIR /app
 

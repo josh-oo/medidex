@@ -70,7 +70,7 @@ services:
       - /var/tmp # Mount tmpfs to /var/tmp
 
   logic:
-    container_name: backend
+    container_name: logic
     build:
       context: ./backend
       dockerfile: logic/Dockerfile
@@ -97,7 +97,7 @@ services:
       - public_net
       - internal_net
     tmpfs:
-      - /app/.streamlit/cache  # Mount tmpfs to Streamlit's cache directory
+      - /app/.streamlit
     cap_drop:
       - ALL
     security_opt:
