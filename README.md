@@ -35,3 +35,9 @@ This service is used to transform plain text into vector embeddings using a self
 This is where all the vectores are stored to index the meerkat reports based on their similarity.
 ## routines
 This service hosts routínes like searching for unindexed reports in meerkat to add them to the index properly.
+
+# Rules for editing this repository
+1. If you are working on this repository please create a new branch for every feature / bugfix and use meaningful prefixes.
+   For example: `bugfix/embedding-model-data-type` or `feature/new-upload-button`
+2. If the bugfix is done you can create a pull request, to merge it back to `main`
+3. The `prod` branch is currently empty we will use it later for CI/CD as soon as we are ready for production.
