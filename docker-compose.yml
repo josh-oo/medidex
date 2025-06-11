@@ -97,7 +97,7 @@ services:
       - public_net
       - internal_net
     tmpfs:
-      - /app/.streamlit
+      - /home/appuser/.streamlit
     cap_drop:
       - ALL
     security_opt:

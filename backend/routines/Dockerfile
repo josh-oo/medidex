@@ -10,6 +10,8 @@ RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding
 # Stage 2: Main app
 FROM python:3.11-alpine
 
+RUN addgroup -S appgroup && adduser -S -G appgroup appuser
+
 ENV PYTHONDONTWRITEBYTECODE 1
 
 WORKDIR /app
@@ -30,5 +32,8 @@ ADD https://github.com/grpc-ecosystem/grpc-health-probe/releases/latest/download
 RUN chmod +x /usr/bin/grpc_health_probe
 
 EXPOSE 8002
+
+# Switch to the non-root user before running the application
+USER appuser
 
 ENTRYPOINT ["/wait_for_services.sh"]
