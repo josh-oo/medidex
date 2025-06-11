@@ -65,3 +65,9 @@ This service hosts routínes like searching for unindexed reports in meerkat to 
 `EMBEDDING_PORT=50051`
 `VECTORSTORE_HOST=qdrant`
 `VECTORSTORE_PORT=6334`
+
+# Rules for editing this repository
+1. If you are working on this repository please create a new branch for every feature / bugfix and use meaningful prefixes.
+   For example: `bugfix/embedding-model-data-type` or `feature/new-upload-button`
+2. If the bugfix is done you can create a pull request, to merge it back to `main`
+3. The `prod` branch is currently empty we will use it later for CI/CD as soon as we are ready for production.
