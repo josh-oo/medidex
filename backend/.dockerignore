@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+**/__pycache__/
+
+# Virtual environments
+**/.venv/
+**/.env
+
+# Huggingface cache
+**/.cache/
+
+# IDEs and editors
+**/.vscode/
+
+# macOS
+**/.DS_Store
+
+# Docker-related
+**/Dockerfile
+
+**/*pb2.py
+**/*pb2_grpc.py
+
+**/traced_model.pt
+**/tokenizer/

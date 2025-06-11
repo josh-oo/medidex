@@ -1,0 +1,115 @@
+version: "3.8"
+
+services:
+  database:
+    container_name: database
+    build: 
+      context: ./backend/database
+      dockerfile: Dockerfile
+    expose:
+      - 8001
+    volumes:
+      - ./backend/_data/database:/data  # Correct path for the database volume
+    #healthcheck:
+    #  test: ["CMD", "curl", "-f", "http://localhost:8001/readyz"]
+    #  interval: 10s
+    #  timeout: 5s
+    #  retries: 12
+    #  start_interval: 30s
+    read_only: true
+    networks:
+      - internal_net
+
+  embedding:
+    container_name: embedding
+    build:
+      context: ./backend
+      dockerfile: embedding/Dockerfile
+    expose:
+      - 50051
+    #healthcheck:
+    #  test: ["CMD", "/usr/bin/grpc_health_probe", "-addr=localhost:50051"]
+    #  interval: 10s
+    #  timeout: 5s
+    #  retries: 12
+    #  start_interval: 30s
+    read_only: true
+    networks:
+      - internal_net
+
+  qdrant:
+    container_name: qdrant
+    image: qdrant/qdrant:latest
+    restart: always
+    expose:
+      - 6333
+      - 6334
+      - 6335
+    configs:
+      - source: qdrant_config
+        target: /qdrant/config/production.yaml
+    volumes:
+      - ./backend/_data/qdrant:/qdrant/storage  # Path for Qdrant storage
+    networks:
+      - internal_net
+
+  routines:
+    container_name: routines
+    build:
+      context: ./backend
+      dockerfile: routines/Dockerfile
+    depends_on:
+        - database
+        - qdrant
+        - embedding
+    read_only: true
+    networks:
+      - internal_net
+    tmpfs:
+      - /tmp     # Mount tmpfs to /tmp
+      - /var/tmp # Mount tmpfs to /var/tmp
+
+  logic:
+    container_name: backend
+    build:
+      context: ./backend
+      dockerfile: logic/Dockerfile
+    expose:
+      - 8002
+    read_only: true
+    networks:
+      - internal_net
+    tmpfs:
+      - /tmp     # Mount tmpfs to /tmp
+      - /var/tmp # Mount tmpfs to /var/tmp
+
+  frontend:
+    container_name: frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - 8501:8501
+    expose:
+      - 8501
+    read_only: true
+    networks:
+      - public_net
+      - internal_net
+    tmpfs:
+      - /app/.streamlit/cache  # Mount tmpfs to Streamlit's cache directory
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+configs:
+  qdrant_config:
+    content: |
+      log_level: INFO
+
+networks:
+  internal_net:
+    internal: true
+  public_net:
+    driver: bridge
