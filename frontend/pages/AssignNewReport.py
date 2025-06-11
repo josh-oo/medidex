@@ -48,24 +48,49 @@ def get_similar_tags(embedding, model, tag):
         print("Request failed:", response.status_code, response.text)
         return None
 
-title = st.text_input("Title")
-abstract = st.text_area("Abstract")
-
 study_search_results = None
 intervention_search_results = None
 condition_search_results = None
 outcome_search_results = None
 
-if st.button("Search", icon=":material/search:", use_container_width=True,  key="search_1") and title + abstract != "":
-    text_to_process =title + "\n" + abstract
-    current_model, current_embedding, current_aspect_embeddings = get_embeddings(text_to_process)
-    if current_model is None or current_embedding is None or current_aspect_embeddings is None:
-        st.error("Could not parse inputs")
+uploaded_file = st.file_uploader("Upload your RIS, CGI or NBIB file", type=["ris", "nbib", "cgi"])
+if uploaded_file is not None:
+    # Read the file content as bytes
+    file_content = uploaded_file.getvalue()
+    
+    # Create a multipart form-data request
+    files = {'file': (uploaded_file.name, file_content, 'application/octet-stream')}
+    
+    # Send the file to FastAPI server for processing
+    response = requests.post(BACKEND_API + f"/upload", files=files)
+    
+    if response.status_code != 200:
+        st.error(f"Error: {response.status_code} - {response.text}")
+    else:
+        #st.json(response.json())  # Display parsed JSON response from FastAPI
+        index = st.slider("Select loaded report", 0, len(response.json()), 0)
+        selected_report = response.json()[index]
+    
+        title = selected_report['title']
+        abstract = selected_report['abstract']
+        st.header(title)
+        st.write(abstract)
 
-    study_search_results = get_similar_studies(current_embedding, current_model)
-    intervention_search_results = get_similar_tags(current_aspect_embeddings['intervention'], current_model, "interventions")
-    condition_search_results = get_similar_tags(current_aspect_embeddings['condition'], current_model, "conditions")
-    outcome_search_results = get_similar_tags(current_aspect_embeddings['outcome'], current_model, "outcomes")
+        if st.button("Search", icon=":material/search:", use_container_width=True,  key="search_1") and title + abstract != "":
+            text_to_process = []
+            if title:
+                text_to_process.append(title)
+            if abstract:
+                text_to_process.append(abstract)
+            text_to_process = "\n".join(text_to_process)
+            current_model, current_embedding, current_aspect_embeddings = get_embeddings(text_to_process)
+            if current_model is None or current_embedding is None or current_aspect_embeddings is None:
+                st.error("Could not parse inputs")
+
+            study_search_results = get_similar_studies(current_embedding, current_model)
+            intervention_search_results = get_similar_tags(current_aspect_embeddings['intervention'], current_model, "interventions")
+            condition_search_results = get_similar_tags(current_aspect_embeddings['condition'], current_model, "conditions")
+            outcome_search_results = get_similar_tags(current_aspect_embeddings['outcome'], current_model, "outcomes")
 
 tab1, tab2, tab3, tab4 = st.tabs(["Studies", "Interventions", "Conditions", "Outcomes"])
 
