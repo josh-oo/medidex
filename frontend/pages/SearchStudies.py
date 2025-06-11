@@ -11,6 +11,10 @@ BACKEND_API = os.getenv('BACKEND_API')
 current_embedding = None
 current_model = None
 
+if "name" in st.session_state:
+    with st.sidebar:
+        st.write(st.session_state.name)
+
 def get_embeddings(text):
     payload = {"text": text}
     response = requests.post(BACKEND_API + "/embedding", json=payload)
@@ -39,20 +43,22 @@ def get_similar_studies(embedding, model, aspect):
 
 options = ["Participants", "Intervention", "Condition", "Outcome"]
 
+col1, col2 = st.columns(2)
+
 selection = st.segmented_control(
-    "Aspect", options, selection_mode="single", default=options[0], label_visibility="hidden",
+    "Aspect", options, selection_mode="single", default=options[0], label_visibility="hidden"
 )
+placeholder = "Search string"
 if selection == options[0]:
-    st.write("Type something like '100' or '42' ")
+    placeholder = "Type something like '100' or '42' "
 if selection == options[1]:
-    st.write("Type something like 'risperidone' or 'family therapy' ")
+    placeholder = "Type something like 'risperidone' or 'family therapy' "
 if selection == options[2]:
-    st.write("Type something like 'first episode' or 'depression' ")
+    placeholder = "Type something like 'first episode' or 'depression' "
 if selection == options[3]:
-    st.write("Type something like 'negative symptome scale' or 'blood pressure' ")
+    placeholder = "Type something like 'negative symptome scale' or 'blood pressure' "
 
-
-search_string = st.text_input("Search string", label_visibility="hidden", placeholder="Search string")
+search_string = st.text_input("Search string", label_visibility="hidden", placeholder=placeholder)
 #abstract = st.text_area("Abstract")
 
 study_search_results = None
@@ -65,6 +71,4 @@ if st.button("Search", icon=":material/search:", use_container_width=True,  key=
 
 if study_search_results is not None:
     st.dataframe(study_search_results)
-else:
-    st.write("No search results")
 

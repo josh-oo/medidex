@@ -1,8 +1,9 @@
-from fastapi import FastAPI, Query, UploadFile, File, HTTPException
+from fastapi import FastAPI, Query, UploadFile, File, HTTPException, Depends
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
-from typing import List
+from typing import List, Annotated
 import httpx
 import os
 
@@ -15,6 +16,11 @@ import rispy
 import nbib
 import io
 
+import sqlite3
+from passlib.context import CryptContext
+from jose import jwt
+from datetime import datetime, timedelta, timezone
+
 load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_HOST")
@@ -24,16 +30,31 @@ DATABASE_PORT = os.getenv("DATABASE_PORT")
 VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
 VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
 
+DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
+JWT_SECRET = os.getenv("JWT_SECRET")
+
 # Initialize FastAPI
 app = FastAPI()
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def get_db():
+    conn = sqlite3.connect(os.path.join(DATABASE_VOLUME,"users.db"))
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 # Request schema
 class TextInput(BaseModel):
     text: str
+    access_token: str
 
 class EmbeddingInput(BaseModel):
     embedding: List[float]
     model_id: str
+    access_token: str
 
 @app.get("/readyz")
 def check():
@@ -192,5 +213,69 @@ async def embedding_aspects(input: TextInput):
 
     return result
 
-    
+class UserOut(BaseModel):
+    id: int
+    email: str
+
+class UserCreate(BaseModel):
+    email: str
+    password: str
+
+def generate_token():
+    pass
+
+@app.post("/signup", response_model=UserOut)
+def signup(user: UserCreate, db: sqlite3.Connection = Depends(get_db)):
+    db.row_factory = sqlite3.Row
+    cursor = db.cursor()
+
+    # Check if user already exists
+    cursor.execute("SELECT * FROM users WHERE email = ?", (user.email,))
+    existing_user = cursor.fetchone()
+    if existing_user:
+        db.close()
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Insert new user
+    hashed_pw = pwd_context.hash(user.password)
+    cursor.execute(
+        "INSERT INTO users (email, password) VALUES (?, ?)",
+        (user.email, hashed_pw)
+    )
+    db.commit()
+
+    # Fetch the new user (with ID)
+    new_user_id = cursor.lastrowid
+    cursor.execute("SELECT id, email FROM users WHERE id = ?", (new_user_id,))
+    new_user = cursor.fetchone()
+    db.close()
+
+    return {"id": new_user["id"], "email": new_user["email"]}
+
+@app.post("/login")
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: sqlite3.Connection = Depends(get_db)):
+    db.row_factory = sqlite3.Row
+    cursor = db.cursor()
+
+    print("Form data: ", form_data)
+
+    # Find user by email
+    cursor.execute("SELECT * FROM users WHERE email = ?", (form_data.username,))
+    user = cursor.fetchone()
+
+    # Validate credentials
+    if not user or not pwd_context.verify(form_data.password, user["password"]):
+        db.close()
+        raise HTTPException(status_code=400, detail="Invalid credentials")
+
+    # Create JWT token
+    expire = datetime.now(tz=timezone.utc) + timedelta(minutes=15)
+    token = jwt.encode({'user': user['email'], 'exp': expire}, 'secret', algorithm='HS256')
+    db.close()
+    return {"access_token": token, "token_type": "bearer", "name": user['email']}
+
+@app.get("/items")
+async def read_items(token: Annotated[str, Depends(oauth2_scheme)]):
+    return {"token": token}
+
 
