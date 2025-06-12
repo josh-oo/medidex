@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Query, UploadFile, File, HTTPException, Depends
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, EmailStr, constr
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
 from typing import List, Annotated
@@ -213,11 +214,11 @@ async def embedding_aspects(input: TextInput, token: str = Depends(oauth2_scheme
 
 class UserOut(BaseModel):
     id: int
-    email: str
+    email: EmailStr
 
 class UserCreate(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: constr(min_length=8)
 
 def generate_token():
     pass
@@ -255,8 +256,6 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: sqlite3.Connecti
     db.row_factory = sqlite3.Row
     cursor = db.cursor()
 
-    print("Form data: ", form_data)
-
     # Find user by email
     cursor.execute("SELECT * FROM users WHERE email = ?", (form_data.username,))
     user = cursor.fetchone()
@@ -272,8 +271,9 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: sqlite3.Connecti
     db.close()
     return {"access_token": token, "token_type": "bearer", "name": user['email']}
 
-@app.get("/items")
-async def read_items(token: Annotated[str, Depends(oauth2_scheme)]):
-    return {"token": token}
+@app.post("/logout")
+def logout(token: Annotated[str, Depends(oauth2_scheme)]):
+    #TODO maybe add to blacklist
+    return JSONResponse(status_code=201, content={"message": "Logout successful"})
 
 

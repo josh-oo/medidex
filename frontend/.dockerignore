@@ -9,7 +9,7 @@ __pycache__/
 .vscode/
 
 # macOS
-.DS_Store
+**/.DS_Store
 
 # Docker-related
 Dockerfile

@@ -86,6 +86,7 @@ services:
     networks:
       - public_net
       - internal_net
+    user: appuser
     tmpfs:
       - /home/appuser/.streamlit
     cap_drop:

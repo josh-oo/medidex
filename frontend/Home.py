@@ -1,7 +1,7 @@
 import streamlit as st
-import requests
 import os
 from dotenv import load_dotenv
+from utils.login import show_login
 
 load_dotenv()
 
@@ -12,36 +12,26 @@ st.set_page_config(
     page_icon="🤖",
 )
 
-if "name" in st.session_state:
-    with st.sidebar:
-        st.write(st.session_state.name)
+st.write("")
 
-with st.form("login"):
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-
-    response = None
-    if st.form_submit_button("Sign Up", use_container_width=True, type="secondary"):
-        payload = {"email": email, "password": password}
-        response = requests.post(BACKEND_API + "/signup", json=payload)
-        
-
-    if st.form_submit_button("Login", use_container_width=True, type="primary"):
-        data = {
-            "username": email,
-            "password": password,
-        }
-
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded"
-        }
-        response = requests.post(BACKEND_API + "/login", data=data, headers=headers)
-
-        st.session_state['access_token'] = response.json()['access_token']
-        st.session_state['name'] = response.json()['name']
+st.markdown(
+    """
+    ### Meerkat AI 
+    This is a simple demo app for the AI models we trained to map new reports to their corresponding study (studification).
     
-    if response:
-        if response.status_code != 200:
-            st.error(f"Error: {response.status_code} - {response.text}")
-        #else:
-        #    st.write(response.text)
+    The system reflects the state of Meerkat's 5th version. For demonstration purposes, only studies and reports that we had in our training/validation set are included
+    (23696 reports and 16125 studies).
+
+    **👈 This demo app demonstrates two use cases which can be found in the tabs on the left side** 
+
+    However, remember that this is a prototype and things may not yet work as expected.
+
+    ### Assign new reports
+    If you get a new report and you want to find the matching studies / Meerkat-tags
+    ### Search for studies according to specific tags
+    If you want to search Meerkat for studies according to your predefined "tag-based-constraints"
+"""
+)
+
+with st.sidebar:
+    show_login()

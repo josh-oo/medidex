@@ -1,5 +1,8 @@
 FROM python:3.13-alpine
 
+#ENV STREAMLIT_SERVER_HEADLESS=true
+ENV PYTHONDONTWRITEBYTECODE 1
+
 RUN addgroup -S appgroup && adduser -S -G appgroup appuser
 
 WORKDIR /app

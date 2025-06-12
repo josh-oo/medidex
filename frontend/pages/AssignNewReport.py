@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import os
 from dotenv import load_dotenv
+from utils.login import show_login
 
 load_dotenv()
 
@@ -11,10 +12,6 @@ BACKEND_API = os.getenv('BACKEND_API')
 current_embedding = None
 current_aspect_embeddings = None
 current_model = None
-
-if "name" in st.session_state:
-    with st.sidebar:
-        st.write(st.session_state.name)
 
 def get_headers():
     headers = {}
@@ -129,3 +126,6 @@ if study_search_results is not None:
             st.dataframe(outcome_search_results)
         else:
             st.write("No search results")
+
+with st.sidebar:
+    show_login()
