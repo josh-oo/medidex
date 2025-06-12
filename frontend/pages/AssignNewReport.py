@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import os
 from dotenv import load_dotenv
+from utils.login import show_login
 
 load_dotenv()
 
@@ -12,9 +13,15 @@ current_embedding = None
 current_aspect_embeddings = None
 current_model = None
 
+def get_headers():
+    headers = {}
+    if "access_token" in st.session_state:
+        headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
+    return headers
+
 def get_embeddings(text):
     payload = {"text": text}
-    response = requests.post(BACKEND_API + "/embedding/aspects", json=payload)
+    response = requests.post(BACKEND_API + "/embedding/aspects", json=payload, headers=get_headers())
 
     if response.status_code == 200:
         data = response.json()
@@ -30,7 +37,7 @@ def get_embeddings(text):
     
 def get_similar_studies(embedding, model):
     payload = {"embedding": embedding, "model_id": model}
-    response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload)
+    response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload, headers=get_headers())
 
     if response.status_code == 200:
         return pd.DataFrame(response.json())
@@ -40,7 +47,7 @@ def get_similar_studies(embedding, model):
 
 def get_similar_tags(embedding, model, tag):
     payload = {"embedding": embedding, "model_id": model}
-    response = requests.post(BACKEND_API + f"/similarity_search/tags/{tag}", json=payload)
+    response = requests.post(BACKEND_API + f"/similarity_search/tags/{tag}", json=payload, headers=get_headers())
 
     if response.status_code == 200:
         return pd.DataFrame(response.json())
@@ -60,12 +67,13 @@ if uploaded_file is not None:
     
     # Create a multipart form-data request
     files = {'file': (uploaded_file.name, file_content, 'application/octet-stream')}
+    headers = {"Authorization": f"Bearer {st.session_state.get('access_token',None)}"}
     
     # Send the file to FastAPI server for processing
-    response = requests.post(BACKEND_API + f"/upload", files=files)
+    response = requests.post(BACKEND_API + f"/upload", files=files, headers=get_headers())
     
     if response.status_code != 200:
-        st.error(f"Error: {response.status_code} - {response.text}")
+        st.error(f"Error: {response.text}")
     else:
         #st.json(response.json())  # Display parsed JSON response from FastAPI
         index = st.slider("Select loaded report", 0, len(response.json()), 0)
@@ -92,28 +100,32 @@ if uploaded_file is not None:
             condition_search_results = get_similar_tags(current_aspect_embeddings['condition'], current_model, "conditions")
             outcome_search_results = get_similar_tags(current_aspect_embeddings['outcome'], current_model, "outcomes")
 
-tab1, tab2, tab3, tab4 = st.tabs(["Studies", "Interventions", "Conditions", "Outcomes"])
+if study_search_results is not None:
+    tab1, tab2, tab3, tab4 = st.tabs(["Studies", "Interventions", "Conditions", "Outcomes"])
 
-with tab1:
-    if study_search_results is not None:
-        st.dataframe(study_search_results)
-    else:
-        st.write("No search results")
+    with tab1:
+        if study_search_results is not None:
+            st.dataframe(study_search_results)
+        else:
+            st.write("No search results")
 
-with tab2:
-    if intervention_search_results is not None:
-        st.dataframe(intervention_search_results)
-    else:
-        st.write("No search results")
+    with tab2:
+        if intervention_search_results is not None:
+            st.dataframe(intervention_search_results)
+        else:
+            st.write("No search results")
 
-with tab3:
-    if condition_search_results is not None:
-        st.dataframe(condition_search_results)
-    else:
-        st.write("No search results")
+    with tab3:
+        if condition_search_results is not None:
+            st.dataframe(condition_search_results)
+        else:
+            st.write("No search results")
 
-with tab4:
-    if outcome_search_results is not None:
-        st.dataframe(outcome_search_results)
-    else:
-        st.write("No search results")
+    with tab4:
+        if outcome_search_results is not None:
+            st.dataframe(outcome_search_results)
+        else:
+            st.write("No search results")
+
+with st.sidebar:
+    show_login()

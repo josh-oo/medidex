@@ -1,8 +1,10 @@
-from fastapi import FastAPI, Query, UploadFile, File, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, Query, UploadFile, File, HTTPException, Depends
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, EmailStr, constr
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
-from typing import List
+from typing import List, Annotated
 import httpx
 import os
 
@@ -15,6 +17,11 @@ import rispy
 import nbib
 import io
 
+import sqlite3
+from passlib.context import CryptContext
+from jose import jwt
+from datetime import datetime, timedelta, timezone
+
 load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_HOST")
@@ -24,8 +31,21 @@ DATABASE_PORT = os.getenv("DATABASE_PORT")
 VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
 VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
 
+DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
+JWT_SECRET = os.getenv("JWT_SECRET")
+
 # Initialize FastAPI
 app = FastAPI()
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def get_db():
+    conn = sqlite3.connect(os.path.join(DATABASE_VOLUME,"users.db"))
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 # Request schema
 class TextInput(BaseModel):
@@ -40,7 +60,7 @@ def check():
     return "Ready"
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), token: str = Depends(oauth2_scheme)):
     class CgiParser(RisParser):
         START_TAG = "DB"
 
@@ -87,7 +107,7 @@ async def upload_file(file: UploadFile = File(...)):
     return results
 
 @app.post("/similarity_search/tags/{type}")
-async def similarity_search_tags(type: str, embedding: EmbeddingInput):
+async def similarity_search_tags(type: str, embedding: EmbeddingInput, token: str = Depends(oauth2_scheme)):
 
     client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
 
@@ -114,7 +134,7 @@ async def similarity_search_tags(type: str, embedding: EmbeddingInput):
     return result
 
 @app.post("/similarity_search/studies")
-async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default")):
+async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default"), token: str = Depends(oauth2_scheme)):
 
     client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
 
@@ -145,7 +165,7 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
     return result
 
 @app.post("/embedding/aspects")
-async def embedding_aspects(input: TextInput):
+async def embedding_aspects(input: TextInput, token: str = Depends(oauth2_scheme)):
 
     def single_element_generator(element):
         yield element
@@ -169,8 +189,8 @@ async def embedding_aspects(input: TextInput):
 
     return result
 
-@app.post("/embedding")
-async def embedding_aspects(input: TextInput):
+@app.post("/embedding", )
+async def embedding_aspects(input: TextInput, token: str = Depends(oauth2_scheme)):
 
     def single_element_generator(element):
         yield element
@@ -192,5 +212,68 @@ async def embedding_aspects(input: TextInput):
 
     return result
 
-    
+class UserOut(BaseModel):
+    id: int
+    email: EmailStr
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: constr(min_length=8)
+
+def generate_token():
+    pass
+
+@app.post("/signup", response_model=UserOut)
+def signup(user: UserCreate, db: sqlite3.Connection = Depends(get_db)):
+    db.row_factory = sqlite3.Row
+    cursor = db.cursor()
+
+    # Check if user already exists
+    cursor.execute("SELECT * FROM users WHERE email = ?", (user.email,))
+    existing_user = cursor.fetchone()
+    if existing_user:
+        db.close()
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Insert new user
+    hashed_pw = pwd_context.hash(user.password)
+    cursor.execute(
+        "INSERT INTO users (email, password) VALUES (?, ?)",
+        (user.email, hashed_pw)
+    )
+    db.commit()
+
+    # Fetch the new user (with ID)
+    new_user_id = cursor.lastrowid
+    cursor.execute("SELECT id, email FROM users WHERE id = ?", (new_user_id,))
+    new_user = cursor.fetchone()
+    db.close()
+
+    return {"id": new_user["id"], "email": new_user["email"]}
+
+@app.post("/login")
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: sqlite3.Connection = Depends(get_db)):
+    db.row_factory = sqlite3.Row
+    cursor = db.cursor()
+
+    # Find user by email
+    cursor.execute("SELECT * FROM users WHERE email = ?", (form_data.username,))
+    user = cursor.fetchone()
+
+    # Validate credentials
+    if not user or not pwd_context.verify(form_data.password, user["password"]):
+        db.close()
+        raise HTTPException(status_code=400, detail="Invalid credentials")
+
+    # Create JWT token
+    expire = datetime.now(tz=timezone.utc) + timedelta(minutes=15)
+    token = jwt.encode({'user': user['email'], 'exp': expire}, 'secret', algorithm='HS256')
+    db.close()
+    return {"access_token": token, "token_type": "bearer", "name": user['email']}
+
+@app.post("/logout")
+def logout(token: Annotated[str, Depends(oauth2_scheme)]):
+    #TODO maybe add to blacklist
+    return JSONResponse(status_code=201, content={"message": "Logout successful"})
+
 

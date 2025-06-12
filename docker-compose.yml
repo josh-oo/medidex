@@ -9,13 +9,7 @@ services:
     expose:
       - 8001
     volumes:
-      - ./backend/_data/database:/data  # Correct path for the database volume
-    #healthcheck:
-    #  test: ["CMD", "curl", "-f", "http://localhost:8001/readyz"]
-    #  interval: 10s
-    #  timeout: 5s
-    #  retries: 12
-    #  start_interval: 30s
+      - ./backend/_data/database:/data
     read_only: true
     networks:
       - internal_net
@@ -27,12 +21,6 @@ services:
       dockerfile: embedding/Dockerfile
     expose:
       - 50051
-    #healthcheck:
-    #  test: ["CMD", "/usr/bin/grpc_health_probe", "-addr=localhost:50051"]
-    #  interval: 10s
-    #  timeout: 5s
-    #  retries: 12
-    #  start_interval: 30s
     read_only: true
     networks:
       - internal_net
@@ -49,7 +37,7 @@ services:
       - source: qdrant_config
         target: /qdrant/config/production.yaml
     volumes:
-      - ./backend/_data/qdrant:/qdrant/storage  # Path for Qdrant storage
+      - ./backend/_data/qdrant:/qdrant/storage
     networks:
       - internal_net
 
@@ -66,8 +54,8 @@ services:
     networks:
       - internal_net
     tmpfs:
-      - /tmp     # Mount tmpfs to /tmp
-      - /var/tmp # Mount tmpfs to /var/tmp
+      - /tmp
+      - /var/tmp
 
   logic:
     container_name: logic
@@ -76,12 +64,14 @@ services:
       dockerfile: logic/Dockerfile
     expose:
       - 8002
+    volumes:
+      - ./backend/_data/users:/data
     read_only: true
     networks:
       - internal_net
     tmpfs:
-      - /tmp     # Mount tmpfs to /tmp
-      - /var/tmp # Mount tmpfs to /var/tmp
+      - /tmp 
+      - /var/tmp
 
   frontend:
     container_name: frontend
@@ -96,6 +86,7 @@ services:
     networks:
       - public_net
       - internal_net
+    user: appuser
     tmpfs:
       - /home/appuser/.streamlit
     cap_drop:

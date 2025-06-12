@@ -1,4 +1,11 @@
 import streamlit as st
+import os
+from dotenv import load_dotenv
+from utils.login import show_login
+
+load_dotenv()
+
+BACKEND_API = os.getenv('BACKEND_API')
 
 st.set_page_config(
     page_title="Meerkat AI",
@@ -6,8 +13,6 @@ st.set_page_config(
 )
 
 st.write("")
-
-st.sidebar.success("Select a demo above.")
 
 st.markdown(
     """
@@ -27,3 +32,6 @@ st.markdown(
     If you want to search Meerkat for studies according to your predefined "tag-based-constraints"
 """
 )
+
+with st.sidebar:
+    show_login()
