@@ -15,9 +15,15 @@ if "name" in st.session_state:
     with st.sidebar:
         st.write(st.session_state.name)
 
+def get_headers():
+    headers = {}
+    if "access_token" in st.session_state:
+        headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
+    return headers
+
 def get_embeddings(text):
     payload = {"text": text}
-    response = requests.post(BACKEND_API + "/embedding", json=payload)
+    response = requests.post(BACKEND_API + "/embedding", json=payload, headers=get_headers())
 
     if response.status_code == 200:
         data = response.json()
@@ -27,18 +33,18 @@ def get_embeddings(text):
         return model, embedding
         
     else:
-        print("Request failed:", response.status_code, response.text)
+        st.error("Error: " + response.text)
         return None, None
     
 def get_similar_studies(embedding, model, aspect):
     payload = {"embedding": embedding, "model_id": model}
     params = {"aspect":aspect}
-    response = requests.post(BACKEND_API + f"/similarity_search/studies", json=payload, params=params)
+    response = requests.post(BACKEND_API + f"/similarity_search/studies", json=payload, params=params, headers=get_headers())
 
     if response.status_code == 200:
         return pd.DataFrame(response.json())
     else:
-        print("Request failed:", response.status_code, response.text)
+        st.error("Error: " + response.text)
         return None
 
 options = ["Participants", "Intervention", "Condition", "Outcome"]

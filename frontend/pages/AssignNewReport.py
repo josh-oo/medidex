@@ -16,11 +16,15 @@ if "name" in st.session_state:
     with st.sidebar:
         st.write(st.session_state.name)
 
+def get_headers():
+    headers = {}
+    if "access_token" in st.session_state:
+        headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
+    return headers
+
 def get_embeddings(text):
     payload = {"text": text}
-    headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
-
-    response = requests.post(BACKEND_API + "/embedding/aspects", json=payload, headers=headers)
+    response = requests.post(BACKEND_API + "/embedding/aspects", json=payload, headers=get_headers())
 
     if response.status_code == 200:
         data = response.json()
@@ -36,8 +40,7 @@ def get_embeddings(text):
     
 def get_similar_studies(embedding, model):
     payload = {"embedding": embedding, "model_id": model}
-    headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
-    response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload, headers=headers)
+    response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload, headers=get_headers())
 
     if response.status_code == 200:
         return pd.DataFrame(response.json())
@@ -47,8 +50,7 @@ def get_similar_studies(embedding, model):
 
 def get_similar_tags(embedding, model, tag):
     payload = {"embedding": embedding, "model_id": model}
-    headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
-    response = requests.post(BACKEND_API + f"/similarity_search/tags/{tag}", json=payload, headers=headers)
+    response = requests.post(BACKEND_API + f"/similarity_search/tags/{tag}", json=payload, headers=get_headers())
 
     if response.status_code == 200:
         return pd.DataFrame(response.json())
@@ -71,10 +73,10 @@ if uploaded_file is not None:
     headers = {"Authorization": f"Bearer {st.session_state.get('access_token',None)}"}
     
     # Send the file to FastAPI server for processing
-    response = requests.post(BACKEND_API + f"/upload", files=files, headers=headers)
+    response = requests.post(BACKEND_API + f"/upload", files=files, headers=get_headers())
     
     if response.status_code != 200:
-        st.error(f"Error: {response.status_code} - {response.text}")
+        st.error(f"Error: {response.text}")
     else:
         #st.json(response.json())  # Display parsed JSON response from FastAPI
         index = st.slider("Select loaded report", 0, len(response.json()), 0)

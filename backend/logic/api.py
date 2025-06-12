@@ -49,19 +49,17 @@ def get_db():
 # Request schema
 class TextInput(BaseModel):
     text: str
-    access_token: str
 
 class EmbeddingInput(BaseModel):
     embedding: List[float]
     model_id: str
-    access_token: str
 
 @app.get("/readyz")
 def check():
     return "Ready"
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), token: str = Depends(oauth2_scheme)):
     class CgiParser(RisParser):
         START_TAG = "DB"
 
@@ -108,7 +106,7 @@ async def upload_file(file: UploadFile = File(...)):
     return results
 
 @app.post("/similarity_search/tags/{type}")
-async def similarity_search_tags(type: str, embedding: EmbeddingInput):
+async def similarity_search_tags(type: str, embedding: EmbeddingInput, token: str = Depends(oauth2_scheme)):
 
     client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
 
@@ -135,7 +133,7 @@ async def similarity_search_tags(type: str, embedding: EmbeddingInput):
     return result
 
 @app.post("/similarity_search/studies")
-async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default")):
+async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default"), token: str = Depends(oauth2_scheme)):
 
     client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
 
@@ -166,7 +164,7 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
     return result
 
 @app.post("/embedding/aspects")
-async def embedding_aspects(input: TextInput):
+async def embedding_aspects(input: TextInput, token: str = Depends(oauth2_scheme)):
 
     def single_element_generator(element):
         yield element
@@ -190,8 +188,8 @@ async def embedding_aspects(input: TextInput):
 
     return result
 
-@app.post("/embedding")
-async def embedding_aspects(input: TextInput):
+@app.post("/embedding", )
+async def embedding_aspects(input: TextInput, token: str = Depends(oauth2_scheme)):
 
     def single_element_generator(element):
         yield element
