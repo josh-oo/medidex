@@ -106,32 +106,44 @@ async def upload_file(file: UploadFile = File(...), token: str = Depends(oauth2_
 
     return results
 
-@app.post("/similarity_search/tags/{type}")
-async def similarity_search_tags(type: str, embedding: EmbeddingInput, token: str = Depends(oauth2_scheme)):
-
+@app.post("/similarity_search/tags")
+async def similarity_search_tags(embedding: EmbeddingInput, sources: List[str] = Query(...), type: str = Query(...), token: str = Depends(oauth2_scheme)):
     client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+
+    #TODO implement more sophisticated tree based search here
+
+    filters = []
+    if "mesh" in sources:
+        filters.append(models.FieldCondition(key="source", match=models.MatchValue(value="mesh")))
+
+    if "meerkat" in sources:
+        filters.append(models.Filter(
+            must=[
+                models.FieldCondition(key="source", match=models.MatchValue(value="meerkat")),
+                models.FieldCondition(
+                    key="tree_ids",
+                    match=models.MatchAny(any=[type]),
+                )
+            ]
+        ))
+
+    filter = models.Filter(should=filters)
 
     search_results = client.query_points(
         collection_name=embedding.model_id + "_tags",
         query=embedding.embedding,
         limit=10,
-        query_filter=models.Filter(must=[models.FieldCondition(key="type", match=models.MatchValue(value=type))]),
+        query_filter=filter,
     )
 
-    found_tag_ids = []
-    scores = []
+    results = {'ID': [], 'Keyword':[], 'Relevance': []}
 
     for result in search_results.points:
-        current_id = int(result.id.split("-")[-1])
-        found_tag_ids.append(current_id)
-        scores.append(str(round(result.score * 100)) + "%")
+        results['ID'].append(result.payload['source_id'])
+        results['Keyword'].append(result.payload['display_name'])
+        results['Relevance'].append(str(round(result.score * 100)) + "%")
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/tags/{type}", json={'ids': found_tag_ids})
-
-    result = response.json()
-    result['Relevance'] = scores
-    return result
+    return results
 
 @app.post("/similarity_search/studies")
 async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default"), token: str = Depends(oauth2_scheme)):
@@ -170,7 +182,7 @@ async def embedding_aspects(input: TextInput, token: str = Depends(oauth2_scheme
     def single_element_generator(element):
         yield element
 
-    request = embedding_pb2.EmbedRequest(text=input.text)
+    request = embedding_pb2.EmbedRequest(id=token, text=[input.text])
 
     channel = grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
@@ -183,9 +195,9 @@ async def embedding_aspects(input: TextInput, token: str = Depends(oauth2_scheme
 
     response = next(responses)
 
-    result = {"model_id": model_id, "embedding": list(response.embedding.values)}
+    result = {"model_id": model_id, "embedding": list(response.embedding[0].values)}
     for i, aspect in enumerate(metadata['aspects'].split(";")):
-        result[aspect] = list(response.aspect_embeddings[i].values)
+        result[aspect] = list(response.aspect_embeddings[0].aspect_embeddings[i].values)
 
     return result
 
@@ -195,7 +207,7 @@ async def embedding_aspects(input: TextInput, token: str = Depends(oauth2_scheme
     def single_element_generator(element):
         yield element
 
-    request = embedding_pb2.EmbedRequest(text=input.text)
+    request = embedding_pb2.EmbedRequest(id=token, text=input.text)
 
     channel = grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
@@ -208,7 +220,7 @@ async def embedding_aspects(input: TextInput, token: str = Depends(oauth2_scheme
 
     response = next(responses)
 
-    result = {"model_id": model_id, "embedding": list(response.embedding.values)}
+    result = {"model_id": model_id, "embedding": list(response.embedding[0].values)}
 
     return result
 

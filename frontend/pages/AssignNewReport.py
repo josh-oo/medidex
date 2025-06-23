@@ -45,9 +45,10 @@ def get_similar_studies(embedding, model):
         print("Request failed:", response.status_code, response.text)
         return None
 
-def get_similar_tags(embedding, model, tag):
+def get_similar_tags(embedding, model, sources, tag):
     payload = {"embedding": embedding, "model_id": model}
-    response = requests.post(BACKEND_API + f"/similarity_search/tags/{tag}", json=payload, headers=get_headers())
+    params = {"type": tag, "sources": [source.lower() for source in sources]}
+    response = requests.post(BACKEND_API + f"/similarity_search/tags", json=payload, headers=get_headers(), params=params)
 
     if response.status_code == 200:
         return pd.DataFrame(response.json())
@@ -84,6 +85,14 @@ if uploaded_file is not None:
         st.header(title)
         st.write(abstract)
 
+        tag_sources = st.multiselect(
+            "Sources for tags",
+            ["Meerkat", "MeSH"],
+            default="Meerkat",
+            max_selections=2,
+            accept_new_options=False,
+        )
+
         if st.button("Search", icon=":material/search:", use_container_width=True,  key="search_1") and title + abstract != "":
             text_to_process = []
             if title:
@@ -96,9 +105,9 @@ if uploaded_file is not None:
                 st.error("Could not parse inputs")
 
             study_search_results = get_similar_studies(current_embedding, current_model)
-            intervention_search_results = get_similar_tags(current_aspect_embeddings['intervention'], current_model, "interventions")
-            condition_search_results = get_similar_tags(current_aspect_embeddings['condition'], current_model, "conditions")
-            outcome_search_results = get_similar_tags(current_aspect_embeddings['outcome'], current_model, "outcomes")
+            intervention_search_results = get_similar_tags(current_aspect_embeddings['intervention'], current_model, tag_sources, "interventions")
+            condition_search_results = get_similar_tags(current_aspect_embeddings['condition'], current_model, tag_sources,"conditions")
+            outcome_search_results = get_similar_tags(current_aspect_embeddings['outcome'], current_model, tag_sources,"outcomes")
 
 if study_search_results is not None:
     tab1, tab2, tab3, tab4 = st.tabs(["Studies", "Interventions", "Conditions", "Outcomes"])

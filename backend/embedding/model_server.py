@@ -33,9 +33,6 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
         self.model = torch.jit.load("traced_model.pt")
         self.model = self.model.to(self.device)
 
-        self.batch_size = 1
-        self.text_buffer = []
-
     def get_embeddings(self, texts, return_aspects=True):
         prefix = ""
         if return_aspects:
@@ -72,21 +69,15 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
             ('dimension', str(MODEL_DIM))
         ))
 
-        def yield_embeddings(texts):
+        def yield_embeddings(id, texts):
             embedding = self.get_embeddings(texts, return_aspects=False)
+            batch_embeddings = []
             for emb in embedding:
-                yield embedding_pb2.EmbedResponse(embedding=embedding_pb2.EmbeddingVector(values=emb.tolist()),)
+                batch_embeddings.append(embedding_pb2.EmbeddingVector(values=emb.tolist()))
+            return embedding_pb2.EmbedResponse(id=id, embedding=batch_embeddings)
 
         for request in request_iterator:
-            self.text_buffer.append(request.text)
-            if len(self.text_buffer) >= self.batch_size:
-                batch_texts = self.text_buffer[:self.batch_size]
-                self.text_buffer = self.text_buffer[self.batch_size:]
-                yield from yield_embeddings(batch_texts)
-
-        if self.text_buffer:
-            yield from yield_embeddings(self.text_buffer)
-            self.text_buffer = []
+            yield yield_embeddings(request.id, request.text)
 
     def GetEmbeddingAspects(self, request_iterator, context):
         context.send_initial_metadata((
@@ -96,27 +87,27 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
             ('dimension', str(MODEL_DIM))
         ))
 
-        def yield_embeddings(texts):
+        def yield_embeddings(id, texts):
             embedding, aspect_embeddings = self.get_embeddings(texts)
+            batch_embeddings = []
+            batch_aspect_embeddings = []
             for i, emb in enumerate(embedding):
-                yield embedding_pb2.EmbedResponseAspects(
-                    embedding=embedding_pb2.EmbeddingVector(values=emb.tolist()),
+                batch_embeddings.append(embedding_pb2.EmbeddingVector(values=emb.tolist()))
+                aspect_vector = embedding_pb2.AspectVectors(
                     aspect_embeddings=[
                         embedding_pb2.EmbeddingVector(values=aspect.tolist())
                         for aspect in aspect_embeddings[i]
                     ]
                 )
+                batch_aspect_embeddings.append(aspect_vector)                  
+            return embedding_pb2.EmbedResponseAspects(
+                id=id,
+                embedding=batch_embeddings,
+                aspect_embeddings=batch_aspect_embeddings,
+            )
 
         for request in request_iterator:
-            self.text_buffer.append(request.text)
-            if len(self.text_buffer) >= self.batch_size:
-                batch_texts = self.text_buffer[:self.batch_size]
-                self.text_buffer = self.text_buffer[self.batch_size:]
-                yield from yield_embeddings(batch_texts)
-
-        if self.text_buffer:
-            yield from yield_embeddings(self.text_buffer)
-            self.text_buffer = []
+            yield yield_embeddings(request.id, request.text)
 
 def _configure_health_server(server: grpc.Server):
     health_servicer = health.HealthServicer()

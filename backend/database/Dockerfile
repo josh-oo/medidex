@@ -19,5 +19,5 @@ EXPOSE 8001
 # Switch to the non-root user before running the application
 USER appuser
 
-#uvicorn database:app --host 0.0.0.0 --port 8001
+# uvicorn database:app --host 0.0.0.0 --port 8001
 ENTRYPOINT ["uvicorn", "database:app", "--host", "0.0.0.0", "--port", "8001"]
