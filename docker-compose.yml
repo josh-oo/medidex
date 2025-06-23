@@ -56,6 +56,8 @@ services:
     tmpfs:
       - /tmp
       - /var/tmp
+    volumes:
+      - ./backend/_data/routines:/data
 
   logic:
     container_name: logic

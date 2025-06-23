@@ -71,3 +71,6 @@ This service hosts routínes like searching for unindexed reports in meerkat to 
    For example: `bugfix/embedding-model-data-type` or `feature/new-upload-button`
 2. If the bugfix is done you can create a pull request, to merge it back to `main`
 3. The `prod` branch is currently empty we will use it later for CI/CD as soon as we are ready for production.
+
+# Local Development
+To run a the project locally you need to start the vectorstore first: `docker run -p 6333:6333 -p 6334:6334 -v /backend/_data/qdrant:/qdrant/storage qdrant/qdrant`. For the host location an absolute path is required.

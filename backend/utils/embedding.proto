@@ -8,18 +8,25 @@ service EmbedService {
 }
 
 message EmbedRequest {
-  string text = 1;
+  string id = 1;
+  repeated string text = 2;
 }
 
 message EmbeddingVector {
   repeated float values = 1;
 }
 
+message AspectVectors {
+  repeated EmbeddingVector aspect_embeddings = 1;
+}
+
 message EmbedResponse {
-  EmbeddingVector embedding = 1; 
+  string id = 1;
+  repeated EmbeddingVector embedding = 2; 
 }
 
 message EmbedResponseAspects {
-  EmbeddingVector embedding = 1;
-  repeated EmbeddingVector aspect_embeddings = 2;
+  string id = 1;
+  repeated EmbeddingVector embedding = 2;
+  repeated AspectVectors aspect_embeddings = 3;
 }
