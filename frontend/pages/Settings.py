@@ -103,6 +103,17 @@ if "role" in st.session_state and st.session_state['role'] == "admin":
     if st.button("Apply"):
         update_user(selected_user, selected_attribute, value)
 
+if st.button("Test"):
+    payload = {'text': "test"}
+    headers = {'X-API-Key': "HS3PIWb8ics.XQFE7tSt6URMwcySgcmR9d32gWrSMwsuGK7nWU4TIiQ"}
+    response = requests.post(BACKEND_API + f"/api/v1/analyze",headers=headers, json=payload)
+
+    st.write(response)
+    if response.status_code == 200:
+        st.write(response.text)
+    else:
+        print("Request failed:", response.status_code, response.text)
+        st.error(response.text)
 
 with st.sidebar:
     show_login()

@@ -3,11 +3,12 @@ from fastapi import FastAPI, Depends
 from src.auth import is_admin, is_verified
 from src.auth import get_users, update_user
 from src.auth import signup, login, logout
-from src.auth import get_api_keys, create_api_key, delete_api_key
+from src.auth import get_api_keys, create_api_key, delete_api_key, verify_api_key
 
 from src.logic import upload_file
 from src.logic import similarity_search_tags, similarity_search_studies
 from src.logic import embedding_aspects, embedding
+from src.logic import analyze_text
 
 # Initialize FastAPI
 app = FastAPI()
@@ -69,3 +70,6 @@ def auth_logout(result = Depends(logout)):
     return result
 
 
+@app.post("api/v1/analyze", dependencies=[Depends(verify_api_key)])
+async def logic_analyze_text(result = Depends(analyze_text)):
+    return result

@@ -1,6 +1,7 @@
-from fastapi import HTTPException, Depends
+from fastapi import Security, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, EmailStr, constr
 from dotenv import load_dotenv
 from typing import Optional
@@ -22,6 +23,8 @@ DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 JWT_SECRET = os.getenv("JWT_SECRET")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+api_key_header = APIKeyHeader(name="X-API-Key")
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def get_db():
@@ -50,6 +53,18 @@ def generate_api_key_pair():
     full_key = f"{key_id}.{secret}"
     key_hash = pwd_context.hash(full_key)
     return key_id, key_hash, full_key
+
+def verify_api_key(api_key: str = Security(api_key_header), db: sqlite3.Connection = Depends(get_db)):
+    key_id = api_key.split(".")[0]
+    cursor = db.cursor()
+    cursor.execute("SELECT hash FROM api_keys WHERE id = ?", (key_id,))
+    rows = cursor.fetchall()
+
+    for row in rows:
+        if pwd_context.verify(api_key, row[0]):
+            return JSONResponse(status_code=201, content={"message": "Api key valid"})
+    
+    raise HTTPException(status_code=400, detail="Invalid api key")
 
 def create_api_key(owner: int, db: sqlite3.Connection = Depends(get_db)):
     

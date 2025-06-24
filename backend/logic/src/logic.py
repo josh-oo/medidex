@@ -10,6 +10,8 @@ import grpc
 import embedding_pb2
 import embedding_pb2_grpc
 
+from functools import lru_cache
+
 from rispy.parser import RisParser
 import rispy
 import nbib
@@ -25,6 +27,14 @@ DATABASE_HOST = os.getenv("DATABASE_HOST")
 DATABASE_PORT = os.getenv("DATABASE_PORT")
 VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
 VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
+
+@lru_cache()
+def get_grpc_channel():
+    return grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
+
+def get_db():
+    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+    yield client
 
 # Request schema
 class TextInput(BaseModel):
@@ -81,10 +91,8 @@ async def upload_file(file: UploadFile = File(...)):
 
     return results
 
-async def similarity_search_tags(embedding: EmbeddingInput, sources: List[str] = Query(...), type: str = Query(...)):
+async def similarity_search_tags(embedding: EmbeddingInput, sources: List[str] = Query(...), type: str = Query(...), client=Depends(get_db)):
     
-    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
-
     #TODO implement more sophisticated tree based search here
 
     filters = []
@@ -120,9 +128,7 @@ async def similarity_search_tags(embedding: EmbeddingInput, sources: List[str] =
 
     return results
 
-async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default")):
-
-    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default"), client=Depends(get_db)):
 
     search_results = client.query_points_groups(
         collection_name=embedding.model_id,
@@ -150,7 +156,7 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
     result['Relevance'] = scores
     return result
 
-async def embedding_aspects(input: TextInput):
+async def embedding_aspects(input: TextInput, channel = Depends(get_grpc_channel)):
 
     def single_element_generator(element):
         yield element
@@ -159,7 +165,6 @@ async def embedding_aspects(input: TextInput):
 
     request = embedding_pb2.EmbedRequest(id=token, text=[input.text])
 
-    channel = grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
 
     responses = stub.GetEmbeddingAspects(single_element_generator(request))
@@ -176,7 +181,7 @@ async def embedding_aspects(input: TextInput):
 
     return result
 
-async def embedding(input: TextInput):
+async def embedding(input: TextInput, channel = Depends(get_grpc_channel)):
 
     def single_element_generator(element):
         yield element
@@ -185,7 +190,6 @@ async def embedding(input: TextInput):
 
     request = embedding_pb2.EmbedRequest(id=token, text=input.text)
 
-    channel = grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
 
     responses = stub.GetEmbedding(single_element_generator(request))
@@ -199,3 +203,7 @@ async def embedding(input: TextInput):
     result = {"model_id": model_id, "embedding": list(response.embedding[0].values)}
 
     return result
+
+async def analyze_text(input: TextInput):
+    embedding_results = embedding_aspects(input)
+    return embedding_results
