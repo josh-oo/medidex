@@ -1,6 +1,8 @@
 import streamlit as st
 import requests
 import os
+import base64
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,6 +14,18 @@ def get_headers():
     if "access_token" in st.session_state:
         headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
     return headers
+
+def decode_jwt(token: str):
+    try:
+        header, payload, signature = token.split('.')
+        # Add padding if needed
+        payload += '=' * (-len(payload) % 4)
+        decoded_bytes = base64.urlsafe_b64decode(payload)
+        decoded_payload = json.loads(decoded_bytes)
+        return decoded_payload
+    except Exception as e:
+        print(f"Error decoding JWT: {e}")
+        return None
 
 def show_login():
     if "name" not in st.session_state:
@@ -29,6 +43,17 @@ def show_login():
                         response = requests.post(BACKEND_API + "/signup", json=payload)
                     else:
                         st.error("Passwords do not match")
+                    
+                    if response.status_code == 200:
+                        token = response.json()['access_token']
+                        payload = decode_jwt(token)
+                        st.session_state['access_token'] = token
+                        st.session_state['name'] = payload['sub']
+                        st.session_state['role'] = payload['role']
+                        st.session_state['id'] = payload['id']
+                        st.rerun()
+                    else:
+                        st.error(f"Error: {response.status_code} - {response.text}")
 
             if st.form_submit_button("Login", use_container_width=True, type="primary"):
                 data = {
@@ -42,8 +67,12 @@ def show_login():
                 response = requests.post(BACKEND_API + "/login", data=data, headers=headers)
 
                 if response.status_code == 200:
-                    st.session_state['access_token'] = response.json()['access_token']
-                    st.session_state['name'] = response.json()['name']
+                    token = response.json()['access_token']
+                    payload = decode_jwt(token)
+                    st.session_state['access_token'] = token
+                    st.session_state['name'] = payload['sub']
+                    st.session_state['role'] = payload['role']
+                    st.session_state['id'] = payload['id']
                     st.rerun()
             
             if response is not None:
@@ -55,4 +84,5 @@ def show_login():
             if response.status_code == 201:
                 st.session_state.pop('access_token')
                 st.session_state.pop('name')
+                st.session_state.pop('role')
                 st.rerun()

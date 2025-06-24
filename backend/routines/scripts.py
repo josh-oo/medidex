@@ -377,7 +377,7 @@ def refresh_mesh_tags(force_recompute_embeddings=False):
 
 
 refresh_vector_store()
-refresh_meerkat_tags("interventions", tag_id="0001", force_recompute_embeddings=True)
-refresh_meerkat_tags("conditions", tag_id="0002", force_recompute_embeddings=True)
-refresh_meerkat_tags("outcomes", tag_id="0003", force_recompute_embeddings=True)
+refresh_meerkat_tags("interventions", tag_id="0001")
+refresh_meerkat_tags("conditions", tag_id="0002")
+refresh_meerkat_tags("outcomes", tag_id="0003")
 refresh_mesh_tags()
