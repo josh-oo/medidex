@@ -29,6 +29,8 @@ RUN chmod +x /wait_for_services.sh
 COPY --from=proto-builder /proto/embedding_pb2.py .
 COPY --from=proto-builder /proto/embedding_pb2_grpc.py .
 
+RUN apk add --no-cache curl
+
 RUN ARCH=$(uname -m) && \
     case "$ARCH" in \
       x86_64)  ARCH_DL=linux-amd64 ;; \
