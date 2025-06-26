@@ -14,6 +14,9 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY . .
 RUN mv .env.production .env
 
+RUN mkdir -p /home/appuser/.streamlit && \
+    chown -R appuser:appgroup /home/appuser
+
 EXPOSE 8501
 
 # Switch to the non-root user before running the application
