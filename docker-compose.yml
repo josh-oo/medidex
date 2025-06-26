@@ -87,8 +87,8 @@ services:
       - public_net
       - internal_net
     user: appuser
-    tmpfs:
-      - /home/appuser/.streamlit
+    volumes:
+      - streamlit-volume:/home/appuser/.streamlit
     cap_drop:
       - ALL
     security_opt:
@@ -104,3 +104,7 @@ networks:
     internal: true
   public_net:
     driver: bridge
+
+volumes:
+  streamlit-volume:
+    driver: local  # Using the default driver for local storage
