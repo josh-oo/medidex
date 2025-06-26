@@ -26,6 +26,14 @@ def decode_jwt(token: str):
     except Exception as e:
         print(f"Error decoding JWT: {e}")
         return None
+    
+def token_auth(token):
+    payload = decode_jwt(token)
+    st.session_state['access_token'] = token
+    st.session_state['name'] = payload['sub']
+    st.session_state['role'] = payload['role']
+    st.session_state['id'] = payload['id']
+    st.rerun()
 
 def show_login():
     if "name" not in st.session_state:
@@ -46,12 +54,7 @@ def show_login():
                     
                     if response.status_code == 200:
                         token = response.json()['access_token']
-                        payload = decode_jwt(token)
-                        st.session_state['access_token'] = token
-                        st.session_state['name'] = payload['sub']
-                        st.session_state['role'] = payload['role']
-                        st.session_state['id'] = payload['id']
-                        st.rerun()
+                        token_auth(token)
                     else:
                         st.error(f"Error: {response.status_code} - {response.text}")
 
@@ -68,12 +71,7 @@ def show_login():
 
                 if response.status_code == 200:
                     token = response.json()['access_token']
-                    payload = decode_jwt(token)
-                    st.session_state['access_token'] = token
-                    st.session_state['name'] = payload['sub']
-                    st.session_state['role'] = payload['role']
-                    st.session_state['id'] = payload['id']
-                    st.rerun()
+                    token_auth(token)
             
             if response is not None:
                 if response.status_code != 200:

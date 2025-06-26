@@ -71,7 +71,11 @@ if uploaded_file is not None:
         st.error(f"Error: {response.text}")
     else:
         #st.json(response.json())  # Display parsed JSON response from FastAPI
-        index = st.slider("Select loaded report", 0, len(response.json()), 0)
+
+        index = st.number_input(
+            "Select a report", value=0, min_value=0, max_value=len(response.json()), step=1
+        )
+
         selected_report = response.json()[index]
     
         title = selected_report['title']
@@ -108,7 +112,8 @@ if study_search_results is not None:
 
     with tab1:
         if study_search_results is not None:
-            st.dataframe(study_search_results)
+            study_search_results['CRGStudyID'] = './Study?id=' + study_search_results['CRGStudyID'].astype(str) + "&token=" + st.session_state['access_token']
+            st.dataframe(study_search_results, column_config={"CRGStudyID": st.column_config.LinkColumn("CRGStudyID", display_text=r"\.\/Study\?id=(.+)&token")})
         else:
             st.write("No search results")
 

@@ -5,7 +5,7 @@ from src.auth import get_users, update_user
 from src.auth import signup, login, logout
 from src.auth import get_api_keys, create_api_key, delete_api_key, verify_api_key
 
-from src.logic import upload_file
+from src.logic import upload_file,get_all_reports_by_study
 from src.logic import similarity_search_tags, similarity_search_studies
 from src.logic import embedding_aspects, embedding
 from src.logic import analyze_text
@@ -19,6 +19,10 @@ def check():
 
 @app.post("/upload", dependencies=[Depends(is_verified)])
 async def logic_upload_file(result = Depends(upload_file)):
+    return result
+
+@app.get("/study/{study_id}/reports", dependencies=[Depends(is_verified)])
+async def logic_get_reports(result = Depends(get_all_reports_by_study)):
     return result
 
 @app.post("/similarity_search/tags", dependencies=[Depends(is_verified)])

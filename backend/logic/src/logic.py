@@ -210,6 +210,12 @@ def _embedding(input: TextInput, channel):
 
     return result
 
+async def get_all_reports_by_study(study_id: int):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{study_id}/reports")
+        return response.json()
+    
+
 async def analyze_text(input: RetrievalInput, vectorstore=Depends(get_db), channel=Depends(get_grpc_channel)):
     text_input = TextInput(text=input.text)
     embedding_results = _embedding_aspects(text_input, channel)

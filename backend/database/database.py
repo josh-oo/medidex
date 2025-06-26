@@ -92,6 +92,19 @@ def get_studies_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(get_d
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, 'CRGStudyID')
 
+
+@app.get("/study/{study_id}/reports")
+def get_studies_by_ids(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+    query = f"""
+        SELECT r.*
+        FROM tblStudyReport sr
+        JOIN tblReport r ON sr.CRGReportID = r.CRGReportID
+        WHERE sr.CRGStudyID = ?
+    """
+    cursor = db.execute(query, (study_id,))
+    rows = cursor.fetchall()
+    return convert_to_column_based_dict(cursor.description, rows)
+
 @app.get("/mapping/report_study")
 def get_mapping_report_study(db: sqlite3.Connection = Depends(get_db)):
     query = f"""
