@@ -38,10 +38,9 @@ RUN ARCH=$(uname -m) && \
       armv7l)  ARCH_DL=linux-arm ;; \
       *)       echo "Unsupported architecture: $ARCH" && exit 1 ;; \
     esac && \
-    curl -sSL -o /home/appuser/grpc_health_probe \
+    curl -sSL -o /usr/local/bin/grpc_health_probe \
       https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-${ARCH_DL} && \
-    chmod 755 /home/appuser/grpc_health_probe && \
-    chown appuser:appuser /home/appuser/grpc_health_probe
+    chmod 755 /usr/local/bin/grpc_health_probe
 
 EXPOSE 8002
 
