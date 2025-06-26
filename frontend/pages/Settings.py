@@ -84,36 +84,39 @@ if "id" in st.session_state:
 
 
 if "role" in st.session_state and st.session_state['role'] == "admin":
-    st.header("Users")
     all_users = get_users()
-    st.dataframe(all_users)
-    selected_user = st.selectbox(
-        "Edit user: ",
-        all_users['id'],
-        index=None,
-        accept_new_options=False,
-    )
-    selected_attribute = st.selectbox(
-        "Attribute: ",
-        ['role', 'verified', 'email'],
-        index=None,
-        accept_new_options=False,
-    )
-    value = st.text_input("Value")
-    if st.button("Apply"):
-        update_user(selected_user, selected_attribute, value)
+    if all_users is not None:
+        st.header("Users")
+        st.dataframe(all_users)
+        selected_user = st.selectbox(
+            "Edit user: ",
+            all_users['id'],
+            index=None,
+            accept_new_options=False,
+        )
+        selected_attribute = st.selectbox(
+            "Attribute: ",
+            ['role', 'verified', 'email'],
+            index=None,
+            accept_new_options=False,
+        )
+        value = st.text_input("Value")
+        if st.button("Apply"):
+            update_user(selected_user, selected_attribute, value)
 
-if st.button("Test"):
-    payload = {'text': "test"}
-    headers = {'X-API-Key': "HS3PIWb8ics.XQFE7tSt6URMwcySgcmR9d32gWrSMwsuGK7nWU4TIiQ"}
-    response = requests.post(BACKEND_API + f"/api/v1/analyze",headers=headers, json=payload)
-
-    st.write(response)
-    if response.status_code == 200:
-        st.write(response.text)
-    else:
-        print("Request failed:", response.status_code, response.text)
-        st.error(response.text)
+#if st.button("Test"):
+#    text = "A two-arm, randomised feasibility trial using link workers to improve dental visiting in people with severe mental illness: a protocol paper"
+#    text += "\n" + "BACKGROUND: People with severe mental illness (e.g. psychosis, bipolar disorder) experience poor oral health compared to the general population as shown by more decayed, missing and filled teeth and a higher prevalence of periodontal disease. Attending dental services allows treatment of oral health problems and support for prevention. However, people with severe mental illness face multiple barriers to attending routine dental appointments and often struggle to access care. Link work interventions use non‐clinical support staff to afford vulnerable populations the capacity, opportunity, and motivation to navigate use of services. The authors have co‐developed with service users a link work intervention for supporting people with severe mental illness to access routine dental appointments. The Mouth Matters in Mental Health Study aims to explore the feasibility and acceptability of this intervention within the context of a feasibility randomised controlled trial (RCT) measuring outcomes related to the recruitment of participants, completion of assessments, and adherence to the intervention. The trial will closely monitor the safety of the intervention and trial procedures. METHODS: A feasibility RCT with 1:1 allocation to two arms: treatment as usual (control) or treatment as usual plus a link work intervention (treatment). The intervention consists of six sessions with a link worker over 9 months. Participants will be adults with severe mental illness receiving clinical input from secondary care mental health service and who have not attended a planned dental appointment in the past 3 years. Assessments will take place at baseline and after 9 months. The target recruitment total is 84 participants from across three NHS Trusts. A subset of participants and key stakeholders will complete qualitative interviews to explore the acceptability of the intervention and trial procedures. DISCUSSION: The link work intervention aims to improve dental access and reduce oral health inequalities in people with severe mental illness. There is a dearth of research relating to interventions that attempt to improve oral health outcomes in people with mental illness and the collected feasibility data will offer insights into this important area. TRIAL REGISTRATION: The trial was preregistered on ISRCTN (ISRCTN13650779) and ClinicalTrials.gov (NCT05545228)."
+#    payload = {'text': text, "topK": 10}
+#    headers = {'X-API-Key': "HS3PIWb8ics.XQFE7tSt6URMwcySgcmR9d32gWrSMwsuGK7nWU4TIiQ"}
+#    response = requests.post(BACKEND_API + f"/api/v1/analyze",headers=headers, json=payload)
+#
+#    st.write(response)
+#    if response.status_code == 200:
+#        st.json(response.text)
+#    else:
+#        print("Request failed:", response.status_code, response.text)
+#        st.error(response.text)
 
 with st.sidebar:
     show_login()

@@ -2,7 +2,7 @@ from fastapi import Query, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
-from typing import List
+from typing import List, Optional
 import httpx
 import os
 
@@ -43,6 +43,11 @@ class TextInput(BaseModel):
 class EmbeddingInput(BaseModel):
     embedding: List[float]
     model_id: str
+
+class RetrievalInput(BaseModel):
+    text: str
+    topK: int
+    excludeReportId : Optional[int] = None
 
 async def upload_file(file: UploadFile = File(...)):
 
@@ -156,11 +161,13 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
     result['Relevance'] = scores
     return result
 
-async def embedding_aspects(input: TextInput, channel = Depends(get_grpc_channel)):
+def single_element_generator(element):
+    yield element
 
-    def single_element_generator(element):
-        yield element
+def embedding_aspects(input: TextInput, channel = Depends(get_grpc_channel)):
+    return _embedding_aspects(input, channel)
 
+def _embedding_aspects(input: TextInput, channel):
     token = secrets.token_urlsafe(8)
 
     request = embedding_pb2.EmbedRequest(id=token, text=[input.text])
@@ -181,14 +188,13 @@ async def embedding_aspects(input: TextInput, channel = Depends(get_grpc_channel
 
     return result
 
-async def embedding(input: TextInput, channel = Depends(get_grpc_channel)):
+def embedding(input: TextInput, channel = Depends(get_grpc_channel)):
+    return _embedding(input, channel)
 
-    def single_element_generator(element):
-        yield element
-
+def _embedding(input: TextInput, channel):
     token = secrets.token_urlsafe(8)
 
-    request = embedding_pb2.EmbedRequest(id=token, text=input.text)
+    request = embedding_pb2.EmbedRequest(id=token, text=[input.text])
 
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
 
@@ -204,6 +210,109 @@ async def embedding(input: TextInput, channel = Depends(get_grpc_channel)):
 
     return result
 
-async def analyze_text(input: TextInput):
-    embedding_results = embedding_aspects(input)
-    return embedding_results
+async def analyze_text(input: RetrievalInput, vectorstore=Depends(get_db), channel=Depends(get_grpc_channel)):
+    text_input = TextInput(text=input.text)
+    embedding_results = _embedding_aspects(text_input, channel)
+
+    if input.excludeReportId is not None:
+        #TODO filter
+        pass
+
+    study_search_results = vectorstore.query_points_groups(
+        collection_name=embedding_results['model_id'],
+        # Same as in the regular query_points() API
+        query=embedding_results['embedding'],
+        using="default",
+        # Grouping parameters
+        group_by="belongs_to_study",  # Path of the field to group by
+        limit=input.topK,  # Max amount of groups
+        group_size=1,  # Max amount of points per group
+    )
+
+    found_study_ids = []
+    scores = []
+    report_hits = []
+    for result in study_search_results.groups:
+        for hit in result.hits:
+            report_hit = hit.payload['source_id']
+            for item in hit.payload['belongs_to_study']:
+                found_study_ids.append(item)
+                scores.append(hit.score)
+                report_hits.append(report_hit)
+
+    result = {}
+    result['related_studies'] = []
+
+    all_related_interventions = []
+    all_related_conditions = []
+    all_related_outcomes = []
+
+    async with httpx.AsyncClient() as client:
+        related_studies = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': found_study_ids})).json()
+        #TODO error handling
+
+        for id, name, report_hit, score in zip(related_studies['CRGStudyID'], related_studies['Short_name'], report_hits, scores):
+            item = {}
+            item['study_id'] =  id
+            item['study_name'] = name
+            item['score'] = score
+            item['report_hit'] = report_hit
+
+            item['assigned_reports'] = {}
+
+            related_interventions = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/interventions/", json={'ids': [id]})).json()
+
+            item['assigned_interventions'] = [item['Description'] for item in related_interventions]
+            all_related_interventions.extend([item['ID'] for item in related_interventions])
+
+            related_conditions = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/conditions/", json={'ids': [id]})).json()
+            item['assigned_interventions'] = [item['Description'] for item in related_conditions]
+            all_related_conditions.extend([item['ID'] for item in related_conditions])
+
+            related_outcomes = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/outcomes/", json={'ids': [id]})).json()
+            item['assigned_outcomes'] = [item['Description'] for item in related_outcomes]
+            all_related_outcomes.extend([item['ID'] for item in related_outcomes])
+        
+            related_reports = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/reports")).json()
+            for report in related_reports:
+                report_item = {}
+                report_item['title'] = report['Title']
+                report_item['abstract'] = report['Abstract']
+                report_item['authors'] = [author.strip() for author in report['Authors'].split("//")]
+                item['assigned_reports'][report['CRGReportID']] = report_item
+
+        
+            result['related_studies'].append(item)
+
+    def search_related_tags(allowed_ids, type_embedding, type_vectorstore):
+
+        tag_filter = models.Filter(
+            must=[
+                models.FieldCondition(key="source", match=models.MatchValue(value="meerkat")),
+                models.FieldCondition(key="tree_ids",match=models.MatchAny(any=[type_vectorstore])),
+                models.FieldCondition(key="source_id",match=models.MatchAny(any=[str(item) for item in allowed_ids]))
+            ]
+        )
+
+        tag_results = vectorstore.query_points(
+            collection_name=embedding_results['model_id'] + "_tags",
+            query=embedding_results[type_embedding],
+            limit=len(allowed_ids),
+            query_filter=tag_filter,
+        )
+
+        related_tags = []
+        for point in tag_results.points:
+            item = {}
+            item['name'] = point.payload['display_name']
+            item['id'] = point.payload['source_id']
+            item['score'] = point.score
+            related_tags.append(item)
+        
+        return related_tags
+
+    result['related_interventions'] = search_related_tags(all_related_interventions, "intervention", "interventions")
+    result['related_conditions'] = search_related_tags(all_related_conditions, "condition", "conditions")
+    result['related_outcomes'] = search_related_tags(all_related_outcomes, "outcome", "outcomes")
+
+    return result

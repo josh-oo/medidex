@@ -70,6 +70,6 @@ def auth_logout(result = Depends(logout)):
     return result
 
 
-@app.post("api/v1/analyze", dependencies=[Depends(verify_api_key)])
+@app.post("/api/v1/analyze", dependencies=[Depends(verify_api_key)])
 async def logic_analyze_text(result = Depends(analyze_text)):
     return result

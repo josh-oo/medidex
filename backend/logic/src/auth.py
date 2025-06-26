@@ -188,7 +188,7 @@ def signup(user: UserCreate, db: sqlite3.Connection = Depends(get_db)):
 
     # Fetch the new user (with ID)
     new_user_id = cursor.lastrowid
-    cursor.execute("SELECT id, email FROM users WHERE id = ?", (new_user_id,))
+    cursor.execute("SELECT * FROM users WHERE id = ?", (new_user_id,))
     new_user = cursor.fetchone()
     return generate_token(new_user)
 

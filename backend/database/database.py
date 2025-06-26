@@ -25,6 +25,16 @@ def get_db():
 class IdInput(BaseModel):
     ids: List[int]
 
+def convert_to_dict_list(description, rows):
+    column_names = [description[0] for description in description]
+    result = []
+    for row in rows:
+        item = {}
+        for i, value in enumerate(row):
+            item[column_names[i]] = value
+        result.append(item)
+    return result
+
 def convert_to_id_based_dict(rows, multi_values=True):
     result = {}
     for key, value in rows:
@@ -111,6 +121,31 @@ def get_all_reports(db: sqlite3.Connection = Depends(get_db)):
     rows = cursor.fetchall()
     return convert_to_column_based_dict(cursor.description, rows)
 
+@app.get("/study/{study_id}/reports")
+def get_all_reports(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+    query = f"""
+        SELECT r.*
+        FROM tblReport r
+        JOIN tblStudyReport sr ON r.CRGReportID = sr.CRGReportID
+        WHERE sr.CRGStudyID = ?;
+    """
+    cursor = db.execute(query, (study_id,))
+    rows = cursor.fetchall()
+    return convert_to_dict_list(cursor.description,rows)
+
+@app.post("/study/tags/interventions/")
+def get_all_interventions(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
+    placeholders = ','.join(['?'] * len(id_input.ids))
+    query = f"""
+        SELECT si.Intervention AS ID, i.Intervention_Description AS Description
+        FROM tblStudyIntervention si
+        JOIN tblIntervention i ON si.Intervention = i.InterventionID 
+        WHERE si.CRGStudyID IN ({placeholders})
+    """
+    cursor = db.execute(query, id_input.ids)
+    rows = cursor.fetchall()
+    return convert_to_dict_list(cursor.description,rows)
+
 @app.get("/tags/interventions/all")
 def get_all_interventions(db: sqlite3.Connection = Depends(get_db)):
     query = f"""
@@ -132,6 +167,19 @@ def get_interventions_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
 
+@app.post("/study/tags/conditions/")
+def get_all_interventions(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
+    placeholders = ','.join(['?'] * len(id_input.ids))
+    query = f"""
+        SELECT sc.Health_Care_Condition AS ID, c.HealthCareConditionDescription AS Description
+        FROM tblStudyHealthCareCondition sc 
+        JOIN tblHealthCareCondition c ON sc.Health_Care_Condition = c.HealthCareConditionID
+        WHERE sc.CRGStudyID IN ({placeholders})
+    """
+    cursor = db.execute(query, id_input.ids)
+    rows = cursor.fetchall()
+    return convert_to_dict_list(cursor.description,rows)
+
 @app.get("/tags/conditions/all")
 def get_all_conditions(db: sqlite3.Connection = Depends(get_db)):
     query = f"""
@@ -152,6 +200,19 @@ def get_conditions_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(ge
     cursor = db.execute(query, id_input.ids)
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
+
+@app.post("/study/tags/outcomes/")
+def get_all_interventions(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
+    placeholders = ','.join(['?'] * len(id_input.ids))
+    query = f"""
+        SELECT so.OutcomeID AS ID, o.OutcomeDescription AS Description
+        FROM tblStudyOutcome so 
+        JOIN tblOutcome o ON so.OutcomeID = o.OutcomeID
+        WHERE so.CRGStudyID IN ({placeholders})
+    """
+    cursor = db.execute(query, id_input.ids)
+    rows = cursor.fetchall()
+    return convert_to_dict_list(cursor.description,rows)
 
 @app.get("/tags/outcomes/all")
 def get_all_outcomes(db: sqlite3.Connection = Depends(get_db)):
