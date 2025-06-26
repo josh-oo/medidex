@@ -29,12 +29,12 @@ RUN chmod +x /wait_for_services.sh
 COPY --from=proto-builder /proto/embedding_pb2.py .
 COPY --from=proto-builder /proto/embedding_pb2_grpc.py .
 
-RUN ARCH=$(dpkg --print-architecture) && \
+RUN ARCH=$(uname -m) && \
     case "$ARCH" in \
-      amd64)  ARCH_DL=linux-amd64 ;; \
-      arm64)  ARCH_DL=linux-arm64 ;; \
-      armhf)  ARCH_DL=linux-arm ;; \
-      *)      echo "Unsupported architecture: $ARCH" && exit 1 ;; \
+      x86_64)  ARCH_DL=linux-amd64 ;; \
+      aarch64) ARCH_DL=linux-arm64 ;; \
+      armv7l)  ARCH_DL=linux-arm ;; \
+      *)       echo "Unsupported architecture: $ARCH" && exit 1 ;; \
     esac && \
     curl -sSL -o /home/appuser/grpc_health_probe \
       https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-${ARCH_DL} && \
