@@ -15,7 +15,15 @@ COPY . .
 RUN mv .env.production .env
 
 RUN mkdir -p /home/appuser/.streamlit && \
-    chown -R appuser:appgroup /home/appuser
+    cat <<EOF > /home/appuser/.streamlit/config.toml
+[server]
+enableCORS = false
+enableXsrfProtection = false
+headless = true
+port = 8501
+address = "0.0.0.0"
+EOF
+RUN chown -R appuser:appgroup /home/appuser
 
 EXPOSE 8501
 
