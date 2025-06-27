@@ -13,6 +13,9 @@ services:
     read_only: true
     networks:
       - internal_net
+    tmpfs:
+      - /tmp
+      - /var/tmp
 
   embedding:
     container_name: embedding
