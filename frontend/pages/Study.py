@@ -22,11 +22,11 @@ if "id" in st.query_params and "token" in st.query_params:
     study_id = st.query_params['id']
     st.header(f"Study {study_id}")
 
-    file_prefix = st.text_input("The file prefix. ", value="file://///nas.ads.mwn.de/tume/ps0/_AGs/Arbeitsgruppe_Leucht/Meerkat_2020_10_19/PDFs/")
+    file_prefix = "file://///nas.ads.mwn.de/tume/ps0/_AGs/Arbeitsgruppe_Leucht/Meerkat_2020_10_19/PDFs/"
     df = get_reports(study_id, st.query_params['token'])
     
     df['ReportNumber'] = file_prefix + df['ReportNumber'].astype(str) + ".pdf"
-    st.dataframe(df, column_config={'ReportNumber': st.column_config.LinkColumn('ReportNumber', display_text=file_prefix + r"(.+)\.pdf")})
+    st.dataframe(df, column_config={'ReportNumber': st.column_config.LinkColumn('ReportNumber', pinned=True, display_text=file_prefix + r"(.+)\.pdf")})
 
 else:
     st.header("No study selected")

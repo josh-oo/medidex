@@ -22,7 +22,7 @@ async def logic_upload_file(result = Depends(upload_file)):
     return result
 
 @app.get("/study/{study_id}/reports", dependencies=[Depends(is_verified)])
-async def logic_get_reports(result = Depends(get_all_reports_by_study)):
+def logic_get_reports(result = Depends(get_all_reports_by_study)):
     return result
 
 @app.post("/similarity_search/tags", dependencies=[Depends(is_verified)])

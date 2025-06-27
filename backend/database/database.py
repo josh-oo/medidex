@@ -14,12 +14,12 @@ DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 app = FastAPI()
 
 def get_db():
-    conn = sqlite3.connect(os.path.join(DATABASE_VOLUME,"meerkat.db"))
+    conn = sqlite3.connect("file:" + os.path.join(DATABASE_VOLUME,"meerkat.db") + "?mode=ro",uri=True, check_same_thread=False)
+    #conn.execute("PRAGMA journal_mode=DELETE;")  # avoid WAL writes
     try:
         yield conn
     finally:
         conn.close()
-
 
 # Request schema
 class IdInput(BaseModel):
