@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   database:
     container_name: database
@@ -31,11 +33,10 @@ services:
       - 6333
       - 6334
       - 6335
-    configs:
-      - source: qdrant_config
-        target: /qdrant/config/production.yaml
     volumes:
       - ./backend/_data/qdrant:/qdrant/storage
+      # Uncomment if you want a custom config file:
+      # - ./backend/_data/qdrant_config/production.yaml:/qdrant/config/production.yaml
     networks:
       - internal_net
 
@@ -45,9 +46,9 @@ services:
       context: ./backend
       dockerfile: routines/Dockerfile
     depends_on:
-        - database
-        - qdrant
-        - embedding
+      - database
+      - qdrant
+      - embedding
     read_only: true
     networks:
       - internal_net
@@ -70,7 +71,7 @@ services:
     networks:
       - internal_net
     tmpfs:
-      - /tmp 
+      - /tmp
       - /var/tmp
 
   frontend:
@@ -79,7 +80,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - 8501:8501
+      - "8501:8501"
     expose:
       - 8501
     read_only: true
@@ -94,17 +95,13 @@ services:
     security_opt:
       - no-new-privileges:true
 
-configs:
-  qdrant_config:
-    content: |
-      log_level: INFO
-
 networks:
   internal_net:
-    internal: true
+    external: true
   public_net:
-    driver: bridge
+    external: true
 
 volumes:
   streamlit-volume:
-    driver: local  # Using the default driver for local storage
+    driver: local
+
