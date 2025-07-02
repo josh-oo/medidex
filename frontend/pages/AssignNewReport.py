@@ -73,7 +73,7 @@ if uploaded_file is not None:
         #st.json(response.json())  # Display parsed JSON response from FastAPI
 
         index = st.number_input(
-            "Select a report", value=0, min_value=0, max_value=len(response.json()), step=1
+            "Select a report", value=0, min_value=0, max_value=len(response.json()) - 1, step=1
         )
 
         selected_report = response.json()[index]
@@ -91,7 +91,7 @@ if uploaded_file is not None:
             accept_new_options=False,
         )
 
-        if st.button("Search", icon=":material/search:", use_container_width=True,  key="search_1") and title + abstract != "":
+        if st.button("Search", icon=":material/search:", use_container_width=True,  key="search_1") and (title != "" or abstract != ""):
             text_to_process = []
             if title:
                 text_to_process.append(title)

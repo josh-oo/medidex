@@ -63,7 +63,7 @@ async def upload_file(file: UploadFile = File(...)):
     if file.filename.endswith(".ris"):
         try:
             content = await file.read()
-            text_stream = io.StringIO(content.decode('utf-8'))  # RIS is plain text
+            text_stream = io.StringIO(content.decode('utf-8-sig'))  # RIS is plain text
             entries = rispy.load(text_stream)  # returns a list of dicts
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to parse .ris: {str(e)}")
@@ -71,7 +71,7 @@ async def upload_file(file: UploadFile = File(...)):
     elif file.filename.endswith(".cgi"):
         try:
             content = await file.read()
-            text_stream = io.StringIO(add_end_tag(content.decode('utf-8')))  # RIS is plain text
+            text_stream = io.StringIO(add_end_tag(content.decode('utf-8-sig')))  # RIS is plain text
             entries = rispy.load(text_stream, implementation=CgiParser, skip_unknown_tags=True)  # returns a list of dicts
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to parse .cgi: {str(e)}")
@@ -79,7 +79,7 @@ async def upload_file(file: UploadFile = File(...)):
     elif file.filename.endswith(".nbib"):
         try:
             content = await file.read()
-            decoded = content.decode("utf-8")
+            decoded = content.decode("utf-8-sig")
             entries = nbib.read(decoded)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to parse .nbib: {str(e)}")

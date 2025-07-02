@@ -19,8 +19,9 @@ If you leave the `qdrant` folder empty the app starts indexing the reports after
 </pre> 
 
 6. Place .env.production files for all services in the corresponding folders. The env vars needed are described in the section below.
-7. Run `docker compose up` (it may take a while building all the images)  
-8. If it is done you can use the tool at http://localhost:8051
+7. Run `docker network create internal_net` and `docker network create public_net`
+8. Run `docker compose up` (it may take a while building all the images)  
+9. If it is done you can use the tool at http://localhost:8051
    
 # Services
 The application is divided into multiple services to facilitate hosting on different machines later
