@@ -10,6 +10,7 @@ BACKEND_API = os.getenv('BACKEND_API')
 st.set_page_config(
     page_title="Meerkat AI",
     page_icon="🤖",
+    layout="wide",
 )
 
 st.write("")
