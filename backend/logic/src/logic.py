@@ -19,6 +19,8 @@ import io
 
 import secrets
 
+from .utils.trial_registration_id import extract_trial_registration_ids
+
 load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_HOST")
@@ -92,7 +94,27 @@ async def upload_file(file: UploadFile = File(...)):
         title = entry.get('primary_title', None)
         if not title:
             title = entry.get('title', None)
-        results.append({'title':title, 'abstract':entry.get('abstract', None)})
+
+        authors = entry.get('authors',None)
+        abstract = entry.get('abstract', None)
+        trial_registration_id = None
+
+        ids = extract_trial_registration_ids(title)
+        if len(ids) == 1:
+            trial_registration_id = ids[0]
+
+        if authors and not trial_registration_id:
+            for author in authors:
+                ids = extract_trial_registration_ids(author)
+                if len(ids) == 1:
+                    trial_registration_id = ids[0]
+        if abstract and not trial_registration_id:
+            ids = extract_trial_registration_ids(abstract)
+            if len(ids) == 1:
+                trial_registration_id = ids[0]
+
+        #TODO study acronym
+        results.append({'title':title, 'abstract':abstract, 'authors': authors, 'trial_registration_id':trial_registration_id})
 
     return results
 
@@ -158,11 +180,11 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
         response = await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': found_study_ids})
 
     result = response.json()
-    current_keys = list(result.keys())
     result['Relevance'] = scores
 
     #move relevance to the front
-    reordered = {key: result[key] for key in ['Relevance'] + current_keys}
+    order = ['CRGStudyID', 'Relevance', 'Short_name', 'Participants', 'Duration', 'Comparison', 'Countries', 'Date_entered', 'Date_edited', 'Status_of_study']
+    reordered = {key: result[key] for key in order}
 
     return reordered
 
