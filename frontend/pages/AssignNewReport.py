@@ -80,8 +80,29 @@ if uploaded_file is not None:
     
         title = selected_report['title']
         abstract = selected_report['abstract']
-        st.header(title)
-        st.write(abstract)
+        authors = selected_report['authors']
+        trial_registration_id = selected_report['trial_registration_id']
+
+        display_title = title
+        display_abstract = abstract
+        display_authors = authors
+
+        if display_title and trial_registration_id and trial_registration_id in display_title:
+            display_title = display_title.replace(trial_registration_id, "`" + trial_registration_id + "`")
+
+        if display_abstract and trial_registration_id and trial_registration_id in display_abstract:
+            display_abstract= display_abstract.replace(trial_registration_id, "`" + trial_registration_id + "`")
+
+        if display_authors and trial_registration_id:
+            for i, author in enumerate(display_authors):
+                if trial_registration_id in author:
+                    display_authors[i] = author.replace(trial_registration_id, "`" + trial_registration_id + "`")
+
+        st.markdown("## " + display_title)
+        if display_authors:
+            st.markdown(" *and* ".join(display_authors))
+        if display_abstract:
+            st.markdown(display_abstract)
 
         tag_sources = st.multiselect(
             "Sources for tags",

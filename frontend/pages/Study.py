@@ -25,8 +25,15 @@ if "id" in st.query_params and "token" in st.query_params:
     file_prefix = "file://///nas.ads.mwn.de/tume/ps0/_AGs/Arbeitsgruppe_Leucht/Meerkat_2020_10_19/PDFs/"
     df = get_reports(study_id, st.query_params['token'])
     
-    df['ReportNumber'] = file_prefix + df['ReportNumber'].astype(str) + ".pdf"
-    st.dataframe(df, column_config={'ReportNumber': st.column_config.LinkColumn('ReportNumber', pinned=True, display_text=file_prefix + r"(.+)\.pdf")})
+    links = file_prefix + df['ReportNumber'].astype(str).str.zfill(5) + ".pdf"
+    st.dataframe(df)#, column_config={'ReportNumber': st.column_config.LinkColumn('ReportNumber')})
+
+    #with open("file://////Users/joshua/Desktop/barrowclough-test.pdf", 'rb') as file:
+    #    # Display PDF using the embed HTML
+    #pdf_display = f'<embed src="file://////Users/joshua/Desktop/barrowclough-test.pdf" width="700" height="900" type="application/pdf">'
+    #st.markdown(pdf_display, unsafe_allow_html=True)
+    links.name = 'Files'
+    st.dataframe(links)
 
 else:
     st.header("No study selected")
