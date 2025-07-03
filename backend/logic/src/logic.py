@@ -158,8 +158,13 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
         response = await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': found_study_ids})
 
     result = response.json()
+    current_keys = list(result.keys())
     result['Relevance'] = scores
-    return result
+
+    #move relevance to the front
+    reordered = {key: result[key] for key in ['Relevance'] + current_keys}
+
+    return reordered
 
 def single_element_generator(element):
     yield element
