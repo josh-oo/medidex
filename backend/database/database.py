@@ -94,7 +94,7 @@ def get_studies_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(get_d
 
 
 @app.get("/study/{study_id}/reports")
-def get_studies_by_ids(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+def get_study_reports_by_id(study_id: int, db: sqlite3.Connection = Depends(get_db)):
     query = f"""
         SELECT r.*
         FROM tblStudyReport sr
@@ -104,6 +104,16 @@ def get_studies_by_ids(study_id: int, db: sqlite3.Connection = Depends(get_db)):
     cursor = db.execute(query, (study_id,))
     rows = cursor.fetchall()
     return convert_to_column_based_dict(cursor.description, rows)
+
+@app.get("/study/{study_id}/date_entered")
+def get_study_date_by_id(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+    query = f"""
+        SELECT DateEntered
+        FROM tblStudy
+        WHERE CRGStudyID = ?
+    """
+    cursor = db.execute(query, (study_id,))
+    return cursor.fetchone()[0]
 
 @app.get("/mapping/report_study")
 def get_mapping_report_study(db: sqlite3.Connection = Depends(get_db)):
@@ -162,7 +172,7 @@ def get_all_interventions(id_input: IdInput, db: sqlite3.Connection = Depends(ge
 @app.get("/tags/interventions/all")
 def get_all_interventions(db: sqlite3.Connection = Depends(get_db)):
     query = f"""
-        SELECT InterventionID, Intervention_Description FROM tblIntervention
+        SELECT InterventionID, InterventionDescription FROM tblIntervention
     """
     cursor = db.execute(query)
     rows = cursor.fetchall()

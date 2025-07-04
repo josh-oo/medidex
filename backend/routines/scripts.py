@@ -2,6 +2,7 @@
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, MultiVectorComparator, MultiVectorConfig
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 from qdrant_client.http.models import PointStruct
 from tqdm import tqdm
 import requests
@@ -14,6 +15,8 @@ import embedding_pb2_grpc
 
 import xml.etree.ElementTree as ET
 
+from datetime import datetime
+
 load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_HOST")
@@ -24,6 +27,10 @@ VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
 VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
 
 MESH_DUMP_LOCATION = os.getenv("MESH_DUMP_LOCATION")
+
+BACKEND_API = os.getenv("BACKEND_API")
+BACKEND_USER = os.getenv("BACKEND_USER")
+BACKEND_PASSWORD = os.getenv("BACKEND_PASSWORD")
 
 def get_missing_ids(client, collection_name, ids):
     response = client.retrieve(collection_name=collection_name, ids=ids)
@@ -80,7 +87,7 @@ def calculate_report_embeddings(data, client=None, batch_size=128):
 
 def preprocess_reports(reports, report_study_mapping):
     results = {}
-    for id, title, abstract in zip(reports['CRGReportID'], reports['Title'],reports['Abstract']):
+    for id, title, abstract, date_entered in zip(reports['CRGReportID'], reports['Title'],reports['Abstract'], reports['Dateentered']):
         title_abstract = []
         if title:
             title_abstract.append(title)
@@ -88,7 +95,7 @@ def preprocess_reports(reports, report_study_mapping):
             title_abstract.append(abstract)
         
         item = {}
-        item['metadata'] = {'belongs_to_study': report_study_mapping[str(id)], 'source_id': id}
+        item['metadata'] = {'belongs_to_study': report_study_mapping[str(id)], 'source_id': id, "date_entered": transform_date_entered(date_entered)}
         item['texts'] = [" ".join(title_abstract)]
 
         vector_store_id = transform_to_uuid(id, "0000")
@@ -146,28 +153,6 @@ def refresh_vector_store(force_recompute_embeddings=False):
     calculate_report_embeddings(relevant_data,client=client)
 
 """
-def update_type():
-    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
-
-    collection_name="josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"
-
-    all_point_ids = []
-
-    # Scroll through the collection to retrieve all point IDs
-    scroll_results, next_offset = client.scroll(collection_name=collection_name, limit=100)
-    all_point_ids.extend([point.id for point in scroll_results])
-    while next_offset:
-        scroll_results, next_offset = client.scroll(collection_name=collection_name, limit=100, offset=next_offset)
-        all_point_ids.extend([point.id for point in scroll_results])
-
-    client.overwrite_payload(
-        collection_name=collection_name,
-        payload={
-            "type": "report",
-        },
-        points=all_point_ids,
-    )
-
 def refresh_study_embeddings():
 
     client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
@@ -175,7 +160,7 @@ def refresh_study_embeddings():
 
     collection_name="josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"
 
-    response = requests.get(DATABASE_BACKEND + "/mapping/report_study/")
+    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/mapping/report_study/")
     if response.status_code != 200:
         print("Cannot refresh study embeddings: Database API (/reports/all/) not reachable")
         return
@@ -183,15 +168,14 @@ def refresh_study_embeddings():
     all_reports = response.json()
 
     for report, studies in tqdm(all_reports.items()):
-        client.overwrite_payload(
+        uuid = transform_to_uuid(report, "0000")
+        client.set_payload(
             collection_name=collection_name,
             payload={
-                "type": "report",
                 "belongs_to_study": [int(item) for item in studies],
             },
-            points=[int(report)],
+            points=[uuid],
     )
-    print(all_reports)
 """
 
 REMOVE_CURLY_BRACKETS = re.compile(r'{.*?}')
@@ -270,6 +254,10 @@ def transform_to_uuid(id, tag):
     missing_zeros = 12 - len(id)
     id = "0"*missing_zeros + id
     return f"00000000-{tag}-4000-a000-{id}"
+
+def transform_date_entered(date_entered):
+    dt = datetime.strptime(date_entered, "%d/%m/%Y %H:%M:%S")
+    return dt.isoformat()
 
 def load_meerkat_tag_data(tag, tag_id="0000"):
     response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/tags/{tag}/all/")
@@ -375,9 +363,116 @@ def refresh_mesh_tags(force_recompute_embeddings=False):
     data= parse_large_xml(MESH_DUMP_LOCATION)
     refresh_all_tag_embeddings(data,force_recompute_embeddings=force_recompute_embeddings)
 
+"""
+def add_date_entered_info():
+
+    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+    #client = QdrantClient(url="http://localhost:6333")
+
+    collection_name="josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"
+
+    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/reports/all/")
+    if response.status_code != 200:
+        print("Cannot refresh vectorstore: Database API (/reports/all/) not reachable")
+        return
+    all_reports = response.json()
+
+    for report_id, date_entered in tqdm(zip(all_reports['CRGReportID'], all_reports['Dateentered'])):
+        uuid = transform_to_uuid(report_id, "0000")
+        client.set_payload(
+            collection_name=collection_name,
+            payload={
+                "date_entered": transform_date_entered(date_entered),
+            },
+            points=[uuid],
+    )
+"""
+
+def evaluate_with_cutoff(cutoff, model_id):
+
+    data = {"username": BACKEND_USER, "password": BACKEND_PASSWORD,}
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+    response = requests.post(BACKEND_API + "/login", data=data, headers=headers)
+
+    if response.status_code != 200:
+        print(response)
+        print(response.text)
+        return
+    
+    token = response.json()['access_token']
+    headers = {"Authorization": f"Bearer {token}"}
+
+    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+
+    filter_condition = Filter(
+        must=[
+            FieldCondition(
+                key="date_entered",
+                match=MatchValue(value=cutoff)
+            )
+        ]
+    )
+
+    # Pagination loop to get all points including vectors
+    recall_at_1 = []
+    recall_at_3 = []
+    recall_at_10 = []
+    scroll_offset = None
+
+    while True:
+        result, scroll_offset = client.scroll(
+            collection_name=model_id,
+            scroll_filter=filter_condition,
+            limit=1,
+            offset=scroll_offset,
+            with_vectors=True,     # <-- include vectors
+            with_payload=True      # <-- include payloads
+        )
+        #all_points.extend(result)
+
+        ground_truth = result[0].payload['belongs_to_study'][0]
+
+        #only consider reports with studies added in the past
+        response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{ground_truth}/date_entered")
+        if response.status_code != 200:
+            print(f"Cannot refresh vectorstore: Database API (/study/{ground_truth}/date_entered) not reachable")
+            return
+        corresponding_study_entered = transform_date_entered(response.json())
+        
+        if corresponding_study_entered < cutoff:
+            payload = {"embedding": result[0].vector['default'], "model_id": model_id}
+            params = {"cutoff":cutoff}
+            response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload,params=params, headers=headers)
+            predicted_studies =response.json()['CRGStudyID']
+
+            rank = 11
+            if ground_truth in predicted_studies:
+                rank = predicted_studies.index(ground_truth) + 1
+            
+            recall_at_1.append(1 if rank == 1 else 0)
+            recall_at_3.append(1 if rank <= 3 else 0)
+            recall_at_10.append(1 if rank <= 10 else 0)     
+
+        if scroll_offset is None:
+            break
+
+    print("Recall@1", sum(recall_at_1) / len(recall_at_1))
+    print("Recall@3", sum(recall_at_3) / len(recall_at_3))
+    print("Recall@10", sum(recall_at_10) / len(recall_at_10))
+    
 
 refresh_vector_store()
 refresh_meerkat_tags("interventions", tag_id="0001")
 refresh_meerkat_tags("conditions", tag_id="0002")
 refresh_meerkat_tags("outcomes", tag_id="0003")
 refresh_mesh_tags()
+
+print("Evaluate 5th update")
+evaluate_with_cutoff("2024-01-24T00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 5th update
+
+print("Evaluate 6th update")
+evaluate_with_cutoff("2024-07-26T00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 6th update
+
+print("Evaluate 7th update")
+evaluate_with_cutoff("2025-01-13T00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update

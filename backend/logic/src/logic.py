@@ -2,6 +2,7 @@ from fastapi import Query, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
+from qdrant_client.models import Filter, FieldCondition, DatetimeRange
 from typing import List, Optional
 import httpx
 import os
@@ -18,6 +19,8 @@ import nbib
 import io
 
 import secrets
+
+from datetime import datetime
 
 from .utils.trial_registration_id import extract_trial_registration_ids
 
@@ -155,7 +158,15 @@ async def similarity_search_tags(embedding: EmbeddingInput, sources: List[str] =
 
     return results
 
-async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default"), client=Depends(get_db)):
+async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default"),  cutoff: str = Query(None), client=Depends(get_db)):
+
+    date_filter = Filter()
+    if cutoff:
+        date_filter = Filter(
+            must=[
+                FieldCondition(key="date_entered",range=DatetimeRange(lt=datetime.fromisoformat(cutoff)))
+            ]
+        )
 
     search_results = client.query_points_groups(
         collection_name=embedding.model_id,
@@ -166,24 +177,24 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
         group_by="belongs_to_study",  # Path of the field to group by
         limit=10,  # Max amount of groups
         group_size=1,  # Max amount of points per group
+        query_filter=date_filter,
     )
 
-    found_study_ids = []
-    scores = []
+    found_study_ids = {}
     for result in search_results.groups:
         for hit in result.hits:
             for item in hit.payload['belongs_to_study']:
-                found_study_ids.append(item)
-                scores.append(str(round(hit.score * 100)) + "%")
+                found_study_ids[item] = str(round(hit.score * 100)) + "%"
 
     async with httpx.AsyncClient() as client:
-        response = await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': found_study_ids})
+        response = await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': list(found_study_ids.keys())})
 
     result = response.json()
-    result['Relevance'] = scores
+    result['Relevance'] = list(found_study_ids.values())
 
     #move relevance to the front
-    order = ['CRGStudyID', 'Relevance', 'Short_name', 'Participants', 'Duration', 'Comparison', 'Countries', 'Date_entered', 'Date_edited', 'Status_of_study']
+    #order = ['CRGStudyID', 'Relevance', 'Short_name', 'Participants', 'Duration', 'Comparison', 'Countries', 'Date_entered', 'Date_edited', 'Status_of_study']
+    order = ['CRGStudyID', 'Relevance', 'ShortName', 'NumberParticipants', 'Duration', 'Comparison', 'Countries', 'DateEntered', 'DateEdited', 'StatusofStudy']
     reordered = {key: result[key] for key in order}
 
     return reordered
