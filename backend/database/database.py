@@ -92,6 +92,15 @@ def get_studies_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(get_d
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, 'CRGStudyID')
 
+@app.get("/reports/{report_id}")
+def get_study_reports_by_id(report_id: int, db: sqlite3.Connection = Depends(get_db)):
+    query = f"""
+        SELECT * FROM tblReport
+        WHERE CRGReportID = ?
+    """
+    cursor = db.execute(query, (report_id,))
+    rows = cursor.fetchall()
+    return convert_to_dict_list(cursor.description, rows)
 
 @app.get("/study/{study_id}/reports")
 def get_study_reports_by_id(study_id: int, db: sqlite3.Connection = Depends(get_db)):
@@ -160,9 +169,9 @@ def get_all_reports(study_id: int, db: sqlite3.Connection = Depends(get_db)):
 def get_all_interventions(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
     placeholders = ','.join(['?'] * len(id_input.ids))
     query = f"""
-        SELECT si.Intervention AS ID, i.Intervention_Description AS Description
+        SELECT si.InterventionID AS ID, i.InterventionDescription AS Description
         FROM tblStudyIntervention si
-        JOIN tblIntervention i ON si.Intervention = i.InterventionID 
+        JOIN tblIntervention i ON si.InterventionID = i.InterventionID 
         WHERE si.CRGStudyID IN ({placeholders})
     """
     cursor = db.execute(query, id_input.ids)
@@ -194,9 +203,9 @@ def get_interventions_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends
 def get_all_interventions(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
     placeholders = ','.join(['?'] * len(id_input.ids))
     query = f"""
-        SELECT sc.Health_Care_Condition AS ID, c.HealthCareConditionDescription AS Description
+        SELECT sc.HealthCareConditionID AS ID, c.HealthCareConditionDescription AS Description
         FROM tblStudyHealthCareCondition sc 
-        JOIN tblHealthCareCondition c ON sc.Health_Care_Condition = c.HealthCareConditionID
+        JOIN tblHealthCareCondition c ON sc.HealthCareConditionID = c.HealthCareConditionID
         WHERE sc.CRGStudyID IN ({placeholders})
     """
     cursor = db.execute(query, id_input.ids)

@@ -49,10 +49,14 @@ class EmbeddingInput(BaseModel):
     embedding: List[float]
     model_id: str
 
-class RetrievalInput(BaseModel):
+class RetrievalInputText(BaseModel):
     text: str
     topK: int
-    excludeReportId : Optional[int] = None
+
+class RetrievalInputEmbedding(BaseModel):
+    embeddings: dict
+    model_id: str
+    topK: int
 
 async def upload_file(file: UploadFile = File(...)):
 
@@ -255,23 +259,36 @@ def get_all_reports_by_study(study_id: int):
         response.raise_for_status()  # Optional: raises on 4xx/5xx
         return response.json()
     
-async def analyze_text(input: RetrievalInput, vectorstore=Depends(get_db), channel=Depends(get_grpc_channel)):
+async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), vectorstore=Depends(get_db)):
+    result = await analyze(vectorstore, input.embeddings, input.model_id, input.topK, cutoff)
+    return result
+
+async def analyze_text(input: RetrievalInputText, cutoff: str = Query(None), vectorstore=Depends(get_db), channel=Depends(get_grpc_channel)):    
     text_input = TextInput(text=input.text)
     embedding_results = _embedding_aspects(text_input, channel)
 
-    if input.excludeReportId is not None:
-        #TODO filter
-        pass
+    result = await analyze(vectorstore, embedding_results, embedding_results['model_id'], input.topK, cutoff)
+    return result
+
+async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
+    date_filter = Filter()
+    if cutoff:
+        date_filter = Filter(
+            must=[
+                FieldCondition(key="date_entered",range=DatetimeRange(lt=datetime.fromisoformat(cutoff)))
+            ]
+        )
 
     study_search_results = vectorstore.query_points_groups(
-        collection_name=embedding_results['model_id'],
+        collection_name=model_id,
         # Same as in the regular query_points() API
-        query=embedding_results['embedding'],
+        query=embeddings['embedding'],
         using="default",
         # Grouping parameters
         group_by="belongs_to_study",  # Path of the field to group by
-        limit=input.topK,  # Max amount of groups
+        limit=top_k,  # Max amount of groups
         group_size=1,  # Max amount of points per group
+        query_filter=date_filter,
     )
 
     found_study_ids = []
@@ -296,7 +313,7 @@ async def analyze_text(input: RetrievalInput, vectorstore=Depends(get_db), chann
         related_studies = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': found_study_ids})).json()
         #TODO error handling
 
-        for id, name, report_hit, score in zip(related_studies['CRGStudyID'], related_studies['Short_name'], report_hits, scores):
+        for id, name, report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], report_hits, scores):
             item = {}
             item['study_id'] =  id
             item['study_name'] = name
@@ -306,12 +323,11 @@ async def analyze_text(input: RetrievalInput, vectorstore=Depends(get_db), chann
             item['assigned_reports'] = {}
 
             related_interventions = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/interventions/", json={'ids': [id]})).json()
-
             item['assigned_interventions'] = [item['Description'] for item in related_interventions]
             all_related_interventions.extend([item['ID'] for item in related_interventions])
 
             related_conditions = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/conditions/", json={'ids': [id]})).json()
-            item['assigned_interventions'] = [item['Description'] for item in related_conditions]
+            item['assigned_conditions'] = [item['Description'] for item in related_conditions]
             all_related_conditions.extend([item['ID'] for item in related_conditions])
 
             related_outcomes = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/outcomes/", json={'ids': [id]})).json()
@@ -319,12 +335,12 @@ async def analyze_text(input: RetrievalInput, vectorstore=Depends(get_db), chann
             all_related_outcomes.extend([item['ID'] for item in related_outcomes])
         
             related_reports = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/reports")).json()
-            for report in related_reports:
+            for report_id, report_title, report_abstract, report_authors in zip(related_reports['CRGReportID'], related_reports['Title'], related_reports['Abstract'], related_reports['Authors']):
                 report_item = {}
-                report_item['title'] = report['Title']
-                report_item['abstract'] = report['Abstract']
-                report_item['authors'] = [author.strip() for author in report['Authors'].split("//")]
-                item['assigned_reports'][report['CRGReportID']] = report_item
+                report_item['title'] = report_title
+                report_item['abstract'] = report_abstract
+                report_item['authors'] = [author.strip() for author in report_authors.split("//")]
+                item['assigned_reports'][report_id] = report_item
 
         
             result['related_studies'].append(item)
@@ -340,8 +356,8 @@ async def analyze_text(input: RetrievalInput, vectorstore=Depends(get_db), chann
         )
 
         tag_results = vectorstore.query_points(
-            collection_name=embedding_results['model_id'] + "_tags",
-            query=embedding_results[type_embedding],
+            collection_name=model_id + "_tags",
+            query=embeddings[type_embedding],
             limit=len(allowed_ids),
             query_filter=tag_filter,
         )

@@ -8,7 +8,7 @@ from src.auth import get_api_keys, create_api_key, delete_api_key, verify_api_ke
 from src.logic import upload_file,get_all_reports_by_study
 from src.logic import similarity_search_tags, similarity_search_studies
 from src.logic import embedding_aspects, embedding
-from src.logic import analyze_text
+from src.logic import analyze_text, analyze_embedding
 
 # Initialize FastAPI
 app = FastAPI()
@@ -74,6 +74,10 @@ def auth_logout(result = Depends(logout)):
     return result
 
 
-@app.post("/api/v1/analyze", dependencies=[Depends(verify_api_key)])
+@app.post("/api/v1/analyze_text", dependencies=[Depends(verify_api_key)])
 async def logic_analyze_text(result = Depends(analyze_text)):
+    return result
+
+@app.post("/api/v1/analyze_embedding", dependencies=[Depends(verify_api_key)])
+async def logic_analyze_embedding(result = Depends(analyze_embedding)):
     return result
