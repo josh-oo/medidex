@@ -75,3 +75,7 @@ This service hosts routínes like searching for unindexed reports in meerkat to 
 
 # Local Development
 To run a the project locally you need to start the vectorstore first: `docker run -p 6333:6333 -p 6334:6334 -v /backend/_data/qdrant:/qdrant/storage qdrant/qdrant`. For the host location an absolute path is required.
+
+# Important
+In the sqlite table:  
+tblStudy Dateentered and tblReport Dateentered need to be in iso format YYYY-MM-DD HH:MM:SS, use the script database/helper.py.

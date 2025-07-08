@@ -159,11 +159,7 @@ def get_study_id_by_trial_id(trial_id: str = Query(...), cutoff: str = Query(...
         SELECT CRGStudyID
         FROM tblStudy
         WHERE ShortName = ? OR UDef7 = ? 
-        AND 
-            substr(Dateentered, 7, 4) || '-' || 
-            printf('%02d', CAST(substr(Dateentered, 4, 2) AS INTEGER)) || '-' || 
-            printf('%02d', CAST(substr(Dateentered, 1, 2) AS INTEGER)) || 
-            substr(Dateentered, 11) < ?
+        AND DateEntered < ?
     """
     cursor = db.execute(query, (trial_id, trial_id,cutoff))
     rows = cursor.fetchone()
@@ -176,11 +172,7 @@ def get_study_id_by_trial_id(trial_id: str = Query(...), cutoff: str = Query(...
         FROM tblStudyReport sr
         JOIN tblReport r ON sr.CRGReportID = r.CRGReportID
         WHERE r.Authors LIKE '%' || ? || '%' OR r.UDef7 = ?
-        AND 
-            substr(Dateentered, 7, 4) || '-' || 
-            printf('%02d', CAST(substr(Dateentered, 4, 2) AS INTEGER)) || '-' || 
-            printf('%02d', CAST(substr(Dateentered, 1, 2) AS INTEGER)) || 
-            substr(Dateentered, 11) < ?
+        AND r.Dateentered < ?
     """
     cursor = db.execute(query, (trial_id, trial_id,cutoff))
     rows = cursor.fetchone()

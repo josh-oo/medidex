@@ -163,7 +163,6 @@ async def similarity_search_tags(embedding: EmbeddingInput, sources: List[str] =
     return results
 
 async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default"), trial_id: str = Query(None),  cutoff: str = Query(None), client=Depends(get_db)):
-
     date_filter = Filter()
     if cutoff:
         date_filter = Filter(
@@ -185,7 +184,6 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
     )
 
     found_study_ids = {}
-
     if trial_id:
         async with httpx.AsyncClient() as client:
             response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
