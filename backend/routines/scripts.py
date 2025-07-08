@@ -432,6 +432,9 @@ def evaluate_with_cutoff(cutoff, model_id):
         #all_points.extend(result)
 
         ground_truth = result[0].payload['belongs_to_study'][0]
+        trial_id = None
+        if 'trial_id' in result[0].payload:
+            trial_id = result[0].payload['trial_id']
 
         #only consider reports with studies added in the past
         response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{ground_truth}/date_entered")
@@ -442,7 +445,7 @@ def evaluate_with_cutoff(cutoff, model_id):
         
         if corresponding_study_entered < cutoff:
             payload = {"embedding": result[0].vector['default'], "model_id": model_id}
-            params = {"cutoff":cutoff}
+            params = {"cutoff":cutoff, "trial_id":trial_id}
             response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload,params=params, headers=headers)
             predicted_studies =response.json()['CRGStudyID']
 
@@ -460,7 +463,96 @@ def evaluate_with_cutoff(cutoff, model_id):
     print("Recall@1", sum(recall_at_1) / len(recall_at_1))
     print("Recall@3", sum(recall_at_3) / len(recall_at_3))
     print("Recall@10", sum(recall_at_10) / len(recall_at_10))
+
+"""
+def extract_trial_registration_ids(text):
+    isrctn = re.compile(r"\bISRCTN\d\d\d\d\d\d\d\d\b")
+    chictr = re.compile(r"\bChiCTR\d\d\d\d\d\d\d\d\d\d\b")
+    chictr_trc = re.compile(r"\bChiCTR.TRC.\d\d\d\d\d\d\d\d\b")
+    chictr_ior = re.compile(r"\bChiCTR.IOR.\d\d\d\d\d\d\d\d\b")
+    chictr_inr = re.compile(r"\bChiCTR-(?:INR|IPR|POC|IIR|IOQ|OPC)-\d{8}\b")
+    chictr_ipr = re.compile(r"\bChiCTR-IPR-\d\d\d\d\d\d\d\d\b")
+    actrn = re.compile(r"\bACTR(?:N|\d)\d{14}\b")
+
+    ctri = re.compile(r"\bCTRI(?:/|-)\d{4}(?:/|-)\d{2,3}(?:/|-)\d{6}\b")
+
+    nct = re.compile(r"\bNCT\d\d\d\d\d\d\d\d\b")
+    drks = re.compile(r"\bDRKS\d\d\d\d\d\d\d\d\b")
+
+    nlomon = re.compile(r"\bNL-OMON\d\d\d\d\d\b")
+    nl = re.compile(r"\bNL\d\d\d\d\b")
+    irct = re.compile(r"\bIRCT\d\d\d\d\d\d\d\d\d\d\d\d\d?\d?N\d+\b")
+    kct = re.compile(r"\bKCT\d\d\d\d\d\d\d\b")
+    tctr = re.compile(r"\bTCTR\d\d\d\d\d\d\d\d\d\d\d\b")
+    rbr = re.compile(r"\bRBR-.......\b")
+    ctis = re.compile(r"\bCTIS\d\d\d\d-\d\d\d\d\d\d-\d\d-\d\d\b")
+    jprn_umin = re.compile(r"\b(?:JPRN-)?UMIN\d\d\d\d\d\d\d\d\d\b")
+    jprn_japic = re.compile(r"\b(?:JPRN-)?JapicCTI-\d{6}\b")
+    jprn_jrct = re.compile(r"\bJPRN-jRCTs?\d\d\d\d\d\d\d\d\d\d?\b")
+    euctr = re.compile(r"\bEUCTR\d{4}-\d{6}-\d{2}(?:-[A-Z0-9]{2})?\b")
+    itmctr = re.compile(r"\bITMCTR\d\d\d\d\d\d\d\d\d\d\b")
+    pactr = re.compile(r"\bPACTR\d\d\d\d\d\d\d\d\d\d\d\d\d\d\d\b")
+    ntr = re.compile(r"\bNTR\d\d\d\d?\b")
+    ukcrnid = re.compile(r"\bUKCRNID\d\d\d\d\d?\b")
+    slctr = re.compile(r"\bSLCTR-\d\d\d\d-\d\d\d\b")
+    hkctr = re.compile(r"\bHKCTR-\d\d\d\d\b")
+    m = re.compile(r"\bM\d\d-\d\d\d\b")
+    mct = re.compile(r"\bMCT-\d\d\d\d\d\b")
+
+    all_registration_id_patterns = [isrctn, chictr, chictr_trc, chictr_ior, actrn, ctri, nct, drks, nlomon,nl, irct, kct, tctr,rbr, ctis, jprn_umin, jprn_jrct, jprn_japic, euctr, itmctr, pactr, ntr, chictr_inr, chictr_ipr, ukcrnid, slctr, hkctr, m, mct]
+
+    all_results = []
+    for pattern in all_registration_id_patterns:
+        matches = re.findall(pattern, text)
+        for m in matches:
+            all_results.append(m)
+
+    return list(set(all_results))
+
+def add_trial_id_info():
+
+    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+    #client = QdrantClient(url="http://localhost:6333")
+
+    collection_name="josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"
+
+    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/reports/all/")
+    if response.status_code != 200:
+        print("Cannot refresh vectorstore: Database API (/reports/all/) not reachable")
+        return
+    all_reports = response.json()
+
+    for report_id, title, abstract, authors in tqdm(zip(all_reports['CRGReportID'], all_reports['Title'], all_reports['Abstract'], all_reports['Authors'])):
+        uuid = transform_to_uuid(report_id, "0000")
+
+        authors = [author.strip() for author in authors.split("//")]
+
+        trial_registration_id  = None
+        ids = extract_trial_registration_ids(title)
+        if len(ids) == 1:
+            trial_registration_id = ids[0]
+
+        if authors and not trial_registration_id:
+            for author in authors:
+                ids = extract_trial_registration_ids(author)
+                if len(ids) == 1:
+                    trial_registration_id = ids[0]
+
+        if abstract and not trial_registration_id:
+            ids = extract_trial_registration_ids(abstract)
+            if len(ids) == 1:
+                trial_registration_id = ids[0]
+
+        client.set_payload(
+            collection_name=collection_name,
+            payload={
+                "trial_id": trial_registration_id,
+            },
+            points=[uuid],
+    )
     
+add_trial_id_info()
+"""
 
 refresh_vector_store()
 refresh_meerkat_tags("interventions", tag_id="0001")

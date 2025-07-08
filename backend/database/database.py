@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -92,16 +92,6 @@ def get_studies_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(get_d
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, 'CRGStudyID')
 
-@app.get("/reports/{report_id}")
-def get_study_reports_by_id(report_id: int, db: sqlite3.Connection = Depends(get_db)):
-    query = f"""
-        SELECT * FROM tblReport
-        WHERE CRGReportID = ?
-    """
-    cursor = db.execute(query, (report_id,))
-    rows = cursor.fetchall()
-    return convert_to_dict_list(cursor.description, rows)
-
 @app.get("/study/{study_id}/reports")
 def get_study_reports_by_id(study_id: int, db: sqlite3.Connection = Depends(get_db)):
     query = f"""
@@ -152,6 +142,50 @@ def get_all_reports(db: sqlite3.Connection = Depends(get_db)):
     cursor = db.execute(query)
     rows = cursor.fetchall()
     return convert_to_column_based_dict(cursor.description, rows)
+
+@app.get("/reports/{report_id}")
+def get_study_reports_by_id(report_id: int, db: sqlite3.Connection = Depends(get_db)):
+    query = f"""
+        SELECT * FROM tblReport
+        WHERE CRGReportID = ?
+    """
+    cursor = db.execute(query, (report_id,))
+    rows = cursor.fetchall()
+    return convert_to_dict_list(cursor.description, rows)
+
+@app.get("/study_id")
+def get_study_id_by_trial_id(trial_id: str = Query(...), cutoff: str = Query(...), db: sqlite3.Connection = Depends(get_db)):
+    query = f"""
+        SELECT CRGStudyID
+        FROM tblStudy
+        WHERE ShortName = ? OR UDef7 = ? 
+        AND 
+            substr(Dateentered, 7, 4) || '-' || 
+            printf('%02d', CAST(substr(Dateentered, 4, 2) AS INTEGER)) || '-' || 
+            printf('%02d', CAST(substr(Dateentered, 1, 2) AS INTEGER)) || 
+            substr(Dateentered, 11) < ?
+    """
+    cursor = db.execute(query, (trial_id, trial_id,cutoff))
+    rows = cursor.fetchone()
+
+    if rows:
+        return rows
+
+    query = f"""
+        SELECT sr.CRGStudyID
+        FROM tblStudyReport sr
+        JOIN tblReport r ON sr.CRGReportID = r.CRGReportID
+        WHERE r.Authors LIKE '%' || ? || '%' OR r.UDef7 = ?
+        AND 
+            substr(Dateentered, 7, 4) || '-' || 
+            printf('%02d', CAST(substr(Dateentered, 4, 2) AS INTEGER)) || '-' || 
+            printf('%02d', CAST(substr(Dateentered, 1, 2) AS INTEGER)) || 
+            substr(Dateentered, 11) < ?
+    """
+    cursor = db.execute(query, (trial_id, trial_id,cutoff))
+    rows = cursor.fetchone()
+
+    return rows
 
 @app.get("/study/{study_id}/reports")
 def get_all_reports(study_id: int, db: sqlite3.Connection = Depends(get_db)):

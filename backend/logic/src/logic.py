@@ -162,7 +162,7 @@ async def similarity_search_tags(embedding: EmbeddingInput, sources: List[str] =
 
     return results
 
-async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default"),  cutoff: str = Query(None), client=Depends(get_db)):
+async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default"), trial_id: str = Query(None),  cutoff: str = Query(None), client=Depends(get_db)):
 
     date_filter = Filter()
     if cutoff:
@@ -185,10 +185,20 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
     )
 
     found_study_ids = {}
+
+    if trial_id:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
+            response = response.json()
+            if response:
+                for result in response:
+                    found_study_ids[result] = "100% (Trial ID)"
+
     for result in search_results.groups:
         for hit in result.hits:
             for item in hit.payload['belongs_to_study']:
-                found_study_ids[item] = str(round(hit.score * 100)) + "%"
+                if item not in found_study_ids:
+                    found_study_ids[item] = str(round(hit.score * 100)) + "%"
 
     async with httpx.AsyncClient() as client:
         response = await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': list(found_study_ids.keys())})

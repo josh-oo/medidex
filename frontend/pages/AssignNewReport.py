@@ -29,9 +29,10 @@ def get_embeddings(text):
         print("Request failed:", response.status_code, response.text)
         return None, None, None
     
-def get_similar_studies(embedding, model):
+def get_similar_studies(embedding, model, trial_id=None):
     payload = {"embedding": embedding, "model_id": model}
-    response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload, headers=get_headers())
+    params = {"trial_id": trial_id}
+    response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload, params=params, headers=get_headers())
 
     if response.status_code == 200:
         return pd.DataFrame(response.json())
@@ -82,6 +83,7 @@ if uploaded_file is not None:
         abstract = selected_report['abstract']
         authors = selected_report['authors']
         trial_registration_id = selected_report['trial_registration_id']
+        current_trial_id = trial_registration_id
 
         display_title = title
         display_abstract = abstract
@@ -123,7 +125,7 @@ if uploaded_file is not None:
             if current_model is None or current_embedding is None or current_aspect_embeddings is None:
                 st.error("Could not parse inputs")
 
-            study_search_results = get_similar_studies(current_embedding, current_model)
+            study_search_results = get_similar_studies(current_embedding, current_model, trial_id=current_trial_id)
             intervention_search_results = get_similar_tags(current_aspect_embeddings['intervention'], current_model, tag_sources, "interventions")
             condition_search_results = get_similar_tags(current_aspect_embeddings['condition'], current_model, tag_sources,"conditions")
             outcome_search_results = get_similar_tags(current_aspect_embeddings['outcome'], current_model, tag_sources,"outcomes")
