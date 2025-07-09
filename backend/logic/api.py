@@ -7,7 +7,7 @@ from src.auth import get_api_keys, create_api_key, delete_api_key, verify_api_ke
 
 from src.logic import upload_file,get_all_reports_by_study
 from src.logic import similarity_search_tags, similarity_search_studies
-from src.logic import embedding_aspects, embedding
+from src.logic import embed_report, embed_aspect
 from src.logic import analyze_text, analyze_embedding
 
 # Initialize FastAPI
@@ -33,12 +33,12 @@ async def similarity_search_tags(result = Depends(similarity_search_tags)):
 async def similarity_search_studies(result = Depends(similarity_search_studies)):
     return result
 
-@app.post("/embedding/aspects", dependencies=[Depends(is_verified)])
-async def embedding_aspects(result = Depends(embedding_aspects)):
+@app.post("/embed/report", dependencies=[Depends(is_verified)])
+async def embed_report(result = Depends(embed_report)):
     return result
 
-@app.post("/embedding", dependencies=[Depends(is_verified)])
-async def embedding(result = Depends(embedding)):
+@app.post("/embed/aspect", dependencies=[Depends(is_verified)])
+async def embed_aspect(result = Depends(embed_aspect)):
     return result
 
 @app.post("/api_key/{owner}",  dependencies=[Depends(is_verified)])

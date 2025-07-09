@@ -14,7 +14,7 @@ current_model = None
 
 def get_embeddings(text):
     payload = {"text": text}
-    response = requests.post(BACKEND_API + "/embedding", json=payload, headers=get_headers())
+    response = requests.post(BACKEND_API + "/embed/aspects", json=payload, headers=get_headers())
 
     if response.status_code == 200:
         data = response.json()

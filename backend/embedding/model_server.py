@@ -61,7 +61,7 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
 
         return embeddings, aspects
     
-    def GetEmbedding(self, request_iterator, context):
+    def GetAspectEmbeddings(self, request_iterator, context):
         context.send_initial_metadata((
             ('model', MODEL_PATH),
             ('revision', MODEL_REVISION),
@@ -71,15 +71,13 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
 
         def yield_embeddings(id, texts):
             embedding = self.get_embeddings(texts, return_aspects=False)
-            batch_embeddings = []
-            for emb in embedding:
-                batch_embeddings.append(embedding_pb2.EmbeddingVector(values=emb.tolist()))
-            return embedding_pb2.EmbedResponse(id=id, embedding=batch_embeddings)
+            batch_embeddings = [embedding_pb2.EmbeddingVector(values=emb.tolist()) for emb in embedding]
+            return embedding_pb2.EmbedResponseAspects(id=id, embedding=batch_embeddings)
 
         for request in request_iterator:
-            yield yield_embeddings(request.id, request.text)
+            yield yield_embeddings(request.id, request.aspects)
 
-    def GetEmbeddingAspects(self, request_iterator, context):
+    def GetReportEmbedding(self, request_iterator, context):
         context.send_initial_metadata((
             ('model', MODEL_PATH),
             ('revision', MODEL_REVISION),
@@ -87,27 +85,27 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
             ('dimension', str(MODEL_DIM))
         ))
 
-        def yield_embeddings(id, texts):
-            embedding, aspect_embeddings = self.get_embeddings(texts)
-            batch_embeddings = []
-            batch_aspect_embeddings = []
-            for i, emb in enumerate(embedding):
-                batch_embeddings.append(embedding_pb2.EmbeddingVector(values=emb.tolist()))
-                aspect_vector = embedding_pb2.AspectVectors(
-                    aspect_embeddings=[
-                        embedding_pb2.EmbeddingVector(values=aspect.tolist())
-                        for aspect in aspect_embeddings[i]
-                    ]
-                )
-                batch_aspect_embeddings.append(aspect_vector)                  
-            return embedding_pb2.EmbedResponseAspects(
+        def yield_embeddings(id, text, authors=[]):
+            embedding, aspect_embeddings = self.get_embeddings([text])
+            author_embeddings = []
+            if len(authors) > 0:
+                author_embeddings = self.get_embeddings(authors, return_aspects=False)
+
+            embedding = embedding[0]
+            aspect_embeddings = aspect_embeddings[0]
+            
+            aspect_embeddings = [embedding_pb2.EmbeddingVector(values=aspect.tolist())for aspect in aspect_embeddings]
+            author_embeddings = [embedding_pb2.EmbeddingVector(values=author.tolist())for author in author_embeddings]
+
+            return embedding_pb2.EmbedResponseReport(
                 id=id,
-                embedding=batch_embeddings,
-                aspect_embeddings=batch_aspect_embeddings,
+                embedding=embedding_pb2.EmbeddingVector(values=embedding.tolist()),
+                aspect_embeddings=aspect_embeddings,
+                author_embeddings=author_embeddings
             )
 
         for request in request_iterator:
-            yield yield_embeddings(request.id, request.text)
+            yield yield_embeddings(request.id, request.text, request.authors)
 
 def _configure_health_server(server: grpc.Server):
     health_servicer = health.HealthServicer()

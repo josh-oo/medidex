@@ -214,17 +214,17 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
 def single_element_generator(element):
     yield element
 
-def embedding_aspects(input: TextInput, channel = Depends(get_grpc_channel)):
-    return _embedding_aspects(input, channel)
+def embed_report(input: TextInput, channel = Depends(get_grpc_channel)):
+    return _embed_report(input, channel)
 
-def _embedding_aspects(input: TextInput, channel):
+def _embed_report(input: TextInput, channel):
     token = secrets.token_urlsafe(8)
 
-    request = embedding_pb2.EmbedRequest(id=token, text=[input.text])
+    request = embedding_pb2.EmbedReportRequest(id=token, text=input.text, authors=[])
 
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
 
-    responses = stub.GetEmbeddingAspects(single_element_generator(request))
+    responses = stub.GetReportEmbedding(single_element_generator(request))
 
     metadata = dict(responses.initial_metadata())
 
@@ -232,23 +232,23 @@ def _embedding_aspects(input: TextInput, channel):
 
     response = next(responses)
 
-    result = {"model_id": model_id, "embedding": list(response.embedding[0].values)}
+    result = {"model_id": model_id, "embedding": list(response.embedding.values)}
     for i, aspect in enumerate(metadata['aspects'].split(";")):
-        result[aspect] = list(response.aspect_embeddings[0].aspect_embeddings[i].values)
+        result[aspect] = list(response.aspect_embeddings[i].values)
 
     return result
 
-def embedding(input: TextInput, channel = Depends(get_grpc_channel)):
-    return _embedding(input, channel)
+def embed_aspect(input: TextInput, channel = Depends(get_grpc_channel)):
+    return _embed_aspect(input, channel)
 
-def _embedding(input: TextInput, channel):
+def _embed_aspect(input: TextInput, channel):
     token = secrets.token_urlsafe(8)
 
-    request = embedding_pb2.EmbedRequest(id=token, text=[input.text])
+    request = embedding_pb2.EmbedRequestAspect(id=token, aspects=[input.text])
 
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
 
-    responses = stub.GetEmbedding(single_element_generator(request))
+    responses = stub.GetAspectEmbeddings(single_element_generator(request))
 
     metadata = dict(responses.initial_metadata())
 

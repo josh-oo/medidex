@@ -46,13 +46,13 @@ def calculate_report_embeddings(data, client=None, batch_size=128):
 
     def stream_requests(data):
         for id, item in data.items():
-            test = embedding_pb2.EmbedRequest(id=id, text=item['texts'])
+            test = embedding_pb2.EmbedReportRequest(id=id, text=item['texts'][0], authors=item['authors'])
             yield test
             
     channel = grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
 
-    responses = stub.GetEmbeddingAspects(stream_requests(data))
+    responses = stub.GetReportEmbedding(stream_requests(data))
 
     all_points = []
 
@@ -67,9 +67,9 @@ def calculate_report_embeddings(data, client=None, batch_size=128):
         if client is None:
             continue
 
-        new_vectors = {"default": response.embedding[0].values,}
+        new_vectors = {"default": response.embedding.values,}
         for i, aspect in enumerate(metadata['aspects'].split(";")):
-            new_vectors[aspect] = response.aspect_embeddings[0].aspect_embeddings[i].values
+            new_vectors[aspect] = response.aspect_embeddings [i].values
 
         current_id = response.id#next(ids)
         payload = data[current_id]['metadata']
@@ -97,6 +97,8 @@ def preprocess_reports(reports, report_study_mapping):
         item = {}
         item['metadata'] = {'belongs_to_study': report_study_mapping[str(id)], 'source_id': id, "date_entered": date_entered}
         item['texts'] = [" ".join(title_abstract)]
+        #TODO remove trial ids
+        item['authors'] = [author.strip() for author in authors.strip()]
 
         vector_store_id = transform_to_uuid(id, "0000")
 
@@ -139,6 +141,7 @@ def refresh_vector_store(force_recompute_embeddings=False):
         vector_config = {"default": VectorParams(size=model_info['dimension'], distance=Distance.COSINE)}
         for aspect in model_info['aspects'].split(";"):
             vector_config[aspect] = VectorParams(size=model_info['dimension'], distance=Distance.COSINE)
+        
         client.create_collection(
             collection_name=collection_name,
             vectors_config=vector_config,
@@ -215,13 +218,13 @@ def calculate_tag_embeddings(data, client=None, batch_size=128):
 
     def stream_requests(data):
         for id, item in data.items():
-            test = embedding_pb2.EmbedRequest(id=id, text=item['texts'])
+            test = embedding_pb2.EmbedAspectsRequest(id=id, aspects=item['texts'])
             yield test
             
     channel = grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
 
-    responses = stub.GetEmbedding(stream_requests(data))
+    responses = stub.GetAspectEmbeddings(stream_requests(data))
 
     all_points = []
 
@@ -460,7 +463,9 @@ def evaluate_with_cutoff(cutoff, model_id):
     print("Recall@3", sum(recall_at_3) / len(recall_at_3))
     print("Recall@10", sum(recall_at_10) / len(recall_at_10))
 
-refresh_vector_store()
+refresh_vector_store(force_recompute_embeddings=True)
+
+"""
 refresh_meerkat_tags("interventions", tag_id="0001")
 refresh_meerkat_tags("conditions", tag_id="0002")
 refresh_meerkat_tags("outcomes", tag_id="0003")
@@ -474,3 +479,4 @@ evaluate_with_cutoff("2024-07-26T00:00:00", "josh-oo_aspect-based-embeddings-v3_
 
 print("Evaluate 7th update")
 evaluate_with_cutoff("2025-01-13T00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update
+"""
