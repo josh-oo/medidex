@@ -299,16 +299,16 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
         query_filter=date_filter,
     )
 
-    found_study_ids = []
-    scores = []
-    report_hits = []
+    found_study_ids = {}
+    #scores = []
+    #report_hits = []
     for result in study_search_results.groups:
         for hit in result.hits:
             report_hit = hit.payload['source_id']
             for item in hit.payload['belongs_to_study']:
-                found_study_ids.append(item)
-                scores.append(hit.score)
-                report_hits.append(report_hit)
+                found_study_ids[item] = {'score': hit.score, 'report_hit': report_hit}
+                #scores.append(hit.score)
+                #report_hits.append(report_hit)
 
     result = {}
     result['related_studies'] = []
@@ -317,8 +317,11 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
     all_related_conditions = []
     all_related_outcomes = []
 
+    scores = [item['score'] for item in found_study_ids.values()]
+    report_hits = [item['report_hit'] for item in found_study_ids.values()]
+
     async with httpx.AsyncClient() as client:
-        related_studies = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': found_study_ids})).json()
+        related_studies = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': list(found_study_ids.keys())})).json()
         #TODO error handling
 
         for id, name, report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], report_hits, scores):
