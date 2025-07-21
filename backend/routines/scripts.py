@@ -15,7 +15,7 @@ import embedding_pb2_grpc
 
 import xml.etree.ElementTree as ET
 
-from datetime import datetime
+import numpy as np
 
 load_dotenv()
 
@@ -29,8 +29,6 @@ VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
 MESH_DUMP_LOCATION = os.getenv("MESH_DUMP_LOCATION")
 
 BACKEND_API = os.getenv("BACKEND_API")
-BACKEND_USER = os.getenv("BACKEND_USER")
-BACKEND_PASSWORD = os.getenv("BACKEND_PASSWORD")
 
 def get_missing_ids(client, collection_name, ids):
     response = client.retrieve(collection_name=collection_name, ids=ids)
@@ -69,7 +67,9 @@ def calculate_report_embeddings(data, client=None, batch_size=128):
 
         new_vectors = {"default": response.embedding.values,}
         for i, aspect in enumerate(metadata['aspects'].split(";")):
-            new_vectors[aspect] = response.aspect_embeddings [i].values
+            new_vectors[aspect] = response.aspect_embeddings[i].values
+
+        new_vectors['authors'] = response.author_embeddings.values
 
         current_id = response.id#next(ids)
         payload = data[current_id]['metadata']
@@ -86,6 +86,12 @@ def calculate_report_embeddings(data, client=None, batch_size=128):
     return metadata
 
 def preprocess_reports(reports, report_study_mapping):
+    session = requests.Session()
+    session.headers.update({"Authorization": "Bearer DEBUG"})
+
+    def check_author(author):
+        return len(author.replace("?", "").strip()) > 0
+    
     results = {}
     for id, title, abstract, date_entered, authors in zip(reports['CRGReportID'], reports['Title'],reports['Abstract'], reports['Dateentered'], reports['Authors']):
         title_abstract = []
@@ -95,27 +101,32 @@ def preprocess_reports(reports, report_study_mapping):
             title_abstract.append(abstract)
         
         item = {}
-        item['metadata'] = {'belongs_to_study': report_study_mapping[str(id)], 'source_id': id, "date_entered": date_entered}
+        authors = [author.strip() for author in authors.split("//") if check_author(author)]
+        trial_id = None
+        data = {'title': title, 'abstract': abstract, 'authors': []}
+        response = session.post(BACKEND_API + "/extract_trial_id", json=data)
+        if response.status_code == 200 and response.json():
+            trial_id = response.json()
+        item['metadata'] = {'belongs_to_study': report_study_mapping[str(id)], 'source_id': id, "date_entered": date_entered, "authors": authors, "trial_id": trial_id}
         item['texts'] = [" ".join(title_abstract)]
-        #TODO remove trial ids
-        item['authors'] = [author.strip() for author in authors.strip()]
+        item['authors'] = authors
 
         vector_store_id = transform_to_uuid(id, "0000")
 
-        results[vector_store_id ] = item
+        results[vector_store_id] = item
     
     return results
 
 def load_report_data():
-    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/reports/all/")
+    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/reports/all")
     if response.status_code != 200:
-        print("Cannot refresh vectorstore: Database API (/reports/all/) not reachable")
+        print("Cannot refresh vectorstore: Database API (/reports/all) not reachable")
         return
     all_reports = response.json()
     
-    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/mapping/report_study/")
+    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/mapping/report_study")
     if response.status_code != 200:
-        print("Cannot refresh study embeddings: Database API (/mapping/report_study/) not reachable")
+        print("Cannot refresh study embeddings: Database API (/mapping/report_study) not reachable")
         return
     report_study_mapping = response.json()
 
@@ -138,7 +149,7 @@ def refresh_vector_store(force_recompute_embeddings=False):
     points_that_need_computation = all_ids
 
     if not exists:
-        vector_config = {"default": VectorParams(size=model_info['dimension'], distance=Distance.COSINE)}
+        vector_config = {"default": VectorParams(size=model_info['dimension'], distance=Distance.COSINE), "authors":VectorParams(size=model_info['dimension'], distance=Distance.COSINE) }
         for aspect in model_info['aspects'].split(";"):
             vector_config[aspect] = VectorParams(size=model_info['dimension'], distance=Distance.COSINE)
         
@@ -163,9 +174,9 @@ def refresh_study_embeddings():
 
     collection_name="josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"
 
-    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/mapping/report_study/")
+    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/mapping/report_study")
     if response.status_code != 200:
-        print("Cannot refresh study embeddings: Database API (/reports/all/) not reachable")
+        print("Cannot refresh study embeddings: Database API (/reports/all) not reachable")
         return
     
     all_reports = response.json()
@@ -259,9 +270,9 @@ def transform_to_uuid(id, tag):
     return f"00000000-{tag}-4000-a000-{id}"
 
 def load_meerkat_tag_data(tag, tag_id="0000"):
-    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/tags/{tag}/all/")
+    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/tags/{tag}/all")
     if response.status_code != 200:
-        print(f"Cannot refresh tag embeddings: Database API (/tags/{tag}/all/) not reachable")
+        print(f"Cannot refresh tag embeddings: Database API (/tags/{tag}/all) not reachable")
         return
     all_tags = response.json()
 
@@ -370,9 +381,9 @@ def add_date_entered_info():
 
     collection_name="josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"
 
-    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/reports/all/")
+    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/reports/all")
     if response.status_code != 200:
-        print("Cannot refresh vectorstore: Database API (/reports/all/) not reachable")
+        print("Cannot refresh vectorstore: Database API (/reports/all) not reachable")
         return
     all_reports = response.json()
 
@@ -389,18 +400,18 @@ def add_date_entered_info():
 
 def evaluate_with_cutoff(cutoff, model_id):
 
-    data = {"username": BACKEND_USER, "password": BACKEND_PASSWORD,}
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    #data = {"username": BACKEND_USER, "password": BACKEND_PASSWORD,}
+    #headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-    response = requests.post(BACKEND_API + "/login", data=data, headers=headers)
+    #response = requests.post(BACKEND_API + "/login", data=data, headers=headers)
 
-    if response.status_code != 200:
-        print(response)
-        print(response.text)
-        return
+    #if response.status_code != 200:
+    #    print(response)
+    #    print(response.text)
+    #    return
     
-    token = response.json()['access_token']
-    headers = {"Authorization": f"Bearer {token}"}
+    session = requests.Session()
+    session.headers.update({"Authorization": "Bearer DEBUG"})
 
     client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
 
@@ -432,21 +443,24 @@ def evaluate_with_cutoff(cutoff, model_id):
 
         ground_truth = result[0].payload['belongs_to_study'][0]
         trial_id = None
+        authors = None
         if 'trial_id' in result[0].payload:
             trial_id = result[0].payload['trial_id']
+        if 'authors' in result[0].payload:
+            authors = result[0].payload['authors']
 
         #only consider reports with studies added in the past
-        response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{ground_truth}/date_entered")
+        response = session.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{ground_truth}/date_entered")
         if response.status_code != 200:
             print(f"Cannot refresh vectorstore: Database API (/study/{ground_truth}/date_entered) not reachable")
             return
         corresponding_study_entered = response.json()
         
         if corresponding_study_entered < cutoff:
-            payload = {"embedding": result[0].vector['default'], "model_id": model_id}
-            params = {"cutoff":cutoff, "trial_id":trial_id}
-            response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload,params=params, headers=headers)
-            predicted_studies =response.json()['CRGStudyID']
+            payload = {"report_embedding": result[0].vector['default'],"participants_embedding": result[0].vector['intervention'], "author_embedding": result[0].vector['authors'], "model_id": model_id}
+            params = {"cutoff":cutoff, "trial_id":trial_id, 'authors': authors}
+            response = session.post(BACKEND_API + "/similarity_search/studies", json=payload,params=params)
+            predicted_studies = response.json()['CRGStudyID']
 
             rank = 11
             if ground_truth in predicted_studies:
@@ -454,29 +468,38 @@ def evaluate_with_cutoff(cutoff, model_id):
             
             recall_at_1.append(1 if rank == 1 else 0)
             recall_at_3.append(1 if rank <= 3 else 0)
-            recall_at_10.append(1 if rank <= 10 else 0)     
+            recall_at_10.append(1 if rank <= 10 else 0)
+
+            """
+            if rank != 1:
+                print(result[0].payload)
+                for item in response.json()['debug']:
+                    for hit in item['hits']:
+                        print(f"{hit['payload']['source_id']} - {hit['payload']['belongs_to_study']} ({hit['score']})")
+                for i, item in enumerate(response.json()['CRGStudyID']):
+                    print(item, response.json()['Relevance'][i])
+                #print(response.json())
+                print()
+            """
 
         if scroll_offset is None:
             break
 
-    print("Recall@1", sum(recall_at_1) / len(recall_at_1))
-    print("Recall@3", sum(recall_at_3) / len(recall_at_3))
-    print("Recall@10", sum(recall_at_10) / len(recall_at_10))
+    print(f"Recall@1  {sum(recall_at_1) / len(recall_at_1)} ({sum(recall_at_1)}/{len(recall_at_1)})" )
+    print(f"Recall@3  {sum(recall_at_3) / len(recall_at_3)} ({sum(recall_at_3)}/{len(recall_at_3)})")
+    print(f"Recall@10 {sum(recall_at_10) / len(recall_at_10)} ({sum(recall_at_10)}/{len(recall_at_10)})")
 
-refresh_vector_store(force_recompute_embeddings=True)
-
-"""
-refresh_meerkat_tags("interventions", tag_id="0001")
-refresh_meerkat_tags("conditions", tag_id="0002")
-refresh_meerkat_tags("outcomes", tag_id="0003")
-refresh_mesh_tags()
+#refresh_vector_store()
+#refresh_meerkat_tags("interventions", tag_id="0001")
+#refresh_meerkat_tags("conditions", tag_id="0002")
+#refresh_meerkat_tags("outcomes", tag_id="0003")
+#refresh_mesh_tags()
 
 print("Evaluate 5th update")
-evaluate_with_cutoff("2024-01-24T00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 5th update
+evaluate_with_cutoff("2024-01-24 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 5th update
 
 print("Evaluate 6th update")
-evaluate_with_cutoff("2024-07-26T00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 6th update
+evaluate_with_cutoff("2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 6th update
 
 print("Evaluate 7th update")
-evaluate_with_cutoff("2025-01-13T00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update
-"""
+evaluate_with_cutoff("2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update

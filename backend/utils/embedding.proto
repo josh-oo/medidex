@@ -31,5 +31,5 @@ message EmbedResponseReport {
   string id = 1;
   EmbeddingVector embedding = 2;
   repeated EmbeddingVector aspect_embeddings = 3;
-  repeated EmbeddingVector author_embeddings = 4;
+  EmbeddingVector author_embeddings = 4;
 }

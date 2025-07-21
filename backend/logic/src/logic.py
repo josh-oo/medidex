@@ -24,6 +24,8 @@ from datetime import datetime
 
 from .utils.trial_registration_id import extract_trial_registration_ids
 
+import numpy as np
+
 load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_HOST")
@@ -32,6 +34,8 @@ DATABASE_HOST = os.getenv("DATABASE_HOST")
 DATABASE_PORT = os.getenv("DATABASE_PORT")
 VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
 VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
+
+DEBUG = os.getenv("DEBUG") == "TRUE"
 
 @lru_cache()
 def get_grpc_channel():
@@ -45,9 +49,20 @@ def get_db():
 class TextInput(BaseModel):
     text: str
 
-class EmbeddingInput(BaseModel):
-    embedding: List[float]
+class RawReport(BaseModel):
+    title: str
+    abstract: Optional[str]
+    authors: Optional[List[str]]
+
+class AspectEmbedding(BaseModel):
     model_id: str
+    embedding: List[float]
+
+class ReportEmbedding(BaseModel):
+    model_id: str
+    report_embedding: List[float]
+    participants_embedding: List[float]
+    author_embedding: List[float]
 
 class RetrievalInputText(BaseModel):
     text: str
@@ -104,28 +119,37 @@ async def upload_file(file: UploadFile = File(...)):
 
         authors = entry.get('authors',None)
         abstract = entry.get('abstract', None)
-        trial_registration_id = None
 
-        ids = extract_trial_registration_ids(title)
-        if len(ids) == 1:
-            trial_registration_id = ids[0]
-
-        if authors and not trial_registration_id:
-            for author in authors:
-                ids = extract_trial_registration_ids(author)
-                if len(ids) == 1:
-                    trial_registration_id = ids[0]
-        if abstract and not trial_registration_id:
-            ids = extract_trial_registration_ids(abstract)
-            if len(ids) == 1:
-                trial_registration_id = ids[0]
+        raw_report = RawReport()
+        raw_report.title = title
+        raw_report.abstract = abstract
+        raw_report.authors = authors
+        trial_registration_id = extract_trial_id(raw_report)
 
         #TODO study acronym
         results.append({'title':title, 'abstract':abstract, 'authors': authors, 'trial_registration_id':trial_registration_id})
 
     return results
 
-async def similarity_search_tags(embedding: EmbeddingInput, sources: List[str] = Query(...), type: str = Query(...), client=Depends(get_db)):
+async def extract_trial_id(raw_report: RawReport):
+    ids = extract_trial_registration_ids(raw_report.title)
+    if len(ids) == 1:
+        return ids[0]
+
+    if raw_report.authors:
+        for author in raw_report.authors:
+            ids = extract_trial_registration_ids(author)
+            if len(ids) == 1:
+                return ids[0]
+    if raw_report.abstract:
+        ids = extract_trial_registration_ids(raw_report.abstract)
+        if len(ids) == 1:
+            return ids[0]
+    
+    return None
+
+
+async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), client=Depends(get_db)):
     
     #TODO implement more sophisticated tree based search here
 
@@ -162,7 +186,7 @@ async def similarity_search_tags(embedding: EmbeddingInput, sources: List[str] =
 
     return results
 
-async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Query("default"), trial_id: str = Query(None),  cutoff: str = Query(None), client=Depends(get_db)):
+async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), client=Depends(get_db)):
     date_filter = Filter()
     if cutoff:
         date_filter = Filter(
@@ -171,17 +195,65 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
             ]
         )
 
+    #prefetch = [models.Prefetch(query=embedding.report_embedding, using="default", limit=10),]
+
     search_results = client.query_points_groups(
         collection_name=embedding.model_id,
         # Same as in the regular query_points() API
-        query=embedding.embedding,
+        #prefetch=prefetch,
+        query=embedding.report_embedding,
         using=aspect,
+        #query=embedding.author_embedding,
+        #using="authors",
         # Grouping parameters
         group_by="belongs_to_study",  # Path of the field to group by
         limit=10,  # Max amount of groups
         group_size=1,  # Max amount of points per group
         query_filter=date_filter,
+        with_payload=True,
+        #with_vectors=True,
     )
+
+    reranked_results = search_results.groups
+    #print(reranked_results)
+    """
+    if authors:
+        print(reranked_results)
+        input_authors = set([author.replace(" ","").strip().lower() for author in authors])
+        print(input_authors)
+        def similarity(group):
+            study_authors = []
+            for point in group.hits:
+                study_authors.extend([author.replace(" ","").strip().lower() for author in point.payload['authors']])
+            
+            intersection = input_authors & set(study_authors)
+            res = float(len(intersection) > 0)
+            print(res)
+            print(study_authors)
+            return res
+        
+        reranked_results = sorted(reranked_results, key=similarity, reverse=True)
+        print(reranked_results)
+
+    def cos_similarity(vec1, vec2):
+        v1 = np.array(vec1)
+        v2 = np.array(vec2)
+        return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+
+    # Step 2: Rerank by author embedding
+    def rerank_by_author_similarity(groups, author_embedding):
+        def similarity(group):
+            all_sims = []
+            for point in group.hits:
+                sim = cos_similarity(point.vector['authors'], author_embedding)
+                #print(f"{point.payload['source_id']} - {sim}")
+                all_sims.append(sim)
+            return max(all_sims)
+        
+        return sorted(groups, key=similarity, reverse=True)
+
+    reranked_results = rerank_by_author_similarity(search_results.groups, embedding.author_embedding)
+    #"""
 
     found_study_ids = {}
     if trial_id:
@@ -192,7 +264,7 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
                 for result in response:
                     found_study_ids[result] = "100% (Trial ID)"
 
-    for result in search_results.groups:
+    for result in reranked_results:
         for hit in result.hits:
             for item in hit.payload['belongs_to_study']:
                 if item not in found_study_ids:
@@ -208,6 +280,9 @@ async def similarity_search_studies(embedding: EmbeddingInput, aspect: str = Que
     #order = ['CRGStudyID', 'Relevance', 'Short_name', 'Participants', 'Duration', 'Comparison', 'Countries', 'Date_entered', 'Date_edited', 'Status_of_study']
     order = ['CRGStudyID', 'Relevance', 'ShortName', 'NumberParticipants', 'Duration', 'Comparison', 'Countries', 'DateEntered', 'DateEdited', 'StatusofStudy']
     reordered = {key: result[key] for key in order}
+
+    if DEBUG:
+        reordered['debug'] = reranked_results
 
     return reordered
 
@@ -232,7 +307,7 @@ def _embed_report(input: TextInput, channel):
 
     response = next(responses)
 
-    result = {"model_id": model_id, "embedding": list(response.embedding.values)}
+    result = {"model_id": model_id, "embedding": list(response.embedding.values), "author_embedding": list(response.embedding.values)}
     for i, aspect in enumerate(metadata['aspects'].split(";")):
         result[aspect] = list(response.aspect_embeddings[i].values)
 
@@ -273,7 +348,7 @@ async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(
 
 async def analyze_text(input: RetrievalInputText, cutoff: str = Query(None), vectorstore=Depends(get_db), channel=Depends(get_grpc_channel)):    
     text_input = TextInput(text=input.text)
-    embedding_results = _embedding_aspects(text_input, channel)
+    embedding_results = _embed_report(text_input, channel)
 
     result = await analyze(vectorstore, embedding_results, embedding_results['model_id'], input.topK, cutoff)
     return result
@@ -324,24 +399,32 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
         related_studies = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': list(found_study_ids.keys())})).json()
         #TODO error handling
 
-        for id, name, report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], report_hits, scores):
+        for id, name, num_participants, countries, durations,report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], related_studies['NumberParticipants'], related_studies['Countries'], related_studies['Duration'], report_hits, scores):
             item = {}
             item['study_id'] =  id
             item['study_name'] = name
             item['score'] = score
             item['report_hit'] = report_hit
 
+            item['attributes'] = {}
+            item['attributes']['countries'] = [country.strip() for country in countries.split("//")] if countries else None
+            item['attributes']['duration'] = [duration.strip() for duration in durations.split("//")] if durations else None
+            item['attributes']['participants_num'] = [p_num.strip() for p_num in num_participants.split("//")] if num_participants else None
+
             item['assigned_reports'] = {}
 
-            related_interventions = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/interventions/", json={'ids': [id]})).json()
+            related_participant_descriptions = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/participants")).json()
+            item['attributes']['participants_desc'] = related_participant_descriptions
+
+            related_interventions = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/tags/interventions")).json()
             item['assigned_interventions'] = [item['Description'] for item in related_interventions]
             all_related_interventions.extend([item['ID'] for item in related_interventions])
 
-            related_conditions = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/conditions/", json={'ids': [id]})).json()
+            related_conditions = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/tags/conditions")).json()
             item['assigned_conditions'] = [item['Description'] for item in related_conditions]
             all_related_conditions.extend([item['ID'] for item in related_conditions])
 
-            related_outcomes = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/outcomes/", json={'ids': [id]})).json()
+            related_outcomes = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/tags/outcomes")).json()
             item['assigned_outcomes'] = [item['Description'] for item in related_outcomes]
             all_related_outcomes.extend([item['ID'] for item in related_outcomes])
         
@@ -357,6 +440,9 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
             result['related_studies'].append(item)
 
     def search_related_tags(allowed_ids, type_embedding, type_vectorstore):
+
+        if len(allowed_ids) == 0:
+            return []
 
         tag_filter = models.Filter(
             must=[

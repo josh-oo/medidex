@@ -158,7 +158,7 @@ def get_study_id_by_trial_id(trial_id: str = Query(...), cutoff: str = Query(...
     query = f"""
         SELECT CRGStudyID
         FROM tblStudy
-        WHERE ShortName = ? OR UDef7 = ? 
+        WHERE ShortName = ? OR TrialRegistrationID = ? 
         AND DateEntered < ?
     """
     cursor = db.execute(query, (trial_id, trial_id,cutoff))
@@ -171,7 +171,7 @@ def get_study_id_by_trial_id(trial_id: str = Query(...), cutoff: str = Query(...
         SELECT sr.CRGStudyID
         FROM tblStudyReport sr
         JOIN tblReport r ON sr.CRGReportID = r.CRGReportID
-        WHERE r.Authors LIKE '%' || ? || '%' OR r.UDef7 = ?
+        WHERE r.Authors LIKE '%' || ? || '%' OR r.TrialRegistrationID = ?
         AND r.Dateentered < ?
     """
     cursor = db.execute(query, (trial_id, trial_id,cutoff))
@@ -191,16 +191,28 @@ def get_all_reports(study_id: int, db: sqlite3.Connection = Depends(get_db)):
     rows = cursor.fetchall()
     return convert_to_dict_list(cursor.description,rows)
 
-@app.post("/study/tags/interventions/")
-def get_all_interventions(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
-    placeholders = ','.join(['?'] * len(id_input.ids))
+@app.get("/study/{study_id}/participants")
+def get_study_participants(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+    query = f"""
+        SELECT ParticipantDescription
+        FROM tblStudyParticipant sp
+        JOIN tblParticipant p ON sp.ParticipantsID = p.ParticipantsID
+        WHERE sp.CRGStudyID = ?;
+    """
+    cursor = db.execute(query, (study_id,))
+    rows = cursor.fetchall()
+    return rows[0]
+
+@app.get("/study/{study_id}/tags/interventions")
+def get_all_interventions(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+    #placeholders = ','.join(['?'] * len(id_input.ids))
     query = f"""
         SELECT si.InterventionID AS ID, i.InterventionDescription AS Description
         FROM tblStudyIntervention si
         JOIN tblIntervention i ON si.InterventionID = i.InterventionID 
-        WHERE si.CRGStudyID IN ({placeholders})
+        WHERE si.CRGStudyID = ?;
     """
-    cursor = db.execute(query, id_input.ids)
+    cursor = db.execute(query, (study_id, ))
     rows = cursor.fetchall()
     return convert_to_dict_list(cursor.description,rows)
 
@@ -225,16 +237,15 @@ def get_interventions_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
 
-@app.post("/study/tags/conditions/")
-def get_all_interventions(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
-    placeholders = ','.join(['?'] * len(id_input.ids))
+@app.get("/study/{study_id}/tags/conditions")
+def get_all_interventions(study_id: int, db: sqlite3.Connection = Depends(get_db)):
     query = f"""
         SELECT sc.HealthCareConditionID AS ID, c.HealthCareConditionDescription AS Description
         FROM tblStudyHealthCareCondition sc 
         JOIN tblHealthCareCondition c ON sc.HealthCareConditionID = c.HealthCareConditionID
-        WHERE sc.CRGStudyID IN ({placeholders})
+        WHERE sc.CRGStudyID = ?;
     """
-    cursor = db.execute(query, id_input.ids)
+    cursor = db.execute(query, (study_id, ))
     rows = cursor.fetchall()
     return convert_to_dict_list(cursor.description,rows)
 
@@ -259,16 +270,15 @@ def get_conditions_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(ge
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
 
-@app.post("/study/tags/outcomes/")
-def get_all_interventions(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
-    placeholders = ','.join(['?'] * len(id_input.ids))
+@app.get("/study/{study_id}/tags/outcomes")
+def get_all_interventions(study_id: int, db: sqlite3.Connection = Depends(get_db)):
     query = f"""
         SELECT so.OutcomeID AS ID, o.OutcomeDescription AS Description
         FROM tblStudyOutcome so 
         JOIN tblOutcome o ON so.OutcomeID = o.OutcomeID
-        WHERE so.CRGStudyID IN ({placeholders})
+        WHERE so.CRGStudyID = ?;
     """
-    cursor = db.execute(query, id_input.ids)
+    cursor = db.execute(query, (study_id,))
     rows = cursor.fetchall()
     return convert_to_dict_list(cursor.description,rows)
 

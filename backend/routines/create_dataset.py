@@ -65,7 +65,7 @@ def create_test_set(path, cutoff, model_id):
 
         #only consider reports with studies added in the past
         payload = {}
-        payload['topK'] = 10
+        payload['topK'] = 50
         payload['model_id'] = model_id
         payload['embeddings'] = {}
         payload['embeddings']['embedding'] = result[0].vector['default']
@@ -90,4 +90,7 @@ def create_test_set(path, cutoff, model_id):
             break
 
 print("Create test set 7th update")
-create_test_set("test_set","2025-01-13T00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update
+create_test_set("test_set","2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update
+
+print("Create train set 6th update")
+create_test_set("train_set","2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 6th update
