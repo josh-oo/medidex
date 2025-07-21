@@ -416,6 +416,10 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
             related_participant_descriptions = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/participants")).json()
             item['attributes']['participants_desc'] = related_participant_descriptions
 
+            related_study_design = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/design")).json()
+            print(related_study_design)
+            item['attributes']['study_design'] = related_study_design
+
             related_interventions = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/tags/interventions")).json()
             item['assigned_interventions'] = [item['Description'] for item in related_interventions]
             all_related_interventions.extend([item['ID'] for item in related_interventions])

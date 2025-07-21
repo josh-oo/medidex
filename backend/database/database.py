@@ -201,7 +201,23 @@ def get_study_participants(study_id: int, db: sqlite3.Connection = Depends(get_d
     """
     cursor = db.execute(query, (study_id,))
     rows = cursor.fetchall()
-    return rows[0]
+    if len(rows) == 0:
+        return None
+    return [row[0] for row in rows]
+
+@app.get("/study/{study_id}/design")
+def get_study_design(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+    query = f"""
+        SELECT DesignDescription
+        FROM tblStudyDesign sd
+        JOIN tblDesign d ON sd.DesignID = d.DesignID
+        WHERE sd.CRGStudyID = ?;
+    """
+    cursor = db.execute(query, (study_id,))
+    rows = cursor.fetchall()
+    if len(rows) == 0:
+        return None
+    return [row[0] for row in rows]
 
 @app.get("/study/{study_id}/tags/interventions")
 def get_all_interventions(study_id: int, db: sqlite3.Connection = Depends(get_db)):
