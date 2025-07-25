@@ -21,6 +21,7 @@ load_dotenv()
 
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 JWT_SECRET = os.getenv("JWT_SECRET")
+DEBUG = os.getenv("DEBUG") == "TRUE"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 api_key_header = APIKeyHeader(name="X-API-Key")
@@ -147,6 +148,8 @@ def is_admin(token: str = Depends(oauth2_scheme)):
     return token
 
 def is_verified(token: str = Depends(oauth2_scheme)):
+    if DEBUG:
+        return token
     decoded = verify_token(token)
     if decoded['verified'] != 1:
         raise HTTPException(status_code=401, detail="Not allowed")

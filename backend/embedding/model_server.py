@@ -12,11 +12,16 @@ from grpc_health.v1 import health
 from grpc_health.v1 import health_pb2
 from grpc_health.v1 import health_pb2_grpc
 
+import html
+import unicodedata
+from bs4 import BeautifulSoup
+
 load_dotenv()
 
 MODEL_PATH = os.getenv("MODEL_PATH")
 MODEL_REVISION = os.getenv("MODEL_REVISION")
 MODEL_DIM = os.getenv("MODEL_DIM")
+MODEL_MAX_INPUT_LENGTH = int(os.getenv("MODEL_MAX_INPUT_LENGTH"))
 ASPECTS = os.getenv("ASPECTS").split(",")
 
 class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
@@ -28,10 +33,23 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
         )
         self.tokenizer = Tokenizer.from_file("tokenizer.json")
         self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")  # Replace with correct pad_token if needed
-        self.tokenizer.enable_truncation(max_length=512)
+        self.tokenizer.enable_truncation(max_length=MODEL_MAX_INPUT_LENGTH)
 
         self.model = torch.jit.load("traced_model.pt")
         self.model = self.model.to(self.device)
+
+    def preprocess(self, text):
+
+        utf8_string = html.unescape(text)
+        utf8_string = utf8_string.replace('\r', '\n')
+        utf8_string = utf8_string.replace('\n', ' ')
+
+        soup = BeautifulSoup(utf8_string, "html.parser")
+        utf8_string = soup.get_text(separator='')
+
+        utf8_string = ' '.join(utf8_string.split())
+        normalized_text = unicodedata.normalize("NFKC", utf8_string)
+        return normalized_text
 
     def get_embeddings(self, texts, return_aspects=True):
         prefix = ""
@@ -61,7 +79,7 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
 
         return embeddings, aspects
     
-    def GetEmbedding(self, request_iterator, context):
+    def GetAspectEmbeddings(self, request_iterator, context):
         context.send_initial_metadata((
             ('model', MODEL_PATH),
             ('revision', MODEL_REVISION),
@@ -70,16 +88,15 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
         ))
 
         def yield_embeddings(id, texts):
+            texts = [self.preprocess(text) for text in texts]
             embedding = self.get_embeddings(texts, return_aspects=False)
-            batch_embeddings = []
-            for emb in embedding:
-                batch_embeddings.append(embedding_pb2.EmbeddingVector(values=emb.tolist()))
-            return embedding_pb2.EmbedResponse(id=id, embedding=batch_embeddings)
+            batch_embeddings = [embedding_pb2.EmbeddingVector(values=emb.tolist()) for emb in embedding]
+            return embedding_pb2.EmbedResponseAspects(id=id, embedding=batch_embeddings)
 
         for request in request_iterator:
-            yield yield_embeddings(request.id, request.text)
+            yield yield_embeddings(request.id, request.aspects)
 
-    def GetEmbeddingAspects(self, request_iterator, context):
+    def GetReportEmbedding(self, request_iterator, context):
         context.send_initial_metadata((
             ('model', MODEL_PATH),
             ('revision', MODEL_REVISION),
@@ -87,27 +104,30 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
             ('dimension', str(MODEL_DIM))
         ))
 
-        def yield_embeddings(id, texts):
-            embedding, aspect_embeddings = self.get_embeddings(texts)
-            batch_embeddings = []
-            batch_aspect_embeddings = []
-            for i, emb in enumerate(embedding):
-                batch_embeddings.append(embedding_pb2.EmbeddingVector(values=emb.tolist()))
-                aspect_vector = embedding_pb2.AspectVectors(
-                    aspect_embeddings=[
-                        embedding_pb2.EmbeddingVector(values=aspect.tolist())
-                        for aspect in aspect_embeddings[i]
-                    ]
-                )
-                batch_aspect_embeddings.append(aspect_vector)                  
-            return embedding_pb2.EmbedResponseAspects(
+        def yield_embeddings(id, text, authors=[]):
+            text = self.preprocess(text)
+            embedding, aspect_embeddings = self.get_embeddings([text])
+            author_embeddings = torch.zeros(embedding[0].shape[0])
+            if len(authors) > 0:
+                author_embeddings = self.get_embeddings(authors, return_aspects=False)
+                author_embeddings = author_embeddings.mean(dim=0)
+
+            embedding = embedding[0]
+            aspect_embeddings = aspect_embeddings[0]
+            
+            aspect_embeddings = [embedding_pb2.EmbeddingVector(values=aspect.tolist())for aspect in aspect_embeddings]
+            author_embeddings = embedding_pb2.EmbeddingVector(values=author_embeddings.tolist())
+            #author_embeddings = [embedding_pb2.EmbeddingVector(values=author.tolist())for author in author_embeddings]
+
+            return embedding_pb2.EmbedResponseReport(
                 id=id,
-                embedding=batch_embeddings,
-                aspect_embeddings=batch_aspect_embeddings,
+                embedding=embedding_pb2.EmbeddingVector(values=embedding.tolist()),
+                aspect_embeddings=aspect_embeddings,
+                author_embeddings=author_embeddings
             )
 
         for request in request_iterator:
-            yield yield_embeddings(request.id, request.text)
+            yield yield_embeddings(request.id, request.text, request.authors)
 
 def _configure_health_server(server: grpc.Server):
     health_servicer = health.HealthServicer()
