@@ -441,7 +441,7 @@ def evaluate_with_cutoff(cutoff, model_id):
         )
         #all_points.extend(result)
 
-        ground_truth = result[0].payload['belongs_to_study'][0]
+        ground_truth = result[0].payload['belongs_to_study']#[0]
         trial_id = None
         authors = None
         if 'trial_id' in result[0].payload:
@@ -450,13 +450,20 @@ def evaluate_with_cutoff(cutoff, model_id):
             authors = result[0].payload['authors']
 
         #only consider reports with studies added in the past
-        response = session.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{ground_truth}/date_entered")
-        if response.status_code != 200:
-            print(f"Cannot refresh vectorstore: Database API (/study/{ground_truth}/date_entered) not reachable")
-            return
-        corresponding_study_entered = response.json()
+        ground_truth_filtered = []
+        for item in ground_truth:
+            response = session.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{item}/date_entered")
+            if response.status_code != 200:
+                print(f"Cannot refresh vectorstore: Database API (/study/{item}/date_entered) not reachable")
+                return
+            
+            corresponding_study_entered = response.json()
         
-        if corresponding_study_entered < cutoff:
+            if corresponding_study_entered < cutoff:
+                ground_truth_filtered.append(item)
+        
+        if len(ground_truth_filtered) == 1:
+            ground_truth = ground_truth_filtered[0]
             payload = {"report_embedding": result[0].vector['default'],"participants_embedding": result[0].vector['intervention'], "author_embedding": result[0].vector['authors'], "model_id": model_id}
             params = {"cutoff":cutoff, "trial_id":trial_id, 'authors': authors}
             response = session.post(BACKEND_API + "/similarity_search/studies", json=payload,params=params)
@@ -495,11 +502,11 @@ def evaluate_with_cutoff(cutoff, model_id):
 #refresh_meerkat_tags("outcomes", tag_id="0003")
 #refresh_mesh_tags()
 
-print("Evaluate 5th update")
-evaluate_with_cutoff("2024-01-24 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 5th update
+#print("Evaluate 5th update")
+#evaluate_with_cutoff("2024-01-24 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 5th update
 
-print("Evaluate 6th update")
-evaluate_with_cutoff("2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 6th update
+#print("Evaluate 6th update")
+#evaluate_with_cutoff("2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 6th update
 
-print("Evaluate 7th update")
-evaluate_with_cutoff("2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update
+#print("Evaluate 7th update")
+#evaluate_with_cutoff("2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update

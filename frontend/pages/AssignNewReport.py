@@ -30,7 +30,7 @@ def get_embeddings(text):
         return None, None, None
     
 def get_similar_studies(embedding, model, trial_id=None):
-    payload = {"embedding": embedding, "model_id": model}
+    payload = {"model_id": model, "report_embedding": embedding, "author_embedding":None}
     params = {"trial_id": trial_id}
     response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload, params=params, headers=get_headers())
 

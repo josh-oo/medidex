@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from typing import List
+from typing import List, Optional
 import sqlite3
 import os
 
@@ -93,9 +93,30 @@ def get_studies_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(get_d
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, 'CRGStudyID')
 
 @app.get("/study/{study_id}/reports")
-def get_study_reports_by_id(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+def get_study_reports_by_id(
+    study_id: int,
+    fields: Optional[List[str]] = Query(None, description="Fields to include in the response"),
+    db: sqlite3.Connection = Depends(get_db)
+):
+    # Default: select all fields
+    select_clause = "*"
+    
+    if fields:
+        # Sanitize field names to avoid SQL injection
+        allowed_fields = {
+            "CRGReportID",
+            "Title",
+            "Abstract",
+            "Authors",
+            "DateEntered",
+        }
+        selected_fields = [field for field in fields if field in allowed_fields]
+        if not selected_fields:
+            raise HTTPException(status_code=400, detail="No valid fields specified.")
+        select_clause = ", ".join([f"r.{field}" for field in selected_fields])
+
     query = f"""
-        SELECT r.*
+        SELECT {select_clause}
         FROM tblStudyReport sr
         JOIN tblReport r ON sr.CRGReportID = r.CRGReportID
         WHERE sr.CRGStudyID = ?
@@ -103,6 +124,48 @@ def get_study_reports_by_id(study_id: int, db: sqlite3.Connection = Depends(get_
     cursor = db.execute(query, (study_id,))
     rows = cursor.fetchall()
     return convert_to_column_based_dict(cursor.description, rows)
+
+@app.get("/study/reports")
+def get_study_reports_by_ids(
+    study_ids: List[int] = Query(...),
+    fields: Optional[List[str]] = Query(None, description="Fields to include in the response"),
+    db: sqlite3.Connection = Depends(get_db)
+):
+    # Default: select all fields
+    select_clause = "*"
+    
+    if fields:
+        # Sanitize field names to avoid SQL injection
+        allowed_fields = {
+            "CRGReportID",
+            "Title",
+            "Abstract",
+            "Authors",
+            "DateEntered",
+        }
+        selected_fields = [field for field in fields if field in allowed_fields]
+        if not selected_fields:
+            raise HTTPException(status_code=400, detail="No valid fields specified.")
+        select_clause = ", ".join([f"r.{field}" for field in selected_fields])
+
+    placeholders = ','.join(['?'] * len(study_ids))
+    query = f"""
+        SELECT sr.CRGStudyID AS StudyID, {select_clause}
+        FROM tblStudyReport sr
+        JOIN tblReport r ON sr.CRGReportID = r.CRGReportID
+        WHERE sr.CRGStudyID IN ({placeholders});
+    """
+    cursor = db.execute(query, study_ids)
+    rows = cursor.fetchall()
+    result = convert_to_dict_list(cursor.description, rows)
+
+    final_result = {}
+    for item in result:
+        if item['StudyID'] not in final_result.keys():
+            final_result[item['StudyID']] = []
+        final_result[item.pop('StudyID')].append(item)
+
+    return final_result
 
 @app.get("/study/{study_id}/date_entered")
 def get_study_date_by_id(study_id: int, db: sqlite3.Connection = Depends(get_db)):
@@ -202,7 +265,7 @@ def get_study_participants(study_id: int, db: sqlite3.Connection = Depends(get_d
     cursor = db.execute(query, (study_id,))
     rows = cursor.fetchall()
     if len(rows) == 0:
-        return None
+        return []
     return [row[0] for row in rows]
 
 @app.get("/study/{study_id}/design")
@@ -216,21 +279,44 @@ def get_study_design(study_id: int, db: sqlite3.Connection = Depends(get_db)):
     cursor = db.execute(query, (study_id,))
     rows = cursor.fetchall()
     if len(rows) == 0:
-        return None
+        return []
     return [row[0] for row in rows]
 
+"""
 @app.get("/study/{study_id}/tags/interventions")
-def get_all_interventions(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+def get_study_interventions(study_id: int, db: sqlite3.Connection = Depends(get_db)):
     #placeholders = ','.join(['?'] * len(id_input.ids))
-    query = f"""
+    query = f""
         SELECT si.InterventionID AS ID, i.InterventionDescription AS Description
         FROM tblStudyIntervention si
         JOIN tblIntervention i ON si.InterventionID = i.InterventionID 
         WHERE si.CRGStudyID = ?;
-    """
+    ""
     cursor = db.execute(query, (study_id, ))
     rows = cursor.fetchall()
     return convert_to_dict_list(cursor.description,rows)
+"""
+
+@app.get("/study/tags/interventions")
+def get_study_interventions_(study_ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
+    placeholders = ','.join(['?'] * len(study_ids))
+    query = f"""
+        SELECT si.CRGStudyID AS StudyID, si.InterventionID AS ID, i.InterventionDescription AS Description
+        FROM tblStudyIntervention si
+        JOIN tblIntervention i ON si.InterventionID = i.InterventionID 
+        WHERE si.CRGStudyID IN ({placeholders});
+    """
+    cursor = db.execute(query, study_ids)
+    rows = cursor.fetchall()
+    result = convert_to_dict_list(cursor.description, rows)
+
+    final_result = {}
+    for item in result:
+        if item['StudyID'] not in final_result.keys():
+            final_result[item['StudyID']] = []
+        final_result[item.pop('StudyID')].append(item)
+
+    return final_result
 
 @app.get("/tags/interventions/all")
 def get_all_interventions(db: sqlite3.Connection = Depends(get_db)):
@@ -253,17 +339,40 @@ def get_interventions_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
 
+"""
 @app.get("/study/{study_id}/tags/conditions")
-def get_all_interventions(study_id: int, db: sqlite3.Connection = Depends(get_db)):
-    query = f"""
+def get_study_conditions(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+    query = f""
         SELECT sc.HealthCareConditionID AS ID, c.HealthCareConditionDescription AS Description
         FROM tblStudyHealthCareCondition sc 
         JOIN tblHealthCareCondition c ON sc.HealthCareConditionID = c.HealthCareConditionID
         WHERE sc.CRGStudyID = ?;
-    """
+    ""
     cursor = db.execute(query, (study_id, ))
     rows = cursor.fetchall()
     return convert_to_dict_list(cursor.description,rows)
+"""
+
+@app.get("/study/tags/conditions")
+def get_study_conditions_(study_ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
+    placeholders = ','.join(['?'] * len(study_ids))
+    query = f"""
+        SELECT sc.CRGStudyID AS StudyID, sc.HealthCareConditionID AS ID, c.HealthCareConditionDescription AS Description
+        FROM tblStudyHealthCareCondition sc 
+        JOIN tblHealthCareCondition c ON sc.HealthCareConditionID = c.HealthCareConditionID
+        WHERE sc.CRGStudyID IN ({placeholders});
+    """
+    cursor = db.execute(query, study_ids)
+    rows = cursor.fetchall()
+    result = convert_to_dict_list(cursor.description, rows)
+
+    final_result = {}
+    for item in result:
+        if item['StudyID'] not in final_result.keys():
+            final_result[item['StudyID']] = []
+        final_result[item['StudyID']].append({'Description':item['Description'], 'ID':item['ID']})
+
+    return final_result
 
 @app.get("/tags/conditions/all")
 def get_all_conditions(db: sqlite3.Connection = Depends(get_db)):
@@ -286,17 +395,40 @@ def get_conditions_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(ge
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
 
+"""
 @app.get("/study/{study_id}/tags/outcomes")
-def get_all_interventions(study_id: int, db: sqlite3.Connection = Depends(get_db)):
-    query = f"""
+def get_study_outcomes(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+    query = f""
         SELECT so.OutcomeID AS ID, o.OutcomeDescription AS Description
         FROM tblStudyOutcome so 
         JOIN tblOutcome o ON so.OutcomeID = o.OutcomeID
         WHERE so.CRGStudyID = ?;
-    """
+    ""
     cursor = db.execute(query, (study_id,))
     rows = cursor.fetchall()
     return convert_to_dict_list(cursor.description,rows)
+"""
+
+@app.get("/study/tags/outcomes")
+def get_study_conditions_(study_ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
+    placeholders = ','.join(['?'] * len(study_ids))
+    query = f"""
+        SELECT so.CRGStudyID AS StudyID, so.OutcomeID AS ID, o.OutcomeDescription AS Description
+        FROM tblStudyOutcome so 
+        JOIN tblOutcome o ON so.OutcomeID = o.OutcomeID
+        WHERE so.CRGStudyID IN ({placeholders});
+    """
+    cursor = db.execute(query, study_ids)
+    rows = cursor.fetchall()
+    result = convert_to_dict_list(cursor.description, rows)
+
+    final_result = {}
+    for item in result:
+        if item['StudyID'] not in final_result.keys():
+            final_result[item['StudyID']] = []
+        final_result[item['StudyID']].append({'Description':item['Description'], 'ID':item['ID']})
+
+    return final_result
 
 @app.get("/tags/outcomes/all")
 def get_all_outcomes(db: sqlite3.Connection = Depends(get_db)):

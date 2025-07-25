@@ -24,7 +24,7 @@ from datetime import datetime
 
 from .utils.trial_registration_id import extract_trial_registration_ids
 
-import numpy as np
+import asyncio
 
 load_dotenv()
 
@@ -61,8 +61,7 @@ class AspectEmbedding(BaseModel):
 class ReportEmbedding(BaseModel):
     model_id: str
     report_embedding: List[float]
-    participants_embedding: List[float]
-    author_embedding: List[float]
+    author_embedding: Optional[List[float]]
 
 class RetrievalInputText(BaseModel):
     text: str
@@ -120,11 +119,8 @@ async def upload_file(file: UploadFile = File(...)):
         authors = entry.get('authors',None)
         abstract = entry.get('abstract', None)
 
-        raw_report = RawReport()
-        raw_report.title = title
-        raw_report.abstract = abstract
-        raw_report.authors = authors
-        trial_registration_id = extract_trial_id(raw_report)
+        raw_report = RawReport(title=title, abstract=abstract, authors=authors)
+        trial_registration_id = await extract_trial_id(raw_report)
 
         #TODO study acronym
         results.append({'title':title, 'abstract':abstract, 'authors': authors, 'trial_registration_id':trial_registration_id})
@@ -396,52 +392,71 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
     report_hits = [item['report_hit'] for item in found_study_ids.values()]
 
     async with httpx.AsyncClient() as client:
-        related_studies = (await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': list(found_study_ids.keys())})).json()
+        related_studies = await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': list(found_study_ids.keys())})
+        related_studies = related_studies.json()
         #TODO error handling
 
+        study_interventions = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/interventions", params={'study_ids': list(found_study_ids.keys())})
+        study_interventions = study_interventions.json()
+
+        study_interventions = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/interventions", params={'study_ids': list(found_study_ids.keys())})
+        study_interventions = study_interventions.json()
+
+        study_conditions = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/conditions", params={'study_ids': list(found_study_ids.keys())})
+        study_conditions = study_conditions.json()
+
+        study_outcomes = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/outcomes", params={'study_ids': list(found_study_ids.keys())})
+        study_outcomes = study_outcomes.json()
+
+        study_reports = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/reports", params={'study_ids': list(found_study_ids.keys()), 'fields': ['CRGReportID', 'Title', 'Abstract', 'Authors']})
+        study_reports = study_reports.json()
+
         for id, name, num_participants, countries, durations,report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], related_studies['NumberParticipants'], related_studies['Countries'], related_studies['Duration'], report_hits, scores):
-            item = {}
-            item['study_id'] =  id
-            item['study_name'] = name
-            item['score'] = score
-            item['report_hit'] = report_hit
+            tasks = [
+                client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/participants"),
+                client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/design"),
+                #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/reports", params={'fields': ['CRGReportID', 'Title', 'Abstract', 'Authors']}),
+            ]
 
-            item['attributes'] = {}
-            item['attributes']['countries'] = [country.strip() for country in countries.split("//")] if countries else None
-            item['attributes']['duration'] = [duration.strip() for duration in durations.split("//")] if durations else None
-            item['attributes']['participants_num'] = [p_num.strip() for p_num in num_participants.split("//")] if num_participants else None
+            responses = await asyncio.gather(*tasks)
+            
+            study_item = {}
+            study_item['study_id'] =  id
+            study_item['study_name'] = name
+            study_item['score'] = score
+            study_item['report_hit'] = report_hit
 
-            item['assigned_reports'] = {}
+            study_item['attributes'] = {}
+            study_item['attributes']['countries'] = [country.strip() for country in countries.split("//")] if countries else None
+            study_item['attributes']['duration'] = [duration.strip() for duration in durations.split("//")] if durations else None
+            study_item['attributes']['participants_num'] = [p_num.strip() for p_num in num_participants.split("//")] if num_participants else None
 
-            related_participant_descriptions = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/participants")).json()
-            item['attributes']['participants_desc'] = related_participant_descriptions
+            study_item['assigned_reports'] = {}
 
-            related_study_design = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/design")).json()
-            print(related_study_design)
-            item['attributes']['study_design'] = related_study_design
+            study_item['attributes']['participants_desc'] = responses[0].json()
+            study_item['attributes']['study_design'] = responses[1].json()
 
-            related_interventions = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/tags/interventions")).json()
-            item['assigned_interventions'] = [item['Description'] for item in related_interventions]
+            related_interventions = study_interventions.get(str(id), [])
+            study_item['assigned_interventions'] = [item['Description'] for item in related_interventions]
             all_related_interventions.extend([item['ID'] for item in related_interventions])
 
-            related_conditions = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/tags/conditions")).json()
-            item['assigned_conditions'] = [item['Description'] for item in related_conditions]
+            related_conditions = study_conditions.get(str(id), [])
+            study_item['assigned_conditions'] = [item['Description'] for item in related_conditions]
             all_related_conditions.extend([item['ID'] for item in related_conditions])
 
-            related_outcomes = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/tags/outcomes")).json()
-            item['assigned_outcomes'] = [item['Description'] for item in related_outcomes]
+            related_outcomes = study_outcomes.get(str(id), [])
+            study_item['assigned_outcomes'] = [item['Description'] for item in related_outcomes]
             all_related_outcomes.extend([item['ID'] for item in related_outcomes])
         
-            related_reports = (await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/reports")).json()
-            for report_id, report_title, report_abstract, report_authors in zip(related_reports['CRGReportID'], related_reports['Title'], related_reports['Abstract'], related_reports['Authors']):
+            related_reports = study_reports.get(str(id), [])#responses[2].json()
+            for related_report_item in related_reports:
                 report_item = {}
-                report_item['title'] = report_title
-                report_item['abstract'] = report_abstract
-                report_item['authors'] = [author.strip() for author in report_authors.split("//")]
-                item['assigned_reports'][report_id] = report_item
-
+                report_item['title'] = related_report_item['Title']
+                report_item['abstract'] =related_report_item['Abstract']
+                report_item['authors'] = [author.strip() for author in related_report_item['Authors'].split("//")]
+                study_item['assigned_reports'][related_report_item['CRGReportID']] = report_item
         
-            result['related_studies'].append(item)
+            result['related_studies'].append(study_item)
 
     def search_related_tags(allowed_ids, type_embedding, type_vectorstore):
 
