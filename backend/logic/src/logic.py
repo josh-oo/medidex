@@ -1,4 +1,4 @@
-from fastapi import Query, UploadFile, File, HTTPException, Depends
+from fastapi import Query, UploadFile, File, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
@@ -26,6 +26,11 @@ from .utils.trial_registration_id import extract_trial_registration_ids
 
 import asyncio
 
+import sqlite3
+import hashlib
+import json
+import pickle
+
 load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_HOST")
@@ -34,16 +39,26 @@ DATABASE_HOST = os.getenv("DATABASE_HOST")
 DATABASE_PORT = os.getenv("DATABASE_PORT")
 VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
 VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
+DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 
-DEBUG = os.getenv("DEBUG") == "TRUE"
+DEBUG = os.getenv("DEBUG", "FALSE") == "TRUE"
+
+write_queue = asyncio.Queue()
 
 @lru_cache()
 def get_grpc_channel():
     return grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
 
-def get_db():
+def get_vectorstore():
     client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
     yield client
+
+def get_db():
+    conn = sqlite3.connect(os.path.join(DATABASE_VOLUME, "users.db"), check_same_thread=False)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 # Request schema
 class TextInput(BaseModel):
@@ -72,8 +87,52 @@ class RetrievalInputEmbedding(BaseModel):
     model_id: str
     topK: int
 
-async def upload_file(file: UploadFile = File(...)):
+async def startup_event():
+    # Start background worker
+    asyncio.create_task(write_worker())
 
+async def write_worker():
+    """Background task that processes queued writes one at a time"""
+    while True:
+        query, params, future = await write_queue.get()
+        try:
+            conn = sqlite3.connect(os.path.join(DATABASE_VOLUME, "users.db"))#, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            new_rows = cursor.rowcount
+            conn.commit()
+            conn.close()
+            future.set_result(new_rows)
+        except Exception as e:
+            future.set_exception(e)
+        finally:
+            write_queue.task_done()
+
+async def process_report(report, batch_hash, index):
+    title = report['title']
+    abstract = report['abstract']
+    authors = report['authors']
+    raw_report = RawReport(title=title, abstract=abstract, authors=authors)
+    trial_registration_id = await extract_trial_id(raw_report)
+
+    text_to_process = []
+    if title:
+        text_to_process.append(title)
+    if abstract:
+        text_to_process.append(abstract)
+    text_to_process = "\n".join(text_to_process)
+   
+    vectors =_embed_report(TextInput(text=text_to_process), get_grpc_channel())
+    vectors_blob = pickle.dumps(vectors)
+
+    future = asyncio.get_event_loop().create_future()
+    query = "INSERT INTO tmp_reports (batch_hash, batch_inner_id, title, abstract, authors, trial_id, vectors) VALUES (?,?,?,?,?, ?, ?)"
+    params = (batch_hash,index, title, abstract, json.dumps(authors), trial_registration_id, vectors_blob)
+    await write_queue.put((query, params, future))
+    await future
+
+async def parse_file(file: UploadFile):
+    entries = None
     class CgiParser(RisParser):
         START_TAG = "DB"
 
@@ -110,7 +169,14 @@ async def upload_file(file: UploadFile = File(...)):
     else:
         raise HTTPException(status_code=400, detail="Only .ris and .nbib files are accepted")
 
+    return entries
+
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+
+    entries = await parse_file(file)
+
     results = []
+    fingerprint_string = ""
     for entry in entries:
         title = entry.get('primary_title', None)
         if not title:
@@ -119,13 +185,82 @@ async def upload_file(file: UploadFile = File(...)):
         authors = entry.get('authors',None)
         abstract = entry.get('abstract', None)
 
-        raw_report = RawReport(title=title, abstract=abstract, authors=authors)
-        trial_registration_id = await extract_trial_id(raw_report)
+        fingerprint_string += title if title else "" + abstract if abstract else "" + authors if authors else ""
+
+        results.append({'title':title, 'abstract':abstract, 'authors': authors})#, 'trial_registration_id':trial_registration_id})
+
+    batch_hash = hashlib.sha256(fingerprint_string.encode()).hexdigest()
+
+    future = asyncio.get_event_loop().create_future()
+    query = """
+    INSERT OR IGNORE INTO tmp_report_batches (batch_hash, batch_description, number_reports)
+    VALUES (?, ?, ?)
+    """
+    params = (batch_hash, file.filename, len(results))
+    await write_queue.put((query, params, future))
+    result = await future
+
+    was_inserted = result == 1
+    if not was_inserted:
+        raise HTTPException(status_code=400, detail="Data already exists")
+
+    for i, result in enumerate(results):
+        background_tasks.add_task(process_report, result, batch_hash, i)
 
         #TODO study acronym
-        results.append({'title':title, 'abstract':abstract, 'authors': authors, 'trial_registration_id':trial_registration_id})
+    
+    # Fetch all rows from tmp_report_batches
+    #cursor = db.execute("SELECT * FROM tmp_report_batches")
+    #rows = cursor.fetchall()
 
-    return results
+    # Optionally include column names (if you want dictionaries)
+    #column_names = [description[0] for description in cursor.description]
+    #all_batches = [dict(zip(column_names, row)) for row in rows]
+
+    #return all_batches
+
+async def get_batched_report(batch_hash: str, report_index : int, db = Depends(get_db)):
+    query = """
+    SELECT title, abstract, authors, trial_id, vectors
+    FROM tmp_reports
+    WHERE batch_hash = ?
+    AND batch_inner_id = ?
+    LIMIT 1;
+    """
+    cursor = db.execute(query, (batch_hash, report_index))
+    rows = cursor.fetchone()
+
+    item = {}
+    item['title'] = rows[0]
+    item['abstract'] = rows[1]
+    item['authors'] = json.loads(rows[2])
+    item['trial_id'] = rows[3]
+
+    item['vectors'] = pickle.loads(rows[4])
+    return item
+
+
+async def get_available_batches(db = Depends(get_db)):
+    query = """
+    SELECT b.*, r.embedded, r.assigned
+    FROM tmp_report_batches AS b
+    LEFT JOIN (
+        SELECT 
+            batch_hash,
+            COUNT(*) AS embedded,
+            COUNT(assigned_studies) AS assigned
+        FROM tmp_reports
+        GROUP BY batch_hash
+    ) AS r
+    ON b.batch_hash = r.batch_hash;
+    """
+    cursor = db.execute(query)
+    rows = cursor.fetchall()
+
+    column_names = [description[0] for description in cursor.description]
+    all_batches = [dict(zip(column_names, row)) for row in rows]
+
+    return all_batches
 
 async def extract_trial_id(raw_report: RawReport):
     ids = extract_trial_registration_ids(raw_report.title)
@@ -145,7 +280,7 @@ async def extract_trial_id(raw_report: RawReport):
     return None
 
 
-async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), client=Depends(get_db)):
+async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), client=Depends(get_vectorstore)):
     
     #TODO implement more sophisticated tree based search here
 
@@ -182,7 +317,7 @@ async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] 
 
     return results
 
-async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), client=Depends(get_db)):
+async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), client=Depends(get_vectorstore)):
     date_filter = Filter()
     if cutoff:
         date_filter = Filter(
@@ -338,11 +473,11 @@ def get_all_reports_by_study(study_id: int):
         response.raise_for_status()  # Optional: raises on 4xx/5xx
         return response.json()
     
-async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), vectorstore=Depends(get_db)):
+async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), vectorstore=Depends(get_vectorstore)):
     result = await analyze(vectorstore, input.embeddings, input.model_id, input.topK, cutoff)
     return result
 
-async def analyze_text(input: RetrievalInputText, cutoff: str = Query(None), vectorstore=Depends(get_db), channel=Depends(get_grpc_channel)):    
+async def analyze_text(input: RetrievalInputText, cutoff: str = Query(None), vectorstore=Depends(get_vectorstore), channel=Depends(get_grpc_channel)):    
     text_input = TextInput(text=input.text)
     embedding_results = _embed_report(text_input, channel)
 

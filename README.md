@@ -76,6 +76,43 @@ This service hosts routínes like searching for unindexed reports in meerkat to 
 # Local Development
 To run a the project locally you need to start the vectorstore first: `docker run -p 6333:6333 -p 6334:6334 -v /backend/_data/qdrant:/qdrant/storage qdrant/qdrant`. For the host location an absolute path is required.
 
+# Database schema
+SELECT sql FROM sqlite_master WHERE name='your_table_name';
+```
+CREATE TABLE sqlite_sequence(name,seq)
+CREATE TABLE "users" (
+	"id"	INTEGER,
+	"email"	TEXT NOT NULL,
+	"password"	TEXT NOT NULL,
+	"role"	TEXT NOT NULL DEFAULT 'user' CHECK("role" IN ('user', 'editor', 'admin')),
+	"verified"	BOOLEAN NOT NULL DEFAULT 0,
+	PRIMARY KEY("id" AUTOINCREMENT)
+)
+CREATE TABLE "api_keys" (
+	"hash"	TEXT NOT NULL,
+	"id"	TEXT NOT NULL,
+	"owner"	INTEGER NOT NULL,
+	PRIMARY KEY("id")
+)
+CREATE TABLE tmp_reports (
+	batch_hash Text,
+    batch_inner_id INTEGER,
+    title TEXT,
+    abstract TEXT,
+	authors Text,
+	trial_id Text,
+	vectors BLOB,
+	assigned_studies Text,
+	PRIMARY KEY (batch_hash, batch_inner_id)
+)
+CREATE TABLE tmp_report_batches (
+    batch_hash TEXT PRIMARY KEY,
+    batch_description TEXT,
+    number_reports INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+```
+
 # Important
 In the sqlite table:  
 tblStudy Dateentered and tblReport Dateentered need to be in iso format YYYY-MM-DD HH:MM:SS, use the script database/helper.py.

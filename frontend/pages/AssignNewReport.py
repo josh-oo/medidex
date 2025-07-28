@@ -9,9 +9,13 @@ load_dotenv()
 
 BACKEND_API = os.getenv('BACKEND_API')
 
-current_embedding = None
-current_aspect_embeddings = None
-current_model = None
+#current_embedding = None
+#current_aspect_embeddings = None
+#current_model = None
+selected_report = None
+
+current_batch = None
+current_batch_size = None
 
 def get_embeddings(text):
     payload = {"text": text}
@@ -67,68 +71,76 @@ if uploaded_file is not None:
     
     # Send the file to FastAPI server for processing
     response = requests.post(BACKEND_API + f"/upload", files=files, headers=get_headers())
-    
-    if response.status_code != 200:
-        st.error(f"Error: {response.text}")
-    else:
-        #st.json(response.json())  # Display parsed JSON response from FastAPI
 
-        index = st.number_input(
-            "Select a report", value=0, min_value=0, max_value=len(response.json()) - 1, step=1
-        )
+response = requests.get(BACKEND_API + f"/batches", headers=get_headers())
 
-        selected_report = response.json()[index]
-    
-        title = selected_report['title']
-        abstract = selected_report['abstract']
-        authors = selected_report['authors']
-        trial_registration_id = selected_report['trial_registration_id']
-        current_trial_id = trial_registration_id
+options = []
+captions=[]
+batch_info = None
+if response.status_code == 200:
+    batch_info = response.json()
+    for item in batch_info:
+        options.append(item['batch_description'])
+        captions.append(f" (Loaded {item['embedded']}/{item['number_reports']}; Assigned {item['assigned']}/{item['number_reports']})")
 
-        display_title = title
-        display_abstract = abstract
-        display_authors = authors
+if len(options) > 0:
+    selected_file = st.radio("Start/Continue processing: ", options, captions=captions)
+    index = options.index(selected_file)
+    current_batch = batch_info[index]['batch_hash']
+    current_batch_size = batch_info[index]['number_reports']
 
-        if display_title and trial_registration_id and trial_registration_id in display_title:
-            display_title = display_title.replace(trial_registration_id, "`" + trial_registration_id + "`")
+    report_index = st.number_input(
+        "Select a report", value=0, min_value=0, max_value=current_batch_size - 1, step=1
+    )
 
-        if display_abstract and trial_registration_id and trial_registration_id in display_abstract:
-            display_abstract= display_abstract.replace(trial_registration_id, "`" + trial_registration_id + "`")
+    response = requests.get(BACKEND_API + f"/batches/{current_batch}/{report_index}", headers=get_headers())
+    if response.status_code == 200:
+        selected_report = response.json()
 
-        if display_authors and trial_registration_id:
-            for i, author in enumerate(display_authors):
-                if trial_registration_id in author:
-                    display_authors[i] = author.replace(trial_registration_id, "`" + trial_registration_id + "`")
+if selected_report is not None:
+    title = selected_report['title']
+    abstract = selected_report['abstract']
+    authors = selected_report['authors']
+    trial_registration_id = selected_report['trial_id']
+    current_trial_id = trial_registration_id
 
-        st.markdown("## " + display_title)
-        if display_authors:
-            st.markdown(" *and* ".join(display_authors))
-        if display_abstract:
-            st.markdown(display_abstract)
+    display_title = title
+    display_abstract = abstract
+    display_authors = authors
 
-        tag_sources = st.multiselect(
-            "Sources for tags",
-            ["Meerkat", "MeSH"],
-            default="Meerkat",
-            max_selections=2,
-            accept_new_options=False,
-        )
+    if display_title and trial_registration_id and trial_registration_id in display_title:
+        display_title = display_title.replace(trial_registration_id, "`" + trial_registration_id + "`")
 
-        if st.button("Search", icon=":material/search:", use_container_width=True,  key="search_1") and (title != "" or abstract != ""):
-            text_to_process = []
-            if title:
-                text_to_process.append(title)
-            if abstract:
-                text_to_process.append(abstract)
-            text_to_process = "\n".join(text_to_process)
-            current_model, current_embedding, current_aspect_embeddings = get_embeddings(text_to_process)
-            if current_model is None or current_embedding is None or current_aspect_embeddings is None:
-                st.error("Could not parse inputs")
+    if display_abstract and trial_registration_id and trial_registration_id in display_abstract:
+        display_abstract= display_abstract.replace(trial_registration_id, "`" + trial_registration_id + "`")
 
-            study_search_results = get_similar_studies(current_embedding, current_model, trial_id=current_trial_id)
-            intervention_search_results = get_similar_tags(current_aspect_embeddings['intervention'], current_model, tag_sources, "interventions")
-            condition_search_results = get_similar_tags(current_aspect_embeddings['condition'], current_model, tag_sources,"conditions")
-            outcome_search_results = get_similar_tags(current_aspect_embeddings['outcome'], current_model, tag_sources,"outcomes")
+    if display_authors and trial_registration_id:
+        for i, author in enumerate(display_authors):
+            if trial_registration_id in author:
+                display_authors[i] = author.replace(trial_registration_id, "`" + trial_registration_id + "`")
+
+    st.markdown("## " + display_title)
+    if display_authors:
+        st.markdown(" *and* ".join(display_authors))
+    if display_abstract:
+        st.markdown(display_abstract)
+
+    tag_sources = st.multiselect(
+        "Sources for tags",
+        ["Meerkat", "MeSH"],
+        default="Meerkat",
+        max_selections=2,
+        accept_new_options=False,
+    )
+
+    #if st.button("Search", icon=":material/search:", use_container_width=True,  key="search_1") and (title != "" or abstract != ""):
+    current_model = selected_report['vectors']['model_id']
+
+    study_search_results = get_similar_studies(selected_report['vectors']['embedding'], current_model, trial_id=current_trial_id)
+    intervention_search_results = get_similar_tags(selected_report['vectors']['intervention'], current_model, tag_sources, "interventions")
+    condition_search_results = get_similar_tags(selected_report['vectors']['condition'], current_model, tag_sources,"conditions")
+    outcome_search_results = get_similar_tags(selected_report['vectors']['outcome'], current_model, tag_sources,"outcomes")
+
 
 if study_search_results is not None:
     tab1, tab2, tab3, tab4 = st.tabs(["Studies", "Interventions", "Conditions", "Outcomes"])
