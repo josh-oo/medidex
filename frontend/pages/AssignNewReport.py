@@ -9,29 +9,72 @@ load_dotenv()
 
 BACKEND_API = os.getenv('BACKEND_API')
 
-#current_embedding = None
-#current_aspect_embeddings = None
-#current_model = None
+study_search_results = None
+intervention_search_results = None
+condition_search_results = None
+outcome_search_results = None
+
 selected_report = None
 
 current_batch = None
 current_batch_size = None
 
-def get_embeddings(text):
-    payload = {"text": text}
-    response = requests.post(BACKEND_API + "/embed/report", json=payload, headers=get_headers())
+@st.dialog("Upload new batch")
+def add_new_batch():
+    uploaded_file = st.file_uploader("Upload your RIS, CGI or NBIB file", type=["ris", "nbib", "cgi"])
+    #reason = st.text_input("Because...")
+    if st.button("Submit", use_container_width=True, type="primary"):
+        if uploaded_file is not None:
+            # Read the file content as bytes
+            file_content = uploaded_file.getvalue()
+            
+            # Create a multipart form-data request
+            files = {'file': (uploaded_file.name, file_content, 'application/octet-stream')}
+            
+            # Send the file to FastAPI server for processing
+            response = requests.post(BACKEND_API + f"/upload", files=files, headers=get_headers())
 
+            if response.status_code != 200:
+                st.error(response.json()['detail'])
+            else:
+                st.rerun()
+
+@st.dialog("Delete batch")
+def delete_batch(batch_hash):
+     if st.button("Delete", use_container_width=True, type="primary"):
+        response = requests.delete(BACKEND_API + f"/batches/{batch_hash}", headers=get_headers())
+        if response.status_code != 200:
+            st.error(response.json()['detail'])
+        else:
+            st.rerun()
+         
+
+def visualize_available_batches():
+    global current_batch, current_batch_size
+    response = requests.get(BACKEND_API + f"/batches", headers=get_headers())
+
+    options = []
+    captions=[]
+    batch_info = None
     if response.status_code == 200:
-        data = response.json()
-        embedding = data.pop("embedding")
-        model = data.pop("model_id")
-        aspect_embeddings = data
+        batch_info = response.json()
+        for item in batch_info:
+            options.append(item['batch_description'])
+            captions.append(f" (Loaded {item['embedded']}/{item['number_reports']}; Assigned {item['assigned']}/{item['number_reports']})")
 
-        return model, embedding, aspect_embeddings
-        
-    else:
-        print("Request failed:", response.status_code, response.text)
-        return None, None, None
+    if len(options) > 0:
+        selected_file = st.radio("Start/Continue processing: ", options, captions=captions)
+        index = options.index(selected_file)
+        current_batch = batch_info[index]['batch_hash']
+        current_batch_size = batch_info[index]['number_reports']
+
+    if st.button("Add new batch", use_container_width=True):
+        add_new_batch()
+    if current_batch is not None:
+        if st.button("Delete selected batch", use_container_width=True, type='primary'):
+            delete_batch(current_batch)
+
+    st.divider()
     
 def get_similar_studies(embedding, model, trial_id=None):
     payload = {"model_id": model, "report_embedding": embedding, "author_embedding":None}
@@ -55,43 +98,29 @@ def get_similar_tags(embedding, model, sources, tag):
         print("Request failed:", response.status_code, response.text)
         return None
 
-study_search_results = None
-intervention_search_results = None
-condition_search_results = None
-outcome_search_results = None
+with st.sidebar:
+    visualize_available_batches()
+    show_login()
 
-uploaded_file = st.file_uploader("Upload your RIS, CGI or NBIB file", type=["ris", "nbib", "cgi"])
-if uploaded_file is not None:
-    # Read the file content as bytes
-    file_content = uploaded_file.getvalue()
+#uploaded_file = st.file_uploader("Upload your RIS, CGI or NBIB file", type=["ris", "nbib", "cgi"])
+#if uploaded_file is not None:
+#    # Read the file content as bytes
+#    file_content = uploaded_file.getvalue()
+#    
+#    # Create a multipart form-data request
+#    files = {'file': (uploaded_file.name, file_content, 'application/octet-stream')}
+#    #headers = {"Authorization": f"Bearer {st.session_state.get('access_token',None)}"}
     
-    # Create a multipart form-data request
-    files = {'file': (uploaded_file.name, file_content, 'application/octet-stream')}
-    headers = {"Authorization": f"Bearer {st.session_state.get('access_token',None)}"}
-    
-    # Send the file to FastAPI server for processing
-    response = requests.post(BACKEND_API + f"/upload", files=files, headers=get_headers())
+    # Send the file to FastAPI server for processing#
+#    response = requests.post(BACKEND_API + f"/upload", files=files, headers=get_headers())
 
-response = requests.get(BACKEND_API + f"/batches", headers=get_headers())
+#   if response.status_code == 400:
+#        st.error(response.json()['detail'])
 
-options = []
-captions=[]
-batch_info = None
-if response.status_code == 200:
-    batch_info = response.json()
-    for item in batch_info:
-        options.append(item['batch_description'])
-        captions.append(f" (Loaded {item['embedded']}/{item['number_reports']}; Assigned {item['assigned']}/{item['number_reports']})")
+#    uploaded_file = None
 
-if len(options) > 0:
-    selected_file = st.radio("Start/Continue processing: ", options, captions=captions)
-    index = options.index(selected_file)
-    current_batch = batch_info[index]['batch_hash']
-    current_batch_size = batch_info[index]['number_reports']
-
-    report_index = st.number_input(
-        "Select a report", value=0, min_value=0, max_value=current_batch_size - 1, step=1
-    )
+if current_batch_size is not None:
+    report_index = st.number_input("Select a report", value=0, min_value=0, max_value=current_batch_size - 1, step=1)
 
     response = requests.get(BACKEND_API + f"/batches/{current_batch}/{report_index}", headers=get_headers())
     if response.status_code == 200:
@@ -169,6 +198,3 @@ if study_search_results is not None:
             st.dataframe(outcome_search_results)
         else:
             st.write("No search results")
-
-with st.sidebar:
-    show_login()

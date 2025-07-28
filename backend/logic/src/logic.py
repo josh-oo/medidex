@@ -239,7 +239,6 @@ async def get_batched_report(batch_hash: str, report_index : int, db = Depends(g
     item['vectors'] = pickle.loads(rows[4])
     return item
 
-
 async def get_available_batches(db = Depends(get_db)):
     query = """
     SELECT b.*, r.embedded, r.assigned
@@ -261,6 +260,23 @@ async def get_available_batches(db = Depends(get_db)):
     all_batches = [dict(zip(column_names, row)) for row in rows]
 
     return all_batches
+
+async def delete_batch(batch_hash):
+    future = asyncio.get_event_loop().create_future()
+    query = """
+    DELETE FROM tmp_report_batches WHERE batch_hash = ?;
+    """
+    params = (batch_hash,)
+    await write_queue.put((query, params, future))
+    await future
+
+    future = asyncio.get_event_loop().create_future()
+    query = """
+    DELETE FROM tmp_reports WHERE batch_hash = ?;
+    """
+    params = (batch_hash,)
+    await write_queue.put((query, params, future))
+    await future
 
 async def extract_trial_id(raw_report: RawReport):
     ids = extract_trial_registration_ids(raw_report.title)

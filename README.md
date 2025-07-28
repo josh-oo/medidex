@@ -94,6 +94,12 @@ CREATE TABLE "api_keys" (
 	"owner"	INTEGER NOT NULL,
 	PRIMARY KEY("id")
 )
+CREATE TABLE tmp_report_batches (
+    batch_hash TEXT PRIMARY KEY,
+    batch_description TEXT,
+    number_reports INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
 CREATE TABLE tmp_reports (
 	batch_hash Text,
     batch_inner_id INTEGER,
@@ -104,12 +110,7 @@ CREATE TABLE tmp_reports (
 	vectors BLOB,
 	assigned_studies Text,
 	PRIMARY KEY (batch_hash, batch_inner_id)
-)
-CREATE TABLE tmp_report_batches (
-    batch_hash TEXT PRIMARY KEY,
-    batch_description TEXT,
-    number_reports INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  FOREIGN KEY(batch_hash) REFERENCES tmp_report_batches(batch_hash) ON DELETE CASCADE
 )
 ```
 
