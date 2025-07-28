@@ -176,8 +176,8 @@ if study_search_results is not None:
 
     with tab1:
         if study_search_results is not None:
-            study_search_results['CRGStudyID'] = './Study?id=' + study_search_results['CRGStudyID'].astype(str) + "&token=" + st.session_state['access_token']
-            st.dataframe(study_search_results, column_config={"CRGStudyID": st.column_config.LinkColumn("CRGStudyID", pinned=True, display_text=r"\.\/Study\?id=(.+)&token")})
+            study_search_results['CRGStudyID'] = './study?id=' + study_search_results['CRGStudyID'].astype(str) + "&token=" + st.session_state['access_token']
+            st.dataframe(study_search_results, column_config={"CRGStudyID": st.column_config.LinkColumn("CRGStudyID", pinned=True, display_text=r"\.\/study\?id=(.+)&token")})
         else:
             st.write("No search results")
 

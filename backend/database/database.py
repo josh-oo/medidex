@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from typing import List, Optional
@@ -93,37 +93,8 @@ def get_studies_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(get_d
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, 'CRGStudyID')
 
 @app.get("/study/{study_id}/reports")
-def get_study_reports_by_id(
-    study_id: int,
-    fields: Optional[List[str]] = Query(None, description="Fields to include in the response"),
-    db: sqlite3.Connection = Depends(get_db)
-):
-    # Default: select all fields
-    select_clause = "*"
-    
-    if fields:
-        # Sanitize field names to avoid SQL injection
-        allowed_fields = {
-            "CRGReportID",
-            "Title",
-            "Abstract",
-            "Authors",
-            "DateEntered",
-        }
-        selected_fields = [field for field in fields if field in allowed_fields]
-        if not selected_fields:
-            raise HTTPException(status_code=400, detail="No valid fields specified.")
-        select_clause = ", ".join([f"r.{field}" for field in selected_fields])
-
-    query = f"""
-        SELECT {select_clause}
-        FROM tblStudyReport sr
-        JOIN tblReport r ON sr.CRGReportID = r.CRGReportID
-        WHERE sr.CRGStudyID = ?
-    """
-    cursor = db.execute(query, (study_id,))
-    rows = cursor.fetchall()
-    return convert_to_column_based_dict(cursor.description, rows)
+def get_study_reports_by_id(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+    return get_study_reports_by_ids(study_ids=[study_id], fields=None, db=db)[study_id]
 
 @app.get("/study/reports")
 def get_study_reports_by_ids(
@@ -132,7 +103,7 @@ def get_study_reports_by_ids(
     db: sqlite3.Connection = Depends(get_db)
 ):
     # Default: select all fields
-    select_clause = "*"
+    select_clause = "r.*"
     
     if fields:
         # Sanitize field names to avoid SQL injection
@@ -146,7 +117,7 @@ def get_study_reports_by_ids(
         selected_fields = [field for field in fields if field in allowed_fields]
         if not selected_fields:
             raise HTTPException(status_code=400, detail="No valid fields specified.")
-        select_clause = ", ".join([f"r.{field}" for field in selected_fields])
+        select_clause = ", ".join([f"r.{field} AS {field}" for field in selected_fields])
 
     placeholders = ','.join(['?'] * len(study_ids))
     query = f"""
@@ -159,11 +130,15 @@ def get_study_reports_by_ids(
     rows = cursor.fetchall()
     result = convert_to_dict_list(cursor.description, rows)
 
+    print("Query: ", query)
+
     final_result = {}
     for item in result:
         if item['StudyID'] not in final_result.keys():
             final_result[item['StudyID']] = []
         final_result[item.pop('StudyID')].append(item)
+
+    print("Result: ", final_result)
 
     return final_result
 
