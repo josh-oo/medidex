@@ -5,13 +5,19 @@ from src.auth import get_users, update_user
 from src.auth import signup, login, logout
 from src.auth import get_api_keys, create_api_key, delete_api_key, verify_api_key
 
-from src.logic import upload_file,get_all_reports_by_study, extract_trial_id
+from src.logic import upload_file, get_available_batches, get_batched_report, delete_batch, get_all_reports_by_study, extract_trial_id
 from src.logic import similarity_search_tags, similarity_search_studies
 from src.logic import embed_report, embed_aspect
 from src.logic import analyze_text, analyze_embedding
 
+from src.logic import startup_event as logic_startup_event
+
 # Initialize FastAPI
 app = FastAPI()
+
+@app.on_event("startup")
+async def startup_event():
+    await logic_startup_event()
 
 @app.get("/readyz")
 def check():
@@ -19,6 +25,18 @@ def check():
 
 @app.post("/upload", dependencies=[Depends(is_verified)])
 async def logic_upload_file(result = Depends(upload_file)):
+    return result
+
+@app.get("/batches", dependencies=[Depends(is_verified)])
+async def logic_get_available_batches(result = Depends(get_available_batches)):
+    return result
+
+@app.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified)])
+async def logic_get_batched_report(result = Depends(get_batched_report)):
+    return result
+
+@app.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified)])
+async def logic_delete_batch(result = Depends(delete_batch)):
     return result
 
 @app.post("/extract_trial_id", dependencies=[Depends(is_verified)])
