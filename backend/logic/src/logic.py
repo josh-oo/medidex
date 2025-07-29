@@ -31,6 +31,10 @@ import hashlib
 import json
 import pickle
 
+#from sklearn.feature_extraction.text import TfidfVectorizer
+#from sklearn.metrics.pairwise import cosine_similarity
+#import numpy as np
+
 load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_HOST")
@@ -75,6 +79,7 @@ class AspectEmbedding(BaseModel):
 
 class ReportEmbedding(BaseModel):
     model_id: str
+    text: str
     report_embedding: List[float]
     author_embedding: Optional[List[float]]
 
@@ -403,30 +408,90 @@ async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Qu
     #"""
 
     found_study_ids = {}
-    if trial_id:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
-            response = response.json()
-            if response:
-                for result in response:
-                    found_study_ids[result] = "100% (Trial ID)"
+    #if trial_id:
+    #    async with httpx.AsyncClient() as client:
+    #        response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
+    #        response = response.json()
+    #        if response:
+    #            for result in response:
+    #                found_study_ids[result] = 10.00 #"100% (Trial ID)"
 
+    studies_for_reranking = []
     for result in reranked_results:
         for hit in result.hits:
             for item in hit.payload['belongs_to_study']:
                 if item not in found_study_ids:
-                    found_study_ids[item] = str(round(hit.score * 100)) + "%"
+                    studies_for_reranking.append(item)
+                    found_study_ids[item] = hit.score
+
+    """
+    vectorizer = TfidfVectorizer(
+            max_features=1000,
+            stop_words='english',
+            ngram_range=(2,5),
+            analyzer="char",
+            norm=None,
+        )
+    all_reranking_texts = []
+    new_similarities = []
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/reports", params={'study_ids': studies_for_reranking, 'cutoff':cutoff})
+        for key in studies_for_reranking:
+            candidate_texts = []
+            #print(response.json())
+            value = response.json()[str(key)]
+            for item in value:
+                candidate_texts.append(f"{item['Title']} {item['Abstract'] if item['Abstract'] else ""}".strip())
+            #all_reranking_texts.append(candidate_text)
+            all_reranking_texts.append(" ".join(candidate_texts))
+        tfidf_candidates = vectorizer.fit_transform([embedding.text] + all_reranking_texts)
+        current_similarities = cosine_similarity(tfidf_candidates[:1], tfidf_candidates[1:])[0]
+        
+        for i, study_id in enumerate(studies_for_reranking):
+            similarity = current_similarities[i]
+            #similarity = np.max(current_similarities).item()
+
+            #print(embedding.text)
+            #print(key)
+            #print(candidate_texts)
+            #print(current_similarities)
+            #print()
+            #new_similarities.append(similarity)
+
+            found_study_ids[study_id] = similarity
+    """
+    #print(found_study_ids)
+    #print(old_similarities)
+    #print(new_similarities)
+
+    #tfidf_candidates = vectorizer.fit_transform(all_reranking_texts)
+    #tfidf_query = vectorizer.transform([embedding.text])
+
+    #similarities = cosine_similarity(tfidf_query, tfidf_candidates)[0]
+
+    #print(similarities)
+
+    #for study_id, new_value in zip(studies_for_reranking, similarities):
+    #    found_study_ids[study_id] = round(new_value * 100)
+    #    print(study_id, round(new_value * 100))
+
+    #rerank 
+    #found_study_ids = dict(sorted(found_study_ids.items(), key=lambda item: item[1], reverse=True))
+
 
     async with httpx.AsyncClient() as client:
-        response = await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': list(found_study_ids.keys())})
+        response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys())})
 
     result = response.json()
-    result['Relevance'] = list(found_study_ids.values())
+    result['Relevance'] = list(found_study_ids.values())# + "%"
 
     #move relevance to the front
     #order = ['CRGStudyID', 'Relevance', 'Short_name', 'Participants', 'Duration', 'Comparison', 'Countries', 'Date_entered', 'Date_edited', 'Status_of_study']
     order = ['CRGStudyID', 'Relevance', 'ShortName', 'NumberParticipants', 'Duration', 'Comparison', 'Countries', 'DateEntered', 'DateEdited', 'StatusofStudy']
     reordered = {key: result[key] for key in order}
+
+    #print(found_study_ids)
+    #print(reordered['CRGStudyID'])
 
     if DEBUG:
         reordered['debug'] = reranked_results
@@ -511,10 +576,8 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
 
     study_search_results = vectorstore.query_points_groups(
         collection_name=model_id,
-        # Same as in the regular query_points() API
         query=embeddings['embedding'],
         using="default",
-        # Grouping parameters
         group_by="belongs_to_study",  # Path of the field to group by
         limit=top_k,  # Max amount of groups
         group_size=1,  # Max amount of points per group
@@ -522,15 +585,11 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
     )
 
     found_study_ids = {}
-    #scores = []
-    #report_hits = []
     for result in study_search_results.groups:
         for hit in result.hits:
             report_hit = hit.payload['source_id']
             for item in hit.payload['belongs_to_study']:
                 found_study_ids[item] = {'score': hit.score, 'report_hit': report_hit}
-                #scores.append(hit.score)
-                #report_hits.append(report_hit)
 
     result = {}
     result['related_studies'] = []
@@ -543,34 +602,27 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
     report_hits = [item['report_hit'] for item in found_study_ids.values()]
 
     async with httpx.AsyncClient() as client:
-        related_studies = await client.post(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", json={'ids': list(found_study_ids.keys())})
-        related_studies = related_studies.json()
-        #TODO error handling
 
-        study_interventions = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/interventions", params={'study_ids': list(found_study_ids.keys())})
-        study_interventions = study_interventions.json()
+        tasks = [
+            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys())}),
+            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/interventions", params={'study_ids': list(found_study_ids.keys())}),
+            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/conditions", params={'study_ids': list(found_study_ids.keys())}),
+            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/outcomes", params={'study_ids': list(found_study_ids.keys())}),
+            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/participants", params={'study_ids': list(found_study_ids.keys())}),
+            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/design", params={'study_ids': list(found_study_ids.keys())}),
+            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/reports", params={'study_ids': list(found_study_ids.keys()), 'fields': ['CRGReportID', 'Title', 'Abstract', 'Authors'], 'cutoff': cutoff}),
+        ]
 
-        study_interventions = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/interventions", params={'study_ids': list(found_study_ids.keys())})
-        study_interventions = study_interventions.json()
+        responses =  await asyncio.gather(*tasks)
+        related_studies = responses[0].json()
+        study_interventions = responses[1].json()
+        study_conditions = responses[2].json()
+        study_outcomes = responses[3].json()
+        study_participants_desc = responses[4].json()
+        study_design = responses[5].json()
+        study_reports = responses[6].json()
 
-        study_conditions = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/conditions", params={'study_ids': list(found_study_ids.keys())})
-        study_conditions = study_conditions.json()
-
-        study_outcomes = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/outcomes", params={'study_ids': list(found_study_ids.keys())})
-        study_outcomes = study_outcomes.json()
-
-        study_reports = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/reports", params={'study_ids': list(found_study_ids.keys()), 'fields': ['CRGReportID', 'Title', 'Abstract', 'Authors']})
-        study_reports = study_reports.json()
-
-        for id, name, num_participants, countries, durations,report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], related_studies['NumberParticipants'], related_studies['Countries'], related_studies['Duration'], report_hits, scores):
-            tasks = [
-                client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/participants"),
-                client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/design"),
-                #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{id}/reports", params={'fields': ['CRGReportID', 'Title', 'Abstract', 'Authors']}),
-            ]
-
-            responses = await asyncio.gather(*tasks)
-            
+        for id, name, num_participants, countries, durations,report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], related_studies['NumberParticipants'], related_studies['Countries'], related_studies['Duration'], report_hits, scores):            
             study_item = {}
             study_item['study_id'] =  id
             study_item['study_name'] = name
@@ -584,8 +636,8 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
 
             study_item['assigned_reports'] = {}
 
-            study_item['attributes']['participants_desc'] = responses[0].json()
-            study_item['attributes']['study_design'] = responses[1].json()
+            study_item['attributes']['participants_desc'] = study_participants_desc.get(str(id), [])
+            study_item['attributes']['study_design'] = study_design.get(str(id), [])
 
             related_interventions = study_interventions.get(str(id), [])
             study_item['assigned_interventions'] = [item['Description'] for item in related_interventions]

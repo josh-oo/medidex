@@ -463,8 +463,16 @@ def evaluate_with_cutoff(cutoff, model_id):
                 ground_truth_filtered.append(item)
         
         if len(ground_truth_filtered) == 1:
+            report_id = result[0].payload['source_id']
+            response = session.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/reports/{report_id}")
+            if response.status_code != 200:
+                print(f"Cannot refresh vectorstore: Database API (/reports/{report_id}) not reachable")
+                return
+            abstract = response.json()[0]['Abstract']
+            text = response.json()[0]['Title'] + (" " + abstract) if abstract else ""
+
             ground_truth = ground_truth_filtered[0]
-            payload = {"report_embedding": result[0].vector['default'],"participants_embedding": result[0].vector['intervention'], "author_embedding": result[0].vector['authors'], "model_id": model_id}
+            payload = {"text": text, "report_embedding": result[0].vector['default'],"participants_embedding": result[0].vector['intervention'], "author_embedding": result[0].vector['authors'], "model_id": model_id}
             params = {"cutoff":cutoff, "trial_id":trial_id, 'authors': authors}
             response = session.post(BACKEND_API + "/similarity_search/studies", json=payload,params=params)
             predicted_studies = response.json()['CRGStudyID']
@@ -476,6 +484,8 @@ def evaluate_with_cutoff(cutoff, model_id):
             recall_at_1.append(1 if rank == 1 else 0)
             recall_at_3.append(1 if rank <= 3 else 0)
             recall_at_10.append(1 if rank <= 10 else 0)
+
+            #break
 
             """
             if rank != 1:
@@ -502,11 +512,11 @@ def evaluate_with_cutoff(cutoff, model_id):
 #refresh_meerkat_tags("outcomes", tag_id="0003")
 #refresh_mesh_tags()
 
-#print("Evaluate 5th update")
-#evaluate_with_cutoff("2024-01-24 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 5th update
+print("Evaluate 5th update")
+evaluate_with_cutoff("2024-01-24 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 5th update
 
-#print("Evaluate 6th update")
-#evaluate_with_cutoff("2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 6th update
+print("Evaluate 6th update")
+evaluate_with_cutoff("2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 6th update
 
-#print("Evaluate 7th update")
-#evaluate_with_cutoff("2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update
+print("Evaluate 7th update")
+evaluate_with_cutoff("2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update

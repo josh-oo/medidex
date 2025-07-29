@@ -1,10 +1,12 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from typing import List, Optional
 import sqlite3
 import os
+
+from datetime import date
 
 load_dotenv()
 
@@ -81,16 +83,16 @@ def check(db: sqlite3.Connection = Depends(get_db)):
         raise HTTPException(status_code=503, detail="Service not ready")
     return JSONResponse(status_code=200, content={"status": "ok"})
 
-@app.post("/studies")
-def get_studies_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
-    placeholders = ','.join(['?'] * len(id_input.ids))
+@app.get("/studies")
+def get_studies(study_ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
+    placeholders = ','.join(['?'] * len(study_ids))
     query = f"""
         SELECT * FROM tblStudy
         WHERE CRGStudyID IN ({placeholders})
     """
-    cursor = db.execute(query, id_input.ids)
+    cursor = db.execute(query, study_ids)
     rows = cursor.fetchall()
-    return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, 'CRGStudyID')
+    return convert_to_column_based_dict_ordered(cursor.description, rows, study_ids, 'CRGStudyID')
 
 @app.get("/study/{study_id}/reports")
 def get_study_reports_by_id(study_id: int, db: sqlite3.Connection = Depends(get_db)):
@@ -99,11 +101,15 @@ def get_study_reports_by_id(study_id: int, db: sqlite3.Connection = Depends(get_
 @app.get("/study/reports")
 def get_study_reports_by_ids(
     study_ids: List[int] = Query(...),
-    fields: Optional[List[str]] = Query(None, description="Fields to include in the response"),
+    cutoff: str = Query(None),
+    fields: Optional[List[str]] = Query(None),
     db: sqlite3.Connection = Depends(get_db)
 ):
     # Default: select all fields
     select_clause = "r.*"
+
+    if cutoff is None:
+        cutoff = date.today().isoformat()
     
     if fields:
         # Sanitize field names to avoid SQL injection
@@ -124,9 +130,10 @@ def get_study_reports_by_ids(
         SELECT sr.CRGStudyID AS StudyID, {select_clause}
         FROM tblStudyReport sr
         JOIN tblReport r ON sr.CRGReportID = r.CRGReportID
-        WHERE sr.CRGStudyID IN ({placeholders});
+        WHERE sr.CRGStudyID IN ({placeholders})
+        AND r.Dateentered < ?
     """
-    cursor = db.execute(query, study_ids)
+    cursor = db.execute(query, study_ids + [cutoff])
     rows = cursor.fetchall()
     result = convert_to_dict_list(cursor.description, rows)
 
@@ -213,60 +220,59 @@ def get_study_id_by_trial_id(trial_id: str = Query(...), cutoff: str = Query(...
 
     return rows
 
-@app.get("/study/{study_id}/reports")
-def get_all_reports(study_id: int, db: sqlite3.Connection = Depends(get_db)):
-    query = f"""
-        SELECT r.*
-        FROM tblReport r
-        JOIN tblStudyReport sr ON r.CRGReportID = sr.CRGReportID
-        WHERE sr.CRGStudyID = ?;
-    """
-    cursor = db.execute(query, (study_id,))
-    rows = cursor.fetchall()
-    return convert_to_dict_list(cursor.description,rows)
-
 @app.get("/study/{study_id}/participants")
 def get_study_participants(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+    return get_study_participants_(study_ids=[study_id], db=db)[study_id]
+
+@app.get("/study/participants")
+def get_study_participants_(study_ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
+    placeholders = ','.join(['?'] * len(study_ids))
     query = f"""
-        SELECT ParticipantDescription
+        SELECT sp.CRGStudyID AS StudyID, ParticipantDescription
         FROM tblStudyParticipant sp
         JOIN tblParticipant p ON sp.ParticipantsID = p.ParticipantsID
-        WHERE sp.CRGStudyID = ?;
+        WHERE sp.CRGStudyID IN ({placeholders});
     """
-    cursor = db.execute(query, (study_id,))
+    cursor = db.execute(query, study_ids)
     rows = cursor.fetchall()
-    if len(rows) == 0:
-        return []
-    return [row[0] for row in rows]
+    result = convert_to_dict_list(cursor.description, rows)
+
+    final_result = {}
+    for item in result:
+        if item['StudyID'] not in final_result.keys():
+            final_result[item['StudyID']] = []
+        final_result[item.pop('StudyID')].append(item['ParticipantDescription'])
+
+    return final_result
 
 @app.get("/study/{study_id}/design")
 def get_study_design(study_id: int, db: sqlite3.Connection = Depends(get_db)):
+    return get_study_design_(study_ids=[study_id], db=db)[study_id]
+
+@app.get("/study/design")
+def get_study_design_(study_ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
+    placeholders = ','.join(['?'] * len(study_ids))
     query = f"""
-        SELECT DesignDescription
+        SELECT sd.CRGStudyID as StudyID, DesignDescription
         FROM tblStudyDesign sd
         JOIN tblDesign d ON sd.DesignID = d.DesignID
-        WHERE sd.CRGStudyID = ?;
+        WHERE sd.CRGStudyID IN ({placeholders});
     """
-    cursor = db.execute(query, (study_id,))
+    cursor = db.execute(query, study_ids)
     rows = cursor.fetchall()
-    if len(rows) == 0:
-        return []
-    return [row[0] for row in rows]
+    result = convert_to_dict_list(cursor.description, rows)
 
-"""
+    final_result = {}
+    for item in result:
+        if item['StudyID'] not in final_result.keys():
+            final_result[item['StudyID']] = []
+        final_result[item.pop('StudyID')].append(item['DesignDescription'])
+
+    return final_result
+
 @app.get("/study/{study_id}/tags/interventions")
 def get_study_interventions(study_id: int, db: sqlite3.Connection = Depends(get_db)):
-    #placeholders = ','.join(['?'] * len(id_input.ids))
-    query = f""
-        SELECT si.InterventionID AS ID, i.InterventionDescription AS Description
-        FROM tblStudyIntervention si
-        JOIN tblIntervention i ON si.InterventionID = i.InterventionID 
-        WHERE si.CRGStudyID = ?;
-    ""
-    cursor = db.execute(query, (study_id, ))
-    rows = cursor.fetchall()
-    return convert_to_dict_list(cursor.description,rows)
-"""
+    return get_study_interventions_(study_ids=[study_id], db=db)[study_id]
 
 @app.get("/study/tags/interventions")
 def get_study_interventions_(study_ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
@@ -310,19 +316,10 @@ def get_interventions_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
 
-"""
+
 @app.get("/study/{study_id}/tags/conditions")
 def get_study_conditions(study_id: int, db: sqlite3.Connection = Depends(get_db)):
-    query = f""
-        SELECT sc.HealthCareConditionID AS ID, c.HealthCareConditionDescription AS Description
-        FROM tblStudyHealthCareCondition sc 
-        JOIN tblHealthCareCondition c ON sc.HealthCareConditionID = c.HealthCareConditionID
-        WHERE sc.CRGStudyID = ?;
-    ""
-    cursor = db.execute(query, (study_id, ))
-    rows = cursor.fetchall()
-    return convert_to_dict_list(cursor.description,rows)
-"""
+    return get_study_conditions_(study_ids=[study_id], db=db)[study_id]
 
 @app.get("/study/tags/conditions")
 def get_study_conditions_(study_ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
@@ -366,19 +363,9 @@ def get_conditions_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(ge
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
 
-"""
 @app.get("/study/{study_id}/tags/outcomes")
 def get_study_outcomes(study_id: int, db: sqlite3.Connection = Depends(get_db)):
-    query = f""
-        SELECT so.OutcomeID AS ID, o.OutcomeDescription AS Description
-        FROM tblStudyOutcome so 
-        JOIN tblOutcome o ON so.OutcomeID = o.OutcomeID
-        WHERE so.CRGStudyID = ?;
-    ""
-    cursor = db.execute(query, (study_id,))
-    rows = cursor.fetchall()
-    return convert_to_dict_list(cursor.description,rows)
-"""
+    return get_study_conditions_(study_ids=[study_id], db=db)[study_id]
 
 @app.get("/study/tags/outcomes")
 def get_study_conditions_(study_ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
@@ -421,4 +408,3 @@ def get_outcomes_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(get_
     cursor = db.execute(query, id_input.ids)
     rows = cursor.fetchall()
     return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
-
