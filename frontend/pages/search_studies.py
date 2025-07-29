@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 import os
 from dotenv import load_dotenv
-from utils.login import show_login, get_headers
+from utils.login import show_logout, get_headers
 
 load_dotenv()
 
@@ -70,5 +70,10 @@ if study_search_results is not None:
     st.dataframe(study_search_results)
 
 with st.sidebar:
-    show_login()
+    if st.button("Switch to report assignment", use_container_width=True):
+        st.switch_page(st.Page("pages/assign_new_report.py", title="Assign new reports", icon=":material/add_circle:"))
+    if st.button("Settings", use_container_width=True):
+        st.switch_page(st.Page("pages/settings.py", title="Settings", icon=":material/settings:"))
+    st.divider()
+    show_logout()
 

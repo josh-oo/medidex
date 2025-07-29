@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 import os
 from dotenv import load_dotenv
-from utils.login import show_login, get_headers
+from utils.login import show_logout, get_headers
 
 load_dotenv()
 
@@ -73,8 +73,6 @@ def visualize_available_batches():
     if current_batch is not None:
         if st.button("Delete selected batch", use_container_width=True, type='primary'):
             delete_batch(current_batch)
-
-    st.divider()
     
 def get_similar_studies(embedding, model, trial_id=None):
     payload = {"model_id": model, "report_embedding": embedding, "author_embedding":None}
@@ -100,7 +98,14 @@ def get_similar_tags(embedding, model, sources, tag):
 
 with st.sidebar:
     visualize_available_batches()
-    show_login()
+    st.divider()
+    if st.button("Switch to manual search", use_container_width=True):
+        st.switch_page(st.Page("pages/search_studies.py", title="Search studies", icon=":material/search:"))
+    if st.button("Settings", use_container_width=True):
+        st.switch_page(st.Page("pages/settings.py", title="Settings", icon=":material/settings:"))
+    st.divider()
+    show_logout()
+        
 
 #uploaded_file = st.file_uploader("Upload your RIS, CGI or NBIB file", type=["ris", "nbib", "cgi"])
 #if uploaded_file is not None:

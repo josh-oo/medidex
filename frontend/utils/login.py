@@ -36,51 +36,51 @@ def token_auth(token):
     st.rerun()
 
 def show_login():
-    if "name" not in st.session_state:
-        with st.form("login", enter_to_submit=False):
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
+    with st.form("login", enter_to_submit=False):
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
 
-            response = None
-            #if st.form_submit_button("Sign Up", use_container_width=True, type="secondary"):
-            with st.popover("Sign Up", use_container_width=True):
-                repeat_password = st.text_input("Repeat Password", type="password")
-                if st.form_submit_button("Sign Up", use_container_width=True, type="secondary"):
-                    if password == repeat_password:
-                        payload = {"email": email, "password": password}
-                        response = requests.post(BACKEND_API + "/signup", json=payload)
-                    else:
-                        st.error("Passwords do not match")
-                    
-                    if response.status_code == 200:
-                        token = response.json()['access_token']
-                        token_auth(token)
-                    else:
-                        st.error(f"Error: {response.status_code} - {response.text}")
-
-            if st.form_submit_button("Login", use_container_width=True, type="primary"):
-                data = {
-                    "username": email,
-                    "password": password,
-                }
-
-                headers = {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                }
-                response = requests.post(BACKEND_API + "/login", data=data, headers=headers)
-
+        response = None
+        #if st.form_submit_button("Sign Up", use_container_width=True, type="secondary"):
+        with st.popover("Sign Up", use_container_width=True):
+            repeat_password = st.text_input("Repeat Password", type="password")
+            if st.form_submit_button("Sign Up", use_container_width=True, type="secondary"):
+                if password == repeat_password:
+                    payload = {"email": email, "password": password}
+                    response = requests.post(BACKEND_API + "/signup", json=payload)
+                else:
+                    st.error("Passwords do not match")
+                
                 if response.status_code == 200:
                     token = response.json()['access_token']
                     token_auth(token)
-            
-            if response is not None:
-                if response.status_code != 200:
+                else:
                     st.error(f"Error: {response.status_code} - {response.text}")
-    else:
-        if st.button("Logout - " + st.session_state.name, use_container_width=True):
-            response = requests.post(BACKEND_API + "/logout", headers=get_headers())
-            if response.status_code == 201:
-                st.session_state.pop('access_token')
-                st.session_state.pop('name')
-                st.session_state.pop('role')
-                st.rerun()
+
+        if st.form_submit_button("Login", use_container_width=True, type="primary"):
+            data = {
+                "username": email,
+                "password": password,
+            }
+
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+            response = requests.post(BACKEND_API + "/login", data=data, headers=headers)
+
+            if response.status_code == 200:
+                token = response.json()['access_token']
+                token_auth(token)
+        
+        if response is not None:
+            if response.status_code != 200:
+                st.error(f"Error: {response.status_code} - {response.text}")
+
+def show_logout():
+    if st.button("Logout - " + st.session_state.name, use_container_width=True):
+        response = requests.post(BACKEND_API + "/logout", headers=get_headers())
+        if response.status_code == 201:
+            st.session_state.pop('access_token')
+            st.session_state.pop('name')
+            st.session_state.pop('role')
+            st.switch_page(st.Page(show_login, title="Login", icon=":material/login:"))

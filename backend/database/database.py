@@ -130,15 +130,11 @@ def get_study_reports_by_ids(
     rows = cursor.fetchall()
     result = convert_to_dict_list(cursor.description, rows)
 
-    print("Query: ", query)
-
     final_result = {}
     for item in result:
         if item['StudyID'] not in final_result.keys():
             final_result[item['StudyID']] = []
         final_result[item.pop('StudyID')].append(item)
-
-    print("Result: ", final_result)
 
     return final_result
 
