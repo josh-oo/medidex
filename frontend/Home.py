@@ -8,6 +8,11 @@ load_dotenv()
 #page = st.Page("pages/Study.py", title="Study details"),
 #study_pg = st.Page("pages/study.py", title="Study details", icon=":material/menu_book:"),
 
+st.set_page_config(
+    page_title="Meerkat AI",
+    layout="wide"
+)
+
 login = st.Page(show_login, title="Login", icon=":material/login:")
 
 assign_new_report = st.Page("pages/assign_new_report.py", title="Assign new reports", icon=":material/add_circle:")
