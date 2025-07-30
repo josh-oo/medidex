@@ -95,10 +95,7 @@ def get_similar_tags(embedding, model, sources, tag):
         return None
     
 def update_selected_studies(selected_studies, current_batch, report_index):
-    selected_studies_cleaned = selected_studies#[]
-    #for study in selected_studies:
-    #    match = re.search(r"\.\/study\?id=([^&]+)&token", study)
-    #    selected_studies_cleaned.append(int(match.group(1)))
+    selected_studies_cleaned = selected_studies
 
     if len(selected_studies_cleaned) == 0:
         return
@@ -106,6 +103,21 @@ def update_selected_studies(selected_studies, current_batch, report_index):
     response = requests.put(BACKEND_API + f"/batches/{current_batch}/{report_index}/studies", headers=get_headers(), params={'study_ids': selected_studies_cleaned})
     if response.status_code != 200:
         st.exception(response.text)
+
+@st.cache_data(max_entries=10)
+def view_study_details(study_id):
+    response = requests.get(BACKEND_API + f"/study/{study_id}/reports", headers=get_headers())
+
+    if response.status_code != 200:
+        st.error("Error: " + response.text)
+    
+    df = pd.DataFrame(response.json())
+
+    file_prefix = "file://///nas.ads.mwn.de/tume/ps0/_AGs/Arbeitsgruppe_Leucht/Meerkat_2020_10_19/PDFs/"
+    
+    df['PDF'] = file_prefix + df['ReportNumber'].astype(str).str.zfill(5) + ".pdf"
+
+    st.dataframe(df)
 
 def reload_data():
     response = requests.get(BACKEND_API + f"/batches/{current_batch}/{st.session_state['report_index']}", headers=get_headers())
@@ -162,20 +174,6 @@ if current_batch_size is not None:
         st.markdown(" *and* ".join(display_authors))
     if display_abstract:
         st.markdown(display_abstract)
-
-def view_study_details(study_id):
-    response = requests.get(BACKEND_API + f"/study/{study_id}/reports", headers=get_headers())
-
-    if response.status_code != 200:
-        st.error("Error: " + response.text)
-    
-    df = pd.DataFrame(response.json())
-
-    file_prefix = "file://///nas.ads.mwn.de/tume/ps0/_AGs/Arbeitsgruppe_Leucht/Meerkat_2020_10_19/PDFs/"
-    
-    df['PDF'] = file_prefix + df['ReportNumber'].astype(str).str.zfill(5) + ".pdf"
-
-    st.dataframe(df)
 
 if 'study_search_results' in st.session_state:
     tab1, tab2, tab3, tab4 = st.tabs(["Studies", "Interventions", "Conditions", "Outcomes"])
