@@ -43,7 +43,7 @@ options = ["Participants", "Intervention", "Condition", "Outcome"]
 col1, col2 = st.columns(2)
 
 selection = st.segmented_control(
-    "Aspect", options, selection_mode="single", default=options[0], label_visibility="hidden"
+    "Aspect", options, selection_mode="single", default=options[0], label_visibility="hidden", width="stretch"
 )
 placeholder = "Search string"
 if selection == options[0]:
