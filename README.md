@@ -52,6 +52,7 @@ This service is used to transform plain text into vector embeddings using a self
 `TOKENIZER_REVISION="6b211a8f4e27b904ab146da7d63a084c2fd94223"`
 `ASPECTS="participants,intervention,condition,outcome"`
 `MODEL_DIM=1024`
+`MODEL_MAX_INPUT_LENGTH=8192`
 If you use another model please adapt the parameters accordingly
 ## qdrant
 This is where all the vectores are stored to index the meerkat reports based on their similarity.

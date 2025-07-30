@@ -70,7 +70,7 @@ def visualize_available_batches():
             delete_batch(current_batch)
     
 def get_similar_studies(embedding, model, trial_id=None, linked_studies=[]):
-    payload = {"model_id": model, "report_embedding": embedding, "author_embedding":None}
+    payload = {"model_id": model, "main_embedding": embedding, "author_embedding":None}
     params = {"trial_id": trial_id}
     response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload, params=params, headers=get_headers())
 

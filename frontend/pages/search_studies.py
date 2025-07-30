@@ -14,7 +14,7 @@ current_model = None
 
 def get_embeddings(text):
     payload = {"text": text}
-    response = requests.post(BACKEND_API + "/embed/aspects", json=payload, headers=get_headers())
+    response = requests.post(BACKEND_API + "/embed/aspect", json=payload, headers=get_headers())
 
     if response.status_code == 200:
         data = response.json()
@@ -28,7 +28,7 @@ def get_embeddings(text):
         return None, None
     
 def get_similar_studies(embedding, model, aspect):
-    payload = {"embedding": embedding, "model_id": model}
+    payload = {"main_embedding": embedding, "author_embedding":None, "model_id": model}
     params = {"aspect":aspect}
     response = requests.post(BACKEND_API + f"/similarity_search/studies", json=payload, params=params, headers=get_headers())
 

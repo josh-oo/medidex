@@ -79,7 +79,7 @@ class AspectEmbedding(BaseModel):
 
 class ReportEmbedding(BaseModel):
     model_id: str
-    report_embedding: List[float]
+    main_embedding: List[float]
     author_embedding: Optional[List[float]]
     #text: Optional[str]
 
@@ -348,7 +348,7 @@ async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Qu
 
     search_results = client.query_points_groups(
         collection_name=embedding.model_id,
-        query=embedding.report_embedding,
+        query=embedding.main_embedding,
         using=aspect,
         group_by="belongs_to_study",  # Path of the field to group by
         limit=10,  # Max amount of groups
@@ -423,7 +423,7 @@ def embed_aspect(input: TextInput, channel = Depends(get_grpc_channel)):
 def _embed_aspect(input: TextInput, channel):
     token = secrets.token_urlsafe(8)
 
-    request = embedding_pb2.EmbedRequestAspect(id=token, aspects=[input.text])
+    request = embedding_pb2.EmbedAspectsRequest(id=token, aspects=[input.text])
 
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
 

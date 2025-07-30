@@ -472,7 +472,7 @@ def evaluate_with_cutoff(cutoff, model_id):
             text = response.json()[0]['Title'] + (" " + abstract) if abstract else ""
 
             ground_truth = ground_truth_filtered[0]
-            payload = {"text": text, "report_embedding": result[0].vector['default'],"participants_embedding": result[0].vector['intervention'], "author_embedding": result[0].vector['authors'], "model_id": model_id}
+            payload = {"text": text, "main_embedding": result[0].vector['default'],"participants_embedding": result[0].vector['intervention'], "author_embedding": result[0].vector['authors'], "model_id": model_id}
             params = {"cutoff":cutoff, "trial_id":trial_id, 'authors': authors}
             response = session.post(BACKEND_API + "/similarity_search/studies", json=payload,params=params)
             predicted_studies = response.json()['CRGStudyID']
