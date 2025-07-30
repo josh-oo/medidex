@@ -79,9 +79,9 @@ class AspectEmbedding(BaseModel):
 
 class ReportEmbedding(BaseModel):
     model_id: str
-    text: str
     report_embedding: List[float]
     author_embedding: Optional[List[float]]
+    #text: Optional[str]
 
 class RetrievalInputText(BaseModel):
     text: str
