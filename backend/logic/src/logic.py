@@ -212,21 +212,9 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     for i, result in enumerate(results):
         background_tasks.add_task(process_report, result, batch_hash, i)
 
-        #TODO study acronym
-    
-    # Fetch all rows from tmp_report_batches
-    #cursor = db.execute("SELECT * FROM tmp_report_batches")
-    #rows = cursor.fetchall()
-
-    # Optionally include column names (if you want dictionaries)
-    #column_names = [description[0] for description in cursor.description]
-    #all_batches = [dict(zip(column_names, row)) for row in rows]
-
-    #return all_batches
-
 async def get_batched_report(batch_hash: str, report_index : int, db = Depends(get_db)):
     query = """
-    SELECT title, abstract, authors, trial_id, vectors
+    SELECT title, abstract, authors, trial_id, vectors, assigned_studies
     FROM tmp_reports
     WHERE batch_hash = ?
     AND batch_inner_id = ?
@@ -238,10 +226,10 @@ async def get_batched_report(batch_hash: str, report_index : int, db = Depends(g
     item = {}
     item['title'] = rows[0]
     item['abstract'] = rows[1]
-    item['authors'] = json.loads(rows[2])
+    item['authors'] = json.loads(rows[2]) if rows[2] else []
     item['trial_id'] = rows[3]
-
     item['vectors'] = pickle.loads(rows[4])
+    item['assigned_studies'] = json.loads(rows[5]) if rows[5] else []
     return item
 
 async def get_available_batches(db = Depends(get_db)):
@@ -283,6 +271,18 @@ async def delete_batch(batch_hash):
     await write_queue.put((query, params, future))
     await future
 
+async def assign_studies(batch_hash: str, report_index: int, study_ids: List[int] = Query(...)):
+    future = asyncio.get_event_loop().create_future()
+    query = """
+    UPDATE tmp_reports
+    SET assigned_studies = ?
+    WHERE batch_hash = ?
+    AND batch_inner_id = ?;
+    """
+    params = (json.dumps(study_ids), batch_hash, report_index)
+    await write_queue.put((query, params, future))
+    await future
+
 async def extract_trial_id(raw_report: RawReport):
     ids = extract_trial_registration_ids(raw_report.title)
     if len(ids) == 1:
@@ -299,7 +299,6 @@ async def extract_trial_id(raw_report: RawReport):
             return ids[0]
     
     return None
-
 
 async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), client=Depends(get_vectorstore)):
     
@@ -347,74 +346,27 @@ async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Qu
             ]
         )
 
-    #prefetch = [models.Prefetch(query=embedding.report_embedding, using="default", limit=10),]
-
     search_results = client.query_points_groups(
         collection_name=embedding.model_id,
-        # Same as in the regular query_points() API
-        #prefetch=prefetch,
         query=embedding.report_embedding,
         using=aspect,
-        #query=embedding.author_embedding,
-        #using="authors",
-        # Grouping parameters
         group_by="belongs_to_study",  # Path of the field to group by
         limit=10,  # Max amount of groups
         group_size=1,  # Max amount of points per group
         query_filter=date_filter,
         with_payload=True,
-        #with_vectors=True,
     )
 
     reranked_results = search_results.groups
-    #print(reranked_results)
-    """
-    if authors:
-        print(reranked_results)
-        input_authors = set([author.replace(" ","").strip().lower() for author in authors])
-        print(input_authors)
-        def similarity(group):
-            study_authors = []
-            for point in group.hits:
-                study_authors.extend([author.replace(" ","").strip().lower() for author in point.payload['authors']])
-            
-            intersection = input_authors & set(study_authors)
-            res = float(len(intersection) > 0)
-            print(res)
-            print(study_authors)
-            return res
-        
-        reranked_results = sorted(reranked_results, key=similarity, reverse=True)
-        print(reranked_results)
-
-    def cos_similarity(vec1, vec2):
-        v1 = np.array(vec1)
-        v2 = np.array(vec2)
-        return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-
-    # Step 2: Rerank by author embedding
-    def rerank_by_author_similarity(groups, author_embedding):
-        def similarity(group):
-            all_sims = []
-            for point in group.hits:
-                sim = cos_similarity(point.vector['authors'], author_embedding)
-                #print(f"{point.payload['source_id']} - {sim}")
-                all_sims.append(sim)
-            return max(all_sims)
-        
-        return sorted(groups, key=similarity, reverse=True)
-
-    reranked_results = rerank_by_author_similarity(search_results.groups, embedding.author_embedding)
-    #"""
 
     found_study_ids = {}
-    #if trial_id:
-    #    async with httpx.AsyncClient() as client:
-    #        response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
-    #        response = response.json()
-    #        if response:
-    #            for result in response:
-    #                found_study_ids[result] = 10.00 #"100% (Trial ID)"
+    if trial_id:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
+            response = response.json()
+            if response:
+                for result in response:
+                    found_study_ids[result] = 10.00 #"100% (Trial ID)"
 
     studies_for_reranking = []
     for result in reranked_results:
@@ -424,74 +376,14 @@ async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Qu
                     studies_for_reranking.append(item)
                     found_study_ids[item] = hit.score
 
-    """
-    vectorizer = TfidfVectorizer(
-            max_features=1000,
-            stop_words='english',
-            ngram_range=(2,5),
-            analyzer="char",
-            norm=None,
-        )
-    all_reranking_texts = []
-    new_similarities = []
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/reports", params={'study_ids': studies_for_reranking, 'cutoff':cutoff})
-        for key in studies_for_reranking:
-            candidate_texts = []
-            #print(response.json())
-            value = response.json()[str(key)]
-            for item in value:
-                candidate_texts.append(f"{item['Title']} {item['Abstract'] if item['Abstract'] else ""}".strip())
-            #all_reranking_texts.append(candidate_text)
-            all_reranking_texts.append(" ".join(candidate_texts))
-        tfidf_candidates = vectorizer.fit_transform([embedding.text] + all_reranking_texts)
-        current_similarities = cosine_similarity(tfidf_candidates[:1], tfidf_candidates[1:])[0]
-        
-        for i, study_id in enumerate(studies_for_reranking):
-            similarity = current_similarities[i]
-            #similarity = np.max(current_similarities).item()
-
-            #print(embedding.text)
-            #print(key)
-            #print(candidate_texts)
-            #print(current_similarities)
-            #print()
-            #new_similarities.append(similarity)
-
-            found_study_ids[study_id] = similarity
-    """
-    #print(found_study_ids)
-    #print(old_similarities)
-    #print(new_similarities)
-
-    #tfidf_candidates = vectorizer.fit_transform(all_reranking_texts)
-    #tfidf_query = vectorizer.transform([embedding.text])
-
-    #similarities = cosine_similarity(tfidf_query, tfidf_candidates)[0]
-
-    #print(similarities)
-
-    #for study_id, new_value in zip(studies_for_reranking, similarities):
-    #    found_study_ids[study_id] = round(new_value * 100)
-    #    print(study_id, round(new_value * 100))
-
-    #rerank 
-    #found_study_ids = dict(sorted(found_study_ids.items(), key=lambda item: item[1], reverse=True))
-
-
     async with httpx.AsyncClient() as client:
         response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys())})
 
     result = response.json()
-    result['Relevance'] = list(found_study_ids.values())# + "%"
+    result['Relevance'] = list(found_study_ids.values())
 
-    #move relevance to the front
-    #order = ['CRGStudyID', 'Relevance', 'Short_name', 'Participants', 'Duration', 'Comparison', 'Countries', 'Date_entered', 'Date_edited', 'Status_of_study']
     order = ['CRGStudyID', 'Relevance', 'ShortName', 'NumberParticipants', 'Duration', 'Comparison', 'Countries', 'DateEntered', 'DateEdited', 'StatusofStudy']
     reordered = {key: result[key] for key in order}
-
-    #print(found_study_ids)
-    #print(reordered['CRGStudyID'])
 
     if DEBUG:
         reordered['debug'] = reranked_results

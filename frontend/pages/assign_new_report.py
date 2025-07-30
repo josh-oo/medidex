@@ -5,6 +5,8 @@ import os
 from dotenv import load_dotenv
 from utils.login import show_logout, get_headers
 
+import re
+
 load_dotenv()
 
 BACKEND_API = os.getenv('BACKEND_API')
@@ -67,15 +69,15 @@ def visualize_available_batches():
         if st.button("Delete selected batch", use_container_width=True, type='primary'):
             delete_batch(current_batch)
     
-def get_similar_studies(embedding, model, trial_id=None):
+def get_similar_studies(embedding, model, trial_id=None, linked_studies=[]):
     payload = {"model_id": model, "report_embedding": embedding, "author_embedding":None}
     params = {"trial_id": trial_id}
     response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload, params=params, headers=get_headers())
 
     if response.status_code == 200:
         df = pd.DataFrame(response.json())
+        df['Linked'] = [candidate in linked_studies for candidate in df['CRGStudyID']]
         df['CRGStudyID'] = './study?id=' + df['CRGStudyID'].astype(str) + "&token=" + st.session_state['access_token']
-        df['Linked'] = False
         return df
     else:
         print("Request failed:", response.status_code, response.text)
@@ -91,6 +93,35 @@ def get_similar_tags(embedding, model, sources, tag):
     else:
         print("Request failed:", response.status_code, response.text)
         return None
+    
+def update_selected_studies(selected_studies, current_batch, report_index):
+    selected_studies_cleaned = []
+    for study in selected_studies:
+        match = re.search(r"\.\/study\?id=([^&]+)&token", study)
+        selected_studies_cleaned.append(int(match.group(1)))
+
+    if len(selected_studies_cleaned) == 0:
+        return
+
+    response = requests.put(BACKEND_API + f"/batches/{current_batch}/{report_index}/studies", headers=get_headers(), params={'study_ids': selected_studies_cleaned})
+    if response.status_code != 200:
+        st.exception(response.text)
+
+def reload_data():
+    response = requests.get(BACKEND_API + f"/batches/{current_batch}/{st.session_state['report_index']}", headers=get_headers())
+    if response.status_code != 200:
+        st.exception(response.text)
+
+    selected_report = response.json()
+    st.session_state['selected_report'] = selected_report
+
+    current_model = selected_report['vectors']['model_id']
+    current_trial_id = selected_report['trial_id']
+
+    st.session_state['study_search_results'] = get_similar_studies(selected_report['vectors']['embedding'], current_model, trial_id=current_trial_id, linked_studies=selected_report['assigned_studies'])
+    st.session_state['intervention_search_results'] = get_similar_tags(selected_report['vectors']['intervention'], current_model, tag_sources, "interventions")
+    st.session_state['condition_search_results'] = get_similar_tags(selected_report['vectors']['condition'], current_model, tag_sources,"conditions")
+    st.session_state['outcome_search_results'] = get_similar_tags(selected_report['vectors']['outcome'], current_model, tag_sources,"outcomes")
 
 with st.sidebar:
     visualize_available_batches()
@@ -108,22 +139,6 @@ with st.sidebar:
         st.switch_page(st.Page("pages/settings.py", title="Settings", icon=":material/settings:"))
     st.divider()
     show_logout()
-
-def reload_data():
-    response = requests.get(BACKEND_API + f"/batches/{current_batch}/{st.session_state['report_index']}", headers=get_headers())
-    if response.status_code != 200:
-        st.exception(response.text)
-
-    selected_report = response.json()
-    st.session_state['selected_report'] = response.json()
-
-    current_model = selected_report['vectors']['model_id']
-    current_trial_id = selected_report['trial_id']
-
-    st.session_state['study_search_results'] = get_similar_studies(selected_report['vectors']['embedding'], current_model, trial_id=current_trial_id)
-    st.session_state['intervention_search_results'] = get_similar_tags(selected_report['vectors']['intervention'], current_model, tag_sources, "interventions")
-    st.session_state['condition_search_results'] = get_similar_tags(selected_report['vectors']['condition'], current_model, tag_sources,"conditions")
-    st.session_state['outcome_search_results'] = get_similar_tags(selected_report['vectors']['outcome'], current_model, tag_sources,"outcomes")
 
 if current_batch_size is not None:
     st.number_input("Select a report", value=0, min_value=0, max_value=current_batch_size - 1, step=1, on_change=reload_data, key='report_index')
@@ -162,6 +177,8 @@ if 'study_search_results' in st.session_state:
         if 'study_search_results' in st.session_state:
             columns = st.session_state['study_search_results'].columns[:-1]
             new_df = st.data_editor(st.session_state['study_search_results'], hide_index=True, disabled=columns, column_config={ "Linked": st.column_config.CheckboxColumn("Linked",help="Select your the **corresponding** studies", pinned=True, disabled=False), "CRGStudyID": st.column_config.LinkColumn("CRGStudyID", pinned=True, display_text=r"\.\/study\?id=(.+)&token")})
+            selected_studies = new_df[new_df['Linked']]['CRGStudyID']
+            update_selected_studies(selected_studies, current_batch, st.session_state['report_index'])
         else:
             st.write("No search results")
 
