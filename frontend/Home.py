@@ -19,7 +19,6 @@ assign_new_report = st.Page("pages/assign_new_report.py", title="Assign new repo
 search_studies = st.Page("pages/search_studies.py", title="Search studies", icon=":material/search:")
 
 settings = st.Page("pages/settings.py", title="Settings", icon=":material/settings:")
-study = st.Page("pages/study.py", title="Study details", icon=":material/menu_book:")
 
 logged_out_pages = [login]
 
@@ -30,12 +29,11 @@ logged_in_pages = {
     ],
     "Admin Panel": [
         settings,
-        study,
     ],
 }
 
 if "access_token" in st.session_state:
-    pg = st.navigation(logged_in_pages, position="hidden")
+    pg = st.navigation(logged_in_pages)
 else:
     pg = st.navigation(logged_out_pages, position="hidden")
 

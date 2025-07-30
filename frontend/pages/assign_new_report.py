@@ -77,7 +77,7 @@ def get_similar_studies(embedding, model, trial_id=None, linked_studies=[]):
     if response.status_code == 200:
         df = pd.DataFrame(response.json())
         df['Linked'] = [candidate in linked_studies for candidate in df['CRGStudyID']]
-        df['CRGStudyID'] = './study?id=' + df['CRGStudyID'].astype(str) + "&token=" + st.session_state['access_token']
+        #df['CRGStudyID'] = './study?id=' + df['CRGStudyID'].astype(str) + "&token=" + st.session_state['access_token']
         return df
     else:
         print("Request failed:", response.status_code, response.text)
@@ -95,10 +95,10 @@ def get_similar_tags(embedding, model, sources, tag):
         return None
     
 def update_selected_studies(selected_studies, current_batch, report_index):
-    selected_studies_cleaned = []
-    for study in selected_studies:
-        match = re.search(r"\.\/study\?id=([^&]+)&token", study)
-        selected_studies_cleaned.append(int(match.group(1)))
+    selected_studies_cleaned = selected_studies#[]
+    #for study in selected_studies:
+    #    match = re.search(r"\.\/study\?id=([^&]+)&token", study)
+    #    selected_studies_cleaned.append(int(match.group(1)))
 
     if len(selected_studies_cleaned) == 0:
         return
@@ -132,13 +132,6 @@ with st.sidebar:
         max_selections=2,
         accept_new_options=False,
     )
-    st.divider()
-    if st.button("Switch to manual search", use_container_width=True):
-        st.switch_page(st.Page("pages/search_studies.py", title="Search studies", icon=":material/search:"))
-    if st.button("Settings", use_container_width=True):
-        st.switch_page(st.Page("pages/settings.py", title="Settings", icon=":material/settings:"))
-    st.divider()
-    show_logout()
 
 if current_batch_size is not None:
     st.number_input("Select a report", value=0, min_value=0, max_value=current_batch_size - 1, step=1, on_change=reload_data, key='report_index')
@@ -170,15 +163,32 @@ if current_batch_size is not None:
     if display_abstract:
         st.markdown(display_abstract)
 
+def view_study_details(study_id):
+    response = requests.get(BACKEND_API + f"/study/{study_id}/reports", headers=get_headers())
+
+    if response.status_code != 200:
+        st.error("Error: " + response.text)
+    
+    df = pd.DataFrame(response.json())
+
+    file_prefix = "file://///nas.ads.mwn.de/tume/ps0/_AGs/Arbeitsgruppe_Leucht/Meerkat_2020_10_19/PDFs/"
+    
+    df['PDF'] = file_prefix + df['ReportNumber'].astype(str).str.zfill(5) + ".pdf"
+
+    st.dataframe(df)
+
 if 'study_search_results' in st.session_state:
     tab1, tab2, tab3, tab4 = st.tabs(["Studies", "Interventions", "Conditions", "Outcomes"])
 
     with tab1:
         if 'study_search_results' in st.session_state:
             columns = st.session_state['study_search_results'].columns[:-1]
-            new_df = st.data_editor(st.session_state['study_search_results'], hide_index=True, disabled=columns, column_config={ "Linked": st.column_config.CheckboxColumn("Linked",help="Select your the **corresponding** studies", pinned=True, disabled=False), "CRGStudyID": st.column_config.LinkColumn("CRGStudyID", pinned=True, display_text=r"\.\/study\?id=(.+)&token")})
+            new_df = st.data_editor(st.session_state['study_search_results'], hide_index=True, disabled=columns, column_config={ "Linked": st.column_config.CheckboxColumn("Linked",help="Select your the **corresponding** studies", pinned=True, disabled=False)})#, "CRGStudyID": st.column_config.LinkColumn("CRGStudyID", pinned=True, display_text=r"\.\/study\?id=(.+)&token")})
             selected_studies = new_df[new_df['Linked']]['CRGStudyID']
             update_selected_studies(selected_studies, current_batch, st.session_state['report_index'])
+
+            selected_study = st.selectbox("Study details: ", new_df['CRGStudyID'])
+            view_study_details(selected_study)
         else:
             st.write("No search results")
 

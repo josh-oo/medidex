@@ -96,7 +96,7 @@ def get_studies(study_ids: List[int] = Query(...), db: sqlite3.Connection = Depe
 
 @app.get("/study/{study_id}/reports")
 def get_study_reports_by_id(study_id: int, db: sqlite3.Connection = Depends(get_db)):
-    return get_study_reports_by_ids(study_ids=[study_id], fields=None, db=db)[study_id]
+    return get_study_reports_by_ids(study_ids=[study_id], fields=None, cutoff=None, db=db)[study_id]
 
 @app.get("/study/reports")
 def get_study_reports_by_ids(

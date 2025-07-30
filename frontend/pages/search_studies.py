@@ -69,11 +69,3 @@ if st.button("Search", icon=":material/search:", use_container_width=True,  key=
 if study_search_results is not None:
     st.dataframe(study_search_results)
 
-with st.sidebar:
-    if st.button("Switch to report assignment", use_container_width=True):
-        st.switch_page(st.Page("pages/assign_new_report.py", title="Assign new reports", icon=":material/add_circle:"))
-    if st.button("Settings", use_container_width=True):
-        st.switch_page(st.Page("pages/settings.py", title="Settings", icon=":material/settings:"))
-    st.divider()
-    show_logout()
-

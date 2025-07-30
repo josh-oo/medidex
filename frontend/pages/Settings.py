@@ -105,10 +105,5 @@ if "role" in st.session_state and st.session_state['role'] == "admin":
             update_user(selected_user, selected_attribute, value)
 
 with st.sidebar:
-    if st.button("Switch to report assignment", use_container_width=True):
-        st.switch_page(st.Page("pages/assign_new_report.py", title="Assign new reports", icon=":material/add_circle:"))
-    if st.button("Switch to manual search", use_container_width=True):
-        st.switch_page(st.Page("pages/search_studies.py", title="Search studies", icon=":material/search:"))
-    st.divider()
     show_logout()
 
