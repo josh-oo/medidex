@@ -97,12 +97,17 @@ def get_similar_tags(embedding, model, sources, tag):
         return None
     
 def update_selected_studies(selected_studies, current_batch, report_index):
-    selected_studies_cleaned = selected_studies
 
-    if len(selected_studies_cleaned) == 0:
+    if selected_studies is None:
+        response = requests.delete(BACKEND_API + f"/batches/{current_batch}/{report_index}/studies", headers=get_headers())
+        if response.status_code != 200:
+            st.exception(response.text)
         return
 
-    response = requests.put(BACKEND_API + f"/batches/{current_batch}/{report_index}/studies", headers=get_headers(), params={'study_ids': selected_studies_cleaned})
+    if len(selected_studies) == 0:
+        return
+
+    response = requests.put(BACKEND_API + f"/batches/{current_batch}/{report_index}/studies", headers=get_headers(), params={'study_ids': selected_studies})
     if response.status_code != 200:
         st.exception(response.text)
 
@@ -179,13 +184,23 @@ if st.session_state.get('selected_report', None):
         study_search_result = get_similar_studies(selected_report['vectors']['embedding'], selected_report['vectors']['model_id'], trial_id=selected_report['trial_id'], linked_studies=selected_report['assigned_studies'], k=st.session_state['top_k'])
 
         if study_search_result is not None:
+            is_new_study = selected_report['assigned_studies'] == [-1]
             columns = study_search_result.columns[:-1]
-            new_df = st.data_editor(study_search_result, hide_index=True, disabled=columns, column_config={ "Linked": st.column_config.CheckboxColumn("Linked",help="Select your the **corresponding** studies", pinned=True, disabled=False), "debug": st.column_config.JsonColumn()})#, "CRGStudyID": st.column_config.LinkColumn("CRGStudyID", pinned=True, display_text=r"\.\/study\?id=(.+)&token")})
+            new_df = st.data_editor(study_search_result, hide_index=True, disabled=columns, column_config={ "Linked": st.column_config.CheckboxColumn("Linked", pinned=True, disabled=is_new_study), "debug": st.column_config.JsonColumn()})#, "CRGStudyID": st.column_config.LinkColumn("CRGStudyID", pinned=True, display_text=r"\.\/study\?id=(.+)&token")})
             selected_studies = new_df[new_df['Linked']]['CRGStudyID']
             update_selected_studies(selected_studies, current_batch, st.session_state['report_index'])
 
             if st.button("Load more ...", use_container_width=True):
                 st.session_state['top_k'] = st.session_state['top_k'] + DEFAULT_TOP_K
+                st.rerun()
+
+            if not is_new_study and st.button("Belongs to a new study", use_container_width=True, type= "secondary"):
+                update_selected_studies([-1], current_batch, st.session_state['report_index'])
+                selected_report['assigned_studies'] = [-1]
+                st.rerun()
+            if is_new_study and st.button("Belongs to a new study", use_container_width=True, type= "primary"):
+                update_selected_studies(None, current_batch, st.session_state['report_index'])
+                selected_report['assigned_studies'] = []
                 st.rerun()
 
             selected_study = st.selectbox("Study details: ", new_df['CRGStudyID'])

@@ -283,6 +283,18 @@ async def assign_studies(batch_hash: str, report_index: int, study_ids: List[int
     await write_queue.put((query, params, future))
     await future
 
+async def delete_assigned_studies(batch_hash: str, report_index: int):
+    future = asyncio.get_event_loop().create_future()
+    query = """
+    UPDATE tmp_reports
+    SET assigned_studies = ?
+    WHERE batch_hash = ?
+    AND batch_inner_id = ?;
+    """
+    params = (None, batch_hash, report_index)
+    await write_queue.put((query, params, future))
+    await future
+
 async def extract_trial_id(raw_report: RawReport):
     ids = extract_trial_registration_ids(raw_report.title)
     if len(ids) == 1:

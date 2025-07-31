@@ -12,7 +12,7 @@ from src.logic import analyze_text, analyze_embedding
 
 from src.logic import startup_event as logic_startup_event
 
-from src.logic import assign_studies
+from src.logic import assign_studies, delete_assigned_studies
 
 # Initialize FastAPI
 app = FastAPI()
@@ -43,6 +43,10 @@ async def logic_delete_batch(result = Depends(delete_batch)):
 
 @app.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)])
 async def logic_assign_studies(result = Depends(assign_studies)):
+    return result
+
+@app.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)])
+async def logic_delete_assigned_studies(result = Depends(delete_assigned_studies)):
     return result
 
 @app.post("/extract_trial_id", dependencies=[Depends(is_verified)])
