@@ -3,13 +3,13 @@ import pandas as pd
 import requests
 import os
 from dotenv import load_dotenv
-from utils.login import show_logout, get_headers
-
-import re
+from utils.login import get_headers
 
 load_dotenv()
 
 BACKEND_API = os.getenv('BACKEND_API')
+
+DEFAULT_TOP_K = 10
 
 current_batch = None
 current_batch_size = None
@@ -68,10 +68,11 @@ def visualize_available_batches():
     if current_batch is not None:
         if st.button("Delete selected batch", use_container_width=True, type='primary'):
             delete_batch(current_batch)
-    
-def get_similar_studies(embedding, model, trial_id=None, linked_studies=[]):
+
+@st.cache_data(max_entries=1)
+def get_similar_studies(embedding, model, trial_id=None, linked_studies=[], k=10):
     payload = {"model_id": model, "main_embedding": embedding, "author_embedding":None}
-    params = {"trial_id": trial_id}
+    params = {"trial_id": trial_id, "k": k}
     response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload, params=params, headers=get_headers())
 
     if response.status_code == 200:
@@ -83,6 +84,7 @@ def get_similar_studies(embedding, model, trial_id=None, linked_studies=[]):
         print("Request failed:", response.status_code, response.text)
         return None
 
+@st.cache_data(max_entries=1)
 def get_similar_tags(embedding, model, sources, tag):
     payload = {"embedding": embedding, "model_id": model}
     params = {"type": tag, "sources": [source.lower() for source in sources]}
@@ -126,14 +128,7 @@ def reload_data():
 
     selected_report = response.json()
     st.session_state['selected_report'] = selected_report
-
-    current_model = selected_report['vectors']['model_id']
-    current_trial_id = selected_report['trial_id']
-
-    st.session_state['study_search_results'] = get_similar_studies(selected_report['vectors']['embedding'], current_model, trial_id=current_trial_id, linked_studies=selected_report['assigned_studies'])
-    st.session_state['intervention_search_results'] = get_similar_tags(selected_report['vectors']['intervention'], current_model, tag_sources, "interventions")
-    st.session_state['condition_search_results'] = get_similar_tags(selected_report['vectors']['condition'], current_model, tag_sources,"conditions")
-    st.session_state['outcome_search_results'] = get_similar_tags(selected_report['vectors']['outcome'], current_model, tag_sources,"outcomes")
+    st.session_state['top_k'] = DEFAULT_TOP_K
 
 with st.sidebar:
     visualize_available_batches()
@@ -169,21 +164,29 @@ if current_batch_size is not None:
             if trial_registration_id in author:
                 display_authors[i] = author.replace(trial_registration_id, "`" + trial_registration_id + "`")
 
-    st.markdown("## " + display_title)
+    st.markdown("### " + display_title)
     if display_authors:
         st.markdown(" *and* ".join(display_authors))
     if display_abstract:
         st.markdown(display_abstract)
 
-if 'study_search_results' in st.session_state:
+if st.session_state.get('selected_report', None):
+    selected_report = st.session_state['selected_report']
+
     tab1, tab2, tab3, tab4 = st.tabs(["Studies", "Interventions", "Conditions", "Outcomes"])
 
     with tab1:
-        if 'study_search_results' in st.session_state:
-            columns = st.session_state['study_search_results'].columns[:-1]
-            new_df = st.data_editor(st.session_state['study_search_results'], hide_index=True, disabled=columns, column_config={ "Linked": st.column_config.CheckboxColumn("Linked",help="Select your the **corresponding** studies", pinned=True, disabled=False)})#, "CRGStudyID": st.column_config.LinkColumn("CRGStudyID", pinned=True, display_text=r"\.\/study\?id=(.+)&token")})
+        study_search_result = get_similar_studies(selected_report['vectors']['embedding'], selected_report['vectors']['model_id'], trial_id=selected_report['trial_id'], linked_studies=selected_report['assigned_studies'], k=st.session_state['top_k'])
+
+        if study_search_result is not None:
+            columns = study_search_result.columns[:-1]
+            new_df = st.data_editor(study_search_result, hide_index=True, disabled=columns, column_config={ "Linked": st.column_config.CheckboxColumn("Linked",help="Select your the **corresponding** studies", pinned=True, disabled=False), "debug": st.column_config.JsonColumn()})#, "CRGStudyID": st.column_config.LinkColumn("CRGStudyID", pinned=True, display_text=r"\.\/study\?id=(.+)&token")})
             selected_studies = new_df[new_df['Linked']]['CRGStudyID']
             update_selected_studies(selected_studies, current_batch, st.session_state['report_index'])
+
+            if st.button("Load more ...", use_container_width=True):
+                st.session_state['top_k'] = st.session_state['top_k'] + DEFAULT_TOP_K
+                st.rerun()
 
             selected_study = st.selectbox("Study details: ", new_df['CRGStudyID'])
             view_study_details(selected_study)
@@ -191,19 +194,22 @@ if 'study_search_results' in st.session_state:
             st.write("No search results")
 
     with tab2:
-        if 'intervention_search_results' in st.session_state:
-            st.dataframe(st.session_state['intervention_search_results'])
+        intervention_search_results = get_similar_tags(selected_report['vectors']['intervention'], selected_report['vectors']['model_id'], tag_sources, "interventions")
+        if intervention_search_results is not None:
+            st.dataframe(intervention_search_results)
         else:
             st.write("No search results")
 
     with tab3:
-        if 'condition_search_results' in st.session_state:
-            st.dataframe(st.session_state['condition_search_results'])
+        condition_search_results = get_similar_tags(selected_report['vectors']['condition'], selected_report['vectors']['model_id'], tag_sources,"conditions")
+        if condition_search_results is not None:
+            st.dataframe(condition_search_results)
         else:
             st.write("No search results")
 
     with tab4:
-        if 'outcome_search_results' in st.session_state:
-            st.dataframe(st.session_state['outcome_search_results'])
+        outcome_search_results = get_similar_tags(selected_report['vectors']['outcome'], selected_report['vectors']['model_id'], tag_sources,"outcomes")
+        if outcome_search_results is not None:
+            st.dataframe(outcome_search_results)
         else:
             st.write("No search results")

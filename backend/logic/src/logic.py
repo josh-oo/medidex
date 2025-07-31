@@ -300,7 +300,7 @@ async def extract_trial_id(raw_report: RawReport):
     
     return None
 
-async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), client=Depends(get_vectorstore)):
+async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), k : int = Query(10), client=Depends(get_vectorstore)):
     
     #TODO implement more sophisticated tree based search here
 
@@ -324,7 +324,7 @@ async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] 
     search_results = client.query_points(
         collection_name=embedding.model_id + "_tags",
         query=embedding.embedding,
-        limit=10,
+        limit=k,
         query_filter=filter,
     )
 
@@ -337,7 +337,7 @@ async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] 
 
     return results
 
-async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), client=Depends(get_vectorstore)):
+async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore)):
     date_filter = Filter()
     if cutoff:
         date_filter = Filter(
@@ -351,7 +351,7 @@ async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Qu
         query=embedding.main_embedding,
         using=aspect,
         group_by="belongs_to_study",  # Path of the field to group by
-        limit=10,  # Max amount of groups
+        limit=k,  # Max amount of groups
         group_size=1,  # Max amount of points per group
         query_filter=date_filter,
         with_payload=True,
@@ -360,21 +360,23 @@ async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Qu
     reranked_results = search_results.groups
 
     found_study_ids = {}
+    debug_map = {}
+
     if trial_id:
         async with httpx.AsyncClient() as client:
             response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
             response = response.json()
             if response:
                 for result in response:
-                    found_study_ids[result] = 10.00 #"100% (Trial ID)"
+                    found_study_ids[result] = 1.0
+                    debug_map[item] = "Trial ID"
 
-    studies_for_reranking = []
     for result in reranked_results:
         for hit in result.hits:
             for item in hit.payload['belongs_to_study']:
                 if item not in found_study_ids:
-                    studies_for_reranking.append(item)
                     found_study_ids[item] = hit.score
+                debug_map[item] = debug_map.get(item, []) + [hit.payload]
 
     async with httpx.AsyncClient() as client:
         response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys())})
@@ -386,7 +388,7 @@ async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Qu
     reordered = {key: result[key] for key in order}
 
     if DEBUG:
-        reordered['debug'] = reranked_results
+        reordered['debug'] = [list({d['source_id']: d for d in debug_map[key]}.values()) for key in reordered['CRGStudyID']]
 
     return reordered
 
