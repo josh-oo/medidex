@@ -31,6 +31,8 @@ import hashlib
 import json
 import pickle
 
+import numpy as np
+
 #from sklearn.feature_extraction.text import TfidfVectorizer
 #from sklearn.metrics.pairwise import cosine_similarity
 #import numpy as np
@@ -81,16 +83,19 @@ class ReportEmbedding(BaseModel):
     model_id: str
     main_embedding: List[float]
     author_embedding: Optional[List[float]]
+    #participants_embedding: Optional[List[float]]
     #text: Optional[str]
 
 class RetrievalInputText(BaseModel):
-    text: str
+    title: str
+    abstract: Optional[str]
+    authors: Optional[List[str]]
     topK: int
 
 class RetrievalInputEmbedding(BaseModel):
+    basic_input: RetrievalInputText
     embeddings: dict
     model_id: str
-    topK: int
 
 async def startup_event():
     # Start background worker
@@ -349,60 +354,179 @@ async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] 
 
     return results
 
-async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore)):
-    date_filter = Filter()
-    if cutoff:
-        date_filter = Filter(
-            must=[
-                FieldCondition(key="date_entered",range=DatetimeRange(lt=datetime.fromisoformat(cutoff)))
-            ]
-        )
-
-    search_results = client.query_points_groups(
-        collection_name=embedding.model_id,
-        query=embedding.main_embedding,
-        using=aspect,
-        group_by="belongs_to_study",  # Path of the field to group by
-        limit=k,  # Max amount of groups
-        group_size=1,  # Max amount of points per group
-        query_filter=date_filter,
-        with_payload=True,
-    )
-
-    reranked_results = search_results.groups
-
+async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), channel = Depends(get_grpc_channel), return_details=False):
+    
     found_study_ids = {}
     debug_map = {}
 
+    return_details= return_details or DEBUG
+    
+    filters = []
+    if cutoff:
+        filters.append(Filter(
+            must=[
+                FieldCondition(key="date_entered",range=DatetimeRange(lt=datetime.fromisoformat(cutoff)))
+            ]
+        ))        
+    
     if trial_id:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
+        async with httpx.AsyncClient() as api_client:
+            response = await  api_client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
             response = response.json()
             if response:
                 for result in response:
                     found_study_ids[result] = 1.0
-                    debug_map[item] = "Trial ID"
+                    debug_map[result] = [{"source_id":trial_id}]
 
-    for result in reranked_results:
-        for hit in result.hits:
-            for item in hit.payload['belongs_to_study']:
-                if item not in found_study_ids:
-                    found_study_ids[item] = hit.score
-                debug_map[item] = debug_map.get(item, []) + [hit.payload]
+            filters.append(
+                    models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="belongs_to_trial_id",
+                                match=models.MatchValue(value=False)
+                            )
+                        ],
+                        must_not=[
+                            models.FieldCondition(
+                                key="belongs_to_study",
+                                match=models.MatchAny(any=list(found_study_ids.keys()))
+                            )
+                        ]
+                    )
+                )
+    
+    filter = models.Filter(must=filters)
+
+    k = k - len(found_study_ids.keys())
+
+    if k > 0:
+        search_results = client.query_points_groups(
+            collection_name=embedding.model_id,
+            query=embedding.main_embedding,
+            using=aspect,
+            group_by="belongs_to_study",  # Path of the field to group by
+            limit=k,  # Max amount of groups
+            group_size=1,  # Max amount of points per group
+            query_filter=filter,
+            with_payload=True,
+            #with_vectors=True,
+        )
+
+        reranked_results = search_results.groups
+
+        for result in reranked_results:
+            for hit in result.hits:
+                for item in hit.payload['belongs_to_study']:
+                    if item not in found_study_ids:
+                        found_study_ids[item] = hit.score
+                    debug_map[item] = debug_map.get(item, []) + [hit.payload]
+
+    # def cosine_similarity(a, b):        
+    #     # Compute dot product
+    #     dot_product = np.dot(a, b)
+        
+    #     # Compute norms
+    #     norm_a = np.linalg.norm(a)
+    #     norm_b = np.linalg.norm(b)
+        
+    #     # Avoid division by zero
+    #     if norm_a == 0 or norm_b == 0:
+    #         return 0.0
+        
+    #     # Return cosine similarity
+    #     return dot_product / (norm_a * norm_b)
+
+    """
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/reports", params={'study_ids': list(found_study_ids.keys()), 'fields': ['Title', 'Abstract'], 'cutoff': cutoff})
+
+        for key, values in response.json().items():
+            all_embeddings = []
+            for value in values:
+                text_input = TextInput(text=value['Title'] + (" " + value['Abstract']) if value['Abstract'] else "")
+                embedding_ = _embed_report(text_input, channel=channel)['embedding']
+                all_embeddings.append(np.array(embedding_))
+            mean_embedding = np.mean(np.stack(all_embeddings), axis=0)
+            new_sim = cosine_similarity(mean_embedding, np.array(embedding.main_embedding))
+            found_study_ids[int(key)] = new_sim
+
+    found_study_ids = dict(sorted(found_study_ids.items(), key=lambda item: item[1], reverse=True))
+    """
 
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys())})
-
+        response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys()), "cutoff": cutoff})
     result = response.json()
+
+    #Remove this block for evaluation without authors
+    scores_authors = await get_scores_authors(report_authors=authors, study_ids=list(found_study_ids.keys()), cutoff=cutoff)
+    for study_id, score in scores_authors.items():
+        if found_study_ids[study_id] < 1.0:
+            found_study_ids[study_id] = min(0.99, found_study_ids[study_id] + score)
+
+    #async with httpx.AsyncClient() as client:
+    #    response_persons = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/persons", params={'study_ids': list(found_study_ids.keys()), "cutoff": cutoff})
+    #persons = response_persons.json()
+    
+    #authors = set([author.strip().lower() for author in authors])
+    #for study_id in found_study_ids.keys():
+    #    study_persons = persons[str(study_id)]
+    #    intersection = authors & set(study_persons)
+    #    new_sim = len(intersection) / len(study_persons) if len(study_persons) > 0 else 0
+    #    found_study_ids[study_id] = min(0.99, found_study_ids[study_id] + new_sim)
+        #print()
+        #print("Intersections: ", intersection)
+        #print()
+    #    if found_study_ids[study_id] > 0.99:
+    #        continue
+
+    #for study_id, participants in zip(result['CRGStudyID'], result['NumberParticipants']):
+    #    if found_study_ids[study_id] > 0.99:
+    #        continue
+    #    embedding_ = _embed_aspect(TextInput(text=str(participants)), channel=channel)['embedding']
+    #    new_sim = cosine_similarity(embedding_, np.array(embedding.main_embedding))
+    #    found_study_ids[study_id] = min(0.99, found_study_ids[study_id] + new_sim)
+    #    #print(study_id, new_sim)
+
     result['Relevance'] = list(found_study_ids.values())
 
     order = ['CRGStudyID', 'Relevance', 'ShortName', 'NumberParticipants', 'Duration', 'Comparison', 'Countries', 'DateEntered', 'DateEdited', 'StatusofStudy']
     reordered = {key: result[key] for key in order}
 
-    if DEBUG:
-        reordered['debug'] = [list({d['source_id']: d for d in debug_map[key]}.values()) for key in reordered['CRGStudyID']]
+    if return_details:
+        reordered['details'] = [list({d['source_id']: d for d in debug_map[key]}.values()) for key in reordered['CRGStudyID']]
+
+    sorted_indices = sorted(range(len(reordered['Relevance'])), key=lambda i: reordered['Relevance'][i], reverse=True)
+    for k in reordered:
+        reordered[k] = [reordered[k][i] for i in sorted_indices]
 
     return reordered
+
+async def get_scores_authors(report_authors: List[str], study_ids: List[int], cutoff: str):
+    async with httpx.AsyncClient() as client:
+        tasks = [
+            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/persons", params={'study_ids': study_ids, "cutoff": cutoff}),
+            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/authors/frequencies", params={'authors': report_authors}),
+            ]
+        responses =  await asyncio.gather(*tasks)
+    study_persons = responses[0].json()
+    current_persons = responses[1].json()
+    report_authors = set(current_persons.keys())
+
+    result = {}
+    num_report_authors = len(report_authors)
+    if num_report_authors == 0:
+        print(report_authors)
+        return {}
+    for study_id, study_authors in study_persons.items():
+        total_score = 0
+        num_total_authors = len(study_authors) + num_report_authors
+        intersection = set(study_authors) & report_authors
+        for matching_author in intersection:
+            total_score += 1 / current_persons[matching_author]
+        total_score = total_score / num_total_authors if num_total_authors > 0 else 0
+        result[int(study_id)] = total_score
+
+    return result
 
 def single_element_generator(element):
     yield element
@@ -460,18 +584,19 @@ def get_all_reports_by_study(study_id: int):
         response.raise_for_status()  # Optional: raises on 4xx/5xx
         return response.json()
     
-async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), vectorstore=Depends(get_vectorstore)):
-    result = await analyze(vectorstore, input.embeddings, input.model_id, input.topK, cutoff)
+async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), trial_id: str = Query(None), vectorstore=Depends(get_vectorstore)):
+    result = await analyze(vectorstore, input.embeddings, input.model_id, input.basic_input.topK, input.basic_input.title, input.basic_input.abstract, input.basic_input.authors, cutoff)
     return result
 
-async def analyze_text(input: RetrievalInputText, cutoff: str = Query(None), vectorstore=Depends(get_vectorstore), channel=Depends(get_grpc_channel)):    
-    text_input = TextInput(text=input.text)
+async def analyze_text(input: RetrievalInputText, cutoff: str = Query(None), trial_id: str = Query(None), vectorstore=Depends(get_vectorstore), channel=Depends(get_grpc_channel)):    
+    text_input = TextInput(text=input.title + " " + input.abstract)
     embedding_results = _embed_report(text_input, channel)
 
-    result = await analyze(vectorstore, embedding_results, embedding_results['model_id'], input.topK, cutoff)
+    result = await analyze(vectorstore, embedding_results, embedding_results['model_id'], input.topK, input.title, input.abstract, input.authors, cutoff,)
     return result
 
-async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
+async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, authors, cutoff):
+    """
     date_filter = Filter()
     if cutoff:
         date_filter = Filter(
@@ -496,6 +621,14 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
             report_hit = hit.payload['source_id']
             for item in hit.payload['belongs_to_study']:
                 found_study_ids[item] = {'score': hit.score, 'report_hit': report_hit}
+    """
+    trial_id = await extract_trial_id(RawReport(title=title,abstract=abstract, authors=[]))
+    report_embeddings =  ReportEmbedding(model_id=model_id, main_embedding=embeddings['embedding'], author_embedding=None)
+    pre_result = await similarity_search_studies(report_embeddings, aspect="default", trial_id=trial_id, authors=None,cutoff=cutoff, k=top_k, client=vectorstore,channel=None, return_details=True)
+
+    found_study_ids = {}
+    for key, score, details in zip(pre_result['CRGStudyID'], pre_result['Relevance'], pre_result['details']):
+        found_study_ids[key] = {'score': score, 'report_hit': details[0]['source_id']}
 
     result = {}
     result['related_studies'] = []
@@ -567,7 +700,7 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
         
             result['related_studies'].append(study_item)
 
-    def search_related_tags(allowed_ids, type_embedding, type_vectorstore):
+    async def search_related_tags(allowed_ids, type_embedding, type_vectorstore):
 
         if len(allowed_ids) == 0:
             return []
@@ -590,15 +723,23 @@ async def analyze(vectorstore, embeddings, model_id, top_k, cutoff):
         related_tags = []
         for point in tag_results.points:
             item = {}
-            item['name'] = point.payload['display_name']
+            #item['name'] = point.payload['display_name'] #TODO check if display_name contains chinese chars
             item['id'] = point.payload['source_id']
             item['score'] = point.score
             related_tags.append(item)
+
+        all_ids = [item['id'] for item in related_tags]
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/tags/{type_vectorstore}", params={'ids': all_ids})
+        result = response.json()
+  
+        for item in related_tags:
+            item['name'] = result[item['id']][0].strip()
         
         return related_tags
 
-    result['related_interventions'] = search_related_tags(all_related_interventions, "intervention", "interventions")
-    result['related_conditions'] = search_related_tags(all_related_conditions, "condition", "conditions")
-    result['related_outcomes'] = search_related_tags(all_related_outcomes, "outcome", "outcomes")
+    result['related_interventions'] = await search_related_tags(all_related_interventions, "intervention", "interventions")
+    result['related_conditions'] = await search_related_tags(all_related_conditions, "condition", "conditions")
+    result['related_outcomes'] = await search_related_tags(all_related_outcomes, "outcome", "outcomes")
 
     return result

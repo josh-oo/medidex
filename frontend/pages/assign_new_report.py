@@ -41,6 +41,7 @@ def delete_batch(batch_hash):
         if response.status_code != 200:
             st.error(response.json()['detail'])
         else:
+            st.session_state['selected_report'] = None
             st.rerun()
          
 

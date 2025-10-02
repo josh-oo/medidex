@@ -92,6 +92,12 @@ def preprocess_reports(reports, report_study_mapping):
     def check_author(author):
         return len(author.replace("?", "").strip()) > 0
     
+    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/trial/studies")
+    if response.status_code != 200:
+        print("Cannot refresh vectorstore: Database API (/trial/studies) not reachable")
+        return
+    all_studies_mapped_to_trial_id = response.json()
+    
     results = {}
     for id, title, abstract, date_entered, authors in zip(reports['CRGReportID'], reports['Title'],reports['Abstract'], reports['Dateentered'], reports['Authors']):
         title_abstract = []
@@ -102,12 +108,20 @@ def preprocess_reports(reports, report_study_mapping):
         
         item = {}
         authors = [author.strip() for author in authors.split("//") if check_author(author)]
-        trial_id = None
-        data = {'title': title, 'abstract': abstract, 'authors': []}
-        response = session.post(BACKEND_API + "/extract_trial_id", json=data)
-        if response.status_code == 200 and response.json():
-            trial_id = response.json()
-        item['metadata'] = {'belongs_to_study': report_study_mapping[str(id)], 'source_id': id, "date_entered": date_entered, "authors": authors, "trial_id": trial_id}
+        #trial_id = None
+        #data = {'title': title, 'abstract': abstract, 'authors': []}
+        
+        #response = session.post(BACKEND_API + "/extract_trial_id", json=data)
+        #if response.status_code == 200 and response.json():
+        #    trial_id = response.json()
+
+        belongs_to_trial_id = True
+        for study in report_study_mapping[str(id)]:
+            if not study in all_studies_mapped_to_trial_id:
+                belongs_to_trial_id = False
+                break
+
+        item['metadata'] = {'belongs_to_study': report_study_mapping[str(id)], 'source_id': id, "date_entered": date_entered, "authors": authors, "title": title, "abstract":abstract, "belongs_to_trial_id":belongs_to_trial_id}
         item['texts'] = [" ".join(title_abstract)]
         item['authors'] = authors
 
@@ -399,16 +413,6 @@ def add_date_entered_info():
 """
 
 def evaluate_with_cutoff(cutoff, model_id):
-
-    #data = {"username": BACKEND_USER, "password": BACKEND_PASSWORD,}
-    #headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
-    #response = requests.post(BACKEND_API + "/login", data=data, headers=headers)
-
-    #if response.status_code != 200:
-    #    print(response)
-    #    print(response.text)
-    #    return
     
     session = requests.Session()
     session.headers.update({"Authorization": "Bearer DEBUG"})
@@ -429,6 +433,8 @@ def evaluate_with_cutoff(cutoff, model_id):
     recall_at_3 = []
     recall_at_10 = []
     scroll_offset = None
+
+    pbar = tqdm()
 
     while True:
         result, scroll_offset = client.scroll(
@@ -463,16 +469,20 @@ def evaluate_with_cutoff(cutoff, model_id):
                 ground_truth_filtered.append(item)
         
         if len(ground_truth_filtered) == 1:
-            report_id = result[0].payload['source_id']
-            response = session.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/reports/{report_id}")
-            if response.status_code != 200:
-                print(f"Cannot refresh vectorstore: Database API (/reports/{report_id}) not reachable")
-                return
-            abstract = response.json()[0]['Abstract']
-            text = response.json()[0]['Title'] + (" " + abstract) if abstract else ""
+            #report_id = result[0].payload['source_id']
+            title = result[0].payload['title']
+            abstract = result[0].payload['abstract']
+            
+            trial_id = None
+            data = {'title': title, 'abstract': abstract, 'authors': []}
+            
+            response = session.post(BACKEND_API + "/extract_trial_id", json=data)
+            if response.status_code == 200 and response.json():
+                trial_id = response.json()
+            text = title + (" " + abstract) if abstract else ""
 
             ground_truth = ground_truth_filtered[0]
-            payload = {"text": text, "main_embedding": result[0].vector['default'],"participants_embedding": result[0].vector['intervention'], "author_embedding": result[0].vector['authors'], "model_id": model_id}
+            payload = {"text": text, "main_embedding": result[0].vector['default'],"participants_embedding": result[0].vector['participants'], "author_embedding": result[0].vector['authors'], "model_id": model_id}
             params = {"cutoff":cutoff, "trial_id":trial_id, 'authors': authors}
             response = session.post(BACKEND_API + "/similarity_search/studies", json=payload,params=params)
             predicted_studies = response.json()['CRGStudyID']
@@ -498,10 +508,11 @@ def evaluate_with_cutoff(cutoff, model_id):
                 #print(response.json())
                 print()
             """
-
+        pbar.update(1)
         if scroll_offset is None:
             break
 
+    print()
     print(f"Recall@1  {sum(recall_at_1) / len(recall_at_1)} ({sum(recall_at_1)}/{len(recall_at_1)})" )
     print(f"Recall@3  {sum(recall_at_3) / len(recall_at_3)} ({sum(recall_at_3)}/{len(recall_at_3)})")
     print(f"Recall@10 {sum(recall_at_10) / len(recall_at_10)} ({sum(recall_at_10)}/{len(recall_at_10)})")
@@ -511,6 +522,40 @@ def evaluate_with_cutoff(cutoff, model_id):
 #refresh_meerkat_tags("conditions", tag_id="0002")
 #refresh_meerkat_tags("outcomes", tag_id="0003")
 #refresh_mesh_tags()
+
+#from sklearn.feature_extraction.text import TfidfVectorizer
+from collections import Counter
+import json
+
+def author_frequency():
+    session = requests.Session()
+    session.headers.update({"Authorization": "Bearer DEBUG"})
+    response = session.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/persons", params={'cutoff':'2025-08'})
+
+    all_authors = []
+    for value in response.json().values():
+        print(value)
+        all_authors.extend(set(value))
+
+    counts = Counter(all_authors)
+    print(counts)
+
+    with open("author_frequencies.json", "w") as json_file:
+        json.dump(counts, json_file)
+
+    #all_docs = []
+    #for key, value in response.json().items():
+    #    all_docs.append(value)
+    
+    #print(len(all_docs))  
+    #vectorizer = TfidfVectorizer(analyzer=lambda x: x, lowercase=False)
+    #tfidf_matrix = vectorizer.fit_transform(all_docs)
+    #print(len(vectorizer.get_feature_names_out()))
+    #print(vectorizer.get_feature_names_out())
+    #print(tfidf_matrix)
+    
+
+#author_frequency()
 
 print("Evaluate 5th update")
 evaluate_with_cutoff("2024-01-24 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 5th update

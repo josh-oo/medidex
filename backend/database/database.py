@@ -7,6 +7,10 @@ import sqlite3
 import os
 
 from datetime import date
+import re
+import json
+
+from nameparser import HumanName
 
 load_dotenv()
 
@@ -22,6 +26,14 @@ def get_db():
         yield conn
     finally:
         conn.close()
+
+def get_trial_person_mapping():
+    with open(os.path.join(DATABASE_VOLUME, "trial_person_mapping.json"), "r") as json_file:
+        return json.load(json_file)
+    
+def get_author_frequencies():
+    with open(os.path.join(DATABASE_VOLUME, "author_frequencies.json"), "r") as json_file:
+        return json.load(json_file)
 
 # Request schema
 class IdInput(BaseModel):
@@ -194,31 +206,231 @@ def get_study_reports_by_id(report_id: int, db: sqlite3.Connection = Depends(get
     rows = cursor.fetchall()
     return convert_to_dict_list(cursor.description, rows)
 
-@app.get("/study_id")
-def get_study_id_by_trial_id(trial_id: str = Query(...), cutoff: str = Query(...), db: sqlite3.Connection = Depends(get_db)):
+@app.get("/studies")
+def get_studies(study_ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
+    placeholders = ','.join(['?'] * len(study_ids))
     query = f"""
-        SELECT CRGStudyID
-        FROM tblStudy
-        WHERE ShortName = ? OR TrialRegistrationID = ? 
-        AND DateEntered < ?
+        SELECT * FROM tblStudy
+        WHERE CRGStudyID IN ({placeholders})
     """
-    cursor = db.execute(query, (trial_id, trial_id,cutoff))
-    rows = cursor.fetchone()
+    cursor = db.execute(query, study_ids)
+    rows = cursor.fetchall()
+    return convert_to_column_based_dict_ordered(cursor.description, rows, study_ids, 'CRGStudyID')
 
-    if rows:
-        return rows
 
-    query = f"""
-        SELECT sr.CRGStudyID
+@app.get("/authors/normalize")
+def normalize_author_names(authors: List[str], trial_person_mapping: dict = Depends(get_trial_person_mapping)):
+    
+    def get_person_from_trial_id(author, data):
+        author = author.strip()
+        trial_id = author.replace("/", "-")
+    
+        if trial_id not in data:
+            return [author]
+        authors = data[trial_id]
+
+        processed_authors = []
+        for author in authors:
+            hn = HumanName(author)
+            # Get last name
+            last = hn.last
+    
+            # Get initials (first and middle names)
+            initials = ''.join(part[0].upper() for part in [hn.first, hn.middle] if part)
+
+            processed_authors.append(f"{last} {initials}")
+
+        return list(set(processed_authors))
+    
+    def normalize_author_names(name):  
+        name = re.sub(r'\bvan\b\s+\bden\b', 'Van Den', name, flags=re.IGNORECASE)     
+        name = re.sub(r'(?<=\b[A-Z])-(?=[A-Z]\b)', '', name)
+
+        name_check = re.match(r"\b([A-Z][a-z]+ )+[A-Z]+\b", name)
+
+        if not name_check:
+            return None
+        
+        #name = name.split()
+        #name = name[0] + " " + name[0][0] #if there are multiple initials just use the first one
+        return name#.lower()
+
+    normalized_authors = []
+    for author in authors:
+        current_authors = [author]
+        if author in trial_person_mapping:
+            current_authors = get_person_from_trial_id(author,trial_person_mapping)
+            print(current_authors)
+        for current_author in current_authors:
+            normalized_author = normalize_author_names(current_author)
+            if normalized_author:
+                normalized_authors.append(normalized_author)
+    
+    return normalized_authors
+
+@app.get("/authors/frequencies")
+def get_author_frequencies(authors: List[str] = Query(...), trial_person_mapping: dict = Depends(get_trial_person_mapping), author_frequencies: dict= Depends(get_author_frequencies)):
+    normalized_author_names = normalize_author_names(authors=authors, trial_person_mapping=trial_person_mapping)
+    
+    result = {}
+    for author in normalized_author_names:
+        if author in author_frequencies:
+            result[author] = author_frequencies[author]
+
+    return result
+
+@app.get("/study/persons")
+def get_study_persons(study_ids: List[int] = Query(None), cutoff: str = Query(None), db: sqlite3.Connection = Depends(get_db), trial_person_mapping: dict = Depends(get_trial_person_mapping)):
+
+    query = """
+        SELECT sr.CRGStudyID AS StudyID, Authors
         FROM tblStudyReport sr
         JOIN tblReport r ON sr.CRGReportID = r.CRGReportID
-        WHERE r.Authors LIKE '%' || ? || '%' OR r.TrialRegistrationID = ?
+        WHERE r.Dateentered < ?
+    """
+
+    params = [cutoff]
+    
+    if study_ids is not None:
+        placeholders = ','.join(['?'] * len(study_ids))
+        query += f" AND sr.CRGStudyID IN ({placeholders})"
+        params += study_ids
+    
+    cursor = db.execute(query, params)
+    rows = cursor.fetchall()
+    result = convert_to_dict_list(cursor.description, rows)
+
+    final_result = {}
+
+    for item in result:
+        key = int(item['StudyID'])
+        value = item['Authors']
+        authors = [author.strip() for author in value.split("//")]
+        normalized_authors = normalize_author_names(authors=authors, trial_person_mapping=trial_person_mapping)
+
+        final_result[key] = normalized_authors
+
+    return final_result
+
+@app.get("/study_id")
+def get_study_id_by_trial_id(trial_id: str = Query(...), cutoff: str = Query(...), db: sqlite3.Connection = Depends(get_db)):
+    
+    trial_id = trial_id.replace("/", "-")
+    alternative_ids = []
+    with open(os.path.join(DATABASE_VOLUME,"trial_id_mapping.json"), "r") as json_file:
+        data = json.load(json_file)
+        if trial_id in data:
+            alternative_ids = data[trial_id]
+
+    alternative_ids += [trial_id]
+
+    alternative_ids = [current_id.replace("/", "-") for current_id in alternative_ids]
+
+    placeholders = ','.join(['?'] * len(alternative_ids))
+    
+    query = f"""
+        SELECT DISTINCT CRGStudyID
+        FROM tblStudy
+        WHERE (REPLACE(ShortName, '/', '-') IN ({placeholders}) OR REPLACE(TrialRegistrationID, '/', '-') IN ({placeholders}))
+        AND DateEntered < ?
+    """
+    cursor = db.execute(query, tuple(alternative_ids) + tuple(alternative_ids) +(cutoff,))
+    rows = cursor.fetchall()
+
+    result = [ row[0] for row in rows]
+    #if len(result) > 0:
+    #    return list(set(result))
+    
+    placeholders_authors = " OR ".join(["REPLACE(r.Authors, '/', '-') LIKE '%' || ? || '%'"] * len(alternative_ids))
+
+    query = f"""
+        SELECT DISTINCT sr.CRGStudyID
+        FROM tblStudyReport sr
+        JOIN tblReport r ON sr.CRGReportID = r.CRGReportID
+        WHERE ({placeholders_authors} OR REPLACE(r.TrialRegistrationID, '/', '-') IN ({placeholders}))
         AND r.Dateentered < ?
     """
     cursor = db.execute(query, (trial_id, trial_id,cutoff))
-    rows = cursor.fetchone()
+    rows = cursor.fetchall()
 
-    return rows
+    for row in rows:
+        result.append(row[0])
+
+    return list(set(result))
+
+@app.get("/trial/studies")
+def get_possible_trial_ids_by_report(db: sqlite3.Connection = Depends(get_db)):
+
+    def regexp(expr, item):
+        return 1 if item and re.search(expr, item) else 0
+
+    db.create_function("REGEXP", 2, regexp)
+
+    query_regex = """
+    (COLUMN_NAME REGEXP 'ISRCTN[0-9]{8}'
+    OR COLUMN_NAME REGEXP 'ChiCTR[0-9]{10}'
+    OR COLUMN_NAME REGEXP 'ChiCTR\\.TRC\\.[0-9]{8}'
+    OR COLUMN_NAME REGEXP 'ChiCTR\\.IOR\\.[0-9]{8}'
+    OR COLUMN_NAME REGEXP 'ChiCTR-(INR|IPR|POC|IIR|IOQ|OPC)-[0-9]{8}'
+    OR COLUMN_NAME REGEXP 'ACTR(N|[0-9])[0-9]{14}'
+    OR COLUMN_NAME REGEXP 'CTRI(/|-)[0-9]{4}(/|-)[0-9]{2,3}(/|-)[0-9]{6}'
+    OR COLUMN_NAME REGEXP 'NCT[0-9]{8}'
+    OR COLUMN_NAME REGEXP 'DRKS[0-9]{8}'
+    OR COLUMN_NAME REGEXP 'NL-OMON[0-9]{5}'
+    OR COLUMN_NAME REGEXP 'NL[0-9]{4}'
+    OR COLUMN_NAME REGEXP 'IRCT[0-9]{11,13}N[0-9]+'
+    OR COLUMN_NAME REGEXP 'KCT[0-9]{7}'
+    OR COLUMN_NAME REGEXP 'TCTR[0-9]{11}'
+    OR COLUMN_NAME REGEXP 'RBR-.{7}'
+    OR COLUMN_NAME REGEXP 'CTIS[0-9]{4}-[0-9]{6}-[0-9]{2}-[0-9]{2}'
+    OR COLUMN_NAME REGEXP '(JPRN-)?UMIN[0-9]{9}'
+    OR COLUMN_NAME REGEXP '(JPRN-)?JapicCTI-[0-9]{6}'
+    OR COLUMN_NAME REGEXP 'JPRN-jRCTs?[0-9]{9,10}'
+    OR COLUMN_NAME REGEXP 'EUCTR[0-9]{4}-[0-9]{6}-[0-9]{2}'
+    OR COLUMN_NAME REGEXP 'ITMCTR[0-9]{10}'
+    OR COLUMN_NAME REGEXP 'PACTR[0-9]{15}'
+    OR COLUMN_NAME REGEXP 'NTR[0-9]{4,5}'
+    OR COLUMN_NAME REGEXP 'UKCRNID[0-9]{4,5}'
+    OR COLUMN_NAME REGEXP 'SLCTR-[0-9]{4}-[0-9]{3}'
+    OR COLUMN_NAME REGEXP 'HKCTR-[0-9]{4}'
+    OR COLUMN_NAME REGEXP 'M[0-9]{2}-[0-9]{3}'
+    OR COLUMN_NAME REGEXP 'MCT-[0-9]{5}');
+    """
+
+    query = """
+        SELECT CRGStudyID
+        FROM tblStudy
+        WHERE FALSE 
+        OR """ + query_regex.replace("COLUMN_NAME", "ShortName")
+
+    cursor = db.execute(query)
+    rows_studies = cursor.fetchall()
+    all_studies = []
+    for row in rows_studies:
+        all_studies.append(row[0])
+
+    #get all study ids where at least one report has a single trial id in its authors field
+    query = """
+        SELECT sr.CRGStudyID
+        FROM tblReport r
+        JOIN tblStudyReport sr
+            ON r.CRGReportID = sr.CRGReportID
+        WHERE r.Authors NOT LIKE '%//%'
+        AND sr.CRGReportID IN (
+            SELECT CRGReportID
+            FROM tblStudyReport
+            GROUP BY CRGReportID
+            HAVING COUNT(DISTINCT CRGStudyID) = 1
+        )
+        AND """ + query_regex.replace("COLUMN_NAME", "r.Authors")
+
+    cursor = db.execute(query)
+    rows_reports = cursor.fetchall()
+    all_reports = []
+    for row in rows_reports:
+        all_reports.append(row[0])
+
+    return all_studies + all_reports
 
 @app.get("/study/{study_id}/participants")
 def get_study_participants(study_id: int, db: sqlite3.Connection = Depends(get_db)):
@@ -304,17 +516,18 @@ def get_all_interventions(db: sqlite3.Connection = Depends(get_db)):
     rows = cursor.fetchall()
     return convert_to_id_based_dict(rows, multi_values=False)
 
-@app.post("/tags/interventions")
-def get_interventions_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
+@app.get("/tags/interventions")
+def get_interventions_by_ids(ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
     ID_COLUMN = "InterventionID"
-    placeholders = ','.join(['?'] * len(id_input.ids))
+    placeholders = ','.join(['?'] * len(ids))
     query = f"""
         SELECT * FROM tblIntervention
         WHERE {ID_COLUMN} IN ({placeholders})
     """
-    cursor = db.execute(query, id_input.ids)
+    cursor = db.execute(query, ids)
     rows = cursor.fetchall()
-    return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
+    #return convert_to_column_based_dict_ordered(cursor.description, rows, ids, ID_COLUMN)
+    return convert_to_id_based_dict(rows)
 
 
 @app.get("/study/{study_id}/tags/conditions")
@@ -351,17 +564,18 @@ def get_all_conditions(db: sqlite3.Connection = Depends(get_db)):
     rows = cursor.fetchall()
     return convert_to_id_based_dict(rows, multi_values=False)
 
-@app.post("/tags/conditions")
-def get_conditions_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
+@app.get("/tags/conditions")
+def get_conditions_by_ids(ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
     ID_COLUMN = "HealthCareConditionID"
-    placeholders = ','.join(['?'] * len(id_input.ids))
+    placeholders = ','.join(['?'] * len(ids))
     query = f"""
         SELECT * FROM tblHealthCareCondition
         WHERE {ID_COLUMN} IN ({placeholders})
     """
-    cursor = db.execute(query, id_input.ids)
+    cursor = db.execute(query, ids)
     rows = cursor.fetchall()
-    return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
+    #return convert_to_column_based_dict_ordered(cursor.description, rows, ids, ID_COLUMN)
+    return convert_to_id_based_dict(rows)
 
 @app.get("/study/{study_id}/tags/outcomes")
 def get_study_outcomes(study_id: int, db: sqlite3.Connection = Depends(get_db)):
@@ -397,14 +611,15 @@ def get_all_outcomes(db: sqlite3.Connection = Depends(get_db)):
     rows = cursor.fetchall()
     return convert_to_id_based_dict(rows, multi_values=False)
 
-@app.post("/tags/outcomes")
-def get_outcomes_by_ids(id_input: IdInput, db: sqlite3.Connection = Depends(get_db)):
+@app.get("/tags/outcomes")
+def get_outcomes_by_ids(ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
     ID_COLUMN = "OutcomeID"
-    placeholders = ','.join(['?'] * len(id_input.ids))
+    placeholders = ','.join(['?'] * len(ids))
     query = f"""
         SELECT * FROM tblOutcome
         WHERE {ID_COLUMN} IN ({placeholders})
     """
-    cursor = db.execute(query, id_input.ids)
+    cursor = db.execute(query, ids)
     rows = cursor.fetchall()
-    return convert_to_column_based_dict_ordered(cursor.description, rows, id_input.ids, ID_COLUMN)
+    return convert_to_id_based_dict(rows)
+    #return convert_to_column_based_dict_ordered(cursor.description, rows, ids, ID_COLUMN)

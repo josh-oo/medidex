@@ -11,7 +11,7 @@ def extract_trial_registration_ids(text):
 
     ctri = re.compile(r"\bCTRI(?:/|-)\d{4}(?:/|-)\d{2,3}(?:/|-)\d{6}\b")
 
-    nct = re.compile(r"\bNCT\d\d\d\d\d\d\d\d\b")
+    nct = re.compile(r"\b[Nn][Cc][Tt]0*[1-9]\d{0,7}\b")
     drks = re.compile(r"\bDRKS\d\d\d\d\d\d\d\d\b")
 
     nlomon = re.compile(r"\bNL-OMON\d\d\d\d\d\b")
@@ -24,7 +24,7 @@ def extract_trial_registration_ids(text):
     jprn_umin = re.compile(r"\b(?:JPRN-)?UMIN\d\d\d\d\d\d\d\d\d\b")
     jprn_japic = re.compile(r"\b(?:JPRN-)?JapicCTI-\d{6}\b")
     jprn_jrct = re.compile(r"\bJPRN-jRCTs?\d\d\d\d\d\d\d\d\d\d?\b")
-    euctr = re.compile(r"\bEUCTR\d{4}-\d{6}-\d{2}(?:-[A-Z0-9]{2})?\b")
+    euctr = re.compile(r"\bEUCTR\d{4}-\d{6}-\d{2}\b")
     itmctr = re.compile(r"\bITMCTR\d\d\d\d\d\d\d\d\d\d\b")
     pactr = re.compile(r"\bPACTR\d\d\d\d\d\d\d\d\d\d\d\d\d\d\d\b")
     ntr = re.compile(r"\bNTR\d\d\d\d?\b")
