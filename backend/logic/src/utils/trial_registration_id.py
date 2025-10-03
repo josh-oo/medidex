@@ -11,7 +11,7 @@ def extract_trial_registration_ids(text):
 
     ctri = re.compile(r"\bCTRI(?:/|-)\d{4}(?:/|-)\d{2,3}(?:/|-)\d{6}\b")
 
-    nct = re.compile(r"\b[Nn][Cc][Tt]0*[1-9]\d{0,7}\b")
+    nct = re.compile(r"\b[Nn][Cc][Tt].?0*[1-9]\d{0,7}\b")
     drks = re.compile(r"\bDRKS\d\d\d\d\d\d\d\d\b")
 
     nlomon = re.compile(r"\bNL-OMON\d\d\d\d\d\b")
@@ -40,6 +40,7 @@ def extract_trial_registration_ids(text):
     for pattern in all_registration_id_patterns:
         matches = re.findall(pattern, text)
         for m in matches:
+            m = m.replace("#", "")
             all_results.append(m)
 
     return list(set(all_results))
