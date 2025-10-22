@@ -5,7 +5,7 @@ from src.auth import get_users, update_user
 from src.auth import signup, login, logout
 from src.auth import get_api_keys, create_api_key, delete_api_key, verify_api_key
 
-from src.logic import upload_file, get_available_batches, get_batched_report, delete_batch, get_all_reports_by_study, extract_trial_id
+from src.logic import upload_file, get_available_batches, get_batched_report, delete_batch, get_all_reports_by_study, get_pdf_links_by_reports, extract_trial_id
 from src.logic import similarity_search_tags, similarity_search_studies
 from src.logic import embed_report, embed_aspect
 from src.logic import analyze_text, analyze_embedding
@@ -57,6 +57,10 @@ async def logic_extracdt_trial_id(result = Depends(extract_trial_id)):
 def logic_get_reports(result = Depends(get_all_reports_by_study)):
     return result
 
+@app.get("/report/pdf_links", dependencies=[Depends(is_verified)])
+def logic_get_pdf_links_by_reports(result = Depends(get_pdf_links_by_reports)):
+    return result
+
 @app.post("/similarity_search/tags", dependencies=[Depends(is_verified)])
 async def similarity_search_tags(result = Depends(similarity_search_tags)):
     return result
@@ -104,7 +108,6 @@ def auth_login(token = Depends(login)):
 @app.post("/logout")
 def auth_logout(result = Depends(logout)):
     return result
-
 
 @app.post("/api/v1/analyze_text", dependencies=[Depends(verify_api_key)])
 async def logic_analyze_text(result = Depends(analyze_text)):

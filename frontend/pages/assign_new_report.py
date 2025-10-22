@@ -117,15 +117,15 @@ def view_study_details(study_id):
     response = requests.get(BACKEND_API + f"/study/{study_id}/reports", headers=get_headers())
 
     if response.status_code != 200:
-        st.error("Error: " + response.text)
+        st.error("Error: " + response.text) 
     
     df = pd.DataFrame(response.json())
 
-    file_prefix = "file://///nas.ads.mwn.de/tume/ps0/_AGs/Arbeitsgruppe_Leucht/Meerkat_2020_10_19/PDFs/"
-    
-    df['PDF'] = file_prefix + df['ReportNumber'].astype(str).str.zfill(5) + ".pdf"
-
-    st.dataframe(df)
+    st.dataframe(df, column_config={
+        "PDF Links": st.column_config.LinkColumn(
+            "PDF Links", display_text="Open PDF"
+        ),
+    },)
 
 def reload_data():
     response = requests.get(BACKEND_API + f"/batches/{current_batch}/{st.session_state['report_index']}", headers=get_headers())

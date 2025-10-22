@@ -1,3 +1,5 @@
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -166,6 +168,23 @@ def get_study_date_by_id(study_id: int, db: sqlite3.Connection = Depends(get_db)
     """
     cursor = db.execute(query, (study_id,))
     return cursor.fetchone()[0]
+
+@app.get("/report/pdf_number")
+def get_pdf_numbers_by_report_ids(report_ids: List[int] = Query(...), db: sqlite3.Connection = Depends(get_db)):
+    query = f"""
+        SELECT CRGReportID, ReportNumber
+        FROM tblReport
+        WHERE CRGReportID IN ({','.join('?' for _ in report_ids)})
+    """
+    cursor = db.execute(query, tuple(report_ids))
+    results = cursor.fetchall()
+    
+    # Return as a dict {report_id: report_number}
+    return {int(row[0]): row[1] for row in results}
+
+@app.get("/report/{report_id}/pdf_number")
+def get_pdf_number_by_report_id(report_id: int, db: sqlite3.Connection = Depends(get_db)):
+    return get_study_reports_by_ids(report_ids=[report_id], db=db)[report_id]
 
 @app.get("/mapping/report_study")
 def get_mapping_report_study(db: sqlite3.Connection = Depends(get_db)):
@@ -623,3 +642,56 @@ def get_outcomes_by_ids(ids: List[int] = Query(...), db: sqlite3.Connection = De
     rows = cursor.fetchall()
     return convert_to_id_based_dict(rows)
     #return convert_to_column_based_dict_ordered(cursor.description, rows, ids, ID_COLUMN)
+
+@app.get("/report/{report_id}/pdf_link")
+def get_pdf_by_report_id(report_id: str, db: sqlite3.Connection = Depends(get_db)):
+    return get_pdf_links_by_report_ids(report_ids=[report_id], db=db)[report_id]
+
+@app.get("/report/pdf_links")
+def get_pdf_links_by_report_ids(report_ids: List[int] = Query(..., description="List of report IDs"),db: sqlite3.Connection = Depends(get_db)):
+
+    pdf_numbers = get_pdf_numbers_by_report_ids(report_ids, db)
+    results = {}
+
+    SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+    creds = service_account.Credentials.from_service_account_file(
+        os.path.join(DATABASE_VOLUME, 'service-account.json'), scopes=SCOPES
+    )
+    service = build('drive', 'v3', credentials=creds)
+
+    folder_name = "Meerkat_PDFs"
+    folder_results = service.files().list(
+        q=f"sharedWithMe and mimeType='application/vnd.google-apps.folder' and name='{folder_name}' and trashed=false",
+        includeItemsFromAllDrives=True,
+        supportsAllDrives=True,
+        fields="files(id, name)"
+    ).execute()
+
+    folders = folder_results.get('files', [])
+    if not folders:
+        return {rid: None for rid in report_id}
+
+    folder_id = folders[0]['id']
+
+    for rid, report_number in pdf_numbers.items():
+        if not report_number:
+            results[rid] = None
+            continue
+
+        pdf_name = str(report_number).zfill(5) + ".pdf"
+        pdf_results = service.files().list(
+            q=f"'{folder_id}' in parents and name='{pdf_name}' and mimeType='application/pdf' and trashed=false",
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
+            fields="files(id, name, owners)",
+        ).execute()
+
+        pdfs = pdf_results.get('files', [])
+        if not pdfs:
+            results[rid] = None
+        else:
+            f = pdfs[0]
+            results[rid] = f"https://drive.google.com/file/d/{f['id']}/view"
+            #results[rid] = f"https://drive.google.com/uc?export=download&id={f['id']}"
+
+    return results

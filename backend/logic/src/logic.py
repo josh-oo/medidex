@@ -582,6 +582,29 @@ def get_all_reports_by_study(study_id: int):
     with httpx.Client() as client:
         response = client.get(url)
         response.raise_for_status()  # Optional: raises on 4xx/5xx
+        data = response.json()
+    report_ids = [item['CRGReportID'] for item in data]#data['CRGReportID']
+
+    url = f"http://{DATABASE_HOST}:{DATABASE_PORT}/report/pdf_links"
+    with httpx.Client() as client:
+        response = client.get(url, params={"report_ids": report_ids} if report_ids else None)
+        response.raise_for_status()  # Optional: raises on 4xx/5xx
+        pdf_links = response.json()
+
+    for i in range(0, len(data)):
+        key = str(data[i]['CRGReportID'])
+        if key in pdf_links.keys():
+            data[i]['PDF Links'] = pdf_links[key]
+        else:
+            data[i]['PDF Links'] = None
+
+    return data
+
+def get_pdf_links_by_reports(report_ids: List = Query(None)):
+    url = f"http://{DATABASE_HOST}:{DATABASE_PORT}/report/pdf_links"
+    with httpx.Client() as client:
+        response = client.get(url, params={"report_ids": report_ids} if report_ids else None)
+        response.raise_for_status()  # Optional: raises on 4xx/5xx
         return response.json()
     
 async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), trial_id: str = Query(None), vectorstore=Depends(get_vectorstore)):
