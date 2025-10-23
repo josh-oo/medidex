@@ -30,11 +30,17 @@ def get_db():
         conn.close()
 
 def get_trial_person_mapping():
-    with open(os.path.join(DATABASE_VOLUME, "trial_person_mapping.json"), "r") as json_file:
+    file_path = os.path.join(DATABASE_VOLUME, "trial_person_mapping.json")
+    if not os.path.exists(file_path):
+        return {}
+    with open(file_path, "r") as json_file:
         return json.load(json_file)
     
 def get_author_frequencies():
-    with open(os.path.join(DATABASE_VOLUME, "author_frequencies.json"), "r") as json_file:
+    file_path = os.path.join(DATABASE_VOLUME, "author_frequencies.json")
+    if not os.path.exists(file_path):
+        return {}
+    with open(file_path, "r") as json_file:
         return json.load(json_file)
 
 # Request schema
