@@ -1,9 +1,11 @@
 from fastapi import FastAPI, Depends
 
-from src.auth import is_admin, is_verified
-from src.auth import get_users, update_user
-from src.auth import signup, login, logout
-from src.auth import get_api_keys, create_api_key, delete_api_key, verify_api_key
+#from src.auth import is_admin, is_verified
+#from src.auth import get_users, update_user
+#from src.auth import signup, login, logout
+#from src.auth import get_api_keys, create_api_key, delete_api_key, verify_api_key
+from src import auth
+from src.auth import is_admin, is_verified, verify_api_key
 
 from src.logic import upload_file, get_available_batches, get_batched_report, delete_batch, get_all_reports_by_study, get_pdf_links_by_reports, extract_trial_id
 from src.logic import similarity_search_tags, similarity_search_studies
@@ -16,6 +18,7 @@ from src.logic import assign_studies, delete_assigned_studies
 
 # Initialize FastAPI
 app = FastAPI(root_path="/api")
+app.include_router(auth.router)
 
 @app.on_event("startup")
 async def startup_event():
@@ -75,38 +78,6 @@ async def embed_report(result = Depends(embed_report)):
 
 @app.post("/embed/aspect", dependencies=[Depends(is_verified)])
 async def embed_aspect(result = Depends(embed_aspect)):
-    return result
-
-@app.post("/api_key/{owner}",  dependencies=[Depends(is_verified)])
-def auth_create_api_key(result = Depends(create_api_key)):
-   return result
-
-@app.delete("/api_key/{key_id}",  dependencies=[Depends(is_verified)])
-def auth_delete_api_key(result = Depends(delete_api_key)):
-    return result
-
-@app.get("/api_keys/{owner}", dependencies=[Depends(is_verified)])
-def auth_get_api_keys(result = Depends(get_api_keys)):
-    return result
-
-@app.get("/users", dependencies=[Depends(is_admin)])
-def auth_get_users(users = Depends(get_users)):
-    return users
-
-@app.put("/user/{user_id}", dependencies=[Depends(is_admin)])
-def auth_update_user(result = Depends(update_user)):
-    return result
-    
-@app.post("/signup")
-def auth_ignup(token = Depends(signup)):
-    return {"access_token": token, "token_type": "bearer"}
-
-@app.post("/login")
-def auth_login(token = Depends(login)):
-    return {"access_token": token, "token_type": "bearer"}
-
-@app.post("/logout")
-def auth_logout(result = Depends(logout)):
     return result
 
 @app.post("/api/v1/analyze_text", dependencies=[Depends(verify_api_key)])

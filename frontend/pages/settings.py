@@ -12,7 +12,7 @@ BACKEND_API = os.getenv('BACKEND_API')
 def update_user(user_id, field, value):
     payload = {}
     payload[field] = value
-    response = requests.put(BACKEND_API + f"/user/{user_id}",headers=get_headers(), json=payload)
+    response = requests.put(BACKEND_API + f"/users/{user_id}",headers=get_headers(), json=payload)
 
     if response.status_code == 200:
         st.rerun()
@@ -30,7 +30,7 @@ def get_users():
         return None
     
 def get_api_keys(owner):
-    response = requests.get(BACKEND_API + f"/api_keys/{owner}", headers=get_headers())
+    response = requests.get(BACKEND_API + f"/users/{owner}/api_keys", headers=get_headers())
 
     if response.status_code == 200:
         return response.json()
@@ -39,7 +39,7 @@ def get_api_keys(owner):
         return None
     
 def create_api_key(owner):
-    response = requests.post(BACKEND_API + f"/api_key/{owner}", headers=get_headers())
+    response = requests.put(BACKEND_API + f"/users/{owner}/api_keys", headers=get_headers())
 
     if response.status_code == 200:
         return response.json()
@@ -47,8 +47,8 @@ def create_api_key(owner):
         print("Request failed:", response.status_code, response.text)
         return None
     
-def revoke_api_key(api_key_id):
-    response = requests.delete(BACKEND_API + f"/api_key/{api_key_id}", headers=get_headers())
+def revoke_api_key(owner, api_key_id):
+    response = requests.delete(BACKEND_API + f"/users/api_keys/{api_key_id}", headers=get_headers())
 
     if response.status_code == 200:
         return response.json()
@@ -72,7 +72,7 @@ if "id" in st.session_state:
                 st.write(api_key[0])
             with col2:
                 if st.button("Revoke", key=f"delete_{i}"):
-                    revoke_api_key(api_key[0])
+                    revoke_api_key(st.session_state['id'], api_key[0])
                     st.rerun()
 
     if st.button("Create new API key"):

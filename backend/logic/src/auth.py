@@ -1,3 +1,4 @@
+from fastapi import APIRouter
 from fastapi import Security, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
@@ -16,6 +17,8 @@ from jose.exceptions import ExpiredSignatureError, JWTError
 from datetime import datetime, timedelta, timezone
 
 import secrets
+
+router = APIRouter(tags=["auth"])
 
 load_dotenv()
 
@@ -48,6 +51,35 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: constr(min_length=8)
 
+def verify_token(token):
+    try:
+        # Decode and verify the JWT
+        decoded = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return decoded
+
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token. Please log in again.")
+
+def generate_token(user):
+    expire = datetime.now(tz=timezone.utc) + timedelta(minutes=15)
+    return jwt.encode({'sub': user['email'], 'role': user['role'], 'id': user['id'], 'verified': user['verified'], 'exp': expire}, JWT_SECRET, algorithm='HS256')
+
+def is_admin(token: str = Depends(oauth2_scheme)):
+    decoded = verify_token(token)
+    if decoded['role'] != "admin":
+        raise HTTPException(status_code=401, detail="Not allowed")
+    return token
+
+def is_verified(token: str = Depends(oauth2_scheme)):
+    if DEBUG:
+        return token
+    decoded = verify_token(token)
+    if decoded['verified'] != 1:
+        raise HTTPException(status_code=401, detail="Not allowed")
+    return token
+
 def generate_api_key_pair():
     key_id = secrets.token_urlsafe(8)  # short prefix
     secret = secrets.token_urlsafe(32)
@@ -67,38 +99,7 @@ def verify_api_key(api_key: str = Security(api_key_header), db: sqlite3.Connecti
     
     raise HTTPException(status_code=400, detail="Invalid api key")
 
-def create_api_key(owner: int, db: sqlite3.Connection = Depends(get_db)):
-    
-    key_id, key_hash, full_key = generate_api_key_pair()
-    db.execute(
-        "INSERT INTO api_keys (id, hash, owner) VALUES (?, ?, ?)",
-        (key_id, key_hash, owner)
-    )
-    db.commit()
-    return JSONResponse(status_code=201, content={"api_key": full_key})
-
-def delete_api_key(key_id: str, db: sqlite3.Connection = Depends(get_db)):
-
-    cursor = db.cursor()
-
-    cursor.execute("SELECT * FROM api_keys WHERE id = ?", (key_id,))
-    api_key = cursor.fetchone()
-    if api_key is None:
-        raise HTTPException(status_code=404, detail="Api key not found")
-
-    cursor.execute("DELETE FROM api_keys WHERE id = ?", (key_id,))
-    db.commit()
-    return JSONResponse(status_code=201, content={"message": "Key removed"})
-
-def get_api_keys(owner: int, db: sqlite3.Connection = Depends(get_db)):
-    
-    query = "SELECT id FROM api_keys WHERE owner = ?"  # Excluding password
-    cursor = db.cursor()  # Create the cursor
-    cursor.execute(query, (owner,))   # Execute the query
-    rows = cursor.fetchall()  # Fetch all results
-
-    return rows
-
+@router.get("/users", dependencies=[Depends(is_admin)], summary="List all users (admin only)")
 def get_users(db: sqlite3.Connection = Depends(get_db)):
     query = "SELECT id, email, role, verified FROM users"  # Excluding password
     cursor = db.cursor()  # Create the cursor
@@ -117,6 +118,7 @@ def get_users(db: sqlite3.Connection = Depends(get_db)):
 
     return users
 
+@router.put("/users/{user_id}", dependencies=[Depends(is_admin)], summary="Update user information (admin only)")
 def update_user(user_id: int, user_update: UserUpdate, db: sqlite3.Connection = Depends(get_db)):
     
     fields = []
@@ -141,35 +143,46 @@ def update_user(user_id: int, user_update: UserUpdate, db: sqlite3.Connection = 
 
     return {"message": "User updated successfully"}
 
-def is_admin(token: str = Depends(oauth2_scheme)):
-    decoded = verify_token(token)
-    if decoded['role'] != "admin":
-        raise HTTPException(status_code=401, detail="Not allowed")
-    return token
-
-def is_verified(token: str = Depends(oauth2_scheme)):
-    if DEBUG:
-        return token
-    decoded = verify_token(token)
-    if decoded['verified'] != 1:
-        raise HTTPException(status_code=401, detail="Not allowed")
-    return token
+@router.put("/users/{user_id}/api_keys",  dependencies=[Depends(is_verified)], summary="Create a new API key for the given user")
+def create_api_key(user_id: int, db: sqlite3.Connection = Depends(get_db)):
     
-def verify_token(token):
-    try:
-        # Decode and verify the JWT
-        decoded = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return decoded
+    key_id, key_hash, full_key = generate_api_key_pair()
+    db.execute(
+        "INSERT INTO api_keys (id, hash, owner) VALUES (?, ?, ?)",
+        (key_id, key_hash, user_id)
+    )
+    db.commit()
+    return JSONResponse(status_code=201, content={"api_key": full_key})
 
-    except ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token. Please log in again.")
+@router.delete("/users/{user_id}/api_keys/{key_id}", summary="Delete an API key belonging to the given user")
+def delete_api_key(user_id : int, key_id: str, token: str = Depends(is_verified), db: sqlite3.Connection = Depends(get_db)):
+   
+    decoded = verify_token(token)
+    if decoded['id'] != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
 
-def generate_token(user):
-    expire = datetime.now(tz=timezone.utc) + timedelta(minutes=15)
-    return jwt.encode({'sub': user['email'], 'role': user['role'], 'id': user['id'], 'verified': user['verified'], 'exp': expire}, JWT_SECRET, algorithm='HS256')
+    cursor = db.cursor()
 
+    cursor.execute("SELECT * FROM api_keys WHERE id = ? AND owner = ?", (key_id, user_id))
+    api_key = cursor.fetchone()
+    if api_key is None:
+        raise HTTPException(status_code=404, detail="API key not found or does not belong to user")
+
+    cursor.execute("DELETE FROM api_keys WHERE id = ? AND owner = ?", (key_id, user_id))
+    db.commit()
+
+    return JSONResponse(status_code=200, content={"message": "Key removed"})
+@router.get("/users/{user_id}/api_keys", dependencies=[Depends(is_verified)], summary="Get all API keys created by the given user")
+def get_api_keys(user_id: int, db: sqlite3.Connection = Depends(get_db)):
+    
+    query = "SELECT id FROM api_keys WHERE owner = ?"  # Excluding password
+    cursor = db.cursor()  # Create the cursor
+    cursor.execute(query, (user_id,))   # Execute the query
+    rows = cursor.fetchall()  # Fetch all results
+
+    return rows
+
+@router.post("/signup", summary="Sign up a new users")
 def signup(user: UserCreate, db: sqlite3.Connection = Depends(get_db)):
     db.row_factory = sqlite3.Row
     cursor = db.cursor()
@@ -193,8 +206,9 @@ def signup(user: UserCreate, db: sqlite3.Connection = Depends(get_db)):
     new_user_id = cursor.lastrowid
     cursor.execute("SELECT * FROM users WHERE id = ?", (new_user_id,))
     new_user = cursor.fetchone()
-    return generate_token(new_user)
+    return {"access_token": generate_token(new_user), "token_type": "bearer"}
 
+@router.post("/login", summary="Log in existing user and returns JWT token")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: sqlite3.Connection = Depends(get_db)):
     db.row_factory = sqlite3.Row
     # Find user by email
@@ -205,8 +219,9 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: sqlite3.Connecti
     if not user or not pwd_context.verify(form_data.password, user["password"]):
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
-    return generate_token(user)
+    return {"access_token": generate_token(user), "token_type": "bearer"}
 
+@router.post("/logout", summary="Log out the current user (not yet implemented)")
 def logout():
     #TODO maybe add to blacklist
     return JSONResponse(status_code=201, content={"message": "Logout successful"})
