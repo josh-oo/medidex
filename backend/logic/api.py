@@ -15,7 +15,7 @@ from src.logic import startup_event as logic_startup_event
 from src.logic import assign_studies, delete_assigned_studies
 
 # Initialize FastAPI
-app = FastAPI()
+app = FastAPI(root_path="/api")
 
 @app.on_event("startup")
 async def startup_event():
