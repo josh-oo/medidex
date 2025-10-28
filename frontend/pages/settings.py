@@ -29,8 +29,8 @@ def get_users():
         print("Request failed:", response.status_code, response.text)
         return None
     
-def get_api_keys(owner):
-    response = requests.get(BACKEND_API + f"/users/{owner}/api_keys", headers=get_headers())
+def get_api_keys():
+    response = requests.get(BACKEND_API + f"/users/me/api_keys", headers=get_headers())
 
     if response.status_code == 200:
         return response.json()
@@ -38,8 +38,8 @@ def get_api_keys(owner):
         print("Request failed:", response.status_code, response.text)
         return None
     
-def create_api_key(owner):
-    response = requests.put(BACKEND_API + f"/users/{owner}/api_keys", headers=get_headers())
+def create_api_key():
+    response = requests.put(BACKEND_API + f"/users/me/api_keys", headers=get_headers())
 
     if response.status_code == 200:
         return response.json()
@@ -47,8 +47,8 @@ def create_api_key(owner):
         print("Request failed:", response.status_code, response.text)
         return None
     
-def revoke_api_key(owner, api_key_id):
-    response = requests.delete(BACKEND_API + f"/users/api_keys/{api_key_id}", headers=get_headers())
+def revoke_api_key(api_key_id):
+    response = requests.delete(BACKEND_API + f"/users/me/api_keys/{api_key_id}", headers=get_headers())
 
     if response.status_code == 200:
         return response.json()
@@ -64,7 +64,7 @@ def show_api_key(api_key):
 if "id" in st.session_state:
     st.header("API Keys")
     all_api_keys = []
-    all_api_keys = get_api_keys(st.session_state['id'])
+    all_api_keys = get_api_keys()
     if all_api_keys and len(all_api_keys) > 0:
         for i, api_key in enumerate(all_api_keys):
             col1, col2 = st.columns([5, 1])
@@ -72,11 +72,11 @@ if "id" in st.session_state:
                 st.write(api_key[0])
             with col2:
                 if st.button("Revoke", key=f"delete_{i}"):
-                    revoke_api_key(st.session_state['id'], api_key[0])
+                    revoke_api_key(api_key[0])
                     st.rerun()
 
     if st.button("Create new API key"):
-        api_key = create_api_key(st.session_state['id'])
+        api_key = create_api_key()
         print("Api key: ", api_key)
         if api_key:
             st.rerun()

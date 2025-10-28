@@ -143,9 +143,11 @@ def update_user(user_id: int, user_update: UserUpdate, db: sqlite3.Connection = 
 
     return {"message": "User updated successfully"}
 
-@router.put("/users/{user_id}/api_keys",  dependencies=[Depends(is_verified)], summary="Create a new API key for the given user")
-def create_api_key(user_id: int, db: sqlite3.Connection = Depends(get_db)):
-    
+@router.put("/users/me/api_keys", summary="Create a new API key for the given user")
+def create_api_key(token: str = Depends(is_verified), db: sqlite3.Connection = Depends(get_db)):
+    decoded = verify_token(token)
+    user_id = decoded['id']
+
     key_id, key_hash, full_key = generate_api_key_pair()
     db.execute(
         "INSERT INTO api_keys (id, hash, owner) VALUES (?, ?, ?)",
@@ -154,12 +156,10 @@ def create_api_key(user_id: int, db: sqlite3.Connection = Depends(get_db)):
     db.commit()
     return JSONResponse(status_code=201, content={"api_key": full_key})
 
-@router.delete("/users/{user_id}/api_keys/{key_id}", summary="Delete an API key belonging to the given user")
-def delete_api_key(user_id : int, key_id: str, token: str = Depends(is_verified), db: sqlite3.Connection = Depends(get_db)):
-   
+@router.delete("/users/me/api_keys/{key_id}", summary="Delete an API key belonging to the given user")
+def delete_api_key(key_id: str, token: str = Depends(is_verified), db: sqlite3.Connection = Depends(get_db)):
     decoded = verify_token(token)
-    if decoded['id'] != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
+    user_id = decoded['id']
 
     cursor = db.cursor()
 
@@ -172,9 +172,12 @@ def delete_api_key(user_id : int, key_id: str, token: str = Depends(is_verified)
     db.commit()
 
     return JSONResponse(status_code=200, content={"message": "Key removed"})
-@router.get("/users/{user_id}/api_keys", dependencies=[Depends(is_verified)], summary="Get all API keys created by the given user")
-def get_api_keys(user_id: int, db: sqlite3.Connection = Depends(get_db)):
     
+@router.get("/users/me/api_keys", summary="Get all API keys created by the given user")
+def get_api_keys(token: str = Depends(is_verified), db: sqlite3.Connection = Depends(get_db)):
+    decoded = verify_token(token)
+    user_id = decoded['id']
+
     query = "SELECT id FROM api_keys WHERE owner = ?"  # Excluding password
     cursor = db.cursor()  # Create the cursor
     cursor.execute(query, (user_id,))   # Execute the query

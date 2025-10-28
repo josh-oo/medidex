@@ -1,9 +1,5 @@
 from fastapi import FastAPI, Depends
 
-#from src.auth import is_admin, is_verified
-#from src.auth import get_users, update_user
-#from src.auth import signup, login, logout
-#from src.auth import get_api_keys, create_api_key, delete_api_key, verify_api_key
 from src import auth
 from src.auth import is_admin, is_verified, verify_api_key
 
@@ -24,7 +20,7 @@ app.include_router(auth.router)
 async def startup_event():
     await logic_startup_event()
 
-@app.get("/readyz")
+@app.get("/readyz", tags=["health"], summary="Readiness probe")
 def check():
     return "Ready"
 
