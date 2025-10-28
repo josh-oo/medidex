@@ -27,7 +27,7 @@ def add_new_batch():
             files = {'file': (uploaded_file.name, file_content, 'application/octet-stream')}
             
             # Send the file to FastAPI server for processing
-            response = requests.post(BACKEND_API + f"/upload", files=files, headers=get_headers())
+            response = requests.post(BACKEND_API + f"/batches", files=files, headers=get_headers())
 
             if response.status_code != 200:
                 st.error(response.json()['detail'])
@@ -86,10 +86,23 @@ def get_similar_studies(embedding, model, trial_id=None, linked_studies=[], k=10
         return None
 
 @st.cache_data(max_entries=1)
-def get_similar_tags(embedding, model, sources, tag):
-    payload = {"embedding": embedding, "model_id": model}
-    params = {"type": tag, "sources": [source.lower() for source in sources]}
-    response = requests.post(BACKEND_API + f"/similarity_search/tags", json=payload, headers=get_headers(), params=params)
+def get_similar_studies_(batch_hash, report_index, linked_studies=[], k=10):
+    params = {"k": k}
+    response = requests.get(BACKEND_API + f"/batches/{batch_hash}/{report_index}/similar_studies", params=params, headers=get_headers())
+
+    if response.status_code == 200:
+        df = pd.DataFrame(response.json())
+        df['Linked'] = [candidate in linked_studies for candidate in df['CRGStudyID']]
+        #df['CRGStudyID'] = './study?id=' + df['CRGStudyID'].astype(str) + "&token=" + st.session_state['access_token']
+        return df
+    else:
+        print("Request failed:", response.status_code, response.text)
+        return None
+
+@st.cache_data(max_entries=1)
+def get_similar_tags(batch_hash, report_index,sources, tag):
+    params = {"aspect": tag, "sources": [source.lower() for source in sources]}
+    response = requests.get(BACKEND_API + f"/batches/{batch_hash}/{report_index}/similar_tags", headers=get_headers(), params=params)
 
     if response.status_code == 200:
         return pd.DataFrame(response.json())
@@ -182,7 +195,8 @@ if st.session_state.get('selected_report', None):
     tab1, tab2, tab3, tab4 = st.tabs(["Studies", "Interventions", "Conditions", "Outcomes"])
 
     with tab1:
-        study_search_result = get_similar_studies(selected_report['vectors']['embedding'], selected_report['vectors']['model_id'], trial_id=selected_report['trial_id'], linked_studies=selected_report['assigned_studies'], k=st.session_state['top_k'])
+        #study_search_result = get_similar_studies(selected_report['vectors']['embedding'], selected_report['vectors']['model_id'], trial_id=selected_report['trial_id'], linked_studies=selected_report['assigned_studies'], k=st.session_state['top_k'])
+        study_search_result = get_similar_studies_(current_batch, st.session_state['report_index'], linked_studies=selected_report['assigned_studies'], k=st.session_state['top_k'])
 
         if study_search_result is not None:
             is_new_study = selected_report['assigned_studies'] == [-1]
@@ -210,21 +224,21 @@ if st.session_state.get('selected_report', None):
             st.write("No search results")
 
     with tab2:
-        intervention_search_results = get_similar_tags(selected_report['vectors']['intervention'], selected_report['vectors']['model_id'], tag_sources, "interventions")
+        intervention_search_results = get_similar_tags(current_batch, st.session_state['report_index'], tag_sources, "interventions")
         if intervention_search_results is not None:
             st.dataframe(intervention_search_results)
         else:
             st.write("No search results")
 
     with tab3:
-        condition_search_results = get_similar_tags(selected_report['vectors']['condition'], selected_report['vectors']['model_id'], tag_sources,"conditions")
+        condition_search_results = get_similar_tags(current_batch, st.session_state['report_index'], tag_sources, "conditions")
         if condition_search_results is not None:
             st.dataframe(condition_search_results)
         else:
             st.write("No search results")
 
     with tab4:
-        outcome_search_results = get_similar_tags(selected_report['vectors']['outcome'], selected_report['vectors']['model_id'], tag_sources,"outcomes")
+        outcome_search_results = get_similar_tags(current_batch, st.session_state['report_index'], tag_sources, "outcomes")
         if outcome_search_results is not None:
             st.dataframe(outcome_search_results)
         else:
