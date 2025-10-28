@@ -611,7 +611,7 @@ async def get_scores_authors(report_authors: List[str], study_ids: List[int], cu
 
     return result
 
-@router.get("/tags/{tag_category}/{tag_value}/related_studies", dependencies=[Depends(is_verified)])
+@router.get("/tags/{tag_category}/{tag_value}/related_studies", dependencies=[Depends(is_verified)], summary="Get studies related to a specific tag (intervention, outcome, ...) currently only vector-similarity search is available")
 async def get_aspect_related_studies(tag_category: str, tag_value: str, k : int = Query(10), client=Depends(get_vectorstore), channel = Depends(get_grpc_channel)):
     embeddings = _embed_aspect(TextInput(text=tag_value), channel)
 
