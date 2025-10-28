@@ -1,3 +1,4 @@
+from fastapi import APIRouter
 from fastapi import Query, UploadFile, File, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -32,6 +33,14 @@ import json
 import pickle
 
 import numpy as np
+
+from .auth import is_verified, verify_api_key
+
+router = APIRouter(tags=["logic"])
+
+@router.on_event("startup")
+async def startup_event():
+    await startup_event()
 
 #from sklearn.feature_extraction.text import TfidfVectorizer
 #from sklearn.metrics.pairwise import cosine_similarity
@@ -181,6 +190,7 @@ async def parse_file(file: UploadFile):
 
     return entries
 
+@router.post("/upload", dependencies=[Depends(is_verified)])
 async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
 
     entries = await parse_file(file)
@@ -217,6 +227,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     for i, result in enumerate(results):
         background_tasks.add_task(process_report, result, batch_hash, i)
 
+@router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified)])
 async def get_batched_report(batch_hash: str, report_index : int, db = Depends(get_db)):
     query = """
     SELECT title, abstract, authors, trial_id, vectors, assigned_studies
@@ -237,6 +248,7 @@ async def get_batched_report(batch_hash: str, report_index : int, db = Depends(g
     item['assigned_studies'] = json.loads(rows[5]) if rows[5] else []
     return item
 
+@router.get("/batches", dependencies=[Depends(is_verified)])
 async def get_available_batches(db = Depends(get_db)):
     query = """
     SELECT b.*, r.embedded, r.assigned
@@ -259,6 +271,7 @@ async def get_available_batches(db = Depends(get_db)):
 
     return all_batches
 
+@router.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified)])
 async def delete_batch(batch_hash):
     future = asyncio.get_event_loop().create_future()
     query = """
@@ -276,6 +289,7 @@ async def delete_batch(batch_hash):
     await write_queue.put((query, params, future))
     await future
 
+@router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)])
 async def assign_studies(batch_hash: str, report_index: int, study_ids: List[int] = Query(...)):
     future = asyncio.get_event_loop().create_future()
     query = """
@@ -288,6 +302,7 @@ async def assign_studies(batch_hash: str, report_index: int, study_ids: List[int
     await write_queue.put((query, params, future))
     await future
 
+@router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)])
 async def delete_assigned_studies(batch_hash: str, report_index: int):
     future = asyncio.get_event_loop().create_future()
     query = """
@@ -300,6 +315,7 @@ async def delete_assigned_studies(batch_hash: str, report_index: int):
     await write_queue.put((query, params, future))
     await future
 
+@router.post("/extract_trial_id", dependencies=[Depends(is_verified)])
 async def extract_trial_id(raw_report: RawReport):
     ids = extract_trial_registration_ids(raw_report.title)
     if len(ids) == 1:
@@ -317,6 +333,7 @@ async def extract_trial_id(raw_report: RawReport):
     
     return None
 
+@router.post("/similarity_search/tags", dependencies=[Depends(is_verified)])
 async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), k : int = Query(10), client=Depends(get_vectorstore)):
     
     #TODO implement more sophisticated tree based search here
@@ -354,6 +371,7 @@ async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] 
 
     return results
 
+@router.post("/similarity_search/studies", dependencies=[Depends(is_verified)])
 async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), channel = Depends(get_grpc_channel), return_details=False):
     
     found_study_ids = {}
@@ -531,6 +549,7 @@ async def get_scores_authors(report_authors: List[str], study_ids: List[int], cu
 def single_element_generator(element):
     yield element
 
+@router.post("/embed/report", dependencies=[Depends(is_verified)])
 def embed_report(input: TextInput, channel = Depends(get_grpc_channel)):
     return _embed_report(input, channel)
 
@@ -555,6 +574,7 @@ def _embed_report(input: TextInput, channel):
 
     return result
 
+@router.post("/embed/aspect", dependencies=[Depends(is_verified)])
 def embed_aspect(input: TextInput, channel = Depends(get_grpc_channel)):
     return _embed_aspect(input, channel)
 
@@ -577,6 +597,7 @@ def _embed_aspect(input: TextInput, channel):
 
     return result
 
+@router.get("/study/{study_id}/reports", dependencies=[Depends(is_verified)])
 def get_all_reports_by_study(study_id: int):
     url = f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{study_id}/reports"
     with httpx.Client() as client:
@@ -600,6 +621,7 @@ def get_all_reports_by_study(study_id: int):
 
     return data
 
+@router.get("/report/pdf_links", dependencies=[Depends(is_verified)])
 def get_pdf_links_by_reports(report_ids: List = Query(None)):
     url = f"http://{DATABASE_HOST}:{DATABASE_PORT}/report/pdf_links"
     with httpx.Client() as client:
@@ -607,10 +629,12 @@ def get_pdf_links_by_reports(report_ids: List = Query(None)):
         response.raise_for_status()  # Optional: raises on 4xx/5xx
         return response.json()
     
+@router.post("/api/v1/analyze_embedding", dependencies=[Depends(verify_api_key)])
 async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), trial_id: str = Query(None), vectorstore=Depends(get_vectorstore)):
     result = await analyze(vectorstore, input.embeddings, input.model_id, input.basic_input.topK, input.basic_input.title, input.basic_input.abstract, input.basic_input.authors, cutoff)
     return result
 
+@router.post("/api/v1/analyze_text", dependencies=[Depends(verify_api_key)])
 async def analyze_text(input: RetrievalInputText, cutoff: str = Query(None), trial_id: str = Query(None), vectorstore=Depends(get_vectorstore), channel=Depends(get_grpc_channel)):    
     text_input = TextInput(text=input.title + " " + input.abstract)
     embedding_results = _embed_report(text_input, channel)
