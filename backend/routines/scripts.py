@@ -476,7 +476,7 @@ def evaluate_with_cutoff(cutoff, model_id):
             trial_id = None
             data = {'title': title, 'abstract': abstract, 'authors': []}
             
-            response = session.post(BACKEND_API + "/extract_trial_id", json=data)
+            response = session.post(BACKEND_API + "/processing/extract_trial_id", json=data)
             if response.status_code == 200 and response.json():
                 trial_id = response.json()
             text = title + (" " + abstract) if abstract else ""

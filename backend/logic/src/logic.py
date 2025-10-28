@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from fastapi import Query, UploadFile, File, HTTPException, Depends, BackgroundTasks
+from fastapi.responses import Response
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
@@ -7,6 +8,8 @@ from qdrant_client.models import Filter, FieldCondition, DatetimeRange
 from typing import List, Optional
 import httpx
 import os
+
+from datetime import datetime
 
 import grpc
 import embedding_pb2
@@ -50,11 +53,11 @@ load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_HOST")
 MODEL_PORT = os.getenv("EMBEDDING_PORT")
+DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 DATABASE_HOST = os.getenv("DATABASE_HOST")
 DATABASE_PORT = os.getenv("DATABASE_PORT")
 VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
 VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
-DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 
 DEBUG = os.getenv("DEBUG", "FALSE") == "TRUE"
 
@@ -74,6 +77,27 @@ def get_db():
         yield conn
     finally:
         conn.close()
+
+class Batch(BaseModel):
+    batch_hash: str
+    batch_description: str
+    number_reports: int
+    created_at: datetime
+    embedded: int
+    assigned: int
+
+class BatchedReport(BaseModel):
+    title: str
+    abstract: Optional[str]
+    authors: List[str]
+    trial_id: Optional[str]
+    vectors: dict
+    assigned_studies: List[int]
+
+class Tag(BaseModel):
+    id: str
+    keyword: str
+    relevance: str
 
 # Request schema
 class TextInput(BaseModel):
@@ -190,7 +214,7 @@ async def parse_file(file: UploadFile):
 
     return entries
 
-@router.post("/batches", dependencies=[Depends(is_verified)], summary="Upload a batch of new reports that need to be assigned to studies (usually in the .ris file format)", description="Uploading a new batch triggers the embedding process. Batches are mainly used to do these compute heavy calculations in the background and only once. All needed data and the calculated embedding vectors are stored temporarily.") 
+@router.post("/batches", dependencies=[Depends(is_verified)], summary="Upload a batch of new reports that need to be assigned to studies (usually in the .ris file format)", description="Uploading a new batch triggers the embedding process. Batches are mainly used to do these compute heavy calculations in the background and only once. All needed data and the calculated embedding vectors are stored temporarily.", status_code=201) 
 async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
 
     entries = await parse_file(file)
@@ -226,9 +250,11 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
     for i, result in enumerate(results):
         background_tasks.add_task(process_report, result, batch_hash, i)
+
+    return Response(status_code=201)
     
 @router.get("/batches", dependencies=[Depends(is_verified)], summary="Get an overview of current report batches", description="For each batch the current progress of embedding calculation and the number of already assigned reports is returned")
-async def get_available_batches(db = Depends(get_db)):
+async def get_available_batches(db = Depends(get_db)) -> List[Batch]:
     query = """
     SELECT b.*, r.embedded, r.assigned
     FROM tmp_report_batches AS b
@@ -250,7 +276,7 @@ async def get_available_batches(db = Depends(get_db)):
 
     return all_batches
 
-@router.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified)], summary="Delete a report batch and all its associated reports (including calculated embedding vectors) from the temporary storage")
+@router.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified)], summary="Delete a report batch and all its associated reports (including calculated embedding vectors) from the temporary storage", status_code=204)
 async def delete_batch(batch_hash):
     future = asyncio.get_event_loop().create_future()
     query = """
@@ -268,8 +294,10 @@ async def delete_batch(batch_hash):
     await write_queue.put((query, params, future))
     await future
 
+    return Response(status_code=204)
+
 @router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified)], summary="Get the data and embedding vectors for a specific report in a batch", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
-async def get_batched_report(batch_hash: str, report_index : int, db = Depends(get_db)):
+async def get_batched_report(batch_hash: str, report_index : int, db = Depends(get_db)) -> BatchedReport:
     query = """
     SELECT title, abstract, authors, trial_id, vectors, assigned_studies
     FROM tmp_reports
@@ -289,7 +317,7 @@ async def get_batched_report(batch_hash: str, report_index : int, db = Depends(g
     item['assigned_studies'] = json.loads(rows[5]) if rows[5] else []
     return item
 
-@router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Assign studies to a specific report in a batch")
+@router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Assign studies to a specific report in a batch", status_code=204)
 async def assign_studies(batch_hash: str, report_index: int, study_ids: List[int] = Query(...)):
     future = asyncio.get_event_loop().create_future()
     query = """
@@ -301,8 +329,9 @@ async def assign_studies(batch_hash: str, report_index: int, study_ids: List[int
     params = (json.dumps(study_ids), batch_hash, report_index)
     await write_queue.put((query, params, future))
     await future
+    return Response(status_code=204)
 
-@router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Remove assigned studies from a specific report in a batch")
+@router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Remove assigned studies from a specific report in a batch", status_code=204)
 async def delete_assigned_studies(batch_hash: str, report_index: int):
     future = asyncio.get_event_loop().create_future()
     query = """
@@ -314,9 +343,10 @@ async def delete_assigned_studies(batch_hash: str, report_index: int):
     params = (None, batch_hash, report_index)
     await write_queue.put((query, params, future))
     await future
+    return Response(status_code=204)
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors")
-async def similar_tags(batch_hash: str, report_index: int, sources: List[str] = Query(...), aspect: str = Query(...), k : int = Query(10), client=Depends(get_vectorstore), db = Depends(get_db)):
+async def similar_tags(batch_hash: str, report_index: int, sources: List[str] = Query(...), aspect: str = Query(...), k : int = Query(10), client=Depends(get_vectorstore), db = Depends(get_db)) -> List[Tag]:
     query = """
     SELECT vectors
     FROM tmp_reports
@@ -338,7 +368,13 @@ async def similar_tags(batch_hash: str, report_index: int, sources: List[str] = 
 
     embedding = vectors[vector_names[aspect]]
 
-    return await get_similar_tags(embedding, collection_name, sources, aspect, k, client)
+    data = await get_similar_tags(embedding, collection_name, sources, aspect, k, client)
+
+    result = [
+        {"id": i, "keyword": k, "relevance": r}
+        for i, k, r in zip(data["ID"], data["Keyword"], data["Relevance"])
+    ]
+    return result
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified)], summary="Get related studies for a specific report in a batch based on its embedding vectors")
 async def similar_studies(batch_hash: str, report_index: int, aspect: str = Query("default"), cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), channel = Depends(get_grpc_channel), db = Depends(get_db), return_details=False):
@@ -364,12 +400,6 @@ async def similar_studies(batch_hash: str, report_index: int, aspect: str = Quer
         embedding_name = "embedding"
 
     return await get_similar_studies(vectors[embedding_name], vectors['model_id'], aspect, trial_id, authors, cutoff, k, client, return_details)
-
-#TODO deprecated endpoint, remove later
-@router.post("/similarity_search/tags", dependencies=[Depends(is_verified)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_tags instead")
-async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), k : int = Query(10), client=Depends(get_vectorstore)):
-    
-    return await get_similar_tags(embedding.embedding, embedding.model_id + "_tags", sources, type, k, client)
 
 async def get_similar_tags(embedding, collection_name, sources: List[str], aspect: str, k: int, client=Depends(get_vectorstore)):
     
@@ -407,11 +437,6 @@ async def get_similar_tags(embedding, collection_name, sources: List[str], aspec
         results['Relevance'].append(str(round(result.score * 100)) + "%")
 
     return results
-
-@router.post("/similarity_search/studies", dependencies=[Depends(is_verified)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_studies instead")
-async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):
-    
-    return await get_similar_studies(embedding.main_embedding, embedding.model_id, aspect, trial_id, authors, cutoff, k, client, return_details)
 
 async def get_similar_studies(embedding, collection_name, aspect: str, trial_id: str, authors: List[str], cutoff: str, k: int, client: QdrantClient, return_details: bool):
     found_study_ids = {}
@@ -586,10 +611,19 @@ async def get_scores_authors(report_authors: List[str], study_ids: List[int], cu
 
     return result
 
+@router.get("/tags/{tag_category}/{tag_value}/related_studies", dependencies=[Depends(is_verified)])
+async def get_aspect_related_studies(tag_category: str, tag_value: str, k : int = Query(10), client=Depends(get_vectorstore), channel = Depends(get_grpc_channel)):
+    embeddings = _embed_aspect(TextInput(text=tag_value), channel)
+
+    collection_name = embeddings['model_id']
+
+    return await get_similar_studies(embeddings['embedding'], collection_name, tag_category, None, None, None, k, client, return_details=False)
+
+
 def single_element_generator(element):
     yield element
 
-@router.post("/embed/report", dependencies=[Depends(is_verified)])
+#@router.post("/embed/report", dependencies=[Depends(is_verified)])
 def embed_report(input: TextInput, channel = Depends(get_grpc_channel)):
     return _embed_report(input, channel)
 
@@ -614,7 +648,7 @@ def _embed_report(input: TextInput, channel):
 
     return result
 
-@router.post("/embed/aspect", dependencies=[Depends(is_verified)])
+#@router.post("/embed/aspect", dependencies=[Depends(is_verified)])
 def embed_aspect(input: TextInput, channel = Depends(get_grpc_channel)):
     return _embed_aspect(input, channel)
 
@@ -636,51 +670,19 @@ def _embed_aspect(input: TextInput, channel):
     result = {"model_id": model_id, "embedding": list(response.embedding[0].values)}
 
     return result
-
-@router.get("/study/{study_id}/reports", dependencies=[Depends(is_verified)])
-def get_all_reports_by_study(study_id: int):
-    url = f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{study_id}/reports"
-    with httpx.Client() as client:
-        response = client.get(url)
-        response.raise_for_status()  # Optional: raises on 4xx/5xx
-        data = response.json()
-    report_ids = [item['CRGReportID'] for item in data]#data['CRGReportID']
-
-    url = f"http://{DATABASE_HOST}:{DATABASE_PORT}/report/pdf_links"
-    with httpx.Client() as client:
-        response = client.get(url, params={"report_ids": report_ids} if report_ids else None)
-        response.raise_for_status()  # Optional: raises on 4xx/5xx
-        pdf_links = response.json()
-
-    for i in range(0, len(data)):
-        key = str(data[i]['CRGReportID'])
-        if key in pdf_links.keys():
-            data[i]['PDF Links'] = pdf_links[key]
-        else:
-            data[i]['PDF Links'] = None
-
-    return data
-
-@router.get("/report/pdf_links", dependencies=[Depends(is_verified)])
-def get_pdf_links_by_reports(report_ids: List = Query(None)):
-    url = f"http://{DATABASE_HOST}:{DATABASE_PORT}/report/pdf_links"
-    with httpx.Client() as client:
-        response = client.get(url, params={"report_ids": report_ids} if report_ids else None)
-        response.raise_for_status()  # Optional: raises on 4xx/5xx
-        return response.json()
     
-@router.post("/api/v1/analyze_embedding", dependencies=[Depends(verify_api_key)])
+@router.post("/processing/analyze_embedding", dependencies=[Depends(verify_api_key)], include_in_schema=False)
 async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), trial_id: str = Query(None), vectorstore=Depends(get_vectorstore)):
     result = await analyze(vectorstore, input.embeddings, input.model_id, input.basic_input.topK, input.basic_input.title, input.basic_input.abstract, input.basic_input.authors, cutoff)
     return result
 
-@router.post("/api/v1/analyze_text", dependencies=[Depends(verify_api_key)])
-async def analyze_text(input: RetrievalInputText, cutoff: str = Query(None), trial_id: str = Query(None), vectorstore=Depends(get_vectorstore), channel=Depends(get_grpc_channel)):    
-    text_input = TextInput(text=input.title + " " + input.abstract)
-    embedding_results = _embed_report(text_input, channel)
+#@router.post("/api/v1/analyze_text", dependencies=[Depends(verify_api_key)])
+#async def analyze_text(input: RetrievalInputText, cutoff: str = Query(None), trial_id: str = Query(None), vectorstore=Depends(get_vectorstore), channel=Depends(get_grpc_channel)):    
+#    text_input = TextInput(text=input.title + " " + input.abstract)
+#    embedding_results = _embed_report(text_input, channel)
 
-    result = await analyze(vectorstore, embedding_results, embedding_results['model_id'], input.topK, input.title, input.abstract, input.authors, cutoff,)
-    return result
+#    result = await analyze(vectorstore, embedding_results, embedding_results['model_id'], input.topK, input.title, input.abstract, input.authors, cutoff,)
+#    return result
 
 async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, authors, cutoff):
     """
@@ -832,7 +834,7 @@ async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, aut
     return result
 
 
-@router.post("/extract_trial_id", dependencies=[Depends(is_verified)])
+@router.post("/processing/extract_trial_id", dependencies=[Depends(is_verified)], include_in_schema=False)
 async def extract_trial_id(raw_report: RawReport):
     ids = extract_trial_registration_ids(raw_report.title)
     if len(ids) == 1:
@@ -849,3 +851,14 @@ async def extract_trial_id(raw_report: RawReport):
             return ids[0]
     
     return None
+
+#TODO deprecated endpoints, remove later
+@router.post("/similarity_search/studies", dependencies=[Depends(is_verified)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_studies instead", deprecated=True)
+async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):
+    
+    return await get_similar_studies(embedding.main_embedding, embedding.model_id, aspect, trial_id, authors, cutoff, k, client, return_details)
+
+@router.post("/similarity_search/tags", dependencies=[Depends(is_verified)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_tags instead", deprecated=True)
+async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), k : int = Query(10), client=Depends(get_vectorstore)):
+    
+    return await get_similar_tags(embedding.embedding, embedding.model_id + "_tags", sources, type, k, client)

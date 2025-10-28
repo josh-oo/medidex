@@ -123,7 +123,7 @@ def create_test_set(path, cutoff, model_id, only_single_report_studies=False):
             payload['embeddings']['condition'] = result[0].vector['condition']
             payload['embeddings']['outcome'] = result[0].vector['outcome']
 
-            response = session.post(BACKEND_API + f"/api/v1/analyze_embedding",json=payload, params=params) 
+            response = session.post(BACKEND_API + f"/processing/analyze_embedding",json=payload, params=params) 
 
             item['input'] = {}
             item['input']['title'] = report['Title']

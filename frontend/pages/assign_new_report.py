@@ -29,7 +29,7 @@ def add_new_batch():
             # Send the file to FastAPI server for processing
             response = requests.post(BACKEND_API + f"/batches", files=files, headers=get_headers())
 
-            if response.status_code != 200:
+            if response.status_code != 201:
                 st.error(response.json()['detail'])
             else:
                 st.rerun()
@@ -38,7 +38,7 @@ def add_new_batch():
 def delete_batch(batch_hash):
      if st.button("Delete", use_container_width=True, type="primary"):
         response = requests.delete(BACKEND_API + f"/batches/{batch_hash}", headers=get_headers())
-        if response.status_code != 200:
+        if response.status_code != 204:
             st.error(response.json()['detail'])
         else:
             st.session_state['selected_report'] = None
@@ -71,22 +71,7 @@ def visualize_available_batches():
             delete_batch(current_batch)
 
 @st.cache_data(max_entries=1)
-def get_similar_studies(embedding, model, trial_id=None, linked_studies=[], k=10):
-    payload = {"model_id": model, "main_embedding": embedding, "author_embedding":None}
-    params = {"trial_id": trial_id, "k": k}
-    response = requests.post(BACKEND_API + "/similarity_search/studies", json=payload, params=params, headers=get_headers())
-
-    if response.status_code == 200:
-        df = pd.DataFrame(response.json())
-        df['Linked'] = [candidate in linked_studies for candidate in df['CRGStudyID']]
-        #df['CRGStudyID'] = './study?id=' + df['CRGStudyID'].astype(str) + "&token=" + st.session_state['access_token']
-        return df
-    else:
-        print("Request failed:", response.status_code, response.text)
-        return None
-
-@st.cache_data(max_entries=1)
-def get_similar_studies_(batch_hash, report_index, linked_studies=[], k=10):
+def get_similar_studies(batch_hash, report_index, linked_studies=[], k=10):
     params = {"k": k}
     response = requests.get(BACKEND_API + f"/batches/{batch_hash}/{report_index}/similar_studies", params=params, headers=get_headers())
 
@@ -114,7 +99,7 @@ def update_selected_studies(selected_studies, current_batch, report_index):
 
     if selected_studies is None:
         response = requests.delete(BACKEND_API + f"/batches/{current_batch}/{report_index}/studies", headers=get_headers())
-        if response.status_code != 200:
+        if response.status_code != 204:
             st.exception(response.text)
         return
 
@@ -122,12 +107,12 @@ def update_selected_studies(selected_studies, current_batch, report_index):
         return
 
     response = requests.put(BACKEND_API + f"/batches/{current_batch}/{report_index}/studies", headers=get_headers(), params={'study_ids': selected_studies})
-    if response.status_code != 200:
+    if response.status_code != 204:
         st.exception(response.text)
-
+        
 @st.cache_data(max_entries=10)
 def view_study_details(study_id):
-    response = requests.get(BACKEND_API + f"/study/{study_id}/reports", headers=get_headers())
+    response = requests.get(BACKEND_API + f"/studies/{study_id}/reports", headers=get_headers())
 
     if response.status_code != 200:
         st.error("Error: " + response.text) 
@@ -135,7 +120,7 @@ def view_study_details(study_id):
     df = pd.DataFrame(response.json())
 
     st.dataframe(df, column_config={
-        "PDF Links": st.column_config.LinkColumn(
+        "PDFLinks": st.column_config.LinkColumn(
             "PDF Links", display_text="Open PDF"
         ),
     },)
@@ -196,7 +181,7 @@ if st.session_state.get('selected_report', None):
 
     with tab1:
         #study_search_result = get_similar_studies(selected_report['vectors']['embedding'], selected_report['vectors']['model_id'], trial_id=selected_report['trial_id'], linked_studies=selected_report['assigned_studies'], k=st.session_state['top_k'])
-        study_search_result = get_similar_studies_(current_batch, st.session_state['report_index'], linked_studies=selected_report['assigned_studies'], k=st.session_state['top_k'])
+        study_search_result = get_similar_studies(current_batch, st.session_state['report_index'], linked_studies=selected_report['assigned_studies'], k=st.session_state['top_k'])
 
         if study_search_result is not None:
             is_new_study = selected_report['assigned_studies'] == [-1]

@@ -1,11 +1,12 @@
 from fastapi import APIRouter
 from fastapi import Security, HTTPException, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, EmailStr, constr
+from pydantic import BaseModel, EmailStr, SecretStr
 from dotenv import load_dotenv
-from typing import Optional
+from typing import Optional, List
+from enum import Enum
 import os
 
 import sqlite3
@@ -38,18 +39,23 @@ def get_db():
     finally:
         conn.close()
 
-class UserUpdate(BaseModel):
-    email: Optional[str] = None
-    role: Optional[str] = None
+class Roles(Enum):
+    user = 'user'
+    admin = 'admin'
+
+class User(BaseModel):
+    email: EmailStr
+    role: Roles = Roles.user
     verified: Optional[bool] = None
+    id: Optional[int] = None
 
-class UserOut(BaseModel):
-    id: int
+class UserCredentials(BaseModel):
     email: EmailStr
+    password: SecretStr
 
-class UserCreate(BaseModel):
-    email: EmailStr
-    password: constr(min_length=8)
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
 
 def verify_token(token):
     try:
@@ -100,7 +106,7 @@ def verify_api_key(api_key: str = Security(api_key_header), db: sqlite3.Connecti
     raise HTTPException(status_code=400, detail="Invalid api key")
 
 @router.get("/users", dependencies=[Depends(is_admin)], summary="List all users (admin only)")
-def get_users(db: sqlite3.Connection = Depends(get_db)):
+def get_users(db: sqlite3.Connection = Depends(get_db)) -> List[User]:
     query = "SELECT id, email, role, verified FROM users"  # Excluding password
     cursor = db.cursor()  # Create the cursor
     cursor.execute(query)   # Execute the query
@@ -119,7 +125,7 @@ def get_users(db: sqlite3.Connection = Depends(get_db)):
     return users
 
 @router.put("/users/{user_id}", dependencies=[Depends(is_admin)], summary="Update user information (admin only)")
-def update_user(user_id: int, user_update: UserUpdate, db: sqlite3.Connection = Depends(get_db)):
+def update_user(user_id: int, user_update: User, db: sqlite3.Connection = Depends(get_db)):
     
     fields = []
     values = []
@@ -143,7 +149,7 @@ def update_user(user_id: int, user_update: UserUpdate, db: sqlite3.Connection = 
 
     return {"message": "User updated successfully"}
 
-@router.put("/users/me/api_keys", summary="Create a new API key for the given user")
+@router.put("/users/me/api_keys", summary="Create a new API key for the given user", status_code=201)
 def create_api_key(token: str = Depends(is_verified), db: sqlite3.Connection = Depends(get_db)):
     decoded = verify_token(token)
     user_id = decoded['id']
@@ -154,9 +160,9 @@ def create_api_key(token: str = Depends(is_verified), db: sqlite3.Connection = D
         (key_id, key_hash, user_id)
     )
     db.commit()
-    return JSONResponse(status_code=201, content={"api_key": full_key})
+    return {"api_key": full_key}
 
-@router.delete("/users/me/api_keys/{key_id}", summary="Delete an API key belonging to the given user")
+@router.delete("/users/me/api_keys/{key_id}", summary="Delete an API key belonging to the given user", status_code=204)
 def delete_api_key(key_id: str, token: str = Depends(is_verified), db: sqlite3.Connection = Depends(get_db)):
     decoded = verify_token(token)
     user_id = decoded['id']
@@ -171,10 +177,10 @@ def delete_api_key(key_id: str, token: str = Depends(is_verified), db: sqlite3.C
     cursor.execute("DELETE FROM api_keys WHERE id = ? AND owner = ?", (key_id, user_id))
     db.commit()
 
-    return JSONResponse(status_code=200, content={"message": "Key removed"})
-    
+    return Response(status_code=204)
+
 @router.get("/users/me/api_keys", summary="Get all API keys created by the given user")
-def get_api_keys(token: str = Depends(is_verified), db: sqlite3.Connection = Depends(get_db)):
+def get_api_keys(token: str = Depends(is_verified), db: sqlite3.Connection = Depends(get_db)) -> List[str]:
     decoded = verify_token(token)
     user_id = decoded['id']
 
@@ -186,7 +192,7 @@ def get_api_keys(token: str = Depends(is_verified), db: sqlite3.Connection = Dep
     return rows
 
 @router.post("/signup", summary="Sign up a new users")
-def signup(user: UserCreate, db: sqlite3.Connection = Depends(get_db)):
+def signup(user: UserCredentials, db: sqlite3.Connection = Depends(get_db)) -> TokenResponse:
     db.row_factory = sqlite3.Row
     cursor = db.cursor()
 
@@ -212,7 +218,7 @@ def signup(user: UserCreate, db: sqlite3.Connection = Depends(get_db)):
     return {"access_token": generate_token(new_user), "token_type": "bearer"}
 
 @router.post("/login", summary="Log in existing user and returns JWT token")
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: sqlite3.Connection = Depends(get_db)):
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: sqlite3.Connection = Depends(get_db)) -> TokenResponse:
     db.row_factory = sqlite3.Row
     # Find user by email
     cursor = db.execute("SELECT * FROM users WHERE email = ?", (form_data.username,))
@@ -227,4 +233,4 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: sqlite3.Connecti
 @router.post("/logout", summary="Log out the current user (not yet implemented)")
 def logout():
     #TODO maybe add to blacklist
-    return JSONResponse(status_code=201, content={"message": "Logout successful"})
+    return {"message": "Logout successful"}
