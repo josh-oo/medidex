@@ -12,7 +12,7 @@ COPY embedding/.env.production .env
 COPY embedding/model_loader.py .
 RUN python model_loader.py
 
-COPY utils/embedding.proto .
+COPY tools/utils/embedding.proto .
 RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding.proto
 
 # Stage 2: Main app

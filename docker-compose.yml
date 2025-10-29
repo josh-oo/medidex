@@ -1,21 +1,21 @@
 version: '3.8'
 
 services:
-  database:
-    container_name: database
-    build: 
-      context: ./backend/database
-      dockerfile: Dockerfile
-    expose:
-      - 8001
-    volumes:
-      - ./backend/_data/database:/data
-    read_only: true
-    networks:
-      - internal_net
-    tmpfs:
-      - /tmp
-      - /var/tmp
+  #database:
+  #  container_name: database
+  #  build: 
+  #    context: ./backend/database
+  #    dockerfile: Dockerfile
+  #  expose:
+  #    - 8001
+  #  volumes:
+  #    - ./backend/_data/backend/resources:/data
+  #  read_only: true
+  #  networks:
+  #    - internal_net
+  #  tmpfs:
+  #    - /tmp
+  #    - /var/tmp
 
   embedding:
     container_name: embedding
@@ -43,13 +43,29 @@ services:
     networks:
       - internal_net
 
-  routines:
-    container_name: routines
+  logic:
+    container_name: logic
     build:
       context: ./backend
-      dockerfile: routines/Dockerfile
+      dockerfile: logic/Dockerfile
+    expose:
+      - 8002
+    volumes:
+      - ./backend/_data/backend:/data
+    read_only: true
+    networks:
+      - internal_net
+    tmpfs:
+      - /tmp
+      - /var/tmp
+
+  tools:
+    container_name: tools
+    build:
+      context: ./backend
+      dockerfile: tools/Dockerfile
     depends_on:
-      - database
+      - logic
       - qdrant
       - embedding
     read_only: true
@@ -59,23 +75,7 @@ services:
       - /tmp
       - /var/tmp
     volumes:
-      - ./backend/_data/routines:/data
-
-  logic:
-    container_name: logic
-    build:
-      context: ./backend
-      dockerfile: logic/Dockerfile
-    expose:
-      - 8002
-    volumes:
-      - ./backend/_data/users:/data
-    read_only: true
-    networks:
-      - internal_net
-    tmpfs:
-      - /tmp
-      - /var/tmp
+      - ./backend/_data/backend/tools:/data
 
   frontend:
     container_name: frontend

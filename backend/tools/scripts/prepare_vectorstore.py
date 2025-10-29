@@ -15,14 +15,10 @@ import embedding_pb2_grpc
 
 import xml.etree.ElementTree as ET
 
-import numpy as np
-
 load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_HOST")
 MODEL_PORT = os.getenv("EMBEDDING_PORT")
-DATABASE_HOST = os.getenv("DATABASE_HOST")
-DATABASE_PORT = os.getenv("DATABASE_PORT")
 VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
 VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
 
@@ -92,7 +88,7 @@ def preprocess_reports(reports, report_study_mapping):
     def check_author(author):
         return len(author.replace("?", "").strip()) > 0
     
-    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/trial/studies")
+    response = requests.get(BACKEND_API + f"/trial/studies")
     if response.status_code != 200:
         print("Cannot refresh vectorstore: Database API (/trial/studies) not reachable")
         return
@@ -132,13 +128,13 @@ def preprocess_reports(reports, report_study_mapping):
     return results
 
 def load_report_data():
-    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/reports/all")
+    response = requests.get(BACKEND_API + f"/reports/all")
     if response.status_code != 200:
         print("Cannot refresh vectorstore: Database API (/reports/all) not reachable")
         return
     all_reports = response.json()
     
-    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/mapping/report_study")
+    response = requests.get(BACKEND_API + f"/mapping/report_study")
     if response.status_code != 200:
         print("Cannot refresh study embeddings: Database API (/mapping/report_study) not reachable")
         return
@@ -188,7 +184,7 @@ def refresh_study_embeddings():
 
     collection_name="josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"
 
-    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/mapping/report_study")
+    response = requests.get(f"http://{LOGIC_HOST}:{LOGIC_PORT}/mapping/report_study")
     if response.status_code != 200:
         print("Cannot refresh study embeddings: Database API (/reports/all) not reachable")
         return
@@ -284,7 +280,7 @@ def transform_to_uuid(id, tag):
     return f"00000000-{tag}-4000-a000-{id}"
 
 def load_meerkat_tag_data(tag, tag_id="0000"):
-    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/tags/{tag}/all")
+    response = requests.get(BACKEND_API + f"/tags/{tag}/all")
     if response.status_code != 200:
         print(f"Cannot refresh tag embeddings: Database API (/tags/{tag}/all) not reachable")
         return
@@ -395,7 +391,7 @@ def add_date_entered_info():
 
     collection_name="josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"
 
-    response = requests.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/reports/all")
+    response = requests.get(BACKEND_API + f"/reports/all")
     if response.status_code != 200:
         print("Cannot refresh vectorstore: Database API (/reports/all) not reachable")
         return
@@ -458,7 +454,7 @@ def evaluate_with_cutoff(cutoff, model_id):
         #only consider reports with studies added in the past
         ground_truth_filtered = []
         for item in ground_truth:
-            response = session.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/{item}/date_entered")
+            response = session.get(BACKEND_API + f"/study/{item}/date_entered")
             if response.status_code != 200:
                 print(f"Cannot refresh vectorstore: Database API (/study/{item}/date_entered) not reachable")
                 return
@@ -530,7 +526,7 @@ import json
 def author_frequency():
     session = requests.Session()
     session.headers.update({"Authorization": "Bearer DEBUG"})
-    response = session.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/persons", params={'cutoff':'2025-08'})
+    response = session.get(BACKEND_API + f"/study/persons", params={'cutoff':'2025-08'})
 
     all_authors = []
     for value in response.json().values():
@@ -557,6 +553,7 @@ def author_frequency():
 
 #author_frequency()
 
+"""
 print("Evaluate 5th update")
 evaluate_with_cutoff("2024-01-24 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 5th update
 
@@ -565,3 +562,4 @@ evaluate_with_cutoff("2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_
 
 print("Evaluate 7th update")
 evaluate_with_cutoff("2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update
+"""

@@ -4,7 +4,7 @@ FROM python:3.11-alpine AS proto-builder
 WORKDIR /proto
 RUN pip3 install --no-cache-dir grpcio-tools==1.72.1
 
-COPY utils/embedding.proto .
+COPY tools/utils/embedding.proto .
 RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding.proto
 
 # Stage 2: Main app
@@ -17,12 +17,12 @@ ENV GRPC_HEALTH_PROBE_VERSION=v0.4.38
 
 WORKDIR /app
 
-COPY routines/requirements.txt .
+COPY tools/requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-COPY routines/scripts.py .
-COPY routines/.env.production .env
-COPY routines/wait_for_services.sh /wait_for_services.sh
+COPY tools/scripts/ .
+COPY tools/.env.production .env
+COPY tools/wait_for_services.sh /wait_for_services.sh
 RUN chmod +x /wait_for_services.sh
 
 # 👇 Copy compiled proto files from the builder stage

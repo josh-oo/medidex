@@ -33,7 +33,7 @@ api_key_header = APIKeyHeader(name="X-API-Key")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-DATABASE_URL = "sqlite:///" + os.path.join(DATABASE_VOLUME,"users.db")
+DATABASE_URL = "sqlite:///" + os.path.join(DATABASE_VOLUME,"persistent","users.db")
 
 engine = create_engine(DATABASE_URL, echo=True)
 

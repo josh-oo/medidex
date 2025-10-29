@@ -37,6 +37,11 @@ import pickle
 
 from .auth import is_verified, verify_api_key
 
+from .resources import get_db_external as get_resources
+from .resources import get_study_id_by_trial_id, get_studies, get_study_persons_, get_author_frequencies_
+from .resources import get_study_interventions_ , get_study_conditions_, get_study_outcomes_, get_study_participants_, get_study_design_, get_study_reports_by_ids
+from .resources import get_interventions_by_ids, get_conditions_by_ids, get_outcomes_by_ids
+
 router = APIRouter(tags=["logic"])
 
 @router.on_event("startup")
@@ -48,8 +53,8 @@ load_dotenv()
 MODEL_HOST = os.getenv("EMBEDDING_HOST")
 MODEL_PORT = os.getenv("EMBEDDING_PORT")
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
-DATABASE_HOST = os.getenv("DATABASE_HOST")
-DATABASE_PORT = os.getenv("DATABASE_PORT")
+#DATABASE_HOST = os.getenv("DATABASE_HOST")
+#DATABASE_PORT = os.getenv("DATABASE_PORT")
 VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
 VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
 
@@ -66,7 +71,7 @@ def get_vectorstore():
     yield client
 
 def get_db():
-    conn = sqlite3.connect(os.path.join(DATABASE_VOLUME, "users.db"), check_same_thread=False)
+    conn = sqlite3.connect(os.path.join(DATABASE_VOLUME,"persistent", "users.db"), check_same_thread=False)
     try:
         yield conn
     finally:
@@ -107,7 +112,7 @@ async def write_worker():
     while True:
         query, params, future = await write_queue.get()
         try:
-            conn = sqlite3.connect(os.path.join(DATABASE_VOLUME, "users.db"))#, check_same_thread=False)
+            conn = sqlite3.connect(os.path.join(DATABASE_VOLUME, "persistent", "users.db"))#, check_same_thread=False)
             cursor = conn.cursor()
             cursor.execute(query, params)
             new_rows = cursor.rowcount
@@ -421,30 +426,32 @@ async def get_similar_studies(embedding, collection_name, aspect: str, trial_id:
         ))        
     
     if trial_id:
-        async with httpx.AsyncClient() as api_client:
-            response = await  api_client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
-            response = response.json()
-            if response:
-                for result in response:
-                    found_study_ids[result] = 1.0
-                    debug_map[result] = [{"source_id":trial_id}]
+        #async with httpx.AsyncClient() as api_client:
+            #response = await  api_client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
+            #response = response.json()
+        with get_resources() as resources:
+            response = get_study_id_by_trial_id(trial_id, cutoff, resources)
+        if response:
+            for result in response:
+                found_study_ids[result] = 1.0
+                debug_map[result] = [{"source_id":trial_id}]
 
-            filters.append(
-                    models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="belongs_to_trial_id",
-                                match=models.MatchValue(value=False)
-                            )
-                        ],
-                        must_not=[
-                            models.FieldCondition(
-                                key="belongs_to_study",
-                                match=models.MatchAny(any=list(found_study_ids.keys()))
-                            )
-                        ]
-                    )
+        filters.append(
+                models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="belongs_to_trial_id",
+                            match=models.MatchValue(value=False)
+                        )
+                    ],
+                    must_not=[
+                        models.FieldCondition(
+                            key="belongs_to_study",
+                            match=models.MatchAny(any=list(found_study_ids.keys()))
+                        )
+                    ]
                 )
+            )
     
     filter = models.Filter(must=filters)
 
@@ -472,71 +479,17 @@ async def get_similar_studies(embedding, collection_name, aspect: str, trial_id:
                         found_study_ids[item] = hit.score
                     debug_map[item] = debug_map.get(item, []) + [hit.payload]
 
-    # def cosine_similarity(a, b):        
-    #     # Compute dot product
-    #     dot_product = np.dot(a, b)
-        
-    #     # Compute norms
-    #     norm_a = np.linalg.norm(a)
-    #     norm_b = np.linalg.norm(b)
-        
-    #     # Avoid division by zero
-    #     if norm_a == 0 or norm_b == 0:
-    #         return 0.0
-        
-    #     # Return cosine similarity
-    #     return dot_product / (norm_a * norm_b)
-
-    """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/reports", params={'study_ids': list(found_study_ids.keys()), 'fields': ['Title', 'Abstract'], 'cutoff': cutoff})
-
-        for key, values in response.json().items():
-            all_embeddings = []
-            for value in values:
-                text_input = TextInput(text=value['Title'] + (" " + value['Abstract']) if value['Abstract'] else "")
-                embedding_ = _embed_report(text_input, channel=channel)['embedding']
-                all_embeddings.append(np.array(embedding_))
-            mean_embedding = np.mean(np.stack(all_embeddings), axis=0)
-            new_sim = cosine_similarity(mean_embedding, np.array(embedding.main_embedding))
-            found_study_ids[int(key)] = new_sim
-
-    found_study_ids = dict(sorted(found_study_ids.items(), key=lambda item: item[1], reverse=True))
-    """
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys()), "cutoff": cutoff})
-    result = response.json()
+    #async with httpx.AsyncClient() as client:
+    #    response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys()), "cutoff": cutoff})
+    #result = response.json()
+    with get_resources() as resources:
+        result = get_studies(list(found_study_ids.keys()), resources)
 
     #Remove this block for evaluation without authors
     scores_authors = await get_scores_authors(report_authors=authors, study_ids=list(found_study_ids.keys()), cutoff=cutoff)
     for study_id, score in scores_authors.items():
         if found_study_ids[study_id] < 1.0:
             found_study_ids[study_id] = min(0.99, found_study_ids[study_id] + score)
-
-    #async with httpx.AsyncClient() as client:
-    #    response_persons = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/persons", params={'study_ids': list(found_study_ids.keys()), "cutoff": cutoff})
-    #persons = response_persons.json()
-    
-    #authors = set([author.strip().lower() for author in authors])
-    #for study_id in found_study_ids.keys():
-    #    study_persons = persons[str(study_id)]
-    #    intersection = authors & set(study_persons)
-    #    new_sim = len(intersection) / len(study_persons) if len(study_persons) > 0 else 0
-    #    found_study_ids[study_id] = min(0.99, found_study_ids[study_id] + new_sim)
-        #print()
-        #print("Intersections: ", intersection)
-        #print()
-    #    if found_study_ids[study_id] > 0.99:
-    #        continue
-
-    #for study_id, participants in zip(result['CRGStudyID'], result['NumberParticipants']):
-    #    if found_study_ids[study_id] > 0.99:
-    #        continue
-    #    embedding_ = _embed_aspect(TextInput(text=str(participants)), channel=channel)['embedding']
-    #    new_sim = cosine_similarity(embedding_, np.array(embedding.main_embedding))
-    #    found_study_ids[study_id] = min(0.99, found_study_ids[study_id] + new_sim)
-    #    #print(study_id, new_sim)
 
     result['Relevance'] = list(found_study_ids.values())
 
@@ -553,14 +506,16 @@ async def get_similar_studies(embedding, collection_name, aspect: str, trial_id:
     return reordered
 
 async def get_scores_authors(report_authors: List[str], study_ids: List[int], cutoff: str):
-    async with httpx.AsyncClient() as client:
-        tasks = [
-            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/persons", params={'study_ids': study_ids, "cutoff": cutoff}),
-            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/authors/frequencies", params={'authors': report_authors}),
-            ]
-        responses =  await asyncio.gather(*tasks)
-    study_persons = responses[0].json()
-    current_persons = responses[1].json()
+    #async with httpx.AsyncClient() as client:
+    #    tasks = [
+    #        client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/persons", params={'study_ids': study_ids, "cutoff": cutoff}),
+    #        client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/authors/frequencies", params={'authors': report_authors}),
+    #        ]
+    #    responses =  await asyncio.gather(*tasks)
+    with get_resources() as resources:
+        study_persons = get_study_persons_(study_ids, cutoff, resources)#responses[0].json()
+    current_persons = get_author_frequencies_(report_authors)#responses[1].json()
+
     report_authors = set(current_persons.keys())
 
     result = {}
@@ -585,7 +540,7 @@ async def get_aspect_related_studies(tag_category: str, tag_value: str, k : int 
 
     collection_name = embeddings['model_id']
 
-    return await get_similar_studies(embeddings['embedding'], collection_name, tag_category, None, None, None, k, client, return_details=False)
+    return await get_similar_studies(embeddings['embedding'], collection_name, tag_category, None, [], None, k, client, return_details=False)
 
 
 def single_element_generator(element):
@@ -615,7 +570,6 @@ def _embed_report(text : str, channel):
 
     return result
 
-#@router.post("/embed/aspect", dependencies=[Depends(is_verified)])
 def embed_aspect(text : str, channel = Depends(get_grpc_channel)):
     return _embed_aspect(text, channel)
 
@@ -638,6 +592,19 @@ def _embed_aspect(text : str, channel):
 
     return result
 
+
+
+
+
+
+
+
+
+
+"""
+Only used for internal API key protected embedding analysis
+"""
+
 class RetrievalInputText(BaseModel):
     title: str
     abstract: Optional[str]
@@ -655,36 +622,9 @@ async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(
     return result
 
 async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, authors, cutoff):
-    """
-    date_filter = Filter()
-    if cutoff:
-        date_filter = Filter(
-            must=[
-                FieldCondition(key="date_entered",range=DatetimeRange(lt=datetime.fromisoformat(cutoff)))
-            ]
-        )
-
-    study_search_results = vectorstore.query_points_groups(
-        collection_name=model_id,
-        query=embeddings['embedding'],
-        using="default",
-        group_by="belongs_to_study",  # Path of the field to group by
-        limit=top_k,  # Max amount of groups
-        group_size=1,  # Max amount of points per group
-        query_filter=date_filter,
-    )
-
-    found_study_ids = {}
-    for result in study_search_results.groups:
-        for hit in result.hits:
-            report_hit = hit.payload['source_id']
-            for item in hit.payload['belongs_to_study']:
-                found_study_ids[item] = {'score': hit.score, 'report_hit': report_hit}
-    """
+    
     trial_id = await extract_trial_id(RawReport(title=title,abstract=abstract, authors=[]))
-    #report_embeddings =  ReportEmbedding(model_id=model_id, main_embedding=embeddings['embedding'], author_embedding=None)
-    #pre_result = await similarity_search_studies(report_embeddings, aspect="default", trial_id=trial_id, authors=None,cutoff=cutoff, k=top_k, client=vectorstore,channel=None, return_details=True)
-    pre_result = await get_similar_studies(embeddings['embedding'], model_id, "default", trial_id, None, cutoff, k, client, return_details=True)
+    pre_result = await get_similar_studies(embeddings['embedding'], model_id, "default", trial_id, authors, cutoff, top_k, client, return_details=True)
 
     found_study_ids = {}
     for key, score, details in zip(pre_result['CRGStudyID'], pre_result['Relevance'], pre_result['details']):
@@ -702,24 +642,25 @@ async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, aut
 
     async with httpx.AsyncClient() as client:
 
-        tasks = [
-            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys())}),
-            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/interventions", params={'study_ids': list(found_study_ids.keys())}),
-            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/conditions", params={'study_ids': list(found_study_ids.keys())}),
-            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/outcomes", params={'study_ids': list(found_study_ids.keys())}),
-            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/participants", params={'study_ids': list(found_study_ids.keys())}),
-            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/design", params={'study_ids': list(found_study_ids.keys())}),
-            client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/reports", params={'study_ids': list(found_study_ids.keys()), 'fields': ['CRGReportID', 'Title', 'Abstract', 'Authors'], 'cutoff': cutoff}),
-        ]
+        #tasks = [
+            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys())}),
+            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/interventions", params={'study_ids': list(found_study_ids.keys())}),
+            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/conditions", params={'study_ids': list(found_study_ids.keys())}),
+            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/outcomes", params={'study_ids': list(found_study_ids.keys())}),
+            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/participants", params={'study_ids': list(found_study_ids.keys())}),
+            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/design", params={'study_ids': list(found_study_ids.keys())}),
+            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/reports", params={'study_ids': list(found_study_ids.keys()), 'fields': ['CRGReportID', 'Title', 'Abstract', 'Authors'], 'cutoff': cutoff}),
+        #]
 
-        responses =  await asyncio.gather(*tasks)
-        related_studies = responses[0].json()
-        study_interventions = responses[1].json()
-        study_conditions = responses[2].json()
-        study_outcomes = responses[3].json()
-        study_participants_desc = responses[4].json()
-        study_design = responses[5].json()
-        study_reports = responses[6].json()
+        #responses =  await asyncio.gather(*tasks)
+        with get_resources() as resources:
+            related_studies = get_studies(list(found_study_ids.keys()), resources)#responses[0].json()
+            study_interventions = get_study_interventions_(list(found_study_ids.keys()), resources)#responses[1].json()
+            study_conditions = get_study_conditions_(list(found_study_ids.keys()), resources)#responses[2].json()
+            study_outcomes = get_study_outcomes_(list(found_study_ids.keys()), resources)# responses[3].json()
+            study_participants_desc = get_study_participants_(list(found_study_ids.keys()), resources)#responses[4].json()
+            study_design = get_study_design_(list(found_study_ids.keys()), resources)#responses[5].json()
+            study_reports = get_study_reports_by_ids(list(found_study_ids.keys()), ['CRGReportID', 'Title', 'Abstract', 'Authors'], cutoff, resources)#responses[6].json()
 
         for id, name, num_participants, countries, durations,report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], related_studies['NumberParticipants'], related_studies['Countries'], related_studies['Duration'], report_hits, scores):            
             study_item = {}
@@ -789,9 +730,19 @@ async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, aut
             related_tags.append(item)
 
         all_ids = [item['id'] for item in related_tags]
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/tags/{type_vectorstore}", params={'ids': all_ids})
-        result = response.json()
+
+        with get_resources() as resources:
+            
+            if type_vectorstore == "interventions":
+                result = get_interventions_by_ids(all_ids, resources)
+            elif type_vectorstore == "conditions":
+                result = get_conditions_by_ids(all_ids, resources)
+            elif type_vectorstore == "outcomes":
+                result = get_outcomes_by_ids(all_ids, resources)
+
+        #async with httpx.AsyncClient() as client:
+        #    response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/tags/{type_vectorstore}", params={'ids': all_ids})
+        #result = response.json()
   
         for item in related_tags:
             item['name'] = result[item['id']][0].strip()
