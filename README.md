@@ -28,34 +28,34 @@ The application is divided into multiple services to facilitate hosting it on di
 ## frontend
 This is just a prototype to visualize and test the applications features.  
 ### Env Vars:
-`BACKEND_API=http://logic:8002`
+`BACKEND_API=http://logic:8002`  
 ## logic
 This services manages the incoming requests from the frontend and calls the appropriate sub-services in the backend
 ### Env Vars (for development):
-`EMBEDDING_HOST=localhost`
-`EMBEDDING_PORT=50051`
-`DATABASE_HOST=localhost`
-`DATABASE_PORT=8001`
-`VECTORSTORE_HOST=localhost`
-`VECTORSTORE_PORT=6334`
-`DATABASE_VOLUME="../_data/users"`
-`JWT_SECRET=DEBUG_SECRET_KEY`
-`DEBUG=TRUE
+`EMBEDDING_HOST=localhost`  
+`EMBEDDING_PORT=50051`  
+`DATABASE_HOST=localhost`  
+`DATABASE_PORT=8001`  
+`VECTORSTORE_HOST=localhost`  
+`VECTORSTORE_PORT=6334`  
+`DATABASE_VOLUME="../_data/users"`  
+`JWT_SECRET=DEBUG_SECRET_KEY`  
+`DEBUG=TRUE` 
 ## database
 Currently this service hosts the meerkat (sql) database and provides a simple REST interface to execute queries. However, in future it might make more sense to run this service, where the meerkat data is actually hosted, so that we don't need a copy of meerkat data in this app.
 ### Env Vars:
-`DATABASE_VOLUME="../_data/database"`
+`DATABASE_VOLUME="../_data/database"`  
 ## embedding
 This service is used to transform plain text into vector embeddings using a fine-tuned embedding model. Currently this service runs on a CPU machine. Depending on the workload it might make sense to move this service to a GPU machine later. The model is publicly available on huggingface (https://huggingface.co/josh-oo/aspect-based-embeddings-v3).
 ### Env Vars:
-`MODEL_PATH="josh-oo/aspect-based-embeddings-v3"`
-`MODEL_REVISION="6b211a8f4e27b904ab146da7d63a084c2fd94223"`
-`MODEL_DTYPE="bfloat16"`
-`TOKENIZER_PATH="josh-oo/aspect-based-embeddings-v3"`
-`TOKENIZER_REVISION="6b211a8f4e27b904ab146da7d63a084c2fd94223"`
-`ASPECTS="participants,intervention,condition,outcome"`
-`MODEL_DIM=1024`
-`MODEL_MAX_INPUT_LENGTH=8192`
+`MODEL_PATH="josh-oo/aspect-based-embeddings-v3"`  
+`MODEL_REVISION="6b211a8f4e27b904ab146da7d63a084c2fd94223"`  
+`MODEL_DTYPE="bfloat16"`  
+`TOKENIZER_PATH="josh-oo/aspect-based-embeddings-v3"`  
+`TOKENIZER_REVISION="6b211a8f4e27b904ab146da7d63a084c2fd94223"`  
+`ASPECTS="participants,intervention,condition,outcome"`  
+`MODEL_DIM=1024`  
+`MODEL_MAX_INPUT_LENGTH=8192`  
 If you use another model please adapt the parameters accordingly
 ## qdrant
 This is where all the vectores are stored to index the meerkat reports based on their similarity.
@@ -64,15 +64,15 @@ No environment variables
 ## routines
 This service hosts routínes like searching for unindexed reports in meerkat to add them to the index properly.
 ### Env Vars:
-`EMBEDDING_HOST=localhost`
-`EMBEDDING_PORT=50051`
-`DATABASE_HOST=localhost`
-`DATABASE_PORT=8001`
-`VECTORSTORE_HOST=localhost`
-`VECTORSTORE_PORT=6334`
-`MESH_DUMP_LOCATION="../_data/routines/desc2025.xml"`
-`BACKEND_API=http://localhost:8002`
-`BACKEND_API_KEY=PLEASE_CREATE_YOUR_OWN_API_KEY`
+`EMBEDDING_HOST=localhost`  
+`EMBEDDING_PORT=50051`  
+`DATABASE_HOST=localhost`  
+`DATABASE_PORT=8001`  
+`VECTORSTORE_HOST=localhost`  
+`VECTORSTORE_PORT=6334`  
+`MESH_DUMP_LOCATION="../_data/routines/desc2025.xml"`  
+`BACKEND_API=http://localhost:8002`  
+`BACKEND_API_KEY=PLEASE_CREATE_YOUR_OWN_API_KEY`  
 
 # Rules for editing this repository
 1. If you are working on this repository please create a new branch for every feature / bugfix and use meaningful prefixes.
