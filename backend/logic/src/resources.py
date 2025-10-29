@@ -1,12 +1,16 @@
 from fastapi import APIRouter
-from fastapi import Query, Depends
+from fastapi import Depends
 import httpx
 import os
+
+from dotenv import load_dotenv
 
 from .auth import is_verified
 from typing import List, Optional
 
 from pydantic import BaseModel
+
+load_dotenv()
 
 router = APIRouter(tags=["resources"])
 

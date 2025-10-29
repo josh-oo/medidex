@@ -10,9 +10,8 @@ load_dotenv()
 BACKEND_API = os.getenv('BACKEND_API')
 
 def update_user(user_id, field, value):
-    payload = {}
-    payload[field] = value
-    response = requests.put(BACKEND_API + f"/users/{user_id}",headers=get_headers(), json=payload)
+    payload = {'value': value}
+    response = requests.put(BACKEND_API + f"/users/{user_id}/{field}",headers=get_headers(), json=payload)
 
     if response.status_code == 200:
         st.rerun()

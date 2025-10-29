@@ -35,8 +35,6 @@ import hashlib
 import json
 import pickle
 
-import numpy as np
-
 from .auth import is_verified, verify_api_key
 
 router = APIRouter(tags=["logic"])
@@ -44,10 +42,6 @@ router = APIRouter(tags=["logic"])
 @router.on_event("startup")
 async def startup_event():
     await startup_event()
-
-#from sklearn.feature_extraction.text import TfidfVectorizer
-#from sklearn.metrics.pairwise import cosine_similarity
-#import numpy as np
 
 load_dotenv()
 
@@ -99,36 +93,10 @@ class Tag(BaseModel):
     keyword: str
     relevance: str
 
-# Request schema
-class TextInput(BaseModel):
-    text: str
-
 class RawReport(BaseModel):
     title: str
     abstract: Optional[str]
     authors: Optional[List[str]]
-
-class AspectEmbedding(BaseModel):
-    model_id: str
-    embedding: List[float]
-
-class ReportEmbedding(BaseModel):
-    model_id: str
-    main_embedding: List[float]
-    author_embedding: Optional[List[float]]
-    #participants_embedding: Optional[List[float]]
-    #text: Optional[str]
-
-class RetrievalInputText(BaseModel):
-    title: str
-    abstract: Optional[str]
-    authors: Optional[List[str]]
-    topK: int
-
-class RetrievalInputEmbedding(BaseModel):
-    basic_input: RetrievalInputText
-    embeddings: dict
-    model_id: str
 
 async def startup_event():
     # Start background worker
@@ -165,7 +133,7 @@ async def process_report(report, batch_hash, index):
         text_to_process.append(abstract)
     text_to_process = "\n".join(text_to_process)
    
-    vectors =_embed_report(TextInput(text=text_to_process), get_grpc_channel())
+    vectors =_embed_report(text_to_process, get_grpc_channel())
     vectors_blob = pickle.dumps(vectors)
 
     future = asyncio.get_event_loop().create_future()
@@ -613,7 +581,7 @@ async def get_scores_authors(report_authors: List[str], study_ids: List[int], cu
 
 @router.get("/tags/{tag_category}/{tag_value}/related_studies", dependencies=[Depends(is_verified)], summary="Get studies related to a specific tag (intervention, outcome, ...) currently only vector-similarity search is available")
 async def get_aspect_related_studies(tag_category: str, tag_value: str, k : int = Query(10), client=Depends(get_vectorstore), channel = Depends(get_grpc_channel)):
-    embeddings = _embed_aspect(TextInput(text=tag_value), channel)
+    embeddings = _embed_aspect(tag_value, channel)
 
     collection_name = embeddings['model_id']
 
@@ -623,14 +591,13 @@ async def get_aspect_related_studies(tag_category: str, tag_value: str, k : int 
 def single_element_generator(element):
     yield element
 
-#@router.post("/embed/report", dependencies=[Depends(is_verified)])
-def embed_report(input: TextInput, channel = Depends(get_grpc_channel)):
-    return _embed_report(input, channel)
+def embed_report(text, channel = Depends(get_grpc_channel)):
+    return _embed_report(text, channel)
 
-def _embed_report(input: TextInput, channel):
+def _embed_report(text : str, channel):
     token = secrets.token_urlsafe(8)
 
-    request = embedding_pb2.EmbedReportRequest(id=token, text=input.text, authors=[])
+    request = embedding_pb2.EmbedReportRequest(id=token, text=text, authors=[])
 
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
 
@@ -649,13 +616,13 @@ def _embed_report(input: TextInput, channel):
     return result
 
 #@router.post("/embed/aspect", dependencies=[Depends(is_verified)])
-def embed_aspect(input: TextInput, channel = Depends(get_grpc_channel)):
-    return _embed_aspect(input, channel)
+def embed_aspect(text : str, channel = Depends(get_grpc_channel)):
+    return _embed_aspect(text, channel)
 
-def _embed_aspect(input: TextInput, channel):
+def _embed_aspect(text : str, channel):
     token = secrets.token_urlsafe(8)
 
-    request = embedding_pb2.EmbedAspectsRequest(id=token, aspects=[input.text])
+    request = embedding_pb2.EmbedAspectsRequest(id=token, aspects=[text])
 
     stub = embedding_pb2_grpc.EmbedServiceStub(channel)
 
@@ -670,19 +637,22 @@ def _embed_aspect(input: TextInput, channel):
     result = {"model_id": model_id, "embedding": list(response.embedding[0].values)}
 
     return result
+
+class RetrievalInputText(BaseModel):
+    title: str
+    abstract: Optional[str]
+    authors: Optional[List[str]]
+    topK: int
+
+class RetrievalInputEmbedding(BaseModel):
+    basic_input: RetrievalInputText
+    embeddings: dict
+    model_id: str
     
 @router.post("/processing/analyze_embedding", dependencies=[Depends(verify_api_key)], include_in_schema=False)
 async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), trial_id: str = Query(None), vectorstore=Depends(get_vectorstore)):
     result = await analyze(vectorstore, input.embeddings, input.model_id, input.basic_input.topK, input.basic_input.title, input.basic_input.abstract, input.basic_input.authors, cutoff)
     return result
-
-#@router.post("/api/v1/analyze_text", dependencies=[Depends(verify_api_key)])
-#async def analyze_text(input: RetrievalInputText, cutoff: str = Query(None), trial_id: str = Query(None), vectorstore=Depends(get_vectorstore), channel=Depends(get_grpc_channel)):    
-#    text_input = TextInput(text=input.title + " " + input.abstract)
-#    embedding_results = _embed_report(text_input, channel)
-
-#    result = await analyze(vectorstore, embedding_results, embedding_results['model_id'], input.topK, input.title, input.abstract, input.authors, cutoff,)
-#    return result
 
 async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, authors, cutoff):
     """
@@ -712,8 +682,9 @@ async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, aut
                 found_study_ids[item] = {'score': hit.score, 'report_hit': report_hit}
     """
     trial_id = await extract_trial_id(RawReport(title=title,abstract=abstract, authors=[]))
-    report_embeddings =  ReportEmbedding(model_id=model_id, main_embedding=embeddings['embedding'], author_embedding=None)
-    pre_result = await similarity_search_studies(report_embeddings, aspect="default", trial_id=trial_id, authors=None,cutoff=cutoff, k=top_k, client=vectorstore,channel=None, return_details=True)
+    #report_embeddings =  ReportEmbedding(model_id=model_id, main_embedding=embeddings['embedding'], author_embedding=None)
+    #pre_result = await similarity_search_studies(report_embeddings, aspect="default", trial_id=trial_id, authors=None,cutoff=cutoff, k=top_k, client=vectorstore,channel=None, return_details=True)
+    pre_result = await get_similar_studies(embeddings['embedding'], model_id, "default", trial_id, None, cutoff, k, client, return_details=True)
 
     found_study_ids = {}
     for key, score, details in zip(pre_result['CRGStudyID'], pre_result['Relevance'], pre_result['details']):
@@ -853,6 +824,16 @@ async def extract_trial_id(raw_report: RawReport):
     return None
 
 #TODO deprecated endpoints, remove later
+
+class ReportEmbedding(BaseModel):
+    model_id: str
+    main_embedding: List[float]
+    author_embedding: Optional[List[float]]
+
+class AspectEmbedding(BaseModel):
+    model_id: str
+    embedding: List[float]
+
 @router.post("/similarity_search/studies", dependencies=[Depends(is_verified)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_studies instead", deprecated=True)
 async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):
     
