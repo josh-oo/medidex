@@ -7,7 +7,7 @@ from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 from sqlmodel import create_engine, select, SQLModel, Session, Field
 
-from typing import List, Literal, Optional
+from typing import List, Literal
 import os
 
 from passlib.context import CryptContext
