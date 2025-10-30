@@ -32,7 +32,7 @@ services:
     build:
       context: ./backend
       dockerfile: logic/Dockerfile
-    expose:
+    ports:
       - "8002:8002"
     volumes:
       - ./backend/_data/backend:/data
