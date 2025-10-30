@@ -1,22 +1,6 @@
 version: '3.8'
 
 services:
-  #database:
-  #  container_name: database
-  #  build: 
-  #    context: ./backend/database
-  #    dockerfile: Dockerfile
-  #  expose:
-  #    - 8001
-  #  volumes:
-  #    - ./backend/_data/backend/resources:/data
-  #  read_only: true
-  #  networks:
-  #    - internal_net
-  #  tmpfs:
-  #    - /tmp
-  #    - /var/tmp
-
   embedding:
     container_name: embedding
     build:
@@ -49,7 +33,7 @@ services:
       context: ./backend
       dockerfile: logic/Dockerfile
     expose:
-      - 8002
+      - "8002:8002"
     volumes:
       - ./backend/_data/backend:/data
     read_only: true
