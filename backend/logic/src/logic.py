@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from fastapi import Query, UploadFile, File, HTTPException, Depends, BackgroundTasks
+from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import Response
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -35,14 +35,27 @@ import hashlib
 import json
 import pickle
 
+import enum
+
 from .auth import is_verified, verify_api_key
 
-from .resources import get_db_external as get_resources
-from .resources import get_study_id_by_trial_id, get_studies, get_study_persons_, get_author_frequencies_
-from .resources import get_study_interventions_ , get_study_conditions_, get_study_outcomes_, get_study_participants_, get_study_design_, get_study_reports_by_ids
-from .resources import get_interventions_by_ids, get_conditions_by_ids, get_outcomes_by_ids
+from .resources import get_study_id_by_trial_id_internal, get_studies_internal, get_study_persons_internal, get_author_frequencies
+from .resources import get_study_interventions_internal , get_study_conditions_internal, get_study_outcomes_internal, get_study_participants_internal, get_study_design_internal
+from .resources import get_all_interventions_internal, get_all_conditions_internal, get_all_outcomes_internal, get_study_reports_by_ids_internal
+
+class TagCategories(str, enum.Enum):
+    interventions = 'interventions'
+    conditions = 'conditions'
+    outcomes = 'outcomes'
+    participants = 'participants'
 
 router = APIRouter(tags=["logic"])
+
+cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
+report_index_path = Path(..., description="The target report's index within the batch (starting with 0)")
+batch_hash_path = Path(..., description="The batch's hash/id")
+
+k_query = Query(10, description="Maximum number of returned results.")
 
 @router.on_event("startup")
 async def startup_event():
@@ -188,7 +201,7 @@ async def parse_file(file: UploadFile):
     return entries
 
 @router.post("/batches", dependencies=[Depends(is_verified)], summary="Upload a batch of new reports that need to be assigned to studies (usually in the .ris file format)", description="Uploading a new batch triggers the embedding process. Batches are mainly used to do these compute heavy calculations in the background and only once. All needed data and the calculated embedding vectors are stored temporarily.", status_code=201) 
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process.")):
 
     entries = await parse_file(file)
 
@@ -226,7 +239,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
     return Response(status_code=201)
     
-@router.get("/batches", dependencies=[Depends(is_verified)], summary="Get an overview of current report batches", description="For each batch the current progress of embedding calculation and the number of already assigned reports is returned")
+@router.get("/batches", dependencies=[Depends(is_verified)], summary="Get an overview of current report batches.", description="For each batch the current progress of embedding calculation and the number of already assigned reports is returned")
 async def get_available_batches(db = Depends(get_db)) -> List[Batch]:
     query = """
     SELECT b.*, r.embedded, r.assigned
@@ -249,8 +262,8 @@ async def get_available_batches(db = Depends(get_db)) -> List[Batch]:
 
     return all_batches
 
-@router.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified)], summary="Delete a report batch and all its associated reports (including calculated embedding vectors) from the temporary storage", status_code=204)
-async def delete_batch(batch_hash):
+@router.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified)], summary="Delete a report batch and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
+async def delete_batch(batch_hash: str = batch_hash_path):
     future = asyncio.get_event_loop().create_future()
     query = """
     DELETE FROM tmp_report_batches WHERE batch_hash = ?;
@@ -269,8 +282,8 @@ async def delete_batch(batch_hash):
 
     return Response(status_code=204)
 
-@router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified)], summary="Get the data and embedding vectors for a specific report in a batch", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
-async def get_batched_report(batch_hash: str, report_index : int, db = Depends(get_db)) -> BatchedReport:
+@router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
+async def get_batched_report(batch_hash: str = batch_hash_path, report_index : int = report_index_path, db = Depends(get_db)) -> BatchedReport:
     query = """
     SELECT title, abstract, authors, trial_id, vectors, assigned_studies
     FROM tmp_reports
@@ -290,8 +303,8 @@ async def get_batched_report(batch_hash: str, report_index : int, db = Depends(g
     item['assigned_studies'] = json.loads(rows[5]) if rows[5] else []
     return item
 
-@router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Assign studies to a specific report in a batch", status_code=204)
-async def assign_studies(batch_hash: str, report_index: int, study_ids: List[int] = Query(...)):
+@router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Assign studies to a specific report in a batch.", status_code=204)
+async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report.")):
     future = asyncio.get_event_loop().create_future()
     query = """
     UPDATE tmp_reports
@@ -304,8 +317,8 @@ async def assign_studies(batch_hash: str, report_index: int, study_ids: List[int
     await future
     return Response(status_code=204)
 
-@router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Remove assigned studies from a specific report in a batch", status_code=204)
-async def delete_assigned_studies(batch_hash: str, report_index: int):
+@router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Remove assigned studies from a specific report in a batch.", status_code=204)
+async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path):
     future = asyncio.get_event_loop().create_future()
     query = """
     UPDATE tmp_reports
@@ -318,8 +331,8 @@ async def delete_assigned_studies(batch_hash: str, report_index: int):
     await future
     return Response(status_code=204)
 
-@router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors")
-async def similar_tags(batch_hash: str, report_index: int, sources: List[str] = Query(...), aspect: str = Query(...), k : int = Query(10), client=Depends(get_vectorstore), db = Depends(get_db)) -> List[Tag]:
+@router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
+async def similar_tags(batch_hash: str = batch_hash_path, report_index: int = report_index_path, sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(None, description="The tag category which you are interested in"), k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_db)) -> List[Tag]:
     query = """
     SELECT vectors
     FROM tmp_reports
@@ -349,8 +362,11 @@ async def similar_tags(batch_hash: str, report_index: int, sources: List[str] = 
     ]
     return result
 
-@router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified)], summary="Get related studies for a specific report in a batch based on its embedding vectors")
-async def similar_studies(batch_hash: str, report_index: int, aspect: str = Query("default"), cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), channel = Depends(get_grpc_channel), db = Depends(get_db), return_details=False):
+@router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
+async def similar_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, aspect: TagCategories = Query(None, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_db), return_details=False):
+    if not aspect:
+        aspect = "default"
+    
     query = """
     SELECT  authors, trial_id, vectors
     FROM tmp_reports
@@ -426,11 +442,8 @@ async def get_similar_studies(embedding, collection_name, aspect: str, trial_id:
         ))        
     
     if trial_id:
-        #async with httpx.AsyncClient() as api_client:
-            #response = await  api_client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study_id", params={"trial_id": trial_id, "cutoff":cutoff})
-            #response = response.json()
-        with get_resources() as resources:
-            response = get_study_id_by_trial_id(trial_id, cutoff, resources)
+        
+        response = get_study_id_by_trial_id_internal(trial_id, cutoff)
         if response:
             for result in response:
                 found_study_ids[result] = 1.0
@@ -479,11 +492,8 @@ async def get_similar_studies(embedding, collection_name, aspect: str, trial_id:
                         found_study_ids[item] = hit.score
                     debug_map[item] = debug_map.get(item, []) + [hit.payload]
 
-    #async with httpx.AsyncClient() as client:
-    #    response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys()), "cutoff": cutoff})
-    #result = response.json()
-    with get_resources() as resources:
-        result = get_studies(list(found_study_ids.keys()), resources)
+    all_studies = get_studies_internal(list(found_study_ids.keys()))
+    #list of dicts to dict of lists:
 
     #Remove this block for evaluation without authors
     scores_authors = await get_scores_authors(report_authors=authors, study_ids=list(found_study_ids.keys()), cutoff=cutoff)
@@ -491,7 +501,16 @@ async def get_similar_studies(embedding, collection_name, aspect: str, trial_id:
         if found_study_ids[study_id] < 1.0:
             found_study_ids[study_id] = min(0.99, found_study_ids[study_id] + score)
 
-    result['Relevance'] = list(found_study_ids.values())
+    #result['Relevance'] = list(found_study_ids.values())
+    for i in range(0, len(all_studies)):
+        item = all_studies[i].dict()
+        item['Relevance'] = found_study_ids[item['CRGStudyID']]
+        all_studies[i] = item
+
+    result = {}
+    for study in all_studies:
+        for key, value in study.items(): 
+            result.setdefault(key, []).append(value)
 
     order = ['CRGStudyID', 'Relevance', 'ShortName', 'NumberParticipants', 'Duration', 'Comparison', 'Countries', 'DateEntered', 'DateEdited', 'StatusofStudy']
     reordered = {key: result[key] for key in order}
@@ -506,15 +525,9 @@ async def get_similar_studies(embedding, collection_name, aspect: str, trial_id:
     return reordered
 
 async def get_scores_authors(report_authors: List[str], study_ids: List[int], cutoff: str):
-    #async with httpx.AsyncClient() as client:
-    #    tasks = [
-    #        client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/persons", params={'study_ids': study_ids, "cutoff": cutoff}),
-    #        client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/authors/frequencies", params={'authors': report_authors}),
-    #        ]
-    #    responses =  await asyncio.gather(*tasks)
-    with get_resources() as resources:
-        study_persons = get_study_persons_(study_ids, cutoff, resources)#responses[0].json()
-    current_persons = get_author_frequencies_(report_authors)#responses[1].json()
+
+    study_persons = get_study_persons_internal(study_ids, cutoff)
+    current_persons = get_author_frequencies(report_authors)
 
     report_authors = set(current_persons.keys())
 
@@ -534,8 +547,8 @@ async def get_scores_authors(report_authors: List[str], study_ids: List[int], cu
 
     return result
 
-@router.get("/tags/{tag_category}/{tag_value}/related_studies", dependencies=[Depends(is_verified)], summary="Get studies related to a specific tag (intervention, outcome, ...) currently only vector-similarity search is available")
-async def get_aspect_related_studies(tag_category: str, tag_value: str, k : int = Query(10), client=Depends(get_vectorstore), channel = Depends(get_grpc_channel)):
+@router.get("/{tag_category}/{tag_value}/related_studies", dependencies=[Depends(is_verified)], summary="Get studies related to a specific tag (intervention, outcome, ...) currently only vector-similarity search is available.", description="Retrieve studies that are related to a specific tag value (e.g., 'Placebo' for interventions) using vector similarity search based on the embedding of the tag value. The similarity search is done at runtime.")
+async def get_aspect_related_studies(tag_category: TagCategories = Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value: str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), k : int = k_query, client=Depends(get_vectorstore), channel = Depends(get_grpc_channel)):
     embeddings = _embed_aspect(tag_value, channel)
 
     collection_name = embeddings['model_id']
@@ -640,66 +653,52 @@ async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, aut
     scores = [item['score'] for item in found_study_ids.values()]
     report_hits = [item['report_hit'] for item in found_study_ids.values()]
 
-    async with httpx.AsyncClient() as client:
+    related_studies = get_studies_internal(list(found_study_ids.keys()))#responses[0].json()
+    study_interventions = get_study_interventions_internal(list(found_study_ids.keys()))#responses[1].json()
+    study_conditions = get_study_conditions_internal(list(found_study_ids.keys()))#responses[2].json()
+    study_outcomes = get_study_outcomes_internal(list(found_study_ids.keys()))# responses[3].json()
+    study_participants_desc = get_study_participants_internal(list(found_study_ids.keys()))#responses[4].json()
+    study_design = get_study_design_internal(list(found_study_ids.keys()))#responses[5].json()
+    study_reports = get_study_reports_by_ids_internal(list(found_study_ids.keys()), ['CRGReportID', 'Title', 'Abstract', 'Authors'], cutoff)#responses[6].json()
 
-        #tasks = [
-            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/studies", params={'study_ids': list(found_study_ids.keys())}),
-            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/interventions", params={'study_ids': list(found_study_ids.keys())}),
-            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/conditions", params={'study_ids': list(found_study_ids.keys())}),
-            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/tags/outcomes", params={'study_ids': list(found_study_ids.keys())}),
-            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/participants", params={'study_ids': list(found_study_ids.keys())}),
-            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/design", params={'study_ids': list(found_study_ids.keys())}),
-            #client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/study/reports", params={'study_ids': list(found_study_ids.keys()), 'fields': ['CRGReportID', 'Title', 'Abstract', 'Authors'], 'cutoff': cutoff}),
-        #]
+    for id, name, num_participants, countries, durations,report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], related_studies['NumberParticipants'], related_studies['Countries'], related_studies['Duration'], report_hits, scores):            
+        study_item = {}
+        study_item['study_id'] =  id
+        study_item['study_name'] = name
+        study_item['score'] = score
+        study_item['report_hit'] = report_hit
 
-        #responses =  await asyncio.gather(*tasks)
-        with get_resources() as resources:
-            related_studies = get_studies(list(found_study_ids.keys()), resources)#responses[0].json()
-            study_interventions = get_study_interventions_(list(found_study_ids.keys()), resources)#responses[1].json()
-            study_conditions = get_study_conditions_(list(found_study_ids.keys()), resources)#responses[2].json()
-            study_outcomes = get_study_outcomes_(list(found_study_ids.keys()), resources)# responses[3].json()
-            study_participants_desc = get_study_participants_(list(found_study_ids.keys()), resources)#responses[4].json()
-            study_design = get_study_design_(list(found_study_ids.keys()), resources)#responses[5].json()
-            study_reports = get_study_reports_by_ids(list(found_study_ids.keys()), ['CRGReportID', 'Title', 'Abstract', 'Authors'], cutoff, resources)#responses[6].json()
+        study_item['attributes'] = {}
+        study_item['attributes']['countries'] = [country.strip() for country in countries.split("//")] if countries else None
+        study_item['attributes']['duration'] = [duration.strip() for duration in durations.split("//")] if durations else None
+        study_item['attributes']['participants_num'] = [p_num.strip() for p_num in num_participants.split("//")] if num_participants else None
 
-        for id, name, num_participants, countries, durations,report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], related_studies['NumberParticipants'], related_studies['Countries'], related_studies['Duration'], report_hits, scores):            
-            study_item = {}
-            study_item['study_id'] =  id
-            study_item['study_name'] = name
-            study_item['score'] = score
-            study_item['report_hit'] = report_hit
+        study_item['assigned_reports'] = {}
 
-            study_item['attributes'] = {}
-            study_item['attributes']['countries'] = [country.strip() for country in countries.split("//")] if countries else None
-            study_item['attributes']['duration'] = [duration.strip() for duration in durations.split("//")] if durations else None
-            study_item['attributes']['participants_num'] = [p_num.strip() for p_num in num_participants.split("//")] if num_participants else None
+        study_item['attributes']['participants_desc'] = study_participants_desc.get(str(id), [])
+        study_item['attributes']['study_design'] = study_design.get(str(id), [])
 
-            study_item['assigned_reports'] = {}
+        related_interventions = study_interventions.get(str(id), [])
+        study_item['assigned_interventions'] = [item['Description'] for item in related_interventions]
+        all_related_interventions.extend([item['ID'] for item in related_interventions])
 
-            study_item['attributes']['participants_desc'] = study_participants_desc.get(str(id), [])
-            study_item['attributes']['study_design'] = study_design.get(str(id), [])
+        related_conditions = study_conditions.get(str(id), [])
+        study_item['assigned_conditions'] = [item['Description'] for item in related_conditions]
+        all_related_conditions.extend([item['ID'] for item in related_conditions])
 
-            related_interventions = study_interventions.get(str(id), [])
-            study_item['assigned_interventions'] = [item['Description'] for item in related_interventions]
-            all_related_interventions.extend([item['ID'] for item in related_interventions])
-
-            related_conditions = study_conditions.get(str(id), [])
-            study_item['assigned_conditions'] = [item['Description'] for item in related_conditions]
-            all_related_conditions.extend([item['ID'] for item in related_conditions])
-
-            related_outcomes = study_outcomes.get(str(id), [])
-            study_item['assigned_outcomes'] = [item['Description'] for item in related_outcomes]
-            all_related_outcomes.extend([item['ID'] for item in related_outcomes])
-        
-            related_reports = study_reports.get(str(id), [])#responses[2].json()
-            for related_report_item in related_reports:
-                report_item = {}
-                report_item['title'] = related_report_item['Title']
-                report_item['abstract'] =related_report_item['Abstract']
-                report_item['authors'] = [author.strip() for author in related_report_item['Authors'].split("//")]
-                study_item['assigned_reports'][related_report_item['CRGReportID']] = report_item
-        
-            result['related_studies'].append(study_item)
+        related_outcomes = study_outcomes.get(str(id), [])
+        study_item['assigned_outcomes'] = [item['Description'] for item in related_outcomes]
+        all_related_outcomes.extend([item['ID'] for item in related_outcomes])
+    
+        related_reports = study_reports.get(str(id), [])#responses[2].json()
+        for related_report_item in related_reports:
+            report_item = {}
+            report_item['title'] = related_report_item['Title']
+            report_item['abstract'] =related_report_item['Abstract']
+            report_item['authors'] = [author.strip() for author in related_report_item['Authors'].split("//")]
+            study_item['assigned_reports'][related_report_item['CRGReportID']] = report_item
+    
+        result['related_studies'].append(study_item)
 
     async def search_related_tags(allowed_ids, type_embedding, type_vectorstore):
 
@@ -724,25 +723,18 @@ async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, aut
         related_tags = []
         for point in tag_results.points:
             item = {}
-            #item['name'] = point.payload['display_name'] #TODO check if display_name contains chinese chars
             item['id'] = point.payload['source_id']
             item['score'] = point.score
             related_tags.append(item)
 
         all_ids = [item['id'] for item in related_tags]
-
-        with get_resources() as resources:
             
-            if type_vectorstore == "interventions":
-                result = get_interventions_by_ids(all_ids, resources)
-            elif type_vectorstore == "conditions":
-                result = get_conditions_by_ids(all_ids, resources)
-            elif type_vectorstore == "outcomes":
-                result = get_outcomes_by_ids(all_ids, resources)
-
-        #async with httpx.AsyncClient() as client:
-        #    response = await client.get(f"http://{DATABASE_HOST}:{DATABASE_PORT}/tags/{type_vectorstore}", params={'ids': all_ids})
-        #result = response.json()
+        if type_vectorstore == "interventions":
+            result = get_all_interventions_internal(all_ids)
+        elif type_vectorstore == "conditions":
+            result = get_all_conditions_internal(all_ids)
+        elif type_vectorstore == "outcomes":
+            result = get_all_outcomes_internal(all_ids)
   
         for item in related_tags:
             item['name'] = result[item['id']][0].strip()

@@ -5,7 +5,8 @@ from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
-from sqlmodel import create_engine, select, SQLModel, Session, Field
+from sqlmodel import create_engine, select, SQLModel, Session
+from .utils.database_models import APIKey, User
 
 from typing import List, Literal
 import os
@@ -36,22 +37,6 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 DATABASE_URL = "sqlite:///" + os.path.join(DATABASE_VOLUME,"persistent","users.db")
 
 engine = create_engine(DATABASE_URL, echo=True)
-
-class User(SQLModel, table=True):
-    __tablename__ = "users"
-
-    id: int = Field(default=None, primary_key=True)
-    email: EmailStr = Field(index=True, unique=True)
-    role: str = Field(default="user")
-    verified: bool = Field(default=False)
-    password: str
-
-class APIKey(SQLModel, table=True):
-    __tablename__ = "api_keys"
-
-    id: str = Field(primary_key=True)
-    hash: str
-    owner: int  # user id
 
 class UserDataResponse(BaseModel):
     id: int

@@ -10,10 +10,13 @@ import os
 import re
 
 import grpc
-import embedding_pb2
-import embedding_pb2_grpc
 
 import xml.etree.ElementTree as ET
+import sys
+
+sys.path.append("../utils")
+import embedding_pb2
+import embedding_pb2_grpc
 
 load_dotenv()
 
@@ -134,9 +137,9 @@ def load_report_data():
         return
     all_reports = response.json()
     
-    response = requests.get(BACKEND_API + f"/mapping/report_study")
+    response = requests.get(BACKEND_API + f"/mappings/report_study")
     if response.status_code != 200:
-        print("Cannot refresh study embeddings: Database API (/mapping/report_study) not reachable")
+        print("Cannot refresh study embeddings: Database API (/mappings/report_study) not reachable")
         return
     report_study_mapping = response.json()
 
@@ -184,7 +187,7 @@ def refresh_study_embeddings():
 
     collection_name="josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"
 
-    response = requests.get(f"http://{LOGIC_HOST}:{LOGIC_PORT}/mapping/report_study")
+    response = requests.get(f"http://{LOGIC_HOST}:{LOGIC_PORT}/mappings/report_study")
     if response.status_code != 200:
         print("Cannot refresh study embeddings: Database API (/reports/all) not reachable")
         return
@@ -280,9 +283,9 @@ def transform_to_uuid(id, tag):
     return f"00000000-{tag}-4000-a000-{id}"
 
 def load_meerkat_tag_data(tag, tag_id="0000"):
-    response = requests.get(BACKEND_API + f"/tags/{tag}/all")
+    response = requests.get(BACKEND_API + f"/{tag}")
     if response.status_code != 200:
-        print(f"Cannot refresh tag embeddings: Database API (/tags/{tag}/all) not reachable")
+        print(f"Cannot refresh tag embeddings: Database API (/{tag}) not reachable")
         return
     all_tags = response.json()
 
@@ -454,9 +457,9 @@ def evaluate_with_cutoff(cutoff, model_id):
         #only consider reports with studies added in the past
         ground_truth_filtered = []
         for item in ground_truth:
-            response = session.get(BACKEND_API + f"/study/{item}/date_entered")
+            response = session.get(BACKEND_API + f"/studies/{item}/date_entered")
             if response.status_code != 200:
-                print(f"Cannot refresh vectorstore: Database API (/study/{item}/date_entered) not reachable")
+                print(f"Cannot refresh vectorstore: Database API (/studies/{item}/date_entered) not reachable")
                 return
             
             corresponding_study_entered = response.json()
@@ -526,7 +529,7 @@ import json
 def author_frequency():
     session = requests.Session()
     session.headers.update({"Authorization": "Bearer DEBUG"})
-    response = session.get(BACKEND_API + f"/study/persons", params={'cutoff':'2025-08'})
+    response = session.get(BACKEND_API + f"/studies/persons", params={'cutoff':'2025-08'})
 
     all_authors = []
     for value in response.json().values():
@@ -553,7 +556,6 @@ def author_frequency():
 
 #author_frequency()
 
-"""
 print("Evaluate 5th update")
 evaluate_with_cutoff("2024-01-24 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 5th update
 
@@ -562,4 +564,3 @@ evaluate_with_cutoff("2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_
 
 print("Evaluate 7th update")
 evaluate_with_cutoff("2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update
-"""

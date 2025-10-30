@@ -112,7 +112,7 @@ def update_selected_studies(selected_studies, current_batch, report_index):
         
 @st.cache_data(max_entries=10)
 def view_study_details(study_id):
-    response = requests.get(BACKEND_API + f"/studies/{study_id}/reports", headers=get_headers())
+    response = requests.get(BACKEND_API + f"/studies/{study_id}/reports", params={'include_pdf_links': True}, headers=get_headers())
 
     if response.status_code != 200:
         st.error("Error: " + response.text) 

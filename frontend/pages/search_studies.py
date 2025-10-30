@@ -14,7 +14,7 @@ current_model = None
 
 def get_related_studies(aspect_category, aspect_value):
     params = {"k": 10}
-    response = requests.get(BACKEND_API + f"/tags/{aspect_category}/{aspect_value}/related_studies", params=params, headers=get_headers())
+    response = requests.get(BACKEND_API + f"/{aspect_category}/{aspect_value}/related_studies", params=params, headers=get_headers())
 
     if response.status_code == 200:
         return pd.DataFrame(response.json())
