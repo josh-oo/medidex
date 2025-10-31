@@ -34,6 +34,9 @@ class FulltextLink(BaseModel):
     report_id: int
     link: str
 
+class ReportResponse(Report):
+    PDFLinks: Optional[str] = None
+
 
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 
@@ -103,27 +106,31 @@ Study Endpoints
 def get_studies(study_ids: List[int] = study_ids_query, session: Session = Depends(get_session)) -> List[Study]:
     return _get_studies(study_ids, session)
 
+@router.get("/studies/reports")
+def get_study_reports_by_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, fields: Optional[List[str]] = Query(None), session: Session = Depends(get_session)) -> Dict[int, List[Report]]:
+    return _get_study_reports_by_ids(study_ids, cutoff, fields, session)
+
+@router.get("/studies/persons", include_in_schema=False)
+def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, session: Session = Depends(get_session)) -> Dict[int, List[str]]:
+    _get_study_persons(study_ids,cutoff,session)
+
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
 def get_studies_single(study_id: int = study_id_path, session: Session = Depends(get_session)) -> List[Study]:
     stmt = select(Study).where(Study.CRGStudyID == study_id)
     return session.exec(stmt).first()
 
-@router.get("/studies/reports", include_in_schema=False)
-def get_study_reports_by_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, fields: Optional[List[str]] = Query(None), session: Session = Depends(get_session)) -> Dict[int, List[Report]]:
-    return _get_study_reports_by_ids(study_ids, cutoff, fields, session)
-
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
-def get_study_reports_by_id(study_id: int = study_id_path, include_pdf_links : bool = Query(None), session: Session = Depends(get_session)) -> List[Report]:
+def get_study_reports_by_id(study_id: int = study_id_path, include_pdf_links : bool = Query(None), session: Session = Depends(get_session)) -> List[ReportResponse]:
     data = get_study_reports_by_ids(study_ids=[study_id], fields=None, cutoff=None, session=session)[study_id]
     if not include_pdf_links:
         return data
 
-    report_ids = [item['CRGReportID'] for item in data]
+    pdf_numbers = {item['CRGReportID']:item['ReportNumber'] for item in data}
     
-    pdf_links = get_pdf_links_by_report_ids(report_ids,session)
+    pdf_links = get_pdf_links_by_report_numbers(pdf_numbers)
 
     for i in range(0, len(data)):
-        key = str(data[i]['CRGReportID'])
+        key = data[i]['CRGReportID']
         if key in pdf_links.keys():
             data[i]['PDFLinks'] = pdf_links[key]
         else:
@@ -160,10 +167,6 @@ def get_study_participants_single(study_id: int = study_id_path, session: Sessio
 def get_study_design_single(study_id: int = study_id_path, session: Session = Depends(get_session)) -> List[str]:
     return get_study_design(study_ids=[study_id], session=session)[study_id]
 
-@router.get("/studies/persons", include_in_schema=False)
-def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, session: Session = Depends(get_session)) -> Dict[int, List[str]]:
-    _get_study_persons(study_ids,cutoff,session)
-
 @router.get("/studies/{study_id}/persons", summary="Get all persons (usually only authors) associated with a specific study")
 def get_study_persons_single(study_id: int = study_id_path, cutoff: str = cutoff_query, session: Session = Depends(get_session)) -> Dict[int, List[str]]:
     return get_study_persons(study_ids=[study_id], cutoff=cutoff, session=session)
@@ -180,25 +183,19 @@ def get_all_reports(report_ids: List[int] = report_ids_query, session: Session =
         stmt = stmt.where(Report.CRGReportID.in_(report_ids))
     return session.exec(stmt).all()
 
-@router.get("/reports/{report_id}", summary="Get details for a specific report.")
-def get_study_reports_by_id(report_id: int = report_id_path, session: Session = Depends(get_session)) -> Report:
-    stmt = select(Report).where(Report.CRGReportID == report_id)
-    return session.exec(stmt).first()
-
 @router.get("/reports/pdf_number", include_in_schema=False)
 def get_pdf_numbers_by_report_ids(report_ids: List[int] = report_ids_query, session: Session = Depends(get_session)) -> Dict[int, int]:
     stmt = select(Report.CRGReportID, Report.ReportNumber).where(Report.CRGReportID.in_(report_ids))
     rows = session.exec(stmt).all()
     return {row[0]: row[1] for row in rows}
 
-@router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
-def get_pdf_number_by_report_id(report_id: int = report_id_path, session: Session = Depends(get_session)) -> int:
-    return get_pdf_numbers_by_report_ids(report_ids=[report_id], session=session)[report_id]
-
 @router.get("/reports/pdf_links", include_in_schema=False)
 def get_pdf_links_by_report_ids(report_ids: List[int] = report_ids_query,session: Session = Depends(get_session)) -> Dict[int, Optional[str]]:
 
-    pdf_numbers = get_pdf_numbers_by_report_ids(report_ids, session=session)
+    pdf_numbers = get_pdf_numbers_by_report_ids(report_ids, session)
+    return get_pdf_links_by_report_numbers(pdf_numbers)
+
+def get_pdf_links_by_report_numbers(pdf_numbers: Dict[int, int]) -> Dict[int, Optional[str]]:
     results = {}
 
     SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
@@ -217,7 +214,7 @@ def get_pdf_links_by_report_ids(report_ids: List[int] = report_ids_query,session
 
     folders = folder_results.get('files', [])
     if not folders:
-        return {rid: None for rid in report_ids}
+        return {rid: None for rid in pdf_numbers.keys()}
 
     folder_id = folders[0]['id']
 
@@ -243,6 +240,15 @@ def get_pdf_links_by_report_ids(report_ids: List[int] = report_ids_query,session
             #results[rid] = f"https://drive.google.com/uc?export=download&id={f['id']}"
 
     return results
+
+@router.get("/reports/{report_id}", summary="Get details for a specific report.")
+def get_study_reports_by_id(report_id: int = report_id_path, session: Session = Depends(get_session)) -> Report:
+    stmt = select(Report).where(Report.CRGReportID == report_id)
+    return session.exec(stmt).first()
+
+@router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
+def get_pdf_number_by_report_id(report_id: int = report_id_path, session: Session = Depends(get_session)) -> int:
+    return get_pdf_numbers_by_report_ids(report_ids=[report_id], session=session)[report_id]
 
 @router.get("/reports/{report_id}/pdf_link", summary="Get the link to the fulltext pdf for a given report")
 def get_pdf_link_by_reports(report_id: int = report_id_path, session : Session = Depends(get_session)) -> str:
@@ -454,15 +460,20 @@ def get_study_reports_by_ids_internal(study_ids: List[int], cutoff: str, fields:
 def _get_study_reports_by_ids(study_ids: List[int], cutoff: str, fields: Optional[List[str]], session: Session) -> Dict[int, List[Report]]:
     cutoff = cutoff or date.today().isoformat()
 
-    allowed_fields = {"CRGReportID", "Title", "Abstract", "Authors", "Dateentered"}
-
-    # Filter and validate selected fields
-    if fields:
-        selected_fields = [f for f in fields if f in allowed_fields]
-        if not selected_fields:
-            raise HTTPException(status_code=400, detail="No valid fields specified.")
+    # If no fields are specified, select all columns from Report
+    if fields is None:
+        # Use Report.__table__.columns to dynamically get all field names
+        selected_fields = [col.name for col in Report.__table__.columns]
     else:
-        selected_fields = list(allowed_fields)
+        # Validate provided field names exist on the Report model
+        report_columns = {col.name for col in Report.__table__.columns}
+        invalid_fields = [f for f in fields if f not in report_columns]
+        if invalid_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid field(s): {', '.join(invalid_fields)}"
+            )
+        selected_fields = fields
 
     # --- Optimized Query ---
     stmt = (

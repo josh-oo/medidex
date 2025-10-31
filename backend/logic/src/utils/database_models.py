@@ -46,7 +46,8 @@ class Report(SQLModel, table=True):
     UDef9 : Optional[str]
     UDef10: Optional[str]
     UDef8: Optional[str]
-    #PDFLinks: Optional[str]
+    
+    #PDFLinks: Optional[str] = Field(default=None, sa_column=None)
 
 class Study(SQLModel, table=True):
     __tablename__ = "tblStudy"
