@@ -106,7 +106,7 @@ Study Endpoints
 def get_studies(study_ids: List[int] = study_ids_query, session: Session = Depends(get_session)) -> List[Study]:
     return _get_studies(study_ids, session)
 
-@router.get("/studies/reports")
+@router.get("/studies/reports", include_in_schema=False)
 def get_study_reports_by_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, fields: Optional[List[str]] = Query(None), session: Session = Depends(get_session)) -> Dict[int, List[Report]]:
     return _get_study_reports_by_ids(study_ids, cutoff, fields, session)
 
