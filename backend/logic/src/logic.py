@@ -3,10 +3,9 @@ from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, Backg
 from fastapi.responses import Response
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from qdrant_client import QdrantClient, models
+from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.models import Filter, FieldCondition, DatetimeRange
 from typing import List, Optional
-import httpx
 import os
 
 from datetime import datetime
@@ -28,9 +27,6 @@ from datetime import datetime
 
 from .utils.trial_registration_id import extract_trial_registration_ids
 
-import asyncio
-
-import sqlite3
 import hashlib
 import json
 import pickle
@@ -43,23 +39,9 @@ from .resources import get_study_id_by_trial_id_internal, get_studies_internal, 
 from .resources import get_study_interventions_internal , get_study_conditions_internal, get_study_outcomes_internal, get_study_participants_internal, get_study_design_internal
 from .resources import get_all_interventions_internal, get_all_conditions_internal, get_all_outcomes_internal, get_study_reports_by_ids_internal
 
-class TagCategories(str, enum.Enum):
-    interventions = 'interventions'
-    conditions = 'conditions'
-    outcomes = 'outcomes'
-    participants = 'participants'
-
-router = APIRouter(tags=["logic"])
-
-cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
-report_index_path = Path(..., description="The target report's index within the batch (starting with 0)")
-batch_hash_path = Path(..., description="The batch's hash/id")
-
-k_query = Query(10, description="Maximum number of returned results.")
-
-@router.on_event("startup")
-async def startup_event():
-    await startup_event()
+from sqlmodel import select, func, delete, update, SQLModel
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from .utils.database_models import TmpReport, TmpReportBatch
 
 load_dotenv()
 
@@ -71,38 +53,26 @@ VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
 
 DEBUG = os.getenv("DEBUG", "FALSE") == "TRUE"
 
-write_queue = asyncio.Queue()
+router = APIRouter(tags=["logic"])
 
-@lru_cache()
-def get_grpc_channel():
-    return grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
+cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
+report_index_path = Path(..., description="The target report's index within the batch (starting with 0)")
+batch_hash_path = Path(..., description="The batch's hash/id")
 
-def get_vectorstore():
-    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
-    yield client
+k_query = Query(10, description="Maximum number of returned results.")
 
-def get_db():
-    conn = sqlite3.connect(os.path.join(DATABASE_VOLUME,"persistent", "users.db"), check_same_thread=False)
-    try:
-        yield conn
-    finally:
-        conn.close()
+DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"persistent","users.db")
 
-class Batch(BaseModel):
+engine = create_async_engine(DATABASE_URL, echo=True)
+
+class BatchResponse(BaseModel):
     batch_hash: str
-    batch_description: str
-    number_reports: int
-    created_at: datetime
-    embedded: int
-    assigned: int
+    batch_description: Optional[str]
+    number_reports: Optional[int]
+    created_at: Optional[datetime]
+    embedded: int = 0
+    assigned: int = 0
 
-class BatchedReport(BaseModel):
-    title: str
-    abstract: Optional[str]
-    authors: List[str]
-    trial_id: Optional[str]
-    vectors: dict
-    assigned_studies: List[int]
 
 class Tag(BaseModel):
     id: str
@@ -114,33 +84,35 @@ class RawReport(BaseModel):
     abstract: Optional[str]
     authors: Optional[List[str]]
 
-async def startup_event():
-    # Start background worker
-    asyncio.create_task(write_worker())
+class TagCategories(str, enum.Enum):
+    interventions = 'interventions'
+    conditions = 'conditions'
+    outcomes = 'outcomes'
+    participants = 'participants'
 
-async def write_worker():
-    """Background task that processes queued writes one at a time"""
-    while True:
-        query, params, future = await write_queue.get()
-        try:
-            conn = sqlite3.connect(os.path.join(DATABASE_VOLUME, "persistent", "users.db"))#, check_same_thread=False)
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            new_rows = cursor.rowcount
-            conn.commit()
-            conn.close()
-            future.set_result(new_rows)
-        except Exception as e:
-            future.set_exception(e)
-        finally:
-            write_queue.task_done()
+@router.on_event("startup")
+async def startup_event():
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+@lru_cache()
+def get_grpc_channel():
+    return grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
+
+def get_vectorstore():
+    client = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+    yield client
+
+async def get_session() -> AsyncSession:
+    async with AsyncSession(engine) as session:
+        yield session
 
 async def process_report(report, batch_hash, index):
     title = report['title']
     abstract = report['abstract']
     authors = report['authors']
     raw_report = RawReport(title=title, abstract=abstract, authors=authors)
-    trial_registration_id = await extract_trial_id(raw_report)
+    trial_registration_id = extract_trial_id(raw_report)
 
     text_to_process = []
     if title:
@@ -152,11 +124,20 @@ async def process_report(report, batch_hash, index):
     vectors =_embed_report(text_to_process, get_grpc_channel())
     vectors_blob = pickle.dumps(vectors)
 
-    future = asyncio.get_event_loop().create_future()
-    query = "INSERT INTO tmp_reports (batch_hash, batch_inner_id, title, abstract, authors, trial_id, vectors) VALUES (?,?,?,?,?, ?, ?)"
-    params = (batch_hash,index, title, abstract, json.dumps(authors), trial_registration_id, vectors_blob)
-    await write_queue.put((query, params, future))
-    await future
+    async with AsyncSession(engine) as session:
+
+        new_report = TmpReport(
+            batch_hash=batch_hash,
+            batch_inner_id=index,
+            title=title,
+            abstract=abstract,
+            authors=json.dumps(authors) if authors is not None else None,
+            trial_id=trial_registration_id,
+            vectors=vectors_blob
+        )
+
+        session.add(new_report)
+        await session.commit()
 
 async def parse_file(file: UploadFile):
     entries = None
@@ -199,7 +180,7 @@ async def parse_file(file: UploadFile):
     return entries
 
 @router.post("/batches", dependencies=[Depends(is_verified)], summary="Upload a batch of new reports that need to be assigned to studies (usually in the .ris file format)", description="Uploading a new batch triggers the embedding process. Batches are mainly used to do these compute heavy calculations in the background and only once. All needed data and the calculated embedding vectors are stored temporarily.", status_code=201) 
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process.")):
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), db : AsyncSession = Depends(get_session)):
 
     entries = await parse_file(file)
 
@@ -219,132 +200,154 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
     batch_hash = hashlib.sha256(fingerprint_string.encode()).hexdigest()
 
-    future = asyncio.get_event_loop().create_future()
-    query = """
-    INSERT OR IGNORE INTO tmp_report_batches (batch_hash, batch_description, number_reports)
-    VALUES (?, ?, ?)
-    """
-    params = (batch_hash, file.filename, len(results))
-    await write_queue.put((query, params, future))
-    result = await future
-
-    was_inserted = result == 1
-    if not was_inserted:
+    # check if batch already exists
+    existing = await db.execute(select(TmpReportBatch).where(TmpReportBatch.batch_hash == batch_hash))
+    if existing.first():
         raise HTTPException(status_code=400, detail="Data already exists")
 
+
+    # insert batch
+    new_batch = TmpReportBatch(
+        batch_hash=batch_hash,
+        batch_description=file.filename,
+        number_reports=len(results)
+    )
+    db.add(new_batch)
+    await db.commit()
+
+    # schedule background tasks
     for i, result in enumerate(results):
         background_tasks.add_task(process_report, result, batch_hash, i)
 
     return Response(status_code=201)
     
 @router.get("/batches", dependencies=[Depends(is_verified)], summary="Get an overview of current report batches.", description="For each batch the current progress of embedding calculation and the number of already assigned reports is returned")
-async def get_available_batches(db = Depends(get_db)) -> List[Batch]:
-    query = """
-    SELECT b.*, r.embedded, r.assigned
-    FROM tmp_report_batches AS b
-    LEFT JOIN (
-        SELECT 
-            batch_hash,
-            COUNT(*) AS embedded,
-            COUNT(assigned_studies) AS assigned
-        FROM tmp_reports
-        GROUP BY batch_hash
-    ) AS r
-    ON b.batch_hash = r.batch_hash;
-    """
-    cursor = db.execute(query)
-    rows = cursor.fetchall()
+async def get_available_batches(db: AsyncSession = Depends(get_session)) -> List[BatchResponse]:
+    r_subq = (
+        select(
+            TmpReport.batch_hash,
+            func.count().label("embedded"),
+            func.count(TmpReport.assigned_studies).label("assigned")
+        )
+        .group_by(TmpReport.batch_hash)
+        .subquery()
+    )
 
-    column_names = [description[0] for description in cursor.description]
-    all_batches = [dict(zip(column_names, row)) for row in rows]
+    query = (
+        select(
+            TmpReportBatch,
+            func.coalesce(r_subq.c.embedded, 0).label("embedded"),
+            func.coalesce(r_subq.c.assigned, 0).label("assigned")
+        )
+        .outerjoin(r_subq, TmpReportBatch.batch_hash == r_subq.c.batch_hash)
+    )
+    result = await db.execute(query)
+    rows = result.mappings().all()
 
-    return all_batches
+    flattened = []
+    for row in rows:
+        batch: TmpReportBatch = row["TmpReportBatch"]
+        batch_dict = batch.dict()  # Convert model to dict
+        # Merge embedded and assigned into the batch dict
+        batch_dict.update({
+            "embedded": row["embedded"],
+            "assigned": row["assigned"]
+        })
+        flattened.append(BatchResponse(**batch_dict))
+
+    return flattened
 
 @router.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified)], summary="Delete a report batch and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
-async def delete_batch(batch_hash: str = batch_hash_path):
-    future = asyncio.get_event_loop().create_future()
-    query = """
-    DELETE FROM tmp_report_batches WHERE batch_hash = ?;
-    """
-    params = (batch_hash,)
-    await write_queue.put((query, params, future))
-    await future
-
-    future = asyncio.get_event_loop().create_future()
-    query = """
-    DELETE FROM tmp_reports WHERE batch_hash = ?;
-    """
-    params = (batch_hash,)
-    await write_queue.put((query, params, future))
-    await future
-
+async def delete_batch(batch_hash: str, db: AsyncSession = Depends(get_session)):
+    # delete related reports first (due to FK constraints)
+    await db.execute(
+        delete(TmpReport).where(TmpReport.batch_hash == batch_hash)
+    )
+    await db.execute(
+        delete(TmpReportBatch).where(TmpReportBatch.batch_hash == batch_hash)
+    )
+    await db.commit()
     return Response(status_code=204)
 
 @router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
-async def get_batched_report(batch_hash: str = batch_hash_path, report_index : int = report_index_path, db = Depends(get_db)) -> BatchedReport:
-    query = """
-    SELECT title, abstract, authors, trial_id, vectors, assigned_studies
-    FROM tmp_reports
-    WHERE batch_hash = ?
-    AND batch_inner_id = ?
-    LIMIT 1;
-    """
-    cursor = db.execute(query, (batch_hash, report_index))
-    rows = cursor.fetchone()
+async def get_batched_report(batch_hash: str, report_index: int, db: AsyncSession = Depends(get_session)):
+    stmt = (
+        select(
+            TmpReport.title,
+            TmpReport.abstract,
+            TmpReport.authors,
+            TmpReport.trial_id,
+            TmpReport.vectors,
+            TmpReport.assigned_studies
+        )
+        .where(
+            TmpReport.batch_hash == batch_hash,
+            TmpReport.batch_inner_id == report_index
+        )
+        .limit(1)
+    )
 
-    item = {}
-    item['title'] = rows[0]
-    item['abstract'] = rows[1]
-    item['authors'] = json.loads(rows[2]) if rows[2] else []
-    item['trial_id'] = rows[3]
-    item['vectors'] = pickle.loads(rows[4])
-    item['assigned_studies'] = json.loads(rows[5]) if rows[5] else []
-    return item
+    result = await db.execute(stmt)
+    row = result.first()
+
+    if not row:
+        return None  # or raise 404
+
+    return {
+        "title": row.title,
+        "abstract": row.abstract,
+        "authors": json.loads(row.authors) if row.authors else [],
+        "trial_id": row.trial_id,
+        "vectors": pickle.loads(row.vectors) if row.vectors else None,
+        "assigned_studies": json.loads(row.assigned_studies) if row.assigned_studies else [],
+    }
 
 @router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Assign studies to a specific report in a batch.", status_code=204)
-async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report.")):
-    future = asyncio.get_event_loop().create_future()
-    query = """
-    UPDATE tmp_reports
-    SET assigned_studies = ?
-    WHERE batch_hash = ?
-    AND batch_inner_id = ?;
-    """
-    params = (json.dumps(study_ids), batch_hash, report_index)
-    await write_queue.put((query, params, future))
-    await future
+async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), db : AsyncSession = Depends(get_session)):
+    stmt = (
+        update(TmpReport)
+        .where(
+            TmpReport.batch_hash == batch_hash,
+            TmpReport.batch_inner_id == report_index
+        )
+        .values(assigned_studies=json.dumps(study_ids))
+    )
+    await db.execute(stmt)
+    await db.commit()
     return Response(status_code=204)
 
 @router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Remove assigned studies from a specific report in a batch.", status_code=204)
-async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path):
-    future = asyncio.get_event_loop().create_future()
-    query = """
-    UPDATE tmp_reports
-    SET assigned_studies = ?
-    WHERE batch_hash = ?
-    AND batch_inner_id = ?;
-    """
-    params = (None, batch_hash, report_index)
-    await write_queue.put((query, params, future))
-    await future
+async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, db : AsyncSession = Depends(get_session)):
+    stmt = (
+        update(TmpReport)
+        .where(
+            TmpReport.batch_hash == batch_hash,
+            TmpReport.batch_inner_id == report_index
+        )
+        .values(assigned_studies=None)
+    )
+    await db.execute(stmt)
+    await db.commit()
     return Response(status_code=204)
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
-async def similar_tags(batch_hash: str = batch_hash_path, report_index: int = report_index_path, sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(None, description="The tag category which you are interested in"), k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_db)) -> List[Tag]:
-    query = """
-    SELECT vectors
-    FROM tmp_reports
-    WHERE batch_hash = ?
-    AND batch_inner_id = ?
-    LIMIT 1;
-    """
-    cursor = db.execute(query, (batch_hash, report_index))
-    rows = cursor.fetchone()
+async def similar_tags(batch_hash: str = batch_hash_path, report_index: int = report_index_path, sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(None, description="The tag category which you are interested in"), k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_session)) -> List[Tag]:
+    stmt = (
+        select(TmpReport.vectors)
+        .where(
+            TmpReport.batch_hash == batch_hash,
+            TmpReport.batch_inner_id == report_index
+        )
+        .limit(1)
+    )
 
-    if not rows:
+    result = await db.execute(stmt)
+    row = result.first()
+
+    if not row:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    vectors = pickle.loads(rows[0])
+    vectors = pickle.loads(row[0])
 
     collection_name = vectors['model_id'] + "_tags"
 
@@ -361,26 +364,32 @@ async def similar_tags(batch_hash: str = batch_hash_path, report_index: int = re
     return result
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
-async def similar_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, aspect: TagCategories = Query(None, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_db), return_details=False):
+async def similar_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, aspect: TagCategories = Query(None, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_session), return_details=False):
     if not aspect:
         aspect = "default"
     
-    query = """
-    SELECT  authors, trial_id, vectors
-    FROM tmp_reports
-    WHERE batch_hash = ?
-    AND batch_inner_id = ?
-    LIMIT 1;
-    """
-    cursor = db.execute(query, (batch_hash, report_index))
-    rows = cursor.fetchone()
+    stmt = (
+        select(
+            TmpReport.authors,
+            TmpReport.trial_id,
+            TmpReport.vectors
+        )
+        .where(
+            TmpReport.batch_hash == batch_hash,
+            TmpReport.batch_inner_id == report_index
+        )
+        .limit(1)
+    )
 
-    if not rows:
+    result = await db.execute(stmt)
+    row = result.first()
+
+    if not row:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    authors = rows[0]
-    trial_id = rows[1]
-    vectors = pickle.loads(rows[2])
+    authors = row[0]
+    trial_id = row[1]
+    vectors = pickle.loads(row[2])
 
     embedding_name = aspect
     if embedding_name == "default":
@@ -409,7 +418,7 @@ async def get_similar_tags(embedding, collection_name, sources: List[str], aspec
 
     filter = models.Filter(should=filters)
 
-    search_results = client.query_points(
+    search_results = await client.query_points(
         collection_name=collection_name,
         query=embedding,
         limit=k,
@@ -425,7 +434,7 @@ async def get_similar_tags(embedding, collection_name, sources: List[str], aspec
 
     return results
 
-async def get_similar_studies(embedding, collection_name, aspect: str, trial_id: str, authors: List[str], cutoff: str, k: int, client: QdrantClient, return_details: bool):
+async def get_similar_studies(embedding, collection_name, aspect: str, trial_id: str, authors: List[str], cutoff: str, k: int, client: AsyncQdrantClient, return_details: bool):
     found_study_ids = {}
     debug_map = {}
 
@@ -441,7 +450,7 @@ async def get_similar_studies(embedding, collection_name, aspect: str, trial_id:
     
     if trial_id:
         
-        response = get_study_id_by_trial_id_internal(trial_id, cutoff)
+        response = await get_study_id_by_trial_id_internal(trial_id, cutoff)
         if response:
             for result in response:
                 found_study_ids[result] = 1.0
@@ -469,7 +478,7 @@ async def get_similar_studies(embedding, collection_name, aspect: str, trial_id:
     k = k - len(found_study_ids.keys())
 
     if k > 0:
-        search_results = client.query_points_groups(
+        search_results = await client.query_points_groups(
             collection_name=collection_name,
             query=embedding,
             using=aspect,
@@ -490,7 +499,7 @@ async def get_similar_studies(embedding, collection_name, aspect: str, trial_id:
                         found_study_ids[item] = hit.score
                     debug_map[item] = debug_map.get(item, []) + [hit.payload]
 
-    all_studies = get_studies_internal(list(found_study_ids.keys()))
+    all_studies = await get_studies_internal(list(found_study_ids.keys()))
     #list of dicts to dict of lists:
 
     #Remove this block for evaluation without authors
@@ -524,7 +533,7 @@ async def get_similar_studies(embedding, collection_name, aspect: str, trial_id:
 
 async def get_scores_authors(report_authors: List[str], study_ids: List[int], cutoff: str):
 
-    study_persons = get_study_persons_internal(study_ids, cutoff)
+    study_persons = await get_study_persons_internal(study_ids, cutoff)
     current_persons = get_author_frequencies(report_authors)
 
     report_authors = set(current_persons.keys())
@@ -551,7 +560,12 @@ async def get_aspect_related_studies(tag_category: TagCategories = Path(..., des
 
     collection_name = embeddings['model_id']
 
-    return await get_similar_studies(embeddings['embedding'], collection_name, tag_category, None, [], None, k, client, return_details=False)
+    aspect = tag_category
+    aspect_mapping = {'interventions': 'intervention', 'conditions': 'condition', 'outcomes': 'outcome'}
+    if tag_category in aspect_mapping.keys():
+        aspect = aspect_mapping[tag_category]
+
+    return await get_similar_studies(embeddings['embedding'], collection_name, aspect, None, [], None, k, client, return_details=False)
 
 
 def single_element_generator(element):
@@ -628,11 +642,11 @@ class RetrievalInputEmbedding(BaseModel):
     model_id: str
     
 @router.post("/processing/analyze_embedding", dependencies=[Depends(verify_api_key)], include_in_schema=False)
-async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), trial_id: str = Query(None), vectorstore=Depends(get_vectorstore)):
-    result = await analyze(vectorstore, input.embeddings, input.model_id, input.basic_input.topK, input.basic_input.title, input.basic_input.abstract, input.basic_input.authors, cutoff)
+async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), client=Depends(get_vectorstore)):
+    result = await analyze(input.embeddings, input.model_id, input.basic_input.topK, input.basic_input.title, input.basic_input.abstract, input.basic_input.authors, cutoff, client)
     return result
 
-async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, authors, cutoff):
+async def analyze(embeddings, model_id, top_k, title, abstract, authors, cutoff, client):
     
     trial_id = await extract_trial_id(RawReport(title=title,abstract=abstract, authors=[]))
     pre_result = await get_similar_studies(embeddings['embedding'], model_id, "default", trial_id, authors, cutoff, top_k, client, return_details=True)
@@ -651,13 +665,13 @@ async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, aut
     scores = [item['score'] for item in found_study_ids.values()]
     report_hits = [item['report_hit'] for item in found_study_ids.values()]
 
-    related_studies = get_studies_internal(list(found_study_ids.keys()))#responses[0].json()
-    study_interventions = get_study_interventions_internal(list(found_study_ids.keys()))#responses[1].json()
-    study_conditions = get_study_conditions_internal(list(found_study_ids.keys()))#responses[2].json()
-    study_outcomes = get_study_outcomes_internal(list(found_study_ids.keys()))# responses[3].json()
-    study_participants_desc = get_study_participants_internal(list(found_study_ids.keys()))#responses[4].json()
-    study_design = get_study_design_internal(list(found_study_ids.keys()))#responses[5].json()
-    study_reports = get_study_reports_by_ids_internal(list(found_study_ids.keys()), ['CRGReportID', 'Title', 'Abstract', 'Authors'], cutoff)#responses[6].json()
+    related_studies = await get_studies_internal(list(found_study_ids.keys()))
+    study_interventions = await get_study_interventions_internal(list(found_study_ids.keys()))
+    study_conditions = await get_study_conditions_internal(list(found_study_ids.keys()))
+    study_outcomes = await get_study_outcomes_internal(list(found_study_ids.keys()))
+    study_participants_desc = await get_study_participants_internal(list(found_study_ids.keys()))
+    study_design = await get_study_design_internal(list(found_study_ids.keys()))
+    study_reports = await get_study_reports_by_ids_internal(list(found_study_ids.keys()), ['CRGReportID', 'Title', 'Abstract', 'Authors'], cutoff)
 
     for id, name, num_participants, countries, durations,report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], related_studies['NumberParticipants'], related_studies['Countries'], related_studies['Duration'], report_hits, scores):            
         study_item = {}
@@ -711,7 +725,7 @@ async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, aut
             ]
         )
 
-        tag_results = vectorstore.query_points(
+        tag_results = client.query_points(
             collection_name=model_id + "_tags",
             query=embeddings[type_embedding],
             limit=len(allowed_ids),
@@ -728,11 +742,11 @@ async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, aut
         all_ids = [item['id'] for item in related_tags]
             
         if type_vectorstore == "interventions":
-            result = get_all_interventions_internal(all_ids)
+            result = await get_all_interventions_internal(all_ids)
         elif type_vectorstore == "conditions":
-            result = get_all_conditions_internal(all_ids)
+            result = await get_all_conditions_internal(all_ids)
         elif type_vectorstore == "outcomes":
-            result = get_all_outcomes_internal(all_ids)
+            result = await get_all_outcomes_internal(all_ids)
   
         for item in related_tags:
             item['name'] = result[item['id']][0].strip()
@@ -747,7 +761,7 @@ async def analyze(vectorstore, embeddings, model_id, top_k, title, abstract, aut
 
 
 @router.post("/processing/extract_trial_id", dependencies=[Depends(is_verified)], include_in_schema=False)
-async def extract_trial_id(raw_report: RawReport):
+def extract_trial_id(raw_report: RawReport):
     ids = extract_trial_registration_ids(raw_report.title)
     if len(ids) == 1:
         return ids[0]

@@ -1,6 +1,7 @@
 from sqlmodel import SQLModel, Field
 from pydantic import EmailStr
 from typing import Optional
+import datetime
 
 """
 Resources
@@ -159,3 +160,28 @@ class APIKey(SQLModel, table=True):
     id: str = Field(primary_key=True)
     hash: str
     owner: int  # user id
+
+
+"""
+User Data
+"""
+
+class TmpReportBatch(SQLModel, table=True):
+    __tablename__ = "tmp_report_batches"
+
+    batch_hash: str = Field(primary_key=True)
+    batch_description: Optional[str]
+    number_reports: Optional[int]
+    created_at: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+
+class TmpReport(SQLModel, table=True):
+    __tablename__ = "tmp_reports"
+
+    batch_hash: str = Field(primary_key=True)
+    batch_inner_id: int = Field(primary_key=True)
+    title: Optional[str]
+    abstract: Optional[str]
+    authors: Optional[str]  # JSON-encoded list
+    trial_id: Optional[str]
+    vectors: Optional[bytes]  # pickled vectors
+    assigned_studies: Optional[str]  # JSON-encoded list

@@ -1,6 +1,6 @@
 
 from dotenv import load_dotenv
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Distance, VectorParams, MultiVectorComparator, MultiVectorConfig
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from qdrant_client.http.models import PointStruct
@@ -8,6 +8,9 @@ from tqdm import tqdm
 import requests
 import os
 import re
+
+import asyncio
+import httpx
 
 import grpc
 
@@ -17,6 +20,7 @@ import sys
 sys.path.append("../utils")
 import embedding_pb2
 import embedding_pb2_grpc
+
 
 load_dotenv()
 
@@ -29,8 +33,8 @@ MESH_DUMP_LOCATION = os.getenv("MESH_DUMP_LOCATION")
 
 BACKEND_API = os.getenv("BACKEND_API")
 
-def get_missing_ids(client, collection_name, ids):
-    response = client.retrieve(collection_name=collection_name, ids=ids)
+async def get_missing_ids(client, collection_name, ids):
+    response = await client.retrieve(collection_name=collection_name, ids=ids)
 
     existing_ids = {item.id for item in response} 
     missing_ids = [item for item in ids if item not in existing_ids]
@@ -38,7 +42,7 @@ def get_missing_ids(client, collection_name, ids):
     return missing_ids 
 
 
-def calculate_report_embeddings(data, client=None, batch_size=128):
+async def calculate_report_embeddings(data, client=None, batch_size=128):
     #ids = iter(ids)
 
     def stream_requests(data):
@@ -76,11 +80,11 @@ def calculate_report_embeddings(data, client=None, batch_size=128):
         all_points.append(PointStruct(id=current_id,vector=new_vectors, payload=payload))
 
         if len(all_points) == batch_size:
-            client.upsert(wait=False, collection_name=collection_name, points=all_points)
+            await client.upsert(wait=False, collection_name=collection_name, points=all_points)
             all_points = []
 
     if client and len(all_points) > 0: #upload the remaining vectors
-        client.upsert(wait=False, collection_name=collection_name, points=all_points)
+        await client.upsert(wait=False, collection_name=collection_name, points=all_points)
 
     return metadata
 
@@ -146,17 +150,17 @@ def load_report_data():
     return preprocess_reports(all_reports, report_study_mapping)
 
 
-def refresh_vector_store(force_recompute_embeddings=False):
+async def refresh_vector_store(force_recompute_embeddings=False):
 
     data = load_report_data()
     all_ids = data.keys()
 
-    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+    client = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
 
     model_info = calculate_report_embeddings({}) 
     collection_name = model_info['model'].replace("/", "_") + "_" + model_info['revision']
 
-    collections = client.get_collections().collections
+    collections = await client.get_collections().collections
     exists = any(c.name == collection_name for c in collections)
 
     points_that_need_computation = all_ids
@@ -166,7 +170,7 @@ def refresh_vector_store(force_recompute_embeddings=False):
         for aspect in model_info['aspects'].split(";"):
             vector_config[aspect] = VectorParams(size=model_info['dimension'], distance=Distance.COSINE)
         
-        client.create_collection(
+        await client.create_collection(
             collection_name=collection_name,
             vectors_config=vector_config,
         )
@@ -238,7 +242,7 @@ def normalize_tags(example):
 
     return example
 
-def calculate_tag_embeddings(data, client=None, batch_size=128):
+async def calculate_tag_embeddings(data, client=None, batch_size=128):
 
     def stream_requests(data):
         for id, item in data.items():
@@ -268,11 +272,11 @@ def calculate_tag_embeddings(data, client=None, batch_size=128):
         all_points.append(PointStruct(id=current_id,vector=all_vectors, payload=payload))
 
         if len(all_points) == batch_size:
-            client.upsert(wait=False, collection_name=collection_name, points=all_points)
+            await client.upsert(wait=False, collection_name=collection_name, points=all_points)
             all_points = []
 
     if client and len(all_points) > 0: #upload the remaining vectors
-        client.upsert(wait=False, collection_name=collection_name, points=all_points)
+        await client.upsert(wait=False, collection_name=collection_name, points=all_points)
 
     return metadata
 
@@ -300,15 +304,15 @@ def load_meerkat_tag_data(tag, tag_id="0000"):
     
     return result
 
-def refresh_all_tag_embeddings(data, force_recompute_embeddings=False):
+async def refresh_all_tag_embeddings(data, force_recompute_embeddings=False):
     all_ids = data.keys()
 
-    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+    client = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
 
     model_info = calculate_tag_embeddings({}) 
     collection_name = model_info['model'].replace("/", "_") + "_" + model_info['revision'] + "_tags"
 
-    collections = client.get_collections().collections
+    collections = await client.get_collections().collections
     exists = any(c.name == collection_name for c in collections)
 
     points_that_need_computation = all_ids
@@ -318,7 +322,7 @@ def refresh_all_tag_embeddings(data, force_recompute_embeddings=False):
                                      distance=Distance.COSINE, 
                                      multivector_config=MultiVectorConfig(comparator=MultiVectorComparator.MAX_SIM),
                                      )
-        client.create_collection(
+        await client.create_collection(
             collection_name=collection_name,
             vectors_config=vector_config,
         )
@@ -412,104 +416,117 @@ def add_date_entered_info():
 """
 
 def evaluate_with_cutoff(cutoff, model_id):
+    asyncio.run(evaluate_with_cutoff_async(cutoff, model_id))
+
+async def calculate_rank(result, model_id, cutoff, client):
+    ground_truth = result[0].payload['belongs_to_study']#[0]
+    trial_id = None
+    authors = None
+    if 'trial_id' in result[0].payload:
+        trial_id = result[0].payload['trial_id']
+    if 'authors' in result[0].payload:
+        authors = result[0].payload['authors']
+
+    #only consider reports with studies added in the past
+    ground_truth_filtered = []
+    for item in ground_truth:
+        response = await client.get(BACKEND_API + f"/studies/{item}/date_entered")
+        if response.status_code != 200:
+            print(f"Cannot refresh vectorstore: Database API (/studies/{item}/date_entered) not reachable")
+            return
+        
+        corresponding_study_entered = response.json()
     
-    session = requests.Session()
-    session.headers.update({"Authorization": "Bearer DEBUG"})
-
-    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
-
-    filter_condition = Filter(
-        must=[
-            FieldCondition(
-                key="date_entered",
-                match=MatchValue(value=cutoff)
-            )
-        ]
-    )
-
-    # Pagination loop to get all points including vectors
-    recall_at_1 = []
-    recall_at_3 = []
-    recall_at_10 = []
-    scroll_offset = None
-
-    pbar = tqdm()
-
-    while True:
-        result, scroll_offset = client.scroll(
-            collection_name=model_id,
-            scroll_filter=filter_condition,
-            limit=1,
-            offset=scroll_offset,
-            with_vectors=True,     # <-- include vectors
-            with_payload=True      # <-- include payloads
-        )
-        #all_points.extend(result)
-
-        ground_truth = result[0].payload['belongs_to_study']#[0]
+        if corresponding_study_entered < cutoff:
+            ground_truth_filtered.append(item)
+    
+    if len(ground_truth_filtered) == 1:
+        #report_id = result[0].payload['source_id']
+        
+        title = result[0].payload['title']
+        abstract = result[0].payload['abstract']
+        
         trial_id = None
-        authors = None
-        if 'trial_id' in result[0].payload:
-            trial_id = result[0].payload['trial_id']
-        if 'authors' in result[0].payload:
-            authors = result[0].payload['authors']
-
-        #only consider reports with studies added in the past
-        ground_truth_filtered = []
-        for item in ground_truth:
-            response = session.get(BACKEND_API + f"/studies/{item}/date_entered")
-            if response.status_code != 200:
-                print(f"Cannot refresh vectorstore: Database API (/studies/{item}/date_entered) not reachable")
-                return
-            
-            corresponding_study_entered = response.json()
+        data = {'title': title, 'abstract': abstract, 'authors': []}
         
-            if corresponding_study_entered < cutoff:
-                ground_truth_filtered.append(item)
-        
-        if len(ground_truth_filtered) == 1:
-            #report_id = result[0].payload['source_id']
-            title = result[0].payload['title']
-            abstract = result[0].payload['abstract']
+        response = await client.post(BACKEND_API + "/processing/extract_trial_id", json=data)
+        if response.status_code == 200 and response.json():
+            trial_id = response.json()
+        text = title + (" " + abstract) if abstract else ""
+
+        ground_truth = ground_truth_filtered[0]
+        payload = {"text": text, "main_embedding": result[0].vector['default'],"participants_embedding": result[0].vector['participants'], "author_embedding": result[0].vector['authors'], "model_id": model_id}
+        params = {"cutoff":cutoff, "trial_id":trial_id, 'authors': authors}
+        response = await client.post(BACKEND_API + "/similarity_search/studies", json=payload,params=params)
+        predicted_studies = response.json()['CRGStudyID']
+
+        rank = 11
+        if ground_truth in predicted_studies:
+            rank = predicted_studies.index(ground_truth) + 1
+
+        return rank
+
+async def evaluate_with_cutoff_async(cutoff, model_id):
+    
+    async with httpx.AsyncClient(headers={"Authorization": "Bearer DEBUG"}, timeout=httpx.Timeout(30.0)) as client:
+
+        vectorstore = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+
+        filter_condition = Filter(
+            must=[
+                FieldCondition(
+                    key="date_entered",
+                    match=MatchValue(value=cutoff)
+                )
+            ]
+        )
+
+        # Pagination loop to get all points including vectors
+        scroll_offset = None
+
+        pbar = tqdm()
+
+        recall_at_1 = []
+        recall_at_3 = []
+        recall_at_10 = []
+
+        tasks = set()
+
+        while True:
+            if tasks:
+                done, pending = await asyncio.wait(tasks, timeout=0)
+                for d in done:
+                    rank = d.result()
+                    if rank:
+                        recall_at_1.append(int(rank == 1))
+                        recall_at_3.append(int(rank <= 3))
+                        recall_at_10.append(int(rank <= 10))
+                    pbar.update(1)
+                tasks = pending
             
-            trial_id = None
-            data = {'title': title, 'abstract': abstract, 'authors': []}
+            result, scroll_offset = await vectorstore.scroll(
+                collection_name=model_id,
+                scroll_filter=filter_condition,
+                limit=1,
+                offset=scroll_offset,
+                with_vectors=True,
+                with_payload=True 
+            )
+
+            tasks.add(asyncio.create_task(calculate_rank(result, model_id, cutoff, client)))
             
-            response = session.post(BACKEND_API + "/processing/extract_trial_id", json=data)
-            if response.status_code == 200 and response.json():
-                trial_id = response.json()
-            text = title + (" " + abstract) if abstract else ""
+            if scroll_offset is None:
+                break
 
-            ground_truth = ground_truth_filtered[0]
-            payload = {"text": text, "main_embedding": result[0].vector['default'],"participants_embedding": result[0].vector['participants'], "author_embedding": result[0].vector['authors'], "model_id": model_id}
-            params = {"cutoff":cutoff, "trial_id":trial_id, 'authors': authors}
-            response = session.post(BACKEND_API + "/similarity_search/studies", json=payload,params=params)
-            predicted_studies = response.json()['CRGStudyID']
+        if tasks:
+            for d in asyncio.as_completed(tasks):
+                rank = await d
+                if rank:
+                    recall_at_1.append(int(rank == 1))
+                    recall_at_3.append(int(rank <= 3))
+                    recall_at_10.append(int(rank <= 10))
+                pbar.update(1)
 
-            rank = 11
-            if ground_truth in predicted_studies:
-                rank = predicted_studies.index(ground_truth) + 1
-            
-            recall_at_1.append(1 if rank == 1 else 0)
-            recall_at_3.append(1 if rank <= 3 else 0)
-            recall_at_10.append(1 if rank <= 10 else 0)
-
-            #break
-
-            """
-            if rank != 1:
-                print(result[0].payload)
-                for item in response.json()['debug']:
-                    for hit in item['hits']:
-                        print(f"{hit['payload']['source_id']} - {hit['payload']['belongs_to_study']} ({hit['score']})")
-                for i, item in enumerate(response.json()['CRGStudyID']):
-                    print(item, response.json()['Relevance'][i])
-                #print(response.json())
-                print()
-            """
-        pbar.update(1)
-        if scroll_offset is None:
-            break
 
     print()
     print(f"Recall@1  {sum(recall_at_1) / len(recall_at_1)} ({sum(recall_at_1)}/{len(recall_at_1)})" )
