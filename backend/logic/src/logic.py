@@ -97,7 +97,7 @@ async def startup_event():
 
 @lru_cache()
 def get_grpc_channel():
-    return grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
+    return grpc.aio.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
 
 def get_vectorstore():
     client = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
@@ -121,7 +121,7 @@ async def process_report(report, batch_hash, index):
         text_to_process.append(abstract)
     text_to_process = "\n".join(text_to_process)
    
-    vectors =_embed_report(text_to_process, get_grpc_channel())
+    vectors = await _embed_report(text_to_process, get_grpc_channel())
     vectors_blob = pickle.dumps(vectors)
 
     async with AsyncSession(engine) as session:
@@ -556,7 +556,7 @@ async def get_scores_authors(report_authors: List[str], study_ids: List[int], cu
 
 @router.get("/{tag_category}/{tag_value}/related_studies", dependencies=[Depends(is_verified)], summary="Get studies related to a specific tag (intervention, outcome, ...) currently only vector-similarity search is available.", description="Retrieve studies that are related to a specific tag value (e.g., 'Placebo' for interventions) using vector similarity search based on the embedding of the tag value. The similarity search is done at runtime.")
 async def get_aspect_related_studies(tag_category: TagCategories = Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value: str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), k : int = k_query, client=Depends(get_vectorstore), channel = Depends(get_grpc_channel)):
-    embeddings = _embed_aspect(tag_value, channel)
+    embeddings = await _embed_aspect(tag_value, channel)
 
     collection_name = embeddings['model_id']
 
@@ -568,13 +568,13 @@ async def get_aspect_related_studies(tag_category: TagCategories = Path(..., des
     return await get_similar_studies(embeddings['embedding'], collection_name, aspect, None, [], None, k, client, return_details=False)
 
 
-def single_element_generator(element):
+async def single_element_generator(element):
     yield element
 
-def embed_report(text, channel = Depends(get_grpc_channel)):
-    return _embed_report(text, channel)
+async def embed_report(text, channel = Depends(get_grpc_channel)):
+    return await _embed_report(text, channel)
 
-def _embed_report(text : str, channel):
+async def _embed_report(text : str, channel):
     token = secrets.token_urlsafe(8)
 
     request = embedding_pb2.EmbedReportRequest(id=token, text=text, authors=[])
@@ -583,11 +583,11 @@ def _embed_report(text : str, channel):
 
     responses = stub.GetReportEmbedding(single_element_generator(request))
 
-    metadata = dict(responses.initial_metadata())
+    metadata = {k: v for k, v in (await responses.initial_metadata())}
 
     model_id = metadata['model'].replace("/", "_") + "_" + metadata["revision"]
 
-    response = next(responses)
+    response = await responses.read()
 
     result = {"model_id": model_id, "embedding": list(response.embedding.values), "author_embedding": list(response.embedding.values)}
     for i, aspect in enumerate(metadata['aspects'].split(";")):
@@ -595,10 +595,10 @@ def _embed_report(text : str, channel):
 
     return result
 
-def embed_aspect(text : str, channel = Depends(get_grpc_channel)):
-    return _embed_aspect(text, channel)
+async def embed_aspect(text : str, channel = Depends(get_grpc_channel)):
+    return await _embed_aspect(text, channel)
 
-def _embed_aspect(text : str, channel):
+async def _embed_aspect(text : str, channel):
     token = secrets.token_urlsafe(8)
 
     request = embedding_pb2.EmbedAspectsRequest(id=token, aspects=[text])
@@ -607,11 +607,11 @@ def _embed_aspect(text : str, channel):
 
     responses = stub.GetAspectEmbeddings(single_element_generator(request))
 
-    metadata = dict(responses.initial_metadata())
+    metadata = {k: v for k, v in (await responses.initial_metadata())}
 
     model_id = metadata['model'].replace("/", "_") + "_" + metadata["revision"]
 
-    response = next(responses)
+    response = await responses.read()
 
     result = {"model_id": model_id, "embedding": list(response.embedding[0].values)}
 
