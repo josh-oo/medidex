@@ -7,11 +7,9 @@ from dotenv import load_dotenv
 from .auth import is_verified_api_call
 from typing import List, Optional
 
-from pydantic import BaseModel
 
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
-from pydantic import BaseModel
 from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
 import os
