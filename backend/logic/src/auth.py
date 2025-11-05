@@ -23,12 +23,11 @@ import secrets
 
 load_dotenv()
 
-router = APIRouter(tags=["auth"])
-
-
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 JWT_SECRET = os.getenv("JWT_SECRET")
 DEBUG = os.getenv("DEBUG") == "TRUE"
+
+router = APIRouter(tags=["auth"])
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 api_key_header = APIKeyHeader(name="X-API-Key")
@@ -56,12 +55,6 @@ class TokenResponse(BaseModel):
 class ApiKeyResponse(BaseModel):
     api_key: str
 
-"""
-def get_session():
-    with Session(engine) as session:
-        yield session
-"""
-
 async def get_session() -> AsyncSession:
     async with AsyncSession(engine) as session:
         yield session
@@ -70,15 +63,6 @@ async def get_session() -> AsyncSession:
 async def startup_event():
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-
-"""
-def init_db():
-    SQLModel.metadata.create_all(engine)
-
-@router.on_event("startup")
-def on_startup():
-    init_db()
-"""
 
 def verify_token(token):
     try:

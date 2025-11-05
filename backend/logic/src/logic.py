@@ -74,7 +74,7 @@ class BatchResponse(BaseModel):
     assigned: int = 0
 
 
-class Tag(BaseModel):
+class TagResponse(BaseModel):
     id: str
     keyword: str
     relevance: str
@@ -331,7 +331,7 @@ async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_inde
     return Response(status_code=204)
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
-async def similar_tags(batch_hash: str = batch_hash_path, report_index: int = report_index_path, sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(None, description="The tag category which you are interested in"), k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_session)) -> List[Tag]:
+async def similar_tags(batch_hash: str = batch_hash_path, report_index: int = report_index_path, sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(None, description="The tag category which you are interested in"), k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_session)) -> List[TagResponse]:
     stmt = (
         select(TmpReport.vectors)
         .where(

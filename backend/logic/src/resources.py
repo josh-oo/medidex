@@ -30,22 +30,16 @@ from .utils.database_models import Condition, Intervention, Design, Outcome, Par
 
 load_dotenv()
 
-router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified)])
-
-class FulltextLink(BaseModel):
-    report_id: int
-    link: str
-
-class ReportResponse(Report):
-    PDFLinks: Optional[str] = None
-
-
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
+
+router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified)])
 
 DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"resources","meerkat.db")
 
 engine = create_async_engine(DATABASE_URL, echo=True)
 
+class ReportResponse(Report):
+    PDFLinks: Optional[str] = None
 
 async def get_session() -> AsyncSession:
     async with AsyncSession(engine) as session:
