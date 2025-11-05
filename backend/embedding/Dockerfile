@@ -12,24 +12,25 @@ COPY embedding/.env.production .env
 COPY embedding/model_loader.py .
 RUN python model_loader.py
 
-COPY utils/embedding.proto .
+COPY tools/utils/embedding.proto .
 RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding.proto
 
 # Stage 2: Main app
 FROM python:3.11-slim
 
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+
 ENV PYTHONDONTWRITEBYTECODE 1
 
 WORKDIR /app
+
+#RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 COPY embedding/requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY embedding/model_server.py .
 COPY embedding/.env.production .env
-
-ADD https://github.com/grpc-ecosystem/grpc-health-probe/releases/latest/download/grpc_health_probe-linux-arm64 /usr/bin/grpc_health_probe
-RUN chmod +x /usr/bin/grpc_health_probe
 
 # 👇 Copy compiled model files from the builder stage
 COPY --from=model-builder /model/embedding_pb2.py .
@@ -39,6 +40,7 @@ COPY --from=model-builder /model/traced_model.pt .
 
 EXPOSE 50051
 
-#HEALTHCHECK CMD ["/usr/bin/grpc_health_probe", "-addr=localhost:50051"]
+# Switch to the non-root user before running the application
+USER appuser
 
 ENTRYPOINT ["python3", "model_server.py"]

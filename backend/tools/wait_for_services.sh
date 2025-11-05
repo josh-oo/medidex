@@ -2,11 +2,11 @@
 
 [ -f .env ] && . .env
 
-echo "Waiting for Database... ${DATABASE_HOST}:${DATABASE_PORT}"
+echo "Waiting for Backend... ${BACKEND_API}"
 
 # Wait for Database to return HTTP 200 on /ready
-until wget -q --spider http://${DATABASE_HOST}:${DATABASE_PORT}/readyz; do
-  echo "Database not ready yet. Sleeping..."
+until wget -q --spider ${BACKEND_API}/readyz; do
+  echo "Backend not ready yet. Sleeping..."
   sleep 2
 done
 
@@ -30,4 +30,4 @@ done
 echo "All services are ready. Starting application..."
 
 # Replace with your real app start command
-exec python3 scripts.py
+exec python3 prepare_vectorstore.py

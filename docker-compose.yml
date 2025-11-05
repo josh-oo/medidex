@@ -1,25 +1,6 @@
-version: "3.8"
+version: '3.8'
 
 services:
-  database:
-    container_name: database
-    build: 
-      context: ./backend/database
-      dockerfile: Dockerfile
-    expose:
-      - 8001
-    volumes:
-      - ./backend/_data/database:/data  # Correct path for the database volume
-    #healthcheck:
-    #  test: ["CMD", "curl", "-f", "http://localhost:8001/readyz"]
-    #  interval: 10s
-    #  timeout: 5s
-    #  retries: 12
-    #  start_interval: 30s
-    read_only: true
-    networks:
-      - internal_net
-
   embedding:
     container_name: embedding
     build:
@@ -27,12 +8,6 @@ services:
       dockerfile: embedding/Dockerfile
     expose:
       - 50051
-    #healthcheck:
-    #  test: ["CMD", "/usr/bin/grpc_health_probe", "-addr=localhost:50051"]
-    #  interval: 10s
-    #  timeout: 5s
-    #  retries: 12
-    #  start_interval: 30s
     read_only: true
     networks:
       - internal_net
@@ -45,43 +20,46 @@ services:
       - 6333
       - 6334
       - 6335
-    configs:
-      - source: qdrant_config
-        target: /qdrant/config/production.yaml
     volumes:
-      - ./backend/_data/qdrant:/qdrant/storage  # Path for Qdrant storage
+      - ./backend/_data/qdrant:/qdrant/storage
+      # Uncomment if you want a custom config file:
+      # - ./backend/_data/qdrant_config/production.yaml:/qdrant/config/production.yaml
     networks:
       - internal_net
-
-  routines:
-    container_name: routines
-    build:
-      context: ./backend
-      dockerfile: routines/Dockerfile
-    depends_on:
-        - database
-        - qdrant
-        - embedding
-    read_only: true
-    networks:
-      - internal_net
-    tmpfs:
-      - /tmp     # Mount tmpfs to /tmp
-      - /var/tmp # Mount tmpfs to /var/tmp
 
   logic:
-    container_name: backend
+    container_name: logic
     build:
       context: ./backend
       dockerfile: logic/Dockerfile
-    expose:
-      - 8002
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./backend/_data/backend:/data
     read_only: true
     networks:
       - internal_net
     tmpfs:
-      - /tmp     # Mount tmpfs to /tmp
-      - /var/tmp # Mount tmpfs to /var/tmp
+      - /tmp
+      - /var/tmp
+
+  tools:
+    container_name: tools
+    build:
+      context: ./backend
+      dockerfile: tools/Dockerfile
+    depends_on:
+      - logic
+      - qdrant
+      - embedding
+    read_only: true
+    networks:
+      - internal_net
+    tmpfs:
+      - /tmp
+      - /var/tmp
+    volumes:
+      - ./backend/_data/backend/tools:/data
 
   frontend:
     container_name: frontend
@@ -89,27 +67,28 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - 8501:8501
+      - "8501:8501"
     expose:
       - 8501
     read_only: true
     networks:
       - public_net
       - internal_net
-    tmpfs:
-      - /app/.streamlit/cache  # Mount tmpfs to Streamlit's cache directory
+    user: appuser
+    volumes:
+      - /home/appuser/.streamlit
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
 
-configs:
-  qdrant_config:
-    content: |
-      log_level: INFO
-
 networks:
   internal_net:
-    internal: true
+    external: true
   public_net:
-    driver: bridge
+    external: true
+
+#volumes:
+#  streamlit-volume:
+#    driver: local
+

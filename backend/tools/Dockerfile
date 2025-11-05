@@ -1,0 +1,50 @@
+# Stage 1: Compile the .proto file
+FROM python:3.11-alpine AS proto-builder
+
+WORKDIR /proto
+RUN pip3 install --no-cache-dir grpcio-tools==1.72.1
+
+COPY tools/utils/embedding.proto .
+RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding.proto
+
+# Stage 2: Main app
+FROM python:3.11-alpine
+
+RUN addgroup -S appgroup && adduser -S -G appgroup appuser
+
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV GRPC_HEALTH_PROBE_VERSION=v0.4.38
+
+WORKDIR /app
+
+COPY tools/requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+COPY tools/scripts/ .
+COPY tools/.env.production .env
+COPY tools/wait_for_services.sh /wait_for_services.sh
+RUN chmod +x /wait_for_services.sh
+
+# 👇 Copy compiled proto files from the builder stage
+COPY --from=proto-builder /proto/embedding_pb2.py .
+COPY --from=proto-builder /proto/embedding_pb2_grpc.py .
+
+RUN apk add --no-cache curl
+
+RUN ARCH=$(uname -m) && \
+    case "$ARCH" in \
+      x86_64)  ARCH_DL=linux-amd64 ;; \
+      aarch64) ARCH_DL=linux-arm64 ;; \
+      armv7l)  ARCH_DL=linux-arm ;; \
+      *)       echo "Unsupported architecture: $ARCH" && exit 1 ;; \
+    esac && \
+    curl -sSL -o /usr/local/bin/grpc_health_probe \
+      https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-${ARCH_DL} && \
+    chmod 755 /usr/local/bin/grpc_health_probe
+
+EXPOSE 8002
+
+# Switch to the non-root user before running the application
+USER appuser
+
+ENTRYPOINT ["/wait_for_services.sh"]

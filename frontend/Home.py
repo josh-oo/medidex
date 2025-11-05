@@ -1,29 +1,44 @@
 import streamlit as st
+#import os
+from dotenv import load_dotenv
+from utils.login import show_login
+
+load_dotenv()
+
+#page = st.Page("pages/Study.py", title="Study details"),
+#study_pg = st.Page("pages/study.py", title="Study details", icon=":material/menu_book:"),
 
 st.set_page_config(
     page_title="Meerkat AI",
-    page_icon="🤖",
+    layout="wide"
 )
 
-st.write("")
+login = st.Page(show_login, title="Login", icon=":material/login:")
 
-st.sidebar.success("Select a demo above.")
+assign_new_report = st.Page("pages/assign_new_report.py", title="Assign new reports", icon=":material/add_circle:")
+search_studies = st.Page("pages/search_studies.py", title="Search studies", icon=":material/search:")
 
-st.markdown(
-    """
-    ### Meerkat AI 
-    This is a simple demo app for the AI models we trained to map new reports to their corresponding study (studification).
-    
-    The system reflects the state of Meerkat's 5th version. For demonstration purposes, only studies and reports that we had in our training/validation set are included
-    (23696 reports and 16125 studies).
+settings = st.Page("pages/settings.py", title="Settings", icon=":material/settings:")
 
-    **👈 This demo app demonstrates two use cases which can be found in the tabs on the left side** 
+logged_out_pages = [login]
 
-    However, remember that this is a prototype and things may not yet work as expected.
+logged_in_pages = {
+    "Researchers Panel": [
+        assign_new_report,
+        search_studies,
+    ],
+    "Admin Panel": [
+        settings,
+    ],
+}
 
-    ### Assign new reports
-    If you get a new report and you want to find the matching studies / Meerkat-tags
-    ### Search for studies according to specific tags
-    If you want to search Meerkat for studies according to your predefined "tag-based-constraints"
-"""
-)
+if "access_token" in st.session_state:
+    pg = st.navigation(logged_in_pages)
+else:
+    pg = st.navigation(logged_out_pages, position="hidden")
+
+pg.run()
+
+
+#with st.sidebar:
+#    show_login()

@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package embed;
+
+service EmbedService {
+  rpc GetReportEmbedding (stream EmbedReportRequest) returns (stream EmbedResponseReport);
+  rpc GetAspectEmbeddings (stream EmbedAspectsRequest) returns (stream EmbedResponseAspects);
+}
+
+message EmbedReportRequest {
+  string id = 1;
+  string text = 2;
+  repeated string authors = 3;
+}
+
+message EmbedAspectsRequest {
+  string id = 1;
+  repeated string aspects = 2;
+}
+
+message EmbeddingVector {
+  repeated float values = 1;
+}
+
+message EmbedResponseAspects {
+  string id = 1;
+  repeated EmbeddingVector embedding = 2; 
+}
+
+message EmbedResponseReport {
+  string id = 1;
+  EmbeddingVector embedding = 2;
+  repeated EmbeddingVector aspect_embeddings = 3;
+  EmbeddingVector author_embeddings = 4;
+}
