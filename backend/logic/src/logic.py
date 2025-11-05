@@ -264,7 +264,7 @@ async def get_available_batches(db: AsyncSession = Depends(get_session)) -> List
 
     return flattened
 
-@router.get("/batches/{batch_hash}", summary="Get a specific report batch by hash.",description="Returns details and progress information for a single report batch identified by batch_hash.")
+@router.get("/batches/{batch_hash}", dependencies=[Depends(is_verified_api_call)], summary="Get a specific report batch by hash.",description="Returns details and progress information for a single report batch identified by batch_hash.")
 async def get_batch_by_hash(batch_hash: str, db: AsyncSession = Depends(get_session)) -> BatchResponse | None:
     r_subq = (
         select(
@@ -315,8 +315,8 @@ async def delete_batch(batch_hash: str, db: AsyncSession = Depends(get_session))
 
     return Response(status_code=204)
 
-@router.get("/batches/{batch_hash}/subscribe")
-async def stream_dummy_data(batch_hash : str,  request: Request, db: AsyncSession = Depends(get_session)):
+@router.get("/batches/{batch_hash}/subscribe",dependencies=[Depends(is_verified_api_call)], summary="Stream updated batch information.")
+async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSession = Depends(get_session)):
     async def event_stream():
         while True:
             if await request.is_disconnected():
