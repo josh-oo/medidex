@@ -33,7 +33,7 @@ import pickle
 
 import enum
 
-from .auth import is_verified, verify_api_key
+from .auth import is_verified_api_call
 
 from .resources import get_study_id_by_trial_id_internal, get_studies_internal, get_study_persons_internal, get_author_frequencies
 from .resources import get_study_interventions_internal , get_study_conditions_internal, get_study_outcomes_internal, get_study_participants_internal, get_study_design_internal
@@ -179,7 +179,7 @@ async def parse_file(file: UploadFile):
 
     return entries
 
-@router.post("/batches", dependencies=[Depends(is_verified)], summary="Upload a batch of new reports that need to be assigned to studies (usually in the .ris file format)", description="Uploading a new batch triggers the embedding process. Batches are mainly used to do these compute heavy calculations in the background and only once. All needed data and the calculated embedding vectors are stored temporarily.", status_code=201) 
+@router.post("/batches", dependencies=[Depends(is_verified_api_call)], summary="Upload a batch of new reports that need to be assigned to studies (usually in the .ris file format)", description="Uploading a new batch triggers the embedding process. Batches are mainly used to do these compute heavy calculations in the background and only once. All needed data and the calculated embedding vectors are stored temporarily.", status_code=201) 
 async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), db : AsyncSession = Depends(get_session)):
 
     entries = await parse_file(file)
@@ -221,7 +221,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
     return Response(status_code=201)
     
-@router.get("/batches", dependencies=[Depends(is_verified)], summary="Get an overview of current report batches.", description="For each batch the current progress of embedding calculation and the number of already assigned reports is returned")
+@router.get("/batches", dependencies=[Depends(is_verified_api_call)], summary="Get an overview of current report batches.", description="For each batch the current progress of embedding calculation and the number of already assigned reports is returned")
 async def get_available_batches(db: AsyncSession = Depends(get_session)) -> List[BatchResponse]:
     r_subq = (
         select(
@@ -257,7 +257,7 @@ async def get_available_batches(db: AsyncSession = Depends(get_session)) -> List
 
     return flattened
 
-@router.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified)], summary="Delete a report batch and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
+@router.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified_api_call)], summary="Delete a report batch and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
 async def delete_batch(batch_hash: str, db: AsyncSession = Depends(get_session)):
     # delete related reports first (due to FK constraints)
     await db.execute(
@@ -269,7 +269,7 @@ async def delete_batch(batch_hash: str, db: AsyncSession = Depends(get_session))
     await db.commit()
     return Response(status_code=204)
 
-@router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
+@router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified_api_call)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
 async def get_batched_report(batch_hash: str, report_index: int, db: AsyncSession = Depends(get_session)):
     stmt = (
         select(
@@ -302,7 +302,7 @@ async def get_batched_report(batch_hash: str, report_index: int, db: AsyncSessio
         "assigned_studies": json.loads(row.assigned_studies) if row.assigned_studies else [],
     }
 
-@router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Assign studies to a specific report in a batch.", status_code=204)
+@router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=204)
 async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), db : AsyncSession = Depends(get_session)):
     stmt = (
         update(TmpReport)
@@ -316,7 +316,7 @@ async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = 
     await db.commit()
     return Response(status_code=204)
 
-@router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified)], summary="Remove assigned studies from a specific report in a batch.", status_code=204)
+@router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=204)
 async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, db : AsyncSession = Depends(get_session)):
     stmt = (
         update(TmpReport)
@@ -330,7 +330,7 @@ async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_inde
     await db.commit()
     return Response(status_code=204)
 
-@router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
+@router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
 async def similar_tags(batch_hash: str = batch_hash_path, report_index: int = report_index_path, sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(None, description="The tag category which you are interested in"), k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_session)) -> List[TagResponse]:
     stmt = (
         select(TmpReport.vectors)
@@ -363,7 +363,7 @@ async def similar_tags(batch_hash: str = batch_hash_path, report_index: int = re
     ]
     return result
 
-@router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
+@router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
 async def similar_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, aspect: TagCategories = Query(None, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_session), return_details=False):
     if not aspect:
         aspect = "default"
@@ -554,7 +554,7 @@ async def get_scores_authors(report_authors: List[str], study_ids: List[int], cu
 
     return result
 
-@router.get("/{tag_category}/{tag_value}/related_studies", dependencies=[Depends(is_verified)], summary="Get studies related to a specific tag (intervention, outcome, ...) currently only vector-similarity search is available.", description="Retrieve studies that are related to a specific tag value (e.g., 'Placebo' for interventions) using vector similarity search based on the embedding of the tag value. The similarity search is done at runtime.")
+@router.get("/{tag_category}/{tag_value}/related_studies", dependencies=[Depends(is_verified_api_call)], summary="Get studies related to a specific tag (intervention, outcome, ...) currently only vector-similarity search is available.", description="Retrieve studies that are related to a specific tag value (e.g., 'Placebo' for interventions) using vector similarity search based on the embedding of the tag value. The similarity search is done at runtime.")
 async def get_aspect_related_studies(tag_category: TagCategories = Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value: str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), k : int = k_query, client=Depends(get_vectorstore), channel = Depends(get_grpc_channel)):
     embeddings = await _embed_aspect(tag_value, channel)
 
@@ -641,7 +641,7 @@ class RetrievalInputEmbedding(BaseModel):
     embeddings: dict
     model_id: str
     
-@router.post("/processing/analyze_embedding", dependencies=[Depends(verify_api_key)], include_in_schema=False)
+@router.post("/processing/analyze_embedding", dependencies=[Depends(is_verified_api_call)], include_in_schema=False)
 async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), client=Depends(get_vectorstore)):
     result = await analyze(input.embeddings, input.model_id, input.basic_input.topK, input.basic_input.title, input.basic_input.abstract, input.basic_input.authors, cutoff, client)
     return result
@@ -760,7 +760,7 @@ async def analyze(embeddings, model_id, top_k, title, abstract, authors, cutoff,
     return result
 
 
-@router.post("/processing/extract_trial_id", dependencies=[Depends(is_verified)], include_in_schema=False)
+@router.post("/processing/extract_trial_id", dependencies=[Depends(is_verified_api_call)], include_in_schema=False)
 def extract_trial_id(raw_report: RawReport):
     ids = extract_trial_registration_ids(raw_report.title)
     if len(ids) == 1:
@@ -789,12 +789,12 @@ class AspectEmbedding(BaseModel):
     model_id: str
     embedding: List[float]
 
-@router.post("/similarity_search/studies", dependencies=[Depends(is_verified)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_studies instead", deprecated=True)
+@router.post("/similarity_search/studies", dependencies=[Depends(is_verified_api_call)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_studies instead", deprecated=True)
 async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):
     
     return await get_similar_studies(embedding.main_embedding, embedding.model_id, aspect, trial_id, authors, cutoff, k, client, return_details)
 
-@router.post("/similarity_search/tags", dependencies=[Depends(is_verified)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_tags instead", deprecated=True)
+@router.post("/similarity_search/tags", dependencies=[Depends(is_verified_api_call)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_tags instead", deprecated=True)
 async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), k : int = Query(10), client=Depends(get_vectorstore)):
     
     return await get_similar_tags(embedding.embedding, embedding.model_id + "_tags", sources, type, k, client)

@@ -9,7 +9,7 @@ from sqlmodel import select, SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from .utils.database_models import APIKey, User
 
-from typing import List, Literal
+from typing import List, Literal, Optional
 import os
 
 from passlib.context import CryptContext
@@ -29,14 +29,17 @@ DEBUG = os.getenv("DEBUG") == "TRUE"
 
 router = APIRouter(tags=["auth"])
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
-api_key_header = APIKeyHeader(name="X-API-Key")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"persistent","users.db")
 
 engine = create_async_engine(DATABASE_URL, echo=True)
+
+if not JWT_SECRET or len(JWT_SECRET) < 32:
+    raise RuntimeError("JWT_SECRET must be set and at least 32 characters long")
 
 class UserDataResponse(BaseModel):
     id: int
@@ -65,6 +68,8 @@ async def startup_event():
         await conn.run_sync(SQLModel.metadata.create_all)
 
 def verify_token(token):
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         # Decode and verify the JWT
         decoded = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
@@ -79,20 +84,6 @@ def generate_token(user):
     expire = datetime.now(tz=timezone.utc) + timedelta(hours=8)
     return jwt.encode({'sub': user.email, 'role': user.role, 'id': user.id, 'verified': user.verified, 'exp': expire}, JWT_SECRET, algorithm='HS256')
 
-def is_admin(token: str = Security(oauth2_scheme)):
-    decoded = verify_token(token)
-    if decoded['role'] != "admin":
-        raise HTTPException(status_code=401, detail="Not allowed")
-    return token
-
-def is_verified(token: str = Security(oauth2_scheme)):
-    if DEBUG:
-        return token
-    decoded = verify_token(token)
-    if decoded['verified'] != 1:
-        raise HTTPException(status_code=401, detail="Not allowed")
-    return token
-
 def generate_api_key_pair():
     key_id = secrets.token_urlsafe(8)  # short prefix
     secret = secrets.token_urlsafe(32)
@@ -100,20 +91,65 @@ def generate_api_key_pair():
     key_hash = pwd_context.hash(full_key)
     return key_id, key_hash, full_key
 
-async def verify_api_key(api_key: str = Security(api_key_header), session: AsyncSession = Depends(get_session)):
-    key_id = api_key.split(".")[0]
+"""
+Authentication
+"""
 
-    statement = select(APIKey.hash).where(APIKey.id == key_id)
+def is_admin(token: str = Security(oauth2_scheme)):
+    decoded = verify_token(token)
+    if decoded['role'] != "admin":
+        raise HTTPException(status_code=401, detail="Not allowed")
+    return token
+
+
+def is_verified(token: Optional[str] = Security(oauth2_scheme)):
+    """Validate a JWT token if provided. Returns the token string when valid, otherwise None.
+
+    Note: auto_error=False lets callers decide whether a missing token is acceptable (so
+    endpoints can support either API keys or JWTs).
+    """
+    if not token:
+        return None
+    if DEBUG:
+        return token
+    decoded = verify_token(token)
+    if decoded.get('verified') == 1:
+        return token
+    
+    raise HTTPException(status_code=403, detail="Not allowed")
+
+async def verify_api_key(api_key: Optional[str] = Security(api_key_header), session: AsyncSession = Depends(get_session)):
+    """Check the provided API key (if any). Returns True when valid, otherwise None.
+
+    Using auto_error=False lets `is_verified_api_call` decide whether the absence of an API
+    key should lead to an error (so endpoints can accept either auth method).
+    """
+    if not api_key:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    key_id = api_key.split(".")[0]
+    # Select whole APIKey objects so we can access .hash attribute
+    statement = select(APIKey).where(APIKey.id == key_id)
     matching_keys = (await session.execute(statement)).scalars().all()
 
-    if matching_keys is None:
-        raise HTTPException(status_code=400, detail="Invalid api key")
+    if not matching_keys:
+        raise HTTPException(status_code=403, detail="Not allowed")
 
     for key in matching_keys:
         if pwd_context.verify(api_key, key.hash):
-            return Response(status_code=201)
-    
-    raise HTTPException(status_code=400, detail="Invalid api key")
+            return True
+
+    raise HTTPException(status_code=403, detail="Not allowed")
+
+def is_verified_api_call(token: Optional[str] = Depends(is_verified, use_cache=False), api_key_valid: Optional[bool] = Depends(verify_api_key, use_cache=False)):
+    # Allow either a valid JWT token or a valid API key. Both dependencies use auto_error=False
+    # so that FastAPI won't short-circuit with an HTTP error before we have a chance to
+    # check the alternative authentication method.
+    if token:
+        return True
+    if api_key_valid:
+        return True
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
 @router.get("/users", dependencies=[Depends(is_admin)], summary="List all users (admin only).")
 async def get_users(session: AsyncSession = Depends(get_session)) -> List[UserDataResponse]:

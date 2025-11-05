@@ -4,7 +4,7 @@ import os
 
 from dotenv import load_dotenv
 
-from .auth import is_verified
+from .auth import is_verified_api_call
 from typing import List, Optional
 
 from pydantic import BaseModel
@@ -32,7 +32,7 @@ load_dotenv()
 
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 
-router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified)])
+router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified_api_call)])
 
 DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"resources","meerkat.db")
 
