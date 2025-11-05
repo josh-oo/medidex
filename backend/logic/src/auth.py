@@ -5,7 +5,8 @@ from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
-from sqlmodel import create_engine, select, SQLModel, Session
+from sqlmodel import select, SQLModel
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from .utils.database_models import APIKey, User
 
 from typing import List, Literal
@@ -34,9 +35,9 @@ api_key_header = APIKeyHeader(name="X-API-Key")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-DATABASE_URL = "sqlite:///" + os.path.join(DATABASE_VOLUME,"persistent","users.db")
+DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"persistent","users.db")
 
-engine = create_engine(DATABASE_URL, echo=True)
+engine = create_async_engine(DATABASE_URL, echo=True)
 
 class UserDataResponse(BaseModel):
     id: int
@@ -55,16 +56,29 @@ class TokenResponse(BaseModel):
 class ApiKeyResponse(BaseModel):
     api_key: str
 
+"""
 def get_session():
     with Session(engine) as session:
         yield session
+"""
 
+async def get_session() -> AsyncSession:
+    async with AsyncSession(engine) as session:
+        yield session
+
+@router.on_event("startup")
+async def startup_event():
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+"""
 def init_db():
     SQLModel.metadata.create_all(engine)
 
 @router.on_event("startup")
 def on_startup():
     init_db()
+"""
 
 def verify_token(token):
     try:
@@ -81,13 +95,13 @@ def generate_token(user):
     expire = datetime.now(tz=timezone.utc) + timedelta(hours=8)
     return jwt.encode({'sub': user.email, 'role': user.role, 'id': user.id, 'verified': user.verified, 'exp': expire}, JWT_SECRET, algorithm='HS256')
 
-def is_admin(token: str = Depends(oauth2_scheme)):
+def is_admin(token: str = Security(oauth2_scheme)):
     decoded = verify_token(token)
     if decoded['role'] != "admin":
         raise HTTPException(status_code=401, detail="Not allowed")
     return token
 
-def is_verified(token: str = Depends(oauth2_scheme)):
+def is_verified(token: str = Security(oauth2_scheme)):
     if DEBUG:
         return token
     decoded = verify_token(token)
@@ -102,11 +116,11 @@ def generate_api_key_pair():
     key_hash = pwd_context.hash(full_key)
     return key_id, key_hash, full_key
 
-def verify_api_key(api_key: str = Security(api_key_header), session: Session = Depends(get_session)):
+async def verify_api_key(api_key: str = Security(api_key_header), session: AsyncSession = Depends(get_session)):
     key_id = api_key.split(".")[0]
 
     statement = select(APIKey.hash).where(APIKey.id == key_id)
-    matching_keys = session.exec(statement).all()
+    matching_keys = (await session.execute(statement)).scalars().all()
 
     if matching_keys is None:
         raise HTTPException(status_code=400, detail="Invalid api key")
@@ -117,56 +131,56 @@ def verify_api_key(api_key: str = Security(api_key_header), session: Session = D
     
     raise HTTPException(status_code=400, detail="Invalid api key")
 
-@router.get("/users", dependencies=[Depends(is_admin)], summary="List all users (admin only)")
-def get_users(session: Session = Depends(get_session)) -> List[UserDataResponse]:
-    users = session.exec(select(User)).all()
+@router.get("/users", dependencies=[Depends(is_admin)], summary="List all users (admin only).")
+async def get_users(session: AsyncSession = Depends(get_session)) -> List[UserDataResponse]:
+    users = (await session.execute(select(User))).scalars().all()
     safe_users = [UserDataResponse.from_orm(user) for user in users]
     return safe_users
 
-@router.put("/users/{user_id}/email", dependencies=[Depends(is_admin)], summary="Update user email (admin only)")
-def update_user(user_id: int, value: EmailStr, session: Session = Depends(get_session)) -> UserDataResponse:
+@router.put("/users/{user_id}/email", dependencies=[Depends(is_admin)], summary="Update user email (admin only).")
+async def update_user(user_id: int, value: EmailStr, session: AsyncSession = Depends(get_session)) -> UserDataResponse:
     
-    old_user = session.get(User, user_id)
+    old_user = await session.get(User, user_id)
     if old_user is None:
         raise HTTPException(status_code=404, detail="User not found")
     old_user.email = value
 
     session.add(old_user)
-    session.commit()
-    session.refresh(old_user) 
+    await session.commit()
+    await session.refresh(old_user) 
 
     return UserDataResponse.from_orm(old_user)
 
-@router.put("/users/{user_id}/verified", dependencies=[Depends(is_admin)], summary="Update user verification (admin only)")
-def update_user(user_id: int, verified: bool, session: Session = Depends(get_session)) -> UserDataResponse:
+@router.put("/users/{user_id}/verified", dependencies=[Depends(is_admin)], summary="Update user 'verified' state (admin only).")
+async def update_user(user_id: int, verified: bool, session: AsyncSession = Depends(get_session)) -> UserDataResponse:
     
-    old_user = session.get(User, user_id)
+    old_user = await session.get(User, user_id)
     if old_user is None:
         raise HTTPException(status_code=404, detail="User not found")
     old_user.verified = verified
 
     session.add(old_user)
-    session.commit()
-    session.refresh(old_user) 
+    await session.commit()
+    await session.refresh(old_user) 
 
     return UserDataResponse.from_orm(old_user)
 
-@router.put("/users/{user_id}/role", dependencies=[Depends(is_admin)], summary="Update user role (admin only)")
-def update_user(user_id: int, role: Literal["user", "admin"], session: Session = Depends(get_session)) -> UserDataResponse:
+@router.put("/users/{user_id}/role", dependencies=[Depends(is_admin)], summary="Update user role (admin only).")
+async def update_user(user_id: int, role: Literal["user", "admin"], session: AsyncSession = Depends(get_session)) -> UserDataResponse:
     
-    old_user = session.get(User, user_id)
+    old_user = await session.get(User, user_id)
     if old_user is None:
         raise HTTPException(status_code=404, detail="User not found")
     old_user.role = role
 
     session.add(old_user)
-    session.commit()
-    session.refresh(old_user) 
+    await session.commit()
+    await session.refresh(old_user) 
 
     return UserDataResponse.from_orm(old_user)
 
-@router.put("/users/me/api_keys", summary="Create a new API key for the given user", status_code=201)
-def create_api_key(token: str = Depends(is_verified), session: Session = Depends(get_session)) -> ApiKeyResponse:
+@router.put("/users/me/api_keys", summary="Create a new API key for the given user.", status_code=201)
+async def create_api_key(token: str = Depends(is_verified), session: AsyncSession = Depends(get_session)) -> ApiKeyResponse:
     decoded = verify_token(token)
     user_id = decoded['id']
 
@@ -174,58 +188,58 @@ def create_api_key(token: str = Depends(is_verified), session: Session = Depends
 
     api_key = APIKey(id=key_id, hash=key_hash, owner=user_id)
     session.add(api_key)
-    session.commit()
-    session.refresh(api_key)
+    await session.commit()
+    await session.refresh(api_key)
 
     return {"api_key": full_key}
 
-@router.delete("/users/me/api_keys/{key_id}", summary="Delete an API key belonging to the given user", status_code=204)
-def delete_api_key(key_id: str, token: str = Depends(is_verified), session: Session = Depends(get_session)):
+@router.delete("/users/me/api_keys/{key_id}", summary="Delete an API key belonging to the given user.", status_code=204)
+async def delete_api_key(key_id: str, token: str = Depends(is_verified), session: AsyncSession = Depends(get_session)):
     decoded = verify_token(token)
     user_id = decoded['id']
 
     statement = select(APIKey).where(APIKey.id == key_id, APIKey.owner == user_id)
-    api_key = session.exec(statement).first()
+    api_key = (await session.execute(statement)).scalars().first()
 
     if not api_key:
         raise HTTPException(status_code=404, detail="API key not found or does not belong to user")
 
-    session.delete(api_key)
-    session.commit()
+    await session.delete(api_key)
+    await session.commit()
 
     return Response(status_code=204)
 
-@router.get("/users/me/api_keys", summary="Get all API keys created by the given user")
-def get_api_keys(token: str = Depends(is_verified), session: Session = Depends(get_session)) -> List[str]:
+@router.get("/users/me/api_keys", summary="Get all API keys created by the given user.")
+async def get_api_keys(token: str = Depends(is_verified), session: AsyncSession = Depends(get_session)) -> List[str]:
     decoded = verify_token(token)
     user_id = decoded['id']
 
     statement = select(APIKey.id).where(APIKey.owner == user_id) # Excluding password
-    api_keys = session.exec(statement).first()
+    api_keys = (await session.execute(statement)).scalars().all()
 
     return api_keys
 
-@router.post("/signup", summary="Sign up a new users")
-def signup(form_data: OAuth2PasswordRequestForm = Depends(), session: Session = Depends(get_session)) -> TokenResponse:
+@router.post("/signup", summary="Sign up a new user. Returns a JWT token.")
+async def signup(form_data: OAuth2PasswordRequestForm = Depends(), session: AsyncSession = Depends(get_session)) -> TokenResponse:
     statement = select(User).where(User.email == form_data.username)
-    existing_user = session.exec(statement).first()
+    existing_user = (await session.execute(statement)).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hashed_pw = pwd_context.hash(form_data.password)
     new_user = User(email=form_data.username, password=hashed_pw)
     session.add(new_user)
-    session.commit()
-    session.refresh(new_user)  # fetch ID and other DB-generated fields
+    await session.commit()
+    await session.refresh(new_user)  # fetch ID and other DB-generated fields
 
     token = generate_token(new_user)
 
     return {"access_token": token, "token_type": "bearer"}
 
-@router.post("/login", summary="Log in existing user and returns JWT token")
-def login(form_data: OAuth2PasswordRequestForm = Depends(), session: Session = Depends(get_session)) -> TokenResponse:
+@router.post("/login", summary="Log in existing user. Returns a JWT token.")
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: AsyncSession = Depends(get_session)) -> TokenResponse:
     statement = select(User).where(User.email == form_data.username)
-    existing_user = session.exec(statement).first()
+    existing_user = (await session.execute(statement)).scalars().first()
 
     # Validate credentials
     if not existing_user or not pwd_context.verify(form_data.password, existing_user.password):

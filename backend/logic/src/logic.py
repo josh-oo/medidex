@@ -99,7 +99,7 @@ async def startup_event():
 def get_grpc_channel():
     return grpc.aio.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
 
-def get_vectorstore():
+def get_vectorstore() -> AsyncQdrantClient:
     client = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
     yield client
 
