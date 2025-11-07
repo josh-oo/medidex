@@ -116,7 +116,7 @@ def is_verified(token: Optional[str] = Security(oauth2_scheme)):
     if decoded.get('verified') != 1:
         raise HTTPException(status_code=401, detail="Not allowed")
     
-    raise token
+    return token
 
 async def verify_api_key(api_key: Optional[str] = Security(api_key_header), session: AsyncSession = Depends(get_session)):
     """Check the provided API key (if any). Returns True when valid, otherwise None.

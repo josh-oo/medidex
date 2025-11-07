@@ -317,6 +317,7 @@ async def delete_batch(batch_hash: str, db: AsyncSession = Depends(get_session))
 
 @router.get("/batches/{batch_hash}/subscribe",dependencies=[Depends(is_verified_api_call)], summary="Stream updated batch information.")
 async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSession = Depends(get_session)):
+    #TODO currently one one subscriber would get updates since the item is removed from the queue then
     async def event_stream():
         while True:
             if await request.is_disconnected():
