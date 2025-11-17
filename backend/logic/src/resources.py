@@ -266,7 +266,7 @@ async def get_pdf_link_by_reports(report_id: int = report_id_path, session : Asy
 
     return (await get_pdf_links_by_report_ids([report_id],session))[report_id]
 
-@router.get("/reports/{report_id}/pdf", summary="Get the the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
+@router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
 async def get_pdf_by_report(report_id: int = report_id_path, session : AsyncSession = Depends(get_session)) -> FileResponse:
 
     report_number = (await get_pdf_numbers_by_report_ids(report_ids=[report_id], session=session))[report_id]
