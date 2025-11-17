@@ -289,7 +289,7 @@ async def get_batch_by_hash(batch_hash: str, db: AsyncSession = Depends(get_sess
     result = await db.execute(query)
     row = result.mappings().first()
     if not row:
-        return None  # or raise HTTPException(status_code=404, detail="Batch not found")
+        raise HTTPException(status_code=404, detail="Batch not found")
 
     batch: TmpReportBatch = row["TmpReportBatch"]
     batch_dict = batch.dict()
