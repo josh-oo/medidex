@@ -274,9 +274,9 @@ async def get_pdf_by_report(report_id: int = report_id_path, session : AsyncSess
     pdf_name = str(report_number).zfill(5) + ".pdf"
     file_name = os.path.join(PDF_PATH, pdf_name)
 
+    if not os.path.exists(file_name):
+        raise HTTPException(status_code=404, detail="PDF file not found.")
     return FileResponse(file_name, media_type="application/pdf")
-
-
 """
 Aspect Endpoints
 """
