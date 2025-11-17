@@ -1,6 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from qdrant_client import AsyncQdrantClient, models
@@ -30,6 +30,7 @@ from .utils.trial_registration_id import extract_trial_registration_ids
 import hashlib
 import json
 import pickle
+import asyncio
 
 import enum
 
@@ -64,6 +65,8 @@ k_query = Query(10, description="Maximum number of returned results.")
 DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"persistent","users.db")
 
 engine = create_async_engine(DATABASE_URL, echo=True)
+
+batch_update_feed = asyncio.Queue()
 
 class BatchResponse(BaseModel):
     batch_hash: str
@@ -138,6 +141,8 @@ async def process_report(report, batch_hash, index):
 
         session.add(new_report)
         await session.commit()
+
+        await batch_update_feed.put("batch stats changed")
 
 async def parse_file(file: UploadFile):
     entries = None
@@ -219,6 +224,8 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     for i, result in enumerate(results):
         background_tasks.add_task(process_report, result, batch_hash, i)
 
+    await batch_update_feed.put(batch_hash)
+
     return Response(status_code=201)
     
 @router.get("/batches", dependencies=[Depends(is_verified_api_call)], summary="Get an overview of current report batches.", description="For each batch the current progress of embedding calculation and the number of already assigned reports is returned")
@@ -257,6 +264,42 @@ async def get_available_batches(db: AsyncSession = Depends(get_session)) -> List
 
     return flattened
 
+@router.get("/batches/{batch_hash}", dependencies=[Depends(is_verified_api_call)], summary="Get a specific report batch by hash.",description="Returns details and progress information for a single report batch identified by batch_hash.")
+async def get_batch_by_hash(batch_hash: str, db: AsyncSession = Depends(get_session)) -> BatchResponse | None:
+    r_subq = (
+        select(
+            TmpReport.batch_hash,
+            func.count().label("embedded"),
+            func.count(TmpReport.assigned_studies).label("assigned")
+        )
+        .group_by(TmpReport.batch_hash)
+        .subquery()
+    )
+
+    query = (
+        select(
+            TmpReportBatch,
+            func.coalesce(r_subq.c.embedded, 0).label("embedded"),
+            func.coalesce(r_subq.c.assigned, 0).label("assigned")
+        )
+        .outerjoin(r_subq, TmpReportBatch.batch_hash == r_subq.c.batch_hash)
+        .where(TmpReportBatch.batch_hash == batch_hash)
+    )
+
+    result = await db.execute(query)
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    batch: TmpReportBatch = row["TmpReportBatch"]
+    batch_dict = batch.dict()
+    batch_dict.update({
+        "embedded": row["embedded"],
+        "assigned": row["assigned"]
+    })
+
+    return BatchResponse(**batch_dict)
+
 @router.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified_api_call)], summary="Delete a report batch and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
 async def delete_batch(batch_hash: str, db: AsyncSession = Depends(get_session)):
     # delete related reports first (due to FK constraints)
@@ -267,7 +310,38 @@ async def delete_batch(batch_hash: str, db: AsyncSession = Depends(get_session))
         delete(TmpReportBatch).where(TmpReportBatch.batch_hash == batch_hash)
     )
     await db.commit()
+
+    await batch_update_feed.put(batch_hash)
+
     return Response(status_code=204)
+
+@router.get("/batches/{batch_hash}/subscribe",dependencies=[Depends(is_verified_api_call)], summary="Stream updated batch information.")
+async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSession = Depends(get_session)):
+    #TODO currently one one subscriber would get updates since the item is removed from the queue then
+    async def event_stream():
+        HEARTBEAT_INTERVAL = 10  # seconds
+        while True:
+            # Check for client disconnect
+            if await request.is_disconnected():
+                break
+            # Check if batch still exists
+            batch_exists = await get_batch_by_hash(batch_hash, db)
+            if batch_exists is None:
+                yield f"event: batch_deleted\ndata: Batch deleted\n\n"
+                break
+            try:
+                data = await asyncio.wait_for(batch_update_feed.get(), timeout=HEARTBEAT_INTERVAL)
+                if data == batch_hash:
+                    result = await get_batch_by_hash(batch_hash, db)
+                    if result is not None:
+                        yield f"data: {result.json()}\n\n"
+                    else:
+                        yield f"event: batch_deleted\ndata: Batch deleted\n\n"
+                        break
+            except asyncio.TimeoutError:
+                # Send heartbeat
+                yield f": heartbeat\n\n"
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 @router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified_api_call)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
 async def get_batched_report(batch_hash: str, report_index: int, db: AsyncSession = Depends(get_session)):
@@ -314,6 +388,9 @@ async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = 
     )
     await db.execute(stmt)
     await db.commit()
+
+    await batch_update_feed.put(batch_hash)
+
     return Response(status_code=204)
 
 @router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=204)
@@ -328,6 +405,9 @@ async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_inde
     )
     await db.execute(stmt)
     await db.commit()
+
+    await batch_update_feed.put(batch_hash)
+
     return Response(status_code=204)
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")

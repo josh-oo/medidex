@@ -113,10 +113,10 @@ def is_verified(token: Optional[str] = Security(oauth2_scheme)):
     if DEBUG:
         return token
     decoded = verify_token(token)
-    if decoded.get('verified') == 1:
-        return token
+    if decoded.get('verified') != 1:
+        raise HTTPException(status_code=401, detail="Not allowed")
     
-    raise HTTPException(status_code=403, detail="Not allowed")
+    return token
 
 async def verify_api_key(api_key: Optional[str] = Security(api_key_header), session: AsyncSession = Depends(get_session)):
     """Check the provided API key (if any). Returns True when valid, otherwise None.
@@ -125,7 +125,7 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header), sess
     key should lead to an error (so endpoints can accept either auth method).
     """
     if not api_key:
-        raise HTTPException(status_code=403, detail="Not allowed")
+        return None
 
     key_id = api_key.split(".")[0]
     # Select whole APIKey objects so we can access .hash attribute
@@ -133,13 +133,13 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header), sess
     matching_keys = (await session.execute(statement)).scalars().all()
 
     if not matching_keys:
-        raise HTTPException(status_code=403, detail="Not allowed")
+        return None
 
     for key in matching_keys:
         if pwd_context.verify(api_key, key.hash):
             return True
 
-    raise HTTPException(status_code=403, detail="Not allowed")
+    return None
 
 def is_verified_api_call(token: Optional[str] = Depends(is_verified, use_cache=False), api_key_valid: Optional[bool] = Depends(verify_api_key, use_cache=False)):
     # Allow either a valid JWT token or a valid API key. Both dependencies use auto_error=False
