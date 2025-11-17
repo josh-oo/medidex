@@ -319,13 +319,28 @@ async def delete_batch(batch_hash: str, db: AsyncSession = Depends(get_session))
 async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSession = Depends(get_session)):
     #TODO currently one one subscriber would get updates since the item is removed from the queue then
     async def event_stream():
+        HEARTBEAT_INTERVAL = 10  # seconds
         while True:
+            # Check for client disconnect
             if await request.is_disconnected():
                 break
-            data = await batch_update_feed.get()
-            if data == batch_hash:
-                result = await get_batch_by_hash(batch_hash, db)
-                yield f"data: {result.json()}\n\n"
+            # Check if batch still exists
+            batch_exists = await get_batch_by_hash(batch_hash, db)
+            if batch_exists is None:
+                yield f"event: batch_deleted\ndata: Batch deleted\n\n"
+                break
+            try:
+                data = await asyncio.wait_for(batch_update_feed.get(), timeout=HEARTBEAT_INTERVAL)
+                if data == batch_hash:
+                    result = await get_batch_by_hash(batch_hash, db)
+                    if result is not None:
+                        yield f"data: {result.json()}\n\n"
+                    else:
+                        yield f"event: batch_deleted\ndata: Batch deleted\n\n"
+                        break
+            except asyncio.TimeoutError:
+                # Send heartbeat
+                yield f": heartbeat\n\n"
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 @router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified_api_call)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
