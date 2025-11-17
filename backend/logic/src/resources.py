@@ -13,7 +13,6 @@ from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
-import os
 
 from datetime import date
 import re
