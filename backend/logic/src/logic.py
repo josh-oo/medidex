@@ -66,7 +66,39 @@ DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"persistent
 
 engine = create_async_engine(DATABASE_URL, echo=True)
 
-batch_update_feed = asyncio.Queue()
+# Simple in-process pub/sub to allow multiple subscribers per batch
+batch_subscribers: dict = {}
+batch_subscribers_lock = asyncio.Lock()
+
+async def publish_batch_update(batch_hash: str):
+    """Publish an update for a specific batch to all subscribers.
+    The published value is the batch_hash (keeps compatibility with existing handlers).
+    """
+    async with batch_subscribers_lock:
+        queues = list(batch_subscribers.get(batch_hash, []))
+
+    for q in queues:
+        try:
+            q.put_nowait(batch_hash)
+        except Exception:
+            # If put_nowait fails for whatever reason, schedule an async put.
+            asyncio.create_task(q.put(batch_hash))
+
+async def subscribe_to_batch(batch_hash: str) -> asyncio.Queue:
+    q: asyncio.Queue = asyncio.Queue()
+    async with batch_subscribers_lock:
+        batch_subscribers.setdefault(batch_hash, []).append(q)
+    return q
+
+async def unsubscribe_from_batch(batch_hash: str, q: asyncio.Queue):
+    async with batch_subscribers_lock:
+        lst = batch_subscribers.get(batch_hash)
+        if not lst:
+            return
+        if q in lst:
+            lst.remove(q)
+        if not lst:
+            batch_subscribers.pop(batch_hash, None)
 
 class BatchResponse(BaseModel):
     batch_hash: str
@@ -142,7 +174,7 @@ async def process_report(report, batch_hash, index):
         session.add(new_report)
         await session.commit()
 
-        await batch_update_feed.put("batch stats changed")
+        await publish_batch_update(batch_hash)
 
 async def parse_file(file: UploadFile):
     entries = None
@@ -224,7 +256,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     for i, result in enumerate(results):
         background_tasks.add_task(process_report, result, batch_hash, i)
 
-    await batch_update_feed.put(batch_hash)
+    await publish_batch_update(batch_hash)
 
     return Response(status_code=201)
     
@@ -311,36 +343,44 @@ async def delete_batch(batch_hash: str, db: AsyncSession = Depends(get_session))
     )
     await db.commit()
 
-    await batch_update_feed.put(batch_hash)
+    await publish_batch_update(batch_hash)
 
     return Response(status_code=204)
 
 @router.get("/batches/{batch_hash}/subscribe",dependencies=[Depends(is_verified_api_call)], summary="Stream updated batch information.")
 async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSession = Depends(get_session)) -> StreamingResponse:
-    #TODO currently one one subscriber would get updates since the item is removed from the queue then
     async def event_stream():
         HEARTBEAT_INTERVAL = 10  # seconds
-        while True:
-            # Check for client disconnect
-            if await request.is_disconnected():
-                break
-            # Check if batch still exists
-            batch_exists = await get_batch_by_hash(batch_hash, db)
-            if batch_exists is None:
-                yield f"event: batch_deleted\ndata: Batch deleted\n\n"
-                break
-            try:
-                data = await asyncio.wait_for(batch_update_feed.get(), timeout=HEARTBEAT_INTERVAL)
-                if data == batch_hash:
-                    result = await get_batch_by_hash(batch_hash, db)
-                    if result is not None:
-                        yield f"data: {result.json()}\n\n"
-                    else:
-                        yield f"event: batch_deleted\ndata: Batch deleted\n\n"
-                        break
-            except asyncio.TimeoutError:
-                # Send heartbeat
-                yield f": heartbeat\n\n"
+
+        # subscribe this client to the batch
+        q = await subscribe_to_batch(batch_hash)
+        try:
+            while True:
+                # Check for client disconnect
+                if await request.is_disconnected():
+                    break
+
+                # Check if batch still exists
+                batch_exists = await get_batch_by_hash(batch_hash, db)
+                if batch_exists is None:
+                    yield f"event: batch_deleted\ndata: Batch deleted\n\n"
+                    break
+
+                try:
+                    data = await asyncio.wait_for(q.get(), timeout=HEARTBEAT_INTERVAL)
+                    if data == batch_hash:
+                        result = await get_batch_by_hash(batch_hash, db)
+                        if result is not None:
+                            yield f"data: {result.json()}\n\n"
+                        else:
+                            yield f"event: batch_deleted\ndata: Batch deleted\n\n"
+                            break
+                except asyncio.TimeoutError:
+                    # Send heartbeat
+                    yield f": heartbeat\n\n"
+        finally:
+            await unsubscribe_from_batch(batch_hash, q)
+
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 @router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified_api_call)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
@@ -389,7 +429,7 @@ async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = 
     await db.execute(stmt)
     await db.commit()
 
-    await batch_update_feed.put(batch_hash)
+    await publish_batch_update(batch_hash)
 
     return Response(status_code=204)
 
@@ -406,7 +446,7 @@ async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_inde
     await db.execute(stmt)
     await db.commit()
 
-    await batch_update_feed.put(batch_hash)
+    await publish_batch_update(batch_hash)
 
     return Response(status_code=204)
 
