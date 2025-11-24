@@ -86,9 +86,8 @@ async def publish_batch_update(batch_hash: str):
         except Exception:
             # If put_nowait fails for whatever reason, schedule an async put.
             task = asyncio.create_task(q.put(batch_hash))
-            # Track the task to prevent resource leaks
+            # Track the task to prevent resource leaks and add cleanup callback
             background_tasks.add(task)
-            # Remove the task from the set when it completes
             task.add_done_callback(background_tasks.discard)
 
 async def subscribe_to_batch(batch_hash: str) -> asyncio.Queue:
