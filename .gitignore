@@ -23,3 +23,8 @@
 **/_data/
 
 **/.cache/
+
+# Test artifacts
+**/htmlcov/
+**/.coverage
+**/.pytest_cache/
