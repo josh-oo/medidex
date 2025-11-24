@@ -88,7 +88,8 @@ async def publish_batch_update(batch_hash: str):
             task = asyncio.create_task(q.put(batch_hash))
             # Track the task to prevent resource leaks and add cleanup callback
             background_tasks.add(task)
-            task.add_done_callback(background_tasks.discard)
+            # Use lambda to be explicit and handle potential exceptions in cleanup
+            task.add_done_callback(lambda t: background_tasks.discard(t))
 
 async def subscribe_to_batch(batch_hash: str) -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue()
