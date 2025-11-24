@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.models import Filter, FieldCondition, DatetimeRange
-from typing import List, Optional
+from typing import Dict, List, Optional
 import os
 
 from datetime import datetime
@@ -67,7 +67,7 @@ DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"persistent
 engine = create_async_engine(DATABASE_URL, echo=True)
 
 # Simple in-process pub/sub to allow multiple subscribers per batch
-batch_subscribers: dict = {}
+batch_subscribers: Dict[str, List[asyncio.Queue]] = {}
 batch_subscribers_lock = asyncio.Lock()
 
 async def publish_batch_update(batch_hash: str):
