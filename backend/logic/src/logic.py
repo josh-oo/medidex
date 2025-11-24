@@ -108,7 +108,6 @@ class BatchResponse(BaseModel):
     embedded: int = 0
     assigned: int = 0
 
-
 class TagResponse(BaseModel):
     id: str
     keyword: str
