@@ -70,6 +70,9 @@ engine = create_async_engine(DATABASE_URL, echo=True)
 batch_subscribers: dict = {}
 batch_subscribers_lock = asyncio.Lock()
 
+# Track background tasks to prevent resource leaks
+background_tasks: set = set()
+
 async def publish_batch_update(batch_hash: str):
     """Publish an update for a specific batch to all subscribers.
     The published value is the batch_hash (keeps compatibility with existing handlers).
@@ -82,7 +85,11 @@ async def publish_batch_update(batch_hash: str):
             q.put_nowait(batch_hash)
         except Exception:
             # If put_nowait fails for whatever reason, schedule an async put.
-            asyncio.create_task(q.put(batch_hash))
+            task = asyncio.create_task(q.put(batch_hash))
+            # Track the task to prevent resource leaks
+            background_tasks.add(task)
+            # Remove the task from the set when it completes
+            task.add_done_callback(background_tasks.discard)
 
 async def subscribe_to_batch(batch_hash: str) -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue()
