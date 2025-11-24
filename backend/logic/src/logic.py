@@ -360,20 +360,27 @@ async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSes
                     break
 
                 # Check if batch still exists
-                batch_exists = await get_batch_by_hash(batch_hash, db)
-                if batch_exists is None:
-                    yield f"event: batch_deleted\ndata: Batch deleted\n\n"
-                    break
+                try:
+                    batch_exists = await get_batch_by_hash(batch_hash, db)
+                except HTTPException as e:
+                    if e.status_code == 404:
+                        yield f"event: batch_deleted\ndata: Batch deleted\n\n"
+                        break
+                    else:
+                        raise
 
                 try:
                     data = await asyncio.wait_for(q.get(), timeout=HEARTBEAT_INTERVAL)
                     if data == batch_hash:
-                        result = await get_batch_by_hash(batch_hash, db)
-                        if result is not None:
+                        try:
+                            result = await get_batch_by_hash(batch_hash, db)
                             yield f"data: {result.json()}\n\n"
-                        else:
-                            yield f"event: batch_deleted\ndata: Batch deleted\n\n"
-                            break
+                        except HTTPException as e:
+                            if e.status_code == 404:
+                                yield f"event: batch_deleted\ndata: Batch deleted\n\n"
+                                break
+                            else:
+                                raise
                 except asyncio.TimeoutError:
                     # Send heartbeat
                     yield f": heartbeat\n\n"
