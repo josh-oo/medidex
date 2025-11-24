@@ -67,9 +67,9 @@ if [ "$RUN_CONTAINER_TESTS" = true ]; then
     echo "Note: Requires running Docker containers (docker compose up -d)"
     echo ""
     
-    # Check if container is accessible
+    # Check if container is accessible using httpx (Python) instead of curl for portability
     CONTAINER_URL="${CONTAINER_URL:-http://localhost:8002}"
-    if curl -s --fail "${CONTAINER_URL}/readyz" > /dev/null 2>&1; then
+    if python3 -c "import httpx; r = httpx.get('${CONTAINER_URL}/readyz', timeout=5); exit(0 if r.status_code == 200 else 1)" 2>/dev/null; then
         pytest test_docker_container.py $VERBOSE
     else
         echo "Warning: Container at ${CONTAINER_URL} is not accessible."
