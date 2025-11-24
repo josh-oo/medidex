@@ -87,12 +87,12 @@ async def test_admin_token(async_client: AsyncClient) -> str:
 
 
 @pytest.fixture
-def auth_headers(test_user_token: str) -> dict:
+async def auth_headers(test_user_token: str) -> dict:
     """Provide authorization headers with test user token."""
     return {"Authorization": f"Bearer {test_user_token}"}
 
 
 @pytest.fixture
-def admin_headers(test_admin_token: str) -> dict:
+async def admin_headers(test_admin_token: str) -> dict:
     """Provide authorization headers with admin user token."""
     return {"Authorization": f"Bearer {test_admin_token}"}

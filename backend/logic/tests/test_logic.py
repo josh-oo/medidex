@@ -95,9 +95,8 @@ ER  -
     async def test_assign_studies_to_report(self, async_client: AsyncClient, test_user_token: str):
         """Test assigning studies to a report in a batch."""
         response = await async_client.put(
-            "/batches/test_hash/0/studies",
-            headers={"Authorization": f"Bearer {test_user_token}"},
-            params={"study_ids": [1, 2, 3]}
+            "/batches/test_hash/0/studies?study_ids=1&study_ids=2&study_ids=3",
+            headers={"Authorization": f"Bearer {test_user_token}"}
         )
         assert response.status_code in [204, 404, 500]
 
@@ -109,9 +108,8 @@ ER  -
     async def test_remove_assigned_studies(self, async_client: AsyncClient, test_user_token: str):
         """Test removing assigned studies from a report."""
         response = await async_client.delete(
-            "/batches/test_hash/0/studies",
-            headers={"Authorization": f"Bearer {test_user_token}"},
-            params={"study_ids": [1, 2]}
+            "/batches/test_hash/0/studies?study_ids=1&study_ids=2",
+            headers={"Authorization": f"Bearer {test_user_token}"}
         )
         assert response.status_code in [204, 404, 500]
 
