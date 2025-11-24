@@ -1,0 +1,24 @@
+name: Build and Deploy Docker
+
+on:
+  push:
+    branches: [ "prod" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: SSH and deploy
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USER }}
+        port: ${{ secrets.SERVER_SSH_PORT }}
+        key: ${{ secrets.SERVER_SSH_KEY }}
+        script: |
+          cd meerkat-tool
+          git fetch origin
+          git checkout prod
+          git pull origin prod
+          docker compose up -d --build
