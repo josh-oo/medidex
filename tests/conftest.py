@@ -1,11 +1,16 @@
 import pytest
 import os
+import sys
 import tempfile
 from fastapi.testclient import TestClient
 from httpx import AsyncClient, ASGITransport
 from sqlmodel import SQLModel
 from typing import AsyncGenerator
 import asyncio
+
+# Add the backend/logic directory to the path so we can import from there
+BACKEND_LOGIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "backend", "logic")
+sys.path.insert(0, BACKEND_LOGIC_DIR)
 
 # Set test environment variables
 test_db_dir = tempfile.mkdtemp()
