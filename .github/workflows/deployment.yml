@@ -1,19 +1,23 @@
-name: Build and Deploy Docker
+name: Deploy to Production
 
 on:
   push:
-    branches: [ "prod" ]
+    branches:
+      - prod
 
 jobs:
   deploy:
     runs-on: self-hosted
 
     steps:
-    - name: Checkout prod branch
-      uses: actions/checkout@v3
-      with:
-        ref: prod  # Checkout the prod branch directly
-    - name: Deploy application
-      run: |
-        cd ~/meerkat-tool
-        sudo docker compose up -d --build
+      - name: Update production code
+        run: |
+          cd ~/meerkat-tool
+          git fetch origin
+          git checkout prod
+          git pull origin prod
+
+      - name: Rebuild and deploy
+        run: |
+          cd ~/meerkat-tool
+          sudo docker compose up -d --build
