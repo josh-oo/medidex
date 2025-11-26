@@ -25,7 +25,7 @@ async def wait_for_services(timeout=120):
     async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
         while time.time() - start_time < timeout:
             try:
-                response = await client.get(f"{BACKEND_API}/healthz")
+                response = await client.get(f"{BACKEND_API}/readyz")
                 if response.status_code == 200:
                     print("✅ Backend API is ready")
                     return True
@@ -35,7 +35,7 @@ async def wait_for_services(timeout=120):
             await asyncio.sleep(5)
     
     # Timeout reached
-    print(f"❌ Backend API not ready at {BACKEND_API}/healthz")
+    print(f"❌ Backend API not ready at {BACKEND_API}/readyz")
     raise TimeoutError(f"Backend service not ready after {timeout} seconds")
 
 def evaluate_with_cutoff(cutoff, model_id):
