@@ -152,6 +152,17 @@ async def process_report(report, batch_hash, index):
     title = report['title']
     abstract = report['abstract']
     authors = report['authors']
+
+    year = report['year']
+    report_number = report['report_number']
+    journal = report['journal']
+    pages = report['pages']
+    place = report['place']
+    language = report['language']
+    issue = report['issue']
+    volume = report['volume']
+    doi = report['doi']
+    
     raw_report = RawReport(title=title, abstract=abstract, authors=authors)
     trial_registration_id = extract_trial_id(raw_report)
 
@@ -173,6 +184,15 @@ async def process_report(report, batch_hash, index):
             title=title,
             abstract=abstract,
             authors=json.dumps(authors) if authors is not None else None,
+            year=year,
+            report_number=report_number,
+            journal=journal,
+            pages=pages,
+            place=place,
+            language=language,
+            volume=volume,
+            issue=issue,
+            doi=doi,
             trial_id=trial_registration_id,
             vectors=vectors_blob
         )
@@ -237,9 +257,19 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
         authors = entry.get('authors',None)
         abstract = entry.get('abstract', None)
 
+        year = entry.get('year', None)
+        report_number = entry.get('research_notes', None)
+        journal = entry.get('secondary_title', None)
+        pages = entry.get('start_page', None)
+        place = entry.get('place_published', None)
+        language = entry.get('language', None)
+        issue = entry.get('note', None)
+        volume = entry.get('volume', None)
+        doi = entry.get('doi', None)
+
         fingerprint_string += title if title else "" + abstract if abstract else "" + authors if authors else ""
 
-        results.append({'title':title, 'abstract':abstract, 'authors': authors})#, 'trial_registration_id':trial_registration_id})
+        results.append({'title':title, 'abstract':abstract, 'authors': authors, 'year': year, 'report_number': report_number, 'journal': journal, 'pages': pages, 'place': place, 'language': language, 'volume': volume, 'issue': issue, 'doi': doi})
 
     batch_hash = hashlib.sha256(fingerprint_string.encode()).hexdigest()
 
@@ -399,14 +429,7 @@ async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSes
 @router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified_api_call)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
 async def get_batched_report(batch_hash: str, report_index: int, db: AsyncSession = Depends(get_session)):
     stmt = (
-        select(
-            TmpReport.title,
-            TmpReport.abstract,
-            TmpReport.authors,
-            TmpReport.trial_id,
-            TmpReport.vectors,
-            TmpReport.assigned_studies
-        )
+        select(TmpReport)
         .where(
             TmpReport.batch_hash == batch_hash,
             TmpReport.batch_inner_id == report_index
@@ -415,19 +438,24 @@ async def get_batched_report(batch_hash: str, report_index: int, db: AsyncSessio
     )
 
     result = await db.execute(stmt)
-    row = result.first()
+    row = result.scalar_one_or_none()  # gets the TmpReport object directly
 
     if not row:
         return None  # or raise 404
 
-    return {
-        "title": row.title,
-        "abstract": row.abstract,
-        "authors": json.loads(row.authors) if row.authors else [],
-        "trial_id": row.trial_id,
-        "vectors": pickle.loads(row.vectors) if row.vectors else None,
-        "assigned_studies": json.loads(row.assigned_studies) if row.assigned_studies else [],
-    }
+    # Convert SQLAlchemy object to dict dynamically
+    report_data = {c.name: getattr(row, c.name) for c in TmpReport.__table__.columns}
+
+    # Decode JSON and Pickle fields
+    if report_data.get("authors"):
+        report_data["authors"] = json.loads(report_data["authors"])
+    if report_data.get("assigned_studies"):
+        report_data["assigned_studies"] = json.loads(report_data["assigned_studies"])
+    if report_data.get("vectors"):
+        report_data["vectors"] = pickle.loads(report_data["vectors"])
+
+    return report_data
+
 
 @router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=204)
 async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), db : AsyncSession = Depends(get_session)):

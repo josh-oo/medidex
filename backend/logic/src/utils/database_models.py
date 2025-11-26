@@ -179,9 +179,18 @@ class TmpReport(SQLModel, table=True):
 
     batch_hash: str = Field(primary_key=True)
     batch_inner_id: int = Field(primary_key=True)
-    title: Optional[str]
-    abstract: Optional[str]
-    authors: Optional[str]  # JSON-encoded list
-    trial_id: Optional[str]
+    title: Optional[str] #TI
+    abstract: Optional[str] #AB
+    authors: Optional[str]  #AU
+    year: Optional[int] #pY
+    report_number: Optional[int] #RN
+    journal: Optional[str] #T2
+    pages: Optional[str] #SP
+    place: Optional[str] #CY
+    language: Optional[str] #LA
+    issue: Optional[str] #M1
+    volume: Optional[str] #VL
+    doi: Optional[str] #DO
+    trial_id: Optional[str] #derived from title/abstract/authors
     vectors: Optional[bytes]  # pickled vectors
     assigned_studies: Optional[str]  # JSON-encoded list
