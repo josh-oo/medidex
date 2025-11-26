@@ -43,24 +43,6 @@ services:
       - /tmp
       - /var/tmp
 
-  tools:
-    container_name: tools
-    build:
-      context: ./backend
-      dockerfile: tools/Dockerfile
-    depends_on:
-      - logic
-      - qdrant
-      - embedding
-    read_only: true
-    networks:
-      - internal_net
-    tmpfs:
-      - /tmp
-      - /var/tmp
-    volumes:
-      - ./backend/_data/backend/tools:/data
-
   frontend:
     container_name: frontend
     build:
@@ -87,8 +69,4 @@ networks:
     external: true
   public_net:
     external: true
-
-#volumes:
-#  streamlit-volume:
-#    driver: local
 
