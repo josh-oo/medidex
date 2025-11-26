@@ -23,15 +23,19 @@ jobs:
           sudo docker compose up -d --build
 
       - name: Run performance checks in Docker
+        shell: bash
         run: |
+          set -o pipefail
+          
           cd ~/meerkat-tool/backend/tools
           
           # Build a temporary test container
-          sudo docker build -t meerkat-tools-test . 
+          sudo docker build -t meerkat-tool-test . 
           
           # Run the performance check script inside the container
           sudo docker run --rm \
-            meerkat-tools-test \
+            --network internal_net \
+            meerkat-tool-test \
             python evaluate_backend.py --ci | tee test_results.txt
           
           # Add results to GitHub Step Summary
@@ -52,4 +56,4 @@ jobs:
       - name: Cleanup Docker test image
         if: always()
         run: |
-          sudo docker image rm meerkat-tools-test || true
+          sudo docker image rm meerkat-tool-test || true
