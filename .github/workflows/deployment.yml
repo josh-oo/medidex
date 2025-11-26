@@ -31,8 +31,6 @@ jobs:
           
           # Run the performance check script inside the container
           sudo docker run --rm \
-            -v $(pwd):/app \
-            -w /app \
             meerkat-tools-test \
             python evaluate_backend.py --ci | tee test_results.txt
           
