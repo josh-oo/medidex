@@ -35,6 +35,14 @@ jobs:
           export JWT_SECRET="${{ secrets.JWT_SECRET }}"
           export BACKEND_API_URL="http://logic:8002"
           export DEBUG="FALSE"
+          # Print current .env file if present
+          if [ -f .env ]; then
+            echo "----- BEGIN .env -----"
+            sudo cat .env
+            echo "----- END .env -----"
+          else
+            echo "No .env file found in $(pwd)"
+          fi
           sudo -E docker compose up -d --build
 
       - name: Run performance checks in Docker
