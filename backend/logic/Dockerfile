@@ -21,7 +21,6 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY logic/api.py .
 COPY logic/src/ ./src/
-COPY logic/.env.production .env
 
 # 👇 Copy compiled proto files from the builder stage
 COPY --from=proto-builder /proto/embedding_pb2.py .

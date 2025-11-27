@@ -1,17 +1,6 @@
 version: '3.8'
 
 services:
-  embedding:
-    container_name: embedding
-    build:
-      context: ./backend
-      dockerfile: embedding/Dockerfile
-    expose:
-      - 50051
-    read_only: true
-    networks:
-      - internal_net
-
   qdrant:
     container_name: qdrant
     image: qdrant/qdrant:latest
@@ -26,6 +15,30 @@ services:
       # - ./backend/_data/qdrant_config/production.yaml:/qdrant/config/production.yaml
     networks:
       - internal_net
+
+  embedding:
+    container_name: embedding
+    build:
+      context: ./backend
+      dockerfile: embedding/Dockerfile
+      args:
+        - MODEL_PATH=${EMBEDDING_MODEL_PATH}
+        - MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
+        - MODEL_DTYPE=${EMBEDDING_MODEL_DTYPE}
+        - TOKENIZER_PATH=${EMBEDDING_MODEL_TOKENIZER_PATH}
+        - TOKENIZER_REVISION=${EMBEDDING_MODEL_TOKENIZER_REVISION}
+        - ASPECTS="${EMBEDDING_MODEL_ASPECTS}"
+    expose:
+      - 50051
+    read_only: true
+    networks:
+      - internal_net
+    environment:
+      - MODEL_PATH=${EMBEDDING_MODEL_PATH}
+      - MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
+      - MODEL_DIM=${EMBEDDING_MODEL_DIM}
+      - MODEL_MAX_INPUT_LENGTH=${EMBEDDING_MODEL_MAX_INPUT_LENGTH}
+      - ASPECTS="${EMBEDDING_MODEL_ASPECTS}"
 
   logic:
     container_name: logic
@@ -42,6 +55,14 @@ services:
     tmpfs:
       - /tmp
       - /var/tmp
+    environment:
+      - DATABASE_VOLUME=/data
+      - EMBEDDING_HOST=${EMBEDDING_SERVICE_HOST}
+      - EMBEDDING_PORT=${EMBEDDING_SERVICE_PORT}
+      - VECTORSTORE_HOST=${VECTORSTORE_SERVICE_HOST}
+      - VECTORSTORE_PORT=${VECTORSTORE_SERVICE_PORT}
+      - JWT_SECRET=${JWT_SECRET}
+      - DEBUG=${DEBUG}
 
   frontend:
     container_name: frontend
@@ -63,6 +84,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    environment:
+      - BACKEND_API=${BACKEND_API_URL}
 
 networks:
   internal_net:

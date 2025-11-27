@@ -12,7 +12,6 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the app
 COPY . .
-RUN mv .env.production .env
 
 RUN mkdir -p /home/appuser/.streamlit && \
     cat <<EOF > /home/appuser/.streamlit/config.toml

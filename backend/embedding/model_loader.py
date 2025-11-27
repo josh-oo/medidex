@@ -3,6 +3,8 @@ from transformers import AutoTokenizer, AutoModel
 from dotenv import load_dotenv
 import torch
 
+import os
+
 load_dotenv()
 
 MODEL_PATH = os.getenv("MODEL_PATH")

@@ -20,7 +20,22 @@ jobs:
       - name: Rebuild and deploy application
         run: |
           cd ~/meerkat-tool
-          sudo docker compose up -d --build
+          export EMBEDDING_MODEL_PATH="${{ vars.EMBEDDING_MODEL_PATH }}"
+          export EMBEDDING_MODEL_REVISION="${{ vars.EMBEDDING_MODEL_REVISION }}"
+          export EMBEDDING_MODEL_DTYPE="${{ vars.EMBEDDING_MODEL_DTYPE }}"
+          export EMBEDDING_MODEL_TOKENIZER_PATH="${{ vars.EMBEDDING_MODEL_TOKENIZER_PATH }}"
+          export EMBEDDING_MODEL_TOKENIZER_REVISION="${{ vars.EMBEDDING_MODEL_TOKENIZER_REVISION }}"
+          export EMBEDDING_MODEL_ASPECTS="${{ vars.EMBEDDING_MODEL_ASPECTS }}"
+          export EMBEDDING_MODEL_DIM="${{ vars.EMBEDDING_MODEL_DIM }}"
+          export EMBEDDING_MODEL_MAX_INPUT_LENGTH="${{ vars.EMBEDDING_MODEL_MAX_INPUT_LENGTH }}"
+          export EMBEDDING_SERIVE_HOST="${{ vars.EMBEDDING_SERIVE_HOST }}"
+          export EMBEDDING_SERVICE_PORT="${{ vars.EMBEDDING_SERVICE_PORT }}"
+          export VECTORSTORE_SERVICE_HOST="${{ vars.VECTORSTORE_SERVICE_HOST }}"
+          export VECTORSTORE_SERVICE_PORT="${{ vars.VECTORSTORE_SERVICE_PORT }}"
+          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
+          export BACKEND_API_URL="http://logic:8002"
+          export DEBUG="FALSE"
+          sudo -E docker compose up -d --build
 
       - name: Run performance checks in Docker
         shell: bash
@@ -36,7 +51,7 @@ jobs:
           sudo docker run --rm \
             --network internal_net \
             meerkat-tool-test \
-            python evaluate_backend.py --ci | tee test_results.txt
+            python evaluate_backend.py --ci --no-progress | tee test_results.txt
           
           # Add results to GitHub Step Summary
           echo "## Integration Test Results" >> $GITHUB_STEP_SUMMARY
@@ -50,7 +65,22 @@ jobs:
           cd ~/meerkat-tool
           echo "Performance checks failed. Rolling back..."
           git checkout HEAD~1
-          sudo docker compose up -d --build
+          export EMBEDDING_MODEL_PATH="${{ vars.EMBEDDING_MODEL_PATH }}"
+          export EMBEDDING_MODEL_REVISION="${{ vars.EMBEDDING_MODEL_REVISION }}"
+          export EMBEDDING_MODEL_DTYPE="${{ vars.EMBEDDING_MODEL_DTYPE }}"
+          export EMBEDDING_MODEL_TOKENIZER_PATH="${{ vars.EMBEDDING_MODEL_TOKENIZER_PATH }}"
+          export EMBEDDING_MODEL_TOKENIZER_REVISION="${{ vars.EMBEDDING_MODEL_TOKENIZER_REVISION }}"
+          export EMBEDDING_MODEL_ASPECTS="${{ vars.EMBEDDING_MODEL_ASPECTS }}"
+          export EMBEDDING_MODEL_DIM="${{ vars.EMBEDDING_MODEL_DIM }}"
+          export EMBEDDING_MODEL_MAX_INPUT_LENGTH="${{ vars.EMBEDDING_MODEL_MAX_INPUT_LENGTH }}"
+          export EMBEDDING_SERIVE_HOST="${{ vars.EMBEDDING_SERIVE_HOST }}"
+          export EMBEDDING_SERVICE_PORT="${{ vars.EMBEDDING_SERVICE_PORT }}"
+          export VECTORSTORE_SERVICE_HOST="${{ vars.VECTORSTORE_SERVICE_HOST }}"
+          export VECTORSTORE_SERVICE_PORT="${{ vars.VECTORSTORE_SERVICE_PORT }}"
+          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
+          export BACKEND_API_URL="http://logic:8002"
+          export DEBUG="FALSE"
+          sudo -E docker compose up -d --build
           exit 1
 
       - name: Cleanup Docker test image
