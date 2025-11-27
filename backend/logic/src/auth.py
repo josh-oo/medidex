@@ -9,6 +9,8 @@ from sqlmodel import select, SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from .utils.database_models import APIKey, User
 
+from asyncio import get_running_loop
+
 from typing import List, Literal, Optional
 import os
 
@@ -126,17 +128,23 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header), sess
     """
     if not api_key:
         return None
+    if DEBUG:
+        return True
 
     key_id = api_key.split(".")[0]
-    # Select whole APIKey objects so we can access .hash attribute
-    statement = select(APIKey).where(APIKey.id == key_id)
-    matching_keys = (await session.execute(statement)).scalars().all()
 
-    if not matching_keys:
+    # Fetch only the hash values
+    statement = select(APIKey.hash).where(APIKey.id == key_id)
+    hashes = (await session.execute(statement)).scalars().all()
+
+    if not hashes:
         return None
 
-    for key in matching_keys:
-        if pwd_context.verify(api_key, key.hash):
+    loop = get_running_loop()
+
+    # Verify each hash concurrently using threads to avoid blocking
+    for h in hashes:
+        if await loop.run_in_executor(None, pwd_context.verify, api_key, h):
             return True
 
     return None

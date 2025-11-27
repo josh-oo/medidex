@@ -157,9 +157,9 @@ class User(SQLModel, table=True):
 class APIKey(SQLModel, table=True):
     __tablename__ = "api_keys"
 
-    id: str = Field(primary_key=True)
+    id: str = Field(primary_key=True, index=True)
+    owner: int = Field(foreign_key="user.id")
     hash: str
-    owner: int  # user id
 
 
 """
