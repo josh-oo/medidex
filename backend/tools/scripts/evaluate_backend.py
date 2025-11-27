@@ -90,8 +90,21 @@ async def calculate_rank(result, model_id, cutoff, client):
 
 
 async def evaluate_with_cutoff_async(cutoff, model_id):
+
+    timeout = httpx.Timeout(
+        read=20.0,
+        connect=10.0,
+        write=30.0,
+        pool=30.0
+    )
+
+    limits = httpx.Limits(
+        max_keepalive_connections=20,
+        max_connections=50,
+        keepalive_expiry=30.0
+    )
     
-    async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=httpx.Timeout(30.0)) as client:
+    async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=timeout, limits=limits) as client:
 
         vectorstore = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
 
