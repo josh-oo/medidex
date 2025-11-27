@@ -91,7 +91,7 @@ async def calculate_rank(result, model_id, cutoff, client):
 
 async def evaluate_with_cutoff_async(cutoff, model_id):
     
-    async with httpx.AsyncClient(headers={f"Authorization": "Bearer {BACKEND_API_KEY}"}, timeout=httpx.Timeout(30.0)) as client:
+    async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=httpx.Timeout(30.0)) as client:
 
         vectorstore = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
 
