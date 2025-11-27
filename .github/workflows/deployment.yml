@@ -20,23 +20,22 @@ jobs:
       - name: Rebuild and deploy application
         run: |
           cd ~/meerkat-tool
-          sudo docker compose up -d --build
-        env:
-          EMBEDDING_MODEL_PATH: ${{ secrets.EMBEDDING_MODEL_PATH }}
-          EMBEDDING_MODEL_REVISION: ${{ secrets.EMBEDDING_MODEL_REVISION }}
-          EMBEDDING_MODEL_DTYPE: ${{ secrets.EMBEDDING_MODEL_DTYPE }}
-          EMBEDDING_MODEL_TOKENIZER_PATH: ${{ secrets.EMBEDDING_MODEL_TOKENIZER_PATH }}
-          EMBEDDING_MODEL_TOKENIZER_REVISION: ${{ secrets.EMBEDDING_MODEL_TOKENIZER_REVISION }}
-          EMBEDDING_MODEL_ASPECTS: ${{ secrets.EMBEDDING_MODEL_ASPECTS }}
-          EMBEDDING_MODEL_DIM: ${{ secrets.EMBEDDING_MODEL_DIM }}
-          EMBEDDING_MODEL_MAX_INPUT_LENGTH: ${{ secrets.EMBEDDING_MODEL_MAX_INPUT_LENGTH }}    
-          EMBEDDING_SERIVE_HOST: ${{ secrets.EMBEDDING_SERIVE_HOST }}
-          EMBEDDING_SERVICE_PORT: ${{ secrets.EMBEDDING_SERVICE_PORT }}
-          VECTORSTORE_SERVICE_HOST: ${{ secrets.VECTORSTORE_SERVICE_HOST }}
-          VECTORSTORE_SERVICE_PORT: ${{ secrets.VECTORSTORE_SERVICE_PORT }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          BACKEND_API_URL=http://logic:8002
-          DEBUG: FALSE
+          export EMBEDDING_MODEL_PATH="${{ vars.EMBEDDING_MODEL_PATH }}"
+          export EMBEDDING_MODEL_REVISION="${{ vars.EMBEDDING_MODEL_REVISION }}"
+          export EMBEDDING_MODEL_DTYPE="${{ vars.EMBEDDING_MODEL_DTYPE }}"
+          export EMBEDDING_MODEL_TOKENIZER_PATH="${{ vars.EMBEDDING_MODEL_TOKENIZER_PATH }}"
+          export EMBEDDING_MODEL_TOKENIZER_REVISION="${{ vars.EMBEDDING_MODEL_TOKENIZER_REVISION }}"
+          export EMBEDDING_MODEL_ASPECTS="${{ vars.EMBEDDING_MODEL_ASPECTS }}"
+          export EMBEDDING_MODEL_DIM="${{ vars.EMBEDDING_MODEL_DIM }}"
+          export EMBEDDING_MODEL_MAX_INPUT_LENGTH="${{ vars.EMBEDDING_MODEL_MAX_INPUT_LENGTH }}"
+          export EMBEDDING_SERIVE_HOST="${{ vars.EMBEDDING_SERIVE_HOST }}"
+          export EMBEDDING_SERVICE_PORT="${{ vars.EMBEDDING_SERVICE_PORT }}"
+          export VECTORSTORE_SERVICE_HOST="${{ vars.VECTORSTORE_SERVICE_HOST }}"
+          export VECTORSTORE_SERVICE_PORT="${{ vars.VECTORSTORE_SERVICE_PORT }}"
+          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
+          export BACKEND_API_URL="http://logic:8002"
+          export DEBUG="FALSE"
+          sudo -E docker compose up -d --build
 
       - name: Run performance checks in Docker
         shell: bash
@@ -66,7 +65,22 @@ jobs:
           cd ~/meerkat-tool
           echo "Performance checks failed. Rolling back..."
           git checkout HEAD~1
-          sudo docker compose up -d --build
+          export EMBEDDING_MODEL_PATH="${{ vars.EMBEDDING_MODEL_PATH }}"
+          export EMBEDDING_MODEL_REVISION="${{ vars.EMBEDDING_MODEL_REVISION }}"
+          export EMBEDDING_MODEL_DTYPE="${{ vars.EMBEDDING_MODEL_DTYPE }}"
+          export EMBEDDING_MODEL_TOKENIZER_PATH="${{ vars.EMBEDDING_MODEL_TOKENIZER_PATH }}"
+          export EMBEDDING_MODEL_TOKENIZER_REVISION="${{ vars.EMBEDDING_MODEL_TOKENIZER_REVISION }}"
+          export EMBEDDING_MODEL_ASPECTS="${{ vars.EMBEDDING_MODEL_ASPECTS }}"
+          export EMBEDDING_MODEL_DIM="${{ vars.EMBEDDING_MODEL_DIM }}"
+          export EMBEDDING_MODEL_MAX_INPUT_LENGTH="${{ vars.EMBEDDING_MODEL_MAX_INPUT_LENGTH }}"
+          export EMBEDDING_SERIVE_HOST="${{ vars.EMBEDDING_SERIVE_HOST }}"
+          export EMBEDDING_SERVICE_PORT="${{ vars.EMBEDDING_SERVICE_PORT }}"
+          export VECTORSTORE_SERVICE_HOST="${{ vars.VECTORSTORE_SERVICE_HOST }}"
+          export VECTORSTORE_SERVICE_PORT="${{ vars.VECTORSTORE_SERVICE_PORT }}"
+          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
+          export BACKEND_API_URL="http://logic:8002"
+          export DEBUG="FALSE"
+          sudo -E docker compose up -d --build
           exit 1
 
       - name: Cleanup Docker test image
