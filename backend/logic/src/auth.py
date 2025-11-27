@@ -22,6 +22,8 @@ from jose.exceptions import ExpiredSignatureError, JWTError
 from datetime import datetime, timedelta, timezone
 
 import secrets
+import hashlib
+import hmac
 
 load_dotenv()
 
@@ -90,7 +92,8 @@ def generate_api_key_pair():
     key_id = secrets.token_urlsafe(8)  # short prefix
     secret = secrets.token_urlsafe(32)
     full_key = f"{key_id}.{secret}"
-    key_hash = pwd_context.hash(full_key)
+    # Unsalted deterministic hash (SHA-256 hex)
+    key_hash = hashlib.sha256(full_key.encode("utf-8")).hexdigest()
     return key_id, key_hash, full_key
 
 """
@@ -123,13 +126,27 @@ def is_verified(token: Optional[str] = Security(oauth2_scheme)):
 async def verify_api_key(api_key: Optional[str] = Security(api_key_header), session: AsyncSession = Depends(get_session)):
     """Check the provided API key (if any). Returns True when valid, otherwise None.
 
-    Using auto_error=False lets `is_verified_api_call` decide whether the absence of an API
-    key should lead to an error (so endpoints can accept either auth method).
+    First tries new unsalted SHA-256 hash lookup by hash. If not found, falls back to legacy bcrypt verification.
     """
     if not api_key:
         return None
-    if DEBUG:
+
+    # Compute SHA-256 hex of the provided full key and try direct hash match
+    sha256_hex = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    statement = select(APIKey.hash).where(APIKey.hash == sha256_hex)
+    match = (await session.execute(statement)).scalars().first()
+
+    if match:
         return True
+
+    # Fallback to legacy lookup by key_id and bcrypt verification
+    return await verify_api_key_legacy(api_key, session)
+
+async def verify_api_key_legacy(api_key: Optional[str], session: AsyncSession):
+    """Check the provided API key (if any). Returns True when valid, otherwise None.
+
+    Supports both legacy bcrypt-hashed keys and new unsalted SHA-256 hashes.
+    """
 
     key_id = api_key.split(".")[0]
 
@@ -141,8 +158,6 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header), sess
         return None
 
     loop = get_running_loop()
-
-    # Verify each hash concurrently using threads to avoid blocking
     for h in hashes:
         if await loop.run_in_executor(None, pwd_context.verify, api_key, h):
             return True
