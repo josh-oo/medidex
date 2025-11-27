@@ -21,6 +21,22 @@ jobs:
         run: |
           cd ~/meerkat-tool
           sudo docker compose up -d --build
+        env:
+          EMBEDDING_MODEL_PATH: ${{ secrets.EMBEDDING_MODEL_PATH }}
+          EMBEDDING_MODEL_REVISION: ${{ secrets.EMBEDDING_MODEL_REVISION }}
+          EMBEDDING_MODEL_DTYPE: ${{ secrets.EMBEDDING_MODEL_DTYPE }}
+          EMBEDDING_MODEL_TOKENIZER_PATH: ${{ secrets.EMBEDDING_MODEL_TOKENIZER_PATH }}
+          EMBEDDING_MODEL_TOKENIZER_REVISION: ${{ secrets.EMBEDDING_MODEL_TOKENIZER_REVISION }}
+          EMBEDDING_MODEL_ASPECTS: ${{ secrets.EMBEDDING_MODEL_ASPECTS }}
+          EMBEDDING_MODEL_DIM: ${{ secrets.EMBEDDING_MODEL_DIM }}
+          EMBEDDING_MODEL_MAX_INPUT_LENGTH: ${{ secrets.EMBEDDING_MODEL_MAX_INPUT_LENGTH }}    
+          EMBEDDING_SERIVE_HOST: ${{ secrets.EMBEDDING_SERIVE_HOST }}
+          EMBEDDING_SERVICE_PORT: ${{ secrets.EMBEDDING_SERVICE_PORT }}
+          VECTORSTORE_SERVICE_HOST: ${{ secrets.VECTORSTORE_SERVICE_HOST }}
+          VECTORSTORE_SERVICE_PORT: ${{ secrets.VECTORSTORE_SERVICE_PORT }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          BACKEND_API_URL=http://logic:8002
+          DEBUG: FALSE
 
       - name: Run performance checks in Docker
         shell: bash

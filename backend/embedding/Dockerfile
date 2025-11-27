@@ -30,7 +30,6 @@ COPY embedding/requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY embedding/model_server.py .
-COPY embedding/.env.production .env
 
 # 👇 Copy compiled model files from the builder stage
 COPY --from=model-builder /model/embedding_pb2.py .
