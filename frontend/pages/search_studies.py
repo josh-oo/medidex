@@ -7,7 +7,7 @@ from utils.login import show_logout, get_headers
 
 load_dotenv()
 
-BACKEND_API = os.getenv('BACKEND_API')
+BACKEND_API = os.getenv('BACKEND_API_URL')
 
 current_embedding = None
 current_model = None

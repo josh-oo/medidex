@@ -20,7 +20,6 @@ COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY scripts/ .
-COPY .env.production .env
 
 # 👇 Copy compiled proto files from the builder stage
 COPY --from=proto-builder /proto/embedding_pb2.py .
