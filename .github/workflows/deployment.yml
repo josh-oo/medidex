@@ -37,7 +37,23 @@ jobs:
       - name: Rebuild and deploy application
         run: |
           cd ~/meerkat-tool
-          sudo -E docker compose up -d --build
+          sudo docker compose \
+            -e EMBEDDING_MODEL_PATH \
+            -e EMBEDDING_MODEL_REVISION \
+            -e EMBEDDING_MODEL_DTYPE \
+            -e EMBEDDING_MODEL_TOKENIZER_PATH \
+            -e EMBEDDING_MODEL_TOKENIZER_REVISION \
+            -e EMBEDDING_MODEL_ASPECTS \
+            -e EMBEDDING_MODEL_DIM \
+            -e EMBEDDING_MODEL_MAX_INPUT_LENGTH \
+            -e EMBEDDING_SERVICE_HOST \
+            -e EMBEDDING_SERVICE_PORT \
+            -e VECTORSTORE_SERVICE_HOST \
+            -e VECTORSTORE_SERVICE_PORT \
+            -e JWT_SECRET \
+            -e BACKEND_API_URL \
+            -e DEBUG \
+            up -d --build
 
       - name: Run performance checks in Docker
         shell: bash
