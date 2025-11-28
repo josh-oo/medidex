@@ -18,11 +18,11 @@ from bs4 import BeautifulSoup
 
 load_dotenv()
 
-MODEL_PATH = os.getenv("MODEL_PATH")
-MODEL_REVISION = os.getenv("MODEL_REVISION")
-MODEL_DIM = os.getenv("MODEL_DIM")
-MODEL_MAX_INPUT_LENGTH = int(os.getenv("MODEL_MAX_INPUT_LENGTH"))
-ASPECTS = os.getenv("ASPECTS").split(",")
+MODEL_PATH = os.getenv("EMBEDDING_MODEL_PATH")
+MODEL_REVISION = os.getenv("EMBEDDING_MODEL_REVISION")
+MODEL_DIM = os.getenv("EMBEDDING_MODEL_DIM")
+MODEL_MAX_INPUT_LENGTH = int(os.getenv("EMBEDDING_MODEL_MAX_INPUT_LENGTH"))
+ASPECTS = os.getenv("EMBEDDING_MODEL_ASPECTS").split(",")
 
 class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
     def __init__(self):
