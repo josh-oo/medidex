@@ -7,7 +7,7 @@ from utils.login import get_headers
 
 load_dotenv()
 
-BACKEND_API = os.getenv('BACKEND_API')
+BACKEND_API = os.getenv('BACKEND_API_URL')
 
 DEFAULT_TOP_K = 10
 

@@ -11,9 +11,9 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 load_dotenv()
 
-VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
-VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
-BACKEND_API = os.getenv("BACKEND_API")
+VECTORSTORE_HOST = os.getenv("VECTORSTORE_SERVICE_HOST")
+VECTORSTORE_PORT = os.getenv("VECTORSTORE_SERVICE_PORT")
+BACKEND_API = os.getenv("BACKEND_API_URL")
 BACKEND_API_KEY = os.getenv("BACKEND_API_KEY")
 
 async def wait_for_services(timeout=120):

@@ -10,10 +10,10 @@ from tqdm import tqdm
 
 load_dotenv()
 
-VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
-VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
+VECTORSTORE_HOST = os.getenv("VECTORSTORE_SERVICE_HOST")
+VECTORSTORE_PORT = os.getenv("VECTORSTORE_SERVICE_PORT")
 
-BACKEND_API = os.getenv("BACKEND_API")
+BACKEND_API = os.getenv("BACKEND_API_URL")
 BACKEND_API_KEY = os.getenv("BACKEND_API_KEY")
 
 def create_test_set(path, cutoff, model_id, only_single_report_studies=False):

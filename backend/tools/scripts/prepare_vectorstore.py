@@ -24,14 +24,14 @@ import embedding_pb2_grpc
 
 load_dotenv()
 
-MODEL_HOST = os.getenv("EMBEDDING_HOST")
-MODEL_PORT = os.getenv("EMBEDDING_PORT")
-VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
-VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
+MODEL_HOST = os.getenv("EMBEDDING_SERVICE_HOST")
+MODEL_PORT = os.getenv("EMBEDDING_SERVICE_PORT")
+VECTORSTORE_HOST = os.getenv("VECTORSTORE_SERVICE_HOST")
+VECTORSTORE_PORT = os.getenv("VECTORSTORE_SERVICE_PORT")
 
 MESH_DUMP_LOCATION = os.getenv("MESH_DUMP_LOCATION")
 
-BACKEND_API = os.getenv("BACKEND_API")
+BACKEND_API = os.getenv("BACKEND_API_URL")
 
 async def get_missing_ids(client, collection_name, ids):
     response = await client.retrieve(collection_name=collection_name, ids=ids)

@@ -46,11 +46,11 @@ from .utils.database_models import TmpReport, TmpReportBatch
 
 load_dotenv()
 
-MODEL_HOST = os.getenv("EMBEDDING_HOST")
-MODEL_PORT = os.getenv("EMBEDDING_PORT")
+MODEL_HOST = os.getenv("EMBEDDING_SERVICE_HOST")
+MODEL_PORT = os.getenv("EMBEDDING_SERVICE_PORT")
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
-VECTORSTORE_HOST = os.getenv("VECTORSTORE_HOST")
-VECTORSTORE_PORT = os.getenv("VECTORSTORE_PORT")
+VECTORSTORE_HOST = os.getenv("VECTORSTORE_SERVICE_HOST")
+VECTORSTORE_PORT = os.getenv("VECTORSTORE_SERVICE_PORT")
 
 DEBUG = os.getenv("DEBUG", "FALSE") == "TRUE"
 
