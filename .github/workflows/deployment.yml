@@ -25,8 +25,13 @@ jobs:
       BACKEND_API_URL: http://logic:8002
       BACKEND_API_KEY: ${{ secrets.BACKEND_API_KEY }}
       DEBUG: "FALSE"
+      DOCKER_CONFIG: /home/oehms/docker-config
 
     steps:
+      - name: Ensure Docker config dir exists
+        run: |
+          mkdir -p $DOCKER_CONFIG
+
       - name: Update production code
         run: |
           cd ~/meerkat-tool
