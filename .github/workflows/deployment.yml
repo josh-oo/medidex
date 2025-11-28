@@ -9,6 +9,7 @@ jobs:
   deploy:
     runs-on: self-hosted
     env:
+      DOCKER_CONFIG: ${{ vars.DOCKER_CONFIG }}
       EMBEDDING_MODEL_PATH: ${{ vars.EMBEDDING_MODEL_PATH }}
       EMBEDDING_MODEL_REVISION: ${{ vars.EMBEDDING_MODEL_REVISION }}
       EMBEDDING_MODEL_DTYPE: ${{ vars.EMBEDDING_MODEL_DTYPE }}
@@ -26,7 +27,6 @@ jobs:
       BACKEND_API_URL: http://logic:8002
       BACKEND_API_KEY: ${{ secrets.BACKEND_API_KEY }}
       DEBUG: "FALSE"
-      DOCKER_CONFIG: /home/oehms/docker-config
 
     steps:
       - name: Ensure Docker config dir exists
