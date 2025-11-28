@@ -37,23 +37,7 @@ jobs:
       - name: Rebuild and deploy application
         run: |
           cd ~/meerkat-tool
-          sudo docker compose \
-            -e EMBEDDING_MODEL_PATH \
-            -e EMBEDDING_MODEL_REVISION \
-            -e EMBEDDING_MODEL_DTYPE \
-            -e EMBEDDING_MODEL_TOKENIZER_PATH \
-            -e EMBEDDING_MODEL_TOKENIZER_REVISION \
-            -e EMBEDDING_MODEL_ASPECTS \
-            -e EMBEDDING_MODEL_DIM \
-            -e EMBEDDING_MODEL_MAX_INPUT_LENGTH \
-            -e EMBEDDING_SERVICE_HOST \
-            -e EMBEDDING_SERVICE_PORT \
-            -e VECTORSTORE_SERVICE_HOST \
-            -e VECTORSTORE_SERVICE_PORT \
-            -e JWT_SECRET \
-            -e BACKEND_API_URL \
-            -e DEBUG \
-            up -d --build
+          docker compose up -d --build
 
       - name: Run performance checks in Docker
         shell: bash
@@ -66,15 +50,8 @@ jobs:
           sudo docker build -t meerkat-tool-test . 
           
           # Run the performance check script inside the container
-          sudo docker run --rm \
+          docker run --rm \
             --network internal_net \
-            -e EMBEDDING_SERVICE_HOST \
-            -e EMBEDDING_SERVICE_PORT \
-            -e VECTORSTORE_SERVICE_HOST \
-            -e VECTORSTORE_SERVICE_PORT \
-            -e MESH_DUMP_LOCATION \
-            -e BACKEND_API_URL \
-            -e BACKEND_API_KEY \
             meerkat-tool-test \
             python evaluate_backend.py --ci --no-progress | tee test_results.txt
           # Add results to GitHub Step Summary
@@ -89,9 +66,9 @@ jobs:
           cd ~/meerkat-tool
           echo "Performance checks failed. Rolling back..."
           git checkout HEAD~1
-          sudo -E docker compose up -d --build
+          docker compose up -d --build
 
       - name: Cleanup Docker test image
         if: always()
         run: |
-          sudo docker image rm meerkat-tool-test || true
+          docker image rm meerkat-tool-test || true
