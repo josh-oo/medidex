@@ -280,7 +280,7 @@ async def calculate_tag_embeddings(data, client=None, batch_size=128):
 
     return metadata
 
-def transform_to_uuid(id, tag):
+def transform_to_uuid(id, tag="0000"):
     id = str(id).lower()
     missing_zeros = 12 - len(id)
     id = "0"*missing_zeros + id
