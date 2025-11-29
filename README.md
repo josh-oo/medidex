@@ -75,30 +75,102 @@ No environment variables
 # Local Development
 Running the project locally (without docker) requires you to run a local vectorstor: `docker run -p 6333:6333 -p 6334:6334 -v /backend/_data/qdrant:/qdrant/storage qdrant/qdrant`. For the storage location (backend/_data/qdrant in this case) an absolute path is required.
 
-# Database schema (user management and temporary values)
-SELECT sql FROM sqlite_master WHERE name='your_table_name';
+# Database schema (important resource classes)  
 ```
-CREATE TABLE sqlite_sequence(name,seq)
-CREATE TABLE "users" (
+CREATE TABLE IF NOT EXISTS "tblStudy" (  
+    CENTRALStudyID INTEGER,  
+    CRGStudyID INTEGER PRIMARY KEY AUTOINCREMENT,  
+    ShortName TEXT,  
+    StatusofStudy TEXT,  
+    TrialistContactDetails TEXT,  
+    CENTRALSubmissionStatus TEXT,  
+    Notes TEXT,  
+    DateEntered TEXT,  
+    DateToCENTRAL TEXT,  
+    DateEdited TEXT,  
+    Search_Tagged INTEGER,  
+    NumberParticipants TEXT,  
+    Countries TEXT,  
+    Duration TEXT,  
+    UDef4 TEXT,  
+    Comparison TEXT,  
+    ISRCTN TEXT,  
+    UDef6 TEXT,  
+    TrialRegistrationID TEXT,  
+    UDef8 REAL,  
+    UDef10 REAL,  
+    UDef9 REAL  
+);  
+
+CREATE TABLE IF NOT EXISTS "tblReport" (  
+    CENTRALReportID INTEGER, 
+    CRGReportID INTEGER PRIMARY KEY AUTOINCREMENT,  
+    Title TEXT,  
+    Notes TEXT,  
+    ReportNumber INTEGER,  
+    OriginalTitle TEXT,  
+    Authors TEXT,  
+    Journal TEXT,  
+    Year INTEGER,  
+    Volume TEXT,  
+    Issue TEXT,  
+    Pages TEXT,  
+    Language TEXT,  
+    Abstract TEXT,  
+    CENTRALSubmissionStatus INTEGER,  
+    CopyStatus TEXT,  
+    DatetoCENTRAL TEXT,  
+    Dateentered TEXT,  
+    DateEdited TEXT,  
+    Editors TEXT,  
+    Publisher TEXT,  
+    City TEXT,  
+    DupString TEXT,  
+    TypeofReportID INTEGER,  
+    PublicationTypeID INTEGER,  
+    Edition TEXT,  
+    Medium TEXT,  
+    StudyDesign TEXT,  
+    DOI TEXT,  
+    UDef3 TEXT,  
+    ISBN TEXT,  
+    UDef5 TEXT,  
+    PMID TEXT,  
+    TrialRegistrationID TEXT,  
+    UDef9 REAL,  
+    UDef10 REAL,  
+    UDef8 REAL  
+);
+
+CREATE TABLE sqlite_sequence(name,seq);  
+CREATE INDEX idx_tblReport ON tblReport(CRGReportID);  
+CREATE INDEX idx_tblStudy ON tblStudy(CRGStudyID);  
+```
+
+# Database schema (user management and temporary values)
+
+```
+CREATE TABLE sqlite_sequence(name,seq);
+CREATE TABLE IF NOT EXISTS "users" (
 	"id"	INTEGER,
 	"email"	TEXT NOT NULL,
 	"password"	TEXT NOT NULL,
 	"role"	TEXT NOT NULL DEFAULT 'user' CHECK("role" IN ('user', 'editor', 'admin')),
 	"verified"	BOOLEAN NOT NULL DEFAULT 0,
 	PRIMARY KEY("id" AUTOINCREMENT)
-)
-CREATE TABLE "api_keys" (
+);
+CREATE TABLE IF NOT EXISTS "api_keys" (
 	"hash"	TEXT NOT NULL,
 	"id"	TEXT NOT NULL,
 	"owner"	INTEGER NOT NULL,
 	PRIMARY KEY("id")
-)
+);
 CREATE TABLE tmp_report_batches (
     batch_hash TEXT PRIMARY KEY,
     batch_description TEXT,
     number_reports INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
+);
 CREATE TABLE tmp_reports (
 	batch_hash Text,
     batch_inner_id INTEGER,
@@ -107,10 +179,10 @@ CREATE TABLE tmp_reports (
 	authors Text,
 	trial_id Text,
 	vectors BLOB,
-	assigned_studies Text,
+	assigned_studies Text, year INTEGER, report_number INTEGER, journal TEXT, pages TEXT, place TEXT, language TEXT, issue TEXT, volume TEXT, doi TEXT, publisher TEXT, CRGReportID INTEGER,
 	PRIMARY KEY (batch_hash, batch_inner_id)
   FOREIGN KEY(batch_hash) REFERENCES tmp_report_batches(batch_hash) ON DELETE CASCADE
-)
+);
 ```
 
 # Important
