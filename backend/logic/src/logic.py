@@ -269,6 +269,83 @@ async def parse_file(file: UploadFile):
 
     return entries
 
+@router.get("/readyz", summary="Health check endpoint for readiness probe", tags=["health"])
+async def readyz(db: AsyncSession = Depends(get_session), client: AsyncQdrantClient = Depends(get_vectorstore)) -> Dict[str, Any]:
+    """
+    Check if the service is ready to accept requests.
+    
+    Returns:
+        - status: "ready" or "not_ready"
+        - checks: detailed status of each dependency
+    """
+    checks = {}
+    overall_status = "ready"
+    
+    # Check database connectivity
+    try:
+        await db.execute(select(1))
+        checks["database"] = {"status": "healthy", "message": "Database connection successful"}
+    except Exception as e:
+        checks["database"] = {"status": "unhealthy", "message": f"Database error: {str(e)}"}
+        overall_status = "not_ready"
+    
+    # Check vector store connectivity
+    try:
+        collections = await client.get_collections()
+        checks["vectorstore"] = {
+            "status": "healthy",
+            "message": f"Vector store accessible, {len(collections.collections)} collections found"
+        }
+    except Exception as e:
+        checks["vectorstore"] = {"status": "unhealthy", "message": f"Vector store error: {str(e)}"}
+        overall_status = "not_ready"
+    
+    # Check gRPC embedding service connectivity
+    try:
+        channel = get_grpc_channel()
+        # Simple connectivity check - channel state
+        state = channel.get_state(try_to_connect=True)
+        if state == grpc.ChannelConnectivity.READY:
+            checks["embedding_service"] = {"status": "healthy", "message": "gRPC channel ready"}
+        else:
+            checks["embedding_service"] = {
+                "status": "degraded",
+                "message": f"gRPC channel state: {state.name}"
+            }
+            overall_status = "not_ready"
+    except Exception as e:
+        checks["embedding_service"] = {"status": "unhealthy", "message": f"gRPC error: {str(e)}"}
+        overall_status = "not_ready"
+    
+    # Check background task health
+    checks["background_tasks"] = {
+        "status": "healthy",
+        "active_tasks": len(background_tasks),
+        "message": f"{len(background_tasks)} active background tasks"
+    }
+    
+    # Check batch subscribers
+    async with batch_subscribers_lock:
+        total_subscribers = sum(len(queues) for queues in batch_subscribers.values())
+        checks["batch_subscribers"] = {
+            "status": "healthy",
+            "active_batches": len(batch_subscribers),
+            "total_subscribers": total_subscribers,
+            "message": f"{len(batch_subscribers)} batches with {total_subscribers} subscribers"
+        }
+    
+    response = {
+        "status": overall_status,
+        "timestamp": datetime.now().isoformat(),
+        "checks": checks
+    }
+    
+    # Return 503 if not ready
+    if overall_status != "ready":
+        raise HTTPException(status_code=503, detail=response)
+    
+    return response
+
 @router.post("/batches", dependencies=[Depends(is_verified_api_call)], summary="Upload a batch of new reports that need to be assigned to studies (usually in the .ris file format)", description="Uploading a new batch triggers the embedding process. Batches are mainly used to do these compute heavy calculations in the background and only once. All needed data and the calculated embedding vectors are stored temporarily.", status_code=201) 
 async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), db : AsyncSession = Depends(get_session)):
 
@@ -1042,80 +1119,3 @@ async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Qu
 async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), k : int = Query(10), client=Depends(get_vectorstore)):
     
     return await get_similar_tags(embedding.embedding, embedding.model_id + "_tags", sources, type, k, client)
-
-@router.get("/readyz", summary="Health check endpoint for readiness probe", tags=["health"])
-async def readyz(db: AsyncSession = Depends(get_session), client: AsyncQdrantClient = Depends(get_vectorstore)) -> Dict[str, Any]:
-    """
-    Check if the service is ready to accept requests.
-    
-    Returns:
-        - status: "ready" or "not_ready"
-        - checks: detailed status of each dependency
-    """
-    checks = {}
-    overall_status = "ready"
-    
-    # Check database connectivity
-    try:
-        await db.execute(select(1))
-        checks["database"] = {"status": "healthy", "message": "Database connection successful"}
-    except Exception as e:
-        checks["database"] = {"status": "unhealthy", "message": f"Database error: {str(e)}"}
-        overall_status = "not_ready"
-    
-    # Check vector store connectivity
-    try:
-        collections = await client.get_collections()
-        checks["vectorstore"] = {
-            "status": "healthy",
-            "message": f"Vector store accessible, {len(collections.collections)} collections found"
-        }
-    except Exception as e:
-        checks["vectorstore"] = {"status": "unhealthy", "message": f"Vector store error: {str(e)}"}
-        overall_status = "not_ready"
-    
-    # Check gRPC embedding service connectivity
-    try:
-        channel = get_grpc_channel()
-        # Simple connectivity check - channel state
-        state = channel.get_state(try_to_connect=True)
-        if state == grpc.ChannelConnectivity.READY:
-            checks["embedding_service"] = {"status": "healthy", "message": "gRPC channel ready"}
-        else:
-            checks["embedding_service"] = {
-                "status": "degraded",
-                "message": f"gRPC channel state: {state.name}"
-            }
-            overall_status = "not_ready"
-    except Exception as e:
-        checks["embedding_service"] = {"status": "unhealthy", "message": f"gRPC error: {str(e)}"}
-        overall_status = "not_ready"
-    
-    # Check background task health
-    checks["background_tasks"] = {
-        "status": "healthy",
-        "active_tasks": len(background_tasks),
-        "message": f"{len(background_tasks)} active background tasks"
-    }
-    
-    # Check batch subscribers
-    async with batch_subscribers_lock:
-        total_subscribers = sum(len(queues) for queues in batch_subscribers.values())
-        checks["batch_subscribers"] = {
-            "status": "healthy",
-            "active_batches": len(batch_subscribers),
-            "total_subscribers": total_subscribers,
-            "message": f"{len(batch_subscribers)} batches with {total_subscribers} subscribers"
-        }
-    
-    response = {
-        "status": overall_status,
-        "timestamp": datetime.now().isoformat(),
-        "checks": checks
-    }
-    
-    # Return 503 if not ready
-    if overall_status != "ready":
-        raise HTTPException(status_code=503, detail=response)
-    
-    return response
