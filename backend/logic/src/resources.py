@@ -921,7 +921,6 @@ async def add_new_report(report: dict):
     doi = report['doi']
     publisher = report['publisher']
     trial_registration_id = report['trial_registration_id']
-    print(report)
 
     new_report = Report(
             Title=title,
