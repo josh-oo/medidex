@@ -9,8 +9,6 @@ services:
       - 6333
       - 6334
       - 6335
-    ports:
-      - "8001:8001"
     volumes:
       - ./backend/_data/qdrant:/qdrant/storage
       # Uncomment if you want a custom config file:
