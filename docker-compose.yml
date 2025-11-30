@@ -9,6 +9,8 @@ services:
       - 6333
       - 6334
       - 6335
+    ports:
+      - "8001:8001"
     volumes:
       - ./backend/_data/qdrant:/qdrant/storage
       # Uncomment if you want a custom config file:
@@ -27,7 +29,7 @@ services:
         - EMBEDDING_MODEL_DTYPE=${EMBEDDING_MODEL_DTYPE}
         - EMBEDDING_MODEL_TOKENIZER_PATH=${EMBEDDING_MODEL_TOKENIZER_PATH}
         - EMBEDDING_MODEL_TOKENIZER_REVISION=${EMBEDDING_MODEL_TOKENIZER_REVISION}
-        - EMBEDDING_MODEL_ASPECTS="${EMBEDDING_MODEL_ASPECTS}"
+        - EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
     expose:
       - 50051
     read_only: true
@@ -38,7 +40,7 @@ services:
       - EMBEDDING_MODEL_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
       - EMBEDDING_MODEL_DIM=${EMBEDDING_MODEL_DIM}
       - EMBEDDING_MODEL_MAX_INPUT_LENGTH=${EMBEDDING_MODEL_MAX_INPUT_LENGTH}
-      - EMBEDDING_MODEL_ASPECTS="${EMBEDDING_MODEL_ASPECTS}"
+      - EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
 
   logic:
     container_name: logic
