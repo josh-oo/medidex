@@ -170,7 +170,6 @@ async def process_report(report, batch_hash, index, vectorstore):
         add_new_report(report)
     )
 
-    #TODO upload vectors to vectorstore use crg id
     new_id = transform_to_uuid(crg_report_id)
     payload = {
         'title': title,
@@ -188,7 +187,8 @@ async def process_report(report, batch_hash, index, vectorstore):
     new_vectors.pop("model_id")
 
     points = [PointStruct(id=new_id,vector=new_vectors, payload=payload)]
-    await vectorstore.upsert(wait=False, collection_name=COLLECTION_NAME, points=points)
+    result = await vectorstore.upsert(wait=True, collection_name=COLLECTION_NAME, points=points)
+    #TODO delete/undo batch upload if something fails upserting the vector
 
     ######### Start of legacy code #############
 
