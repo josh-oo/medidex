@@ -142,9 +142,19 @@ CREATE TABLE IF NOT EXISTS "tblReport" (
     UDef8 REAL  
 );
 
+CREATE TABLE IF NOT EXISTS "tblStudyReport" (
+  "StudyReportID" INTEGER PRIMARY KEY AUTOINCREMENT,
+  "CRGStudyID" INTEGER NOT NULL,
+  "CRGReportID" INTEGER NOT NULL,
+  FOREIGN KEY("CRGStudyID") REFERENCES "tblStudy"("CRGStudyID") ON DELETE CASCADE,
+  FOREIGN KEY("CRGReportID") REFERENCES "tblReport"("CRGReportID") ON DELETE CASCADE
+);
+
 CREATE TABLE sqlite_sequence(name,seq);  
 CREATE INDEX idx_tblReport ON tblReport(CRGReportID);  
-CREATE INDEX idx_tblStudy ON tblStudy(CRGStudyID);  
+CREATE INDEX idx_tblStudy ON tblStudy(CRGStudyID); 
+CREATE INDEX idx_tblStudyReport_r ON tblStudyReport(CRGReportID);
+CREATE INDEX idx_tblStudyReport_s ON tblStudyReport(CRGStudyID); 
 ```
 
 # Database schema (user management and temporary values)

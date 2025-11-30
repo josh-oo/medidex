@@ -448,7 +448,7 @@ async def delete_batch(batch_hash: str, db: AsyncSession = Depends(get_session),
     # Get all report IDs associated with this batch (before deletion)
     result = await db.execute(select(TmpReport.CRGReportID).where(TmpReport.batch_hash == batch_hash))
     crg_report_ids = result.scalars().all()
-    
+
     try:
         # Delete the batch (CASCADE will handle TmpReport deletion)
         await db.execute(delete(TmpReportBatch).where(TmpReportBatch.batch_hash == batch_hash))
