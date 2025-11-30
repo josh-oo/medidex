@@ -167,8 +167,8 @@ The test suite uses:
 - `DATABASE_VOLUME` - Path to test database (auto-created)
 - `JWT_SECRET` - Secret key for JWT tokens
 - `DEBUG` - Enable debug mode
-- `EMBEDDING_HOST` / `EMBEDDING_PORT` - Embedding service location
-- `VECTORSTORE_HOST` / `VECTORSTORE_PORT` - Vector store location
+- `EMBEDDING_SERVICE_HOST` / `EMBEDDING_SERVICE_PORT` - Embedding service location
+- `VECTORSTORE_SERVICE_HOST` / `VECTORSTORE_SERVICE_PORT` - Vector store location
 
 ### Container Tests
 - `CONTAINER_URL` - Base URL of the running container (default: http://localhost:8002)

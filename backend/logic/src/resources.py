@@ -81,6 +81,7 @@ async def startup_event():
         await conn.run_sync(metadata_resources.create_all)
         await conn.execute(text("PRAGMA journal_mode=WAL"))
         await conn.execute(text("PRAGMA synchronous=NORMAL"))
+        await conn.execute(text("PRAGMA foreign_keys = ON;"))
 
 
 def convert_to_id_based_dict(rows, multi_values=True):
@@ -273,8 +274,7 @@ def get_pdf_links_by_report_numbers(pdf_numbers: Dict[int, int]) -> Dict[int, Op
 
 @router.get("/reports/{report_id}", summary="Get details for a specific report.")
 async def get_reports_by_id(report_id: int = report_id_path, session: AsyncSession = Depends(get_session)) -> Report:
-    result = await session.get(Report, report_id)
-    return result
+    return await _get_report_by_id(report_id, session)
 
 @router.get("/reports/{report_id}/studies", summary="Get the studies linked to this specific report.")
 async def get_report_studies_by_id(
@@ -283,18 +283,7 @@ async def get_report_studies_by_id(
     date_to: Optional[str] = Query(None, description="Filter studies with DateEntered <= this ISO datetime (e.g. '2025-01-31 23:59:59')"),
     session: AsyncSession = Depends(get_session)
 ) -> List[Study]:
-    stmt = (
-        select(Study)
-        .join(StudyReport, StudyReport.CRGStudyID == Study.CRGStudyID)
-        .where(StudyReport.CRGReportID == report_id)
-    )
-    
-    if date_from:
-        stmt = stmt.where(Study.DateEntered >= date_from)
-    if date_to:
-        stmt = stmt.where(Study.DateEntered <= date_to)
-    
-    return (await session.execute(stmt)).scalars().all()
+    return await _get_report_studies_by_id(report_id, session, date_from, date_to)
 
 @router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
 async def get_pdf_number_by_report_id(report_id: int = report_id_path, session: AsyncSession = Depends(get_session)) -> int:
@@ -770,6 +759,149 @@ async def _get_all_outcomes(ids: List[int], session) -> List[Outcome]:
     if ids:
         stmt = stmt.where(Outcome.OutcomeID.in_(ids))
     return (await session.execute(stmt)).scalars().all()
+
+async def get_report_by_id_internal(report_id):
+    async with AsyncSession(engine) as session:
+        return await _get_report_by_id(report_id, session)
+
+async def _get_report_by_id(report_id, session):
+    result = await session.get(Report, report_id)
+    return result
+
+async def get_report_studies_by_id_internal(report_id, date_from=None, date_to=None):
+    async with AsyncSession(engine) as session:
+        return await _get_report_studies_by_id(report_id, session, date_from, date_to)
+
+async def _get_report_studies_by_id(report_id, session, date_from=None, date_to=None):
+    stmt = (
+        select(Study)
+        .join(StudyReport, StudyReport.CRGStudyID == Study.CRGStudyID)
+        .where(StudyReport.CRGReportID == report_id)
+    )
+    
+    if date_from:
+        stmt = stmt.where(Study.DateEntered >= date_from)
+    if date_to:
+        stmt = stmt.where(Study.DateEntered <= date_to)
+    
+    return (await session.execute(stmt)).scalars().all()
+
+async def add_report_studies_by_id_internal(report_id: int, study_ids: List[int]) -> Dict[str, Any]:
+    """
+    Create StudyReport links for the given report_id to the provided study_ids.
+    Uses write_lock to serialize writes.
+    """
+    async with write_lock:
+        async with AsyncSession(engine) as session:
+            return await _add_report_studies_by_id(report_id, study_ids, session)
+
+async def _add_report_studies_by_id(
+    report_id: int,
+    study_ids: List[int],
+    session: AsyncSession
+) -> Dict[str, Any]:
+    """
+    Internal implementation to link a report to multiple studies.
+
+    Returns:
+        {
+          "report_id": int,
+          "created_count": int,
+          "already_linked": List[int],
+          "invalid_study_ids": List[int],
+          "created_links": List[Dict[str, int]]
+        }
+    """
+    study_ids = study_ids or []
+    if not study_ids:
+        return {
+            "report_id": report_id,
+            "created_count": 0,
+            "already_linked": [],
+            "invalid_study_ids": [],
+            "created_links": []
+        }
+
+    # Validate report exists
+    report = await session.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+
+    # Validate studies exist
+    valid_id_rows = await session.execute(
+        select(Study.CRGStudyID).where(Study.CRGStudyID.in_(study_ids))
+    )
+    valid_ids = set(valid_id_rows.scalars().all())
+    invalid_ids = [sid for sid in study_ids if sid not in valid_ids]
+
+    # Find already existing links for this report
+    existing_rows = await session.execute(
+        select(StudyReport.CRGStudyID).where(StudyReport.CRGReportID == report_id)
+    )
+    existing_links = set(existing_rows.scalars().all())
+
+    # Determine which links to create (deduplicate input)
+    to_create = [sid for sid in sorted(valid_ids) if sid not in existing_links]
+
+    created_links: List[Dict[str, int]] = []
+    for sid in to_create:
+        session.add(StudyReport(CRGReportID=report_id, CRGStudyID=sid))
+        created_links.append({"CRGReportID": report_id, "CRGStudyID": sid})
+
+    if to_create:
+        await session.commit()
+
+    already_linked = [sid for sid in study_ids if sid in existing_links]
+
+    return {
+        "report_id": report_id,
+        "created_count": len(to_create),
+        "already_linked": already_linked,
+        "invalid_study_ids": invalid_ids,
+        "created_links": created_links
+    }
+
+async def delete_report_studies_by_id_internal(report_id: int) -> Dict[str, Any]:
+    """
+    Delete all StudyReport links for the given report_id.
+    Uses write_lock to serialize writes.
+    """
+    async with write_lock:
+        async with AsyncSession(engine) as session:
+            return await _delete_report_studies_by_id(report_id, session)
+
+async def _delete_report_studies_by_id(
+    report_id: int,
+    session: AsyncSession
+) -> Dict[str, Any]:
+    """
+    Internal implementation to delete all links between a report and studies.
+    """
+    # Validate report exists
+    report = await session.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+
+    # Fetch all links
+    rows = (
+        await session.execute(
+            select(StudyReport).where(StudyReport.CRGReportID == report_id)
+        )
+    ).scalars().all()
+
+    deleted_links: List[Dict[str, int]] = []
+    for sr in rows:
+        deleted_links.append({"CRGReportID": sr.CRGReportID, "CRGStudyID": sr.CRGStudyID})
+        await session.delete(sr)
+
+    if rows:
+        await session.commit()
+
+    return {
+        "report_id": report_id,
+        "deleted_count": len(rows),
+        "deleted_links": deleted_links
+    }
 
 async def add_new_report(report: dict):
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

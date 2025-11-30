@@ -81,8 +81,8 @@ class StudyReport(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyReport"
 
     StudyReportID: int = Field(primary_key=True)
-    CRGStudyID: int 
-    CRGReportID: int
+    CRGStudyID: int = Field(foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    CRGReportID: int = Field(foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
 
 class Participant(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblParticipant"
@@ -93,8 +93,8 @@ class Participant(SQLModel, table=True, metadata=metadata_resources):
 class StudyParticipant(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyParticipant"
 
-    CRGStudyID: int = Field(primary_key=True)
-    ParticipantsID: int = Field(primary_key=True)
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    ParticipantsID: int = Field(primary_key=True, foreign_key="tblParticipant.ParticipantsID", ondelete="CASCADE")
 
 class Design(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblDesign"
@@ -105,8 +105,8 @@ class Design(SQLModel, table=True, metadata=metadata_resources):
 class StudyDesign(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyDesign"
 
-    CRGStudyID: int = Field(primary_key=True)
-    DesignID: int = Field(primary_key=True)
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    DesignID: int = Field(primary_key=True, foreign_key="tblDesign.DesignID", ondelete="CASCADE")
 
 class Intervention(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblIntervention"
@@ -117,8 +117,8 @@ class Intervention(SQLModel, table=True, metadata=metadata_resources):
 class StudyIntervention(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyIntervention"
 
-    CRGStudyID: int = Field(primary_key=True)
-    InterventionID: int = Field(primary_key=True)
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    InterventionID: int = Field(primary_key=True, foreign_key="tblIntervention.InterventionID", ondelete="CASCADE")
 
 class Condition(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblHealthCareCondition"
@@ -129,8 +129,8 @@ class Condition(SQLModel, table=True, metadata=metadata_resources):
 class StudyCondition(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyHealthCareCondition"
 
-    CRGStudyID: int = Field(primary_key=True)
-    HealthCareConditionID: int = Field(primary_key=True)
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    HealthCareConditionID: int = Field(primary_key=True, foreign_key="tblHealthCareCondition.HealthCareConditionID", ondelete="CASCADE")
 
 class Outcome(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblOutcome"
@@ -141,8 +141,8 @@ class Outcome(SQLModel, table=True, metadata=metadata_resources):
 class StudyOutcome(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyOutcome"
 
-    CRGStudyID: int = Field(primary_key=True)
-    OutcomeID: int = Field(primary_key=True)
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    OutcomeID: int = Field(primary_key=True, foreign_key="tblOutcome.OutcomeID", ondelete="CASCADE")
 
 
 """
@@ -162,7 +162,7 @@ class APIKey(SQLModel, table=True, metadata=metadata_user_data):
     __tablename__ = "api_keys"
 
     id: str = Field(primary_key=True, index=True)
-    owner: int = Field(foreign_key="users.id")
+    owner: int = Field(foreign_key="users.id", ondelete="CASCADE")
     hash: str = Field(index=True)
 
 
@@ -181,21 +181,5 @@ class TmpReportBatch(SQLModel, table=True, metadata=metadata_user_data):
 class TmpReport(SQLModel, table=True, metadata=metadata_user_data):
     __tablename__ = "tmp_reports"
     CRGReportID: int
-    batch_hash: str = Field(primary_key=True)
+    batch_hash: str = Field(primary_key=True, foreign_key="tmp_report_batches.batch_hash", ondelete="CASCADE")
     batch_inner_id: int = Field(primary_key=True)
-    title: Optional[str] #TI
-    abstract: Optional[str] #AB
-    authors: Optional[str]  #AU
-    year: Optional[int] #pY
-    report_number: Optional[int] #RN
-    journal: Optional[str] #T2
-    pages: Optional[str] #SP
-    place: Optional[str] #CY
-    language: Optional[str] #LA
-    issue: Optional[str] #M1
-    volume: Optional[str] #VL
-    doi: Optional[str] #DO
-    trial_id: Optional[str] #derived from title/abstract/authors
-    vectors: Optional[bytes]  # pickled vectors
-    assigned_studies: Optional[str]  # JSON-encoded list
-    publisher: Optional[str] # PB
