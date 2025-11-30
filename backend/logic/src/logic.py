@@ -982,13 +982,15 @@ async def analyze(embeddings, top_k, title, abstract, authors, cutoff, client):
     scores = [item['score'] for item in found_study_ids.values()]
     report_hits = [item['report_hit'] for item in found_study_ids.values()]
 
-    related_studies = await get_studies_internal(list(found_study_ids.keys()))
-    study_interventions = await get_study_interventions_internal(list(found_study_ids.keys()))
-    study_conditions = await get_study_conditions_internal(list(found_study_ids.keys()))
-    study_outcomes = await get_study_outcomes_internal(list(found_study_ids.keys()))
-    study_participants_desc = await get_study_participants_internal(list(found_study_ids.keys()))
-    study_design = await get_study_design_internal(list(found_study_ids.keys()))
-    study_reports = await get_study_reports_by_ids_internal(list(found_study_ids.keys()), ['CRGReportID', 'Title', 'Abstract', 'Authors'], cutoff)
+    (related_studies, study_interventions, study_conditions, study_outcomes, study_participants_desc, study_design, study_reports) = await asyncio.gather(
+        get_studies_internal(list(found_study_ids.keys())),
+        get_study_interventions_internal(list(found_study_ids.keys())),
+        get_study_conditions_internal(list(found_study_ids.keys())),
+        get_study_outcomes_internal(list(found_study_ids.keys())),
+        get_study_participants_internal(list(found_study_ids.keys())),
+        get_study_design_internal(list(found_study_ids.keys())),
+        get_study_reports_by_ids_internal(list(found_study_ids.keys()), ['CRGReportID', 'Title', 'Abstract', 'Authors'], cutoff)
+    )
 
     for id, name, num_participants, countries, durations,report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], related_studies['NumberParticipants'], related_studies['Countries'], related_studies['Duration'], report_hits, scores):            
         study_item = {}
