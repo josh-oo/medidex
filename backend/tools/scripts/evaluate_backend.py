@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
 from tqdm import tqdm
 import asyncio
 import httpx
@@ -6,13 +7,8 @@ import os
 import sys
 import time
 
-from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchValue
-
 load_dotenv()
 
-VECTORSTORE_HOST = os.getenv("VECTORSTORE_SERVICE_HOST")
-VECTORSTORE_PORT = os.getenv("VECTORSTORE_SERVICE_PORT")
 BACKEND_API = os.getenv("BACKEND_API_URL")
 BACKEND_API_KEY = os.getenv("BACKEND_API_KEY")
 
@@ -38,35 +34,23 @@ async def wait_for_services(timeout=120):
     print(f"❌ Backend API not ready at {BACKEND_API}/readyz")
     raise TimeoutError(f"Backend service not ready after {timeout} seconds")
 
-def evaluate_with_cutoff(cutoff, model_id):
-    return asyncio.run(evaluate_with_cutoff_async(cutoff, model_id))
+def evaluate_with_cutoff(cutoff):
+    return asyncio.run(evaluate_with_cutoff_async(cutoff))
 
-async def calculate_rank(result, model_id, cutoff, client):
-    ground_truth = result[0].payload['belongs_to_study']#[0]
-    trial_id = None
-    authors = None
-    if 'trial_id' in result[0].payload:
-        trial_id = result[0].payload['trial_id']
-    if 'authors' in result[0].payload:
-        authors = result[0].payload['authors']
+async def calculate_rank(crg_report_id, cutoff, client):
+    
+    dt = datetime.strptime(cutoff, "%Y-%m-%d %H:%M:%S")
+    exclusive_cutoff = dt - timedelta(days=1)
 
-    #only consider reports with studies added in the past
-    ground_truth_filtered = []
-    for item in ground_truth:
-        response = await client.get(BACKEND_API + f"/studies/{item}/date_entered")
-        if response.status_code != 200:
-            print(f"Cannot refresh vectorstore: Database API (/studies/{item}/date_entered) not reachable")
-            return
-        
-        corresponding_study_entered = response.json()
+    response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/studies", params={"date_to": exclusive_cutoff})
+    ground_truth = [item['CRGStudyID'] for item in response.json()]
     
-        if corresponding_study_entered < cutoff:
-            ground_truth_filtered.append(item)
-    
-    if len(ground_truth_filtered) == 1:
-        
-        title = result[0].payload['title']
-        abstract = result[0].payload['abstract']
+    if len(ground_truth) == 1:
+        response = await client.get(BACKEND_API + f"/reports/{crg_report_id}")
+        title = response.json()['Title']
+        abstract = response.json()['Abstract']
+        authors = response.json()['Authors'].split("//")
+        authors = [author.strip() for author in authors]
         
         trial_id = None
         data = {'title': title, 'abstract': abstract, 'authors': []}
@@ -74,12 +58,10 @@ async def calculate_rank(result, model_id, cutoff, client):
         response = await client.post(BACKEND_API + "/processing/extract_trial_id", json=data)
         if response.status_code == 200 and response.json():
             trial_id = response.json()
-        text = title + (" " + abstract) if abstract else ""
 
-        ground_truth = ground_truth_filtered[0]
-        payload = {"text": text, "main_embedding": result[0].vector['default'],"participants_embedding": result[0].vector['participants'], "author_embedding": result[0].vector['authors'], "model_id": model_id}
+        ground_truth = ground_truth[0]
         params = {"cutoff":cutoff, "trial_id":trial_id, 'authors': authors}
-        response = await client.post(BACKEND_API + "/similarity_search/studies", json=payload,params=params)
+        response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params=params)
         predicted_studies = response.json()['CRGStudyID']
 
         rank = 11
@@ -89,7 +71,7 @@ async def calculate_rank(result, model_id, cutoff, client):
         return rank
 
 
-async def evaluate_with_cutoff_async(cutoff, model_id):
+async def evaluate_with_cutoff_async(cutoff):
 
     timeout = httpx.Timeout(
         read=20.0,
@@ -106,21 +88,10 @@ async def evaluate_with_cutoff_async(cutoff, model_id):
     
     async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=timeout, limits=limits) as client:
 
-        vectorstore = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+        response =  await client.get(f"{BACKEND_API}/reports", params={"date_from": cutoff, "date_to": cutoff})
+        current_crg_report_ids = [item['CRGReportID'] for item in response.json()]
 
-        filter_condition = Filter(
-            must=[
-                FieldCondition(
-                    key="date_entered",
-                    match=MatchValue(value=cutoff)
-                )
-            ]
-        )
-
-        # Pagination loop to get all points including vectors
-        scroll_offset = None
-
-        pbar = tqdm()
+        pbar = tqdm(total=len(current_crg_report_ids))
 
         recall_at_1 = []
         recall_at_3 = []
@@ -128,7 +99,7 @@ async def evaluate_with_cutoff_async(cutoff, model_id):
 
         tasks = set()
 
-        while True:
+        for crg_report_id in current_crg_report_ids:
             if tasks:
                 done, pending = await asyncio.wait(tasks, timeout=0)
                 for d in done:
@@ -139,20 +110,8 @@ async def evaluate_with_cutoff_async(cutoff, model_id):
                         recall_at_10.append(int(rank <= 10))
                     pbar.update(1)
                 tasks = pending
-            
-            result, scroll_offset = await vectorstore.scroll(
-                collection_name=model_id,
-                scroll_filter=filter_condition,
-                limit=1,
-                offset=scroll_offset,
-                with_vectors=True,
-                with_payload=True 
-            )
 
-            tasks.add(asyncio.create_task(calculate_rank(result, model_id, cutoff, client)))
-            
-            if scroll_offset is None:
-                break
+            tasks.add(asyncio.create_task(calculate_rank(crg_report_id, cutoff, client)))
 
         if tasks:
             for d in asyncio.as_completed(tasks):
@@ -211,9 +170,9 @@ def run_integration_tests():
     }
     
     tests = [
-        ("5th update", "2024-01-24 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"),
-        ("6th update", "2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"),
-        ("7th update", "2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"),
+        ("5th update", "2024-01-24 00:00:00"),
+        ("6th update", "2024-07-26 00:00:00"),
+        ("7th update", "2025-01-13 00:00:00"),
     ]
     
     all_passed = True
@@ -271,7 +230,7 @@ if __name__ == "__main__":
     else:
         # Original behavior for manual testing
         print("Evaluate 5th update")
-        evaluate_with_cutoff("2024-01-24 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 5th update
+        evaluate_with_cutoff("2024-01-24 00:00:00") # 5th update
         #expected
         """
         Recall@1  0.8219895287958116 (157/191)
@@ -280,7 +239,7 @@ if __name__ == "__main__":
         """
 
         print("Evaluate 6th update")
-        evaluate_with_cutoff("2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 6th update
+        evaluate_with_cutoff("2024-07-26 00:00:00") # 6th update
         #expected
         """
         Recall@1  0.8378378378378378 (186/222)
@@ -289,7 +248,7 @@ if __name__ == "__main__":
         """
 
         print("Evaluate 7th update")
-        evaluate_with_cutoff("2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223") # 7th update
+        evaluate_with_cutoff("2025-01-13 00:00:00") # 7th update
         #expected
         """
         Recall@1  0.8053691275167785 (120/149)

@@ -1,4 +1,5 @@
 from sqlmodel import SQLModel, Field
+from sqlalchemy import MetaData
 from pydantic import EmailStr
 from typing import Optional
 import datetime
@@ -7,7 +8,10 @@ import datetime
 Resources
 """
 
-class Report(SQLModel, table=True):
+metadata_resources = MetaData()
+metadata_user_data = MetaData()
+
+class Report(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblReport"
 
     CENTRALReportID: Optional[int]
@@ -50,7 +54,7 @@ class Report(SQLModel, table=True):
     
     #PDFLinks: Optional[str] = Field(default=None, sa_column=None)
 
-class Study(SQLModel, table=True):
+class Study(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudy"
 
     CENTRALStudyID: Optional[int]
@@ -73,79 +77,79 @@ class Study(SQLModel, table=True):
     UDef6: Optional[str]
     TrialRegistrationID: Optional[str]
 
-class StudyReport(SQLModel, table=True):
+class StudyReport(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyReport"
 
     StudyReportID: int = Field(primary_key=True)
-    CRGStudyID: int 
-    CRGReportID: int
+    CRGStudyID: int = Field(foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    CRGReportID: int = Field(foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
 
-class Participant(SQLModel, table=True):
+class Participant(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblParticipant"
 
     ParticipantsID: int = Field(primary_key=True)
     ParticipantDescription: str
 
-class StudyParticipant(SQLModel, table=True):
+class StudyParticipant(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyParticipant"
 
-    CRGStudyID: int = Field(primary_key=True)
-    ParticipantsID: int = Field(primary_key=True)
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    ParticipantsID: int = Field(primary_key=True, foreign_key="tblParticipant.ParticipantsID", ondelete="CASCADE")
 
-class Design(SQLModel, table=True):
+class Design(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblDesign"
 
     DesignID: int = Field(primary_key=True)
     DesignDescription: Optional[str] = None
 
-class StudyDesign(SQLModel, table=True):
+class StudyDesign(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyDesign"
 
-    CRGStudyID: int = Field(primary_key=True)
-    DesignID: int = Field(primary_key=True)
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    DesignID: int = Field(primary_key=True, foreign_key="tblDesign.DesignID", ondelete="CASCADE")
 
-class Intervention(SQLModel, table=True):
+class Intervention(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblIntervention"
 
     InterventionID: int = Field(primary_key=True)
     InterventionDescription: Optional[str] = None
 
-class StudyIntervention(SQLModel, table=True):
+class StudyIntervention(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyIntervention"
 
-    CRGStudyID: int = Field(primary_key=True)
-    InterventionID: int = Field(primary_key=True)
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    InterventionID: int = Field(primary_key=True, foreign_key="tblIntervention.InterventionID", ondelete="CASCADE")
 
-class Condition(SQLModel, table=True):
+class Condition(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblHealthCareCondition"
 
     HealthCareConditionID: int = Field(primary_key=True)
     HealthCareConditionDescription: Optional[str] = None
 
-class StudyCondition(SQLModel, table=True):
+class StudyCondition(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyHealthCareCondition"
 
-    CRGStudyID: int = Field(primary_key=True)
-    HealthCareConditionID: int = Field(primary_key=True)
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    HealthCareConditionID: int = Field(primary_key=True, foreign_key="tblHealthCareCondition.HealthCareConditionID", ondelete="CASCADE")
 
-class Outcome(SQLModel, table=True):
+class Outcome(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblOutcome"
 
     OutcomeID: int = Field(primary_key=True)
     OutcomeDescription: Optional[str] = None
 
-class StudyOutcome(SQLModel, table=True):
+class StudyOutcome(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyOutcome"
 
-    CRGStudyID: int = Field(primary_key=True)
-    OutcomeID: int = Field(primary_key=True)
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    OutcomeID: int = Field(primary_key=True, foreign_key="tblOutcome.OutcomeID", ondelete="CASCADE")
 
 
 """
 Authentication
 """
 
-class User(SQLModel, table=True):
+class User(SQLModel, table=True, metadata=metadata_user_data):
     __tablename__ = "users"
 
     id: int = Field(default=None, primary_key=True)
@@ -154,11 +158,11 @@ class User(SQLModel, table=True):
     verified: bool = Field(default=False)
     password: str
 
-class APIKey(SQLModel, table=True):
+class APIKey(SQLModel, table=True, metadata=metadata_user_data):
     __tablename__ = "api_keys"
 
     id: str = Field(primary_key=True, index=True)
-    owner: int = Field(foreign_key="users.id")
+    owner: int = Field(foreign_key="users.id", ondelete="CASCADE")
     hash: str = Field(index=True)
 
 
@@ -166,7 +170,7 @@ class APIKey(SQLModel, table=True):
 User Data
 """
 
-class TmpReportBatch(SQLModel, table=True):
+class TmpReportBatch(SQLModel, table=True, metadata=metadata_user_data):
     __tablename__ = "tmp_report_batches"
 
     batch_hash: str = Field(primary_key=True)
@@ -174,23 +178,8 @@ class TmpReportBatch(SQLModel, table=True):
     number_reports: Optional[int]
     created_at: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
 
-class TmpReport(SQLModel, table=True):
+class TmpReport(SQLModel, table=True, metadata=metadata_user_data):
     __tablename__ = "tmp_reports"
-
-    batch_hash: str = Field(primary_key=True)
+    CRGReportID: int
+    batch_hash: str = Field(primary_key=True, foreign_key="tmp_report_batches.batch_hash", ondelete="CASCADE")
     batch_inner_id: int = Field(primary_key=True)
-    title: Optional[str] #TI
-    abstract: Optional[str] #AB
-    authors: Optional[str]  #AU
-    year: Optional[int] #pY
-    report_number: Optional[int] #RN
-    journal: Optional[str] #T2
-    pages: Optional[str] #SP
-    place: Optional[str] #CY
-    language: Optional[str] #LA
-    issue: Optional[str] #M1
-    volume: Optional[str] #VL
-    doi: Optional[str] #DO
-    trial_id: Optional[str] #derived from title/abstract/authors
-    vectors: Optional[bytes]  # pickled vectors
-    assigned_studies: Optional[str]  # JSON-encoded list

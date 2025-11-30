@@ -7,7 +7,7 @@ from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 from sqlmodel import select, SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from .utils.database_models import APIKey, User
+from .utils.database_models import APIKey, User, metadata_user_data
 
 from asyncio import get_running_loop
 
@@ -23,7 +23,6 @@ from datetime import datetime, timedelta, timezone
 
 import secrets
 import hashlib
-import hmac
 
 load_dotenv()
 
@@ -69,7 +68,7 @@ async def get_session() -> AsyncSession:
 @router.on_event("startup")
 async def startup_event():
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(metadata_user_data.create_all)
 
 def verify_token(token):
     if not token:

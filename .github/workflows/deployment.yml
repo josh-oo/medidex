@@ -21,6 +21,7 @@ jobs:
       EMBEDDING_SERVICE_PORT: ${{ vars.EMBEDDING_SERVICE_PORT }}
       VECTORSTORE_SERVICE_HOST: ${{ vars.VECTORSTORE_SERVICE_HOST }}
       VECTORSTORE_SERVICE_PORT: ${{ vars.VECTORSTORE_SERVICE_PORT }}
+      VECTORSTORE_COLLECTION_NAME: ${{ vars.VECTORSTORE_COLLECTION_NAME }}
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
       BACKEND_API_URL: http://logic:8002
       BACKEND_API_KEY: ${{ secrets.BACKEND_API_KEY }}
@@ -57,11 +58,6 @@ jobs:
           # Run the performance check script inside the container
           docker run --rm \
             --network internal_net \
-            -e EMBEDDING_SERVICE_HOST="${{ vars.EMBEDDING_SERVICE_HOST }}" \
-            -e EMBEDDING_SERVICE_PORT="${{ vars.EMBEDDING_SERVICE_PORT }}" \
-            -e VECTORSTORE_SERVICE_HOST="${{ vars.VECTORSTORE_SERVICE_HOST }}" \
-            -e VECTORSTORE_SERVICE_PORT="${{ vars.VECTORSTORE_SERVICE_PORT }}" \
-            -e MESH_DUMP_LOCATION="/data/desc2025.xml" \
             -e BACKEND_API_URL=http://logic:8002 \
             -e BACKEND_API_KEY="${{ secrets.BACKEND_API_KEY }}" \
             meerkat-tool-test \
