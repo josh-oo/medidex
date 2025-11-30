@@ -165,9 +165,10 @@ async def process_report(report, batch_hash, index, vectorstore):
         text_to_process.append(abstract)
     text_to_process = "\n".join(text_to_process)
    
-    vectors = await _embed_report(text_to_process, get_grpc_channel())
-
-    crg_report_id = await add_new_report(report)
+    vectors, crg_report_id = await asyncio.gather(
+        _embed_report(text_to_process, get_grpc_channel()),
+        add_new_report(report)
+    )
 
     #TODO upload vectors to vectorstore use crg id
     new_id = transform_to_uuid(crg_report_id)
@@ -645,11 +646,7 @@ async def similar_studies(batch_hash: str = batch_hash_path, report_index: int =
         aspect = "default"
     
     stmt = (
-        select(
-            TmpReport.authors,
-            TmpReport.trial_id,
-            TmpReport.CRGReportID
-        )
+        select(TmpReport.CRGReportID)
         .where(
             TmpReport.batch_hash == batch_hash,
             TmpReport.batch_inner_id == report_index
@@ -658,14 +655,15 @@ async def similar_studies(batch_hash: str = batch_hash_path, report_index: int =
     )
 
     result = await db.execute(stmt)
-    row = result.first()
+    crg_report_id = result.scalar()
 
-    if not row:
+    if not crg_report_id:
         raise HTTPException(status_code=404, detail="Report not found")
+    
+    report = await get_report_by_id_internal(crg_report_id)
 
-    authors = row[0]
-    trial_id = row[1]
-    crg_report_id = row[2]
+    authors = [item.strip() for item in report.Authors.split("//")]
+    trial_id = report.TrialRegistrationID
 
     return await get_similar_studies_by_id(crg_report_id, aspect, trial_id, authors, cutoff, k, client, return_details)
 

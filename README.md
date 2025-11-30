@@ -182,16 +182,11 @@ CREATE TABLE tmp_report_batches (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE tmp_reports (
-	batch_hash Text,
+    CRGReportID INTEGER,
+	batch_hash TEXT,
     batch_inner_id INTEGER,
-    title TEXT,
-    abstract TEXT,
-	authors Text,
-	trial_id Text,
-	vectors BLOB,
-	assigned_studies Text, year INTEGER, report_number INTEGER, journal TEXT, pages TEXT, place TEXT, language TEXT, issue TEXT, volume TEXT, doi TEXT, publisher TEXT, CRGReportID INTEGER,
 	PRIMARY KEY (batch_hash, batch_inner_id)
-  FOREIGN KEY(batch_hash) REFERENCES tmp_report_batches(batch_hash) ON DELETE CASCADE
+    FOREIGN KEY(batch_hash) REFERENCES tmp_report_batches(batch_hash) ON DELETE CASCADE
 );
 ```
 
