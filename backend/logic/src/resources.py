@@ -145,7 +145,6 @@ async def get_study_reports_by_id(study_id: int = study_id_path, include_pdf_lin
 @router.get("/studies/{trial_id}/study_id", summary="Get the CRGStudyID given a matching trial registration id")
 async def get_study_id_by_trial_id(trial_id: str = Path(..., description="A regular trial id (e.g. ACTRN12605000202662, NCT00034892)"), cutoff: str = cutoff_query, session: AsyncSession = Depends(get_session)) -> List[int]:
     result = await _get_study_id_by_trial_id(trial_id,cutoff,session)
-    print(result)
     return result
 
 @router.get("/studies/{study_id}/date_entered", summary="Get the date when the study was entered into the database")

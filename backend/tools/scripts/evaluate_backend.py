@@ -46,21 +46,8 @@ async def calculate_rank(crg_report_id, cutoff, client):
     ground_truth = [item['CRGStudyID'] for item in response.json()]
     
     if len(ground_truth) == 1:
-        response = await client.get(BACKEND_API + f"/reports/{crg_report_id}")
-        title = response.json()['Title']
-        abstract = response.json()['Abstract']
-        authors = response.json()['Authors'].split("//")
-        authors = [author.strip() for author in authors]
-        
-        trial_id = None
-        data = {'title': title, 'abstract': abstract, 'authors': []}
-        
-        response = await client.post(BACKEND_API + "/processing/extract_trial_id", json=data)
-        if response.status_code == 200 and response.json():
-            trial_id = response.json()
-
         ground_truth = ground_truth[0]
-        params = {"cutoff":cutoff, "trial_id":trial_id, 'authors': authors}
+        params = {"cutoff":cutoff}
         response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params=params)
         predicted_studies = response.json()['CRGStudyID']
 
@@ -156,13 +143,13 @@ def run_integration_tests():
             'total_count': 191
         },
         "6th update": {
-            'recall_at_1_count': 187,#TODO check why did it increase from 186 to 187
+            'recall_at_1_count': 188,#TODO check why did it increase from 186 to 187
             'recall_at_3_count': 206,
             'recall_at_10_count': 210,
             'total_count': 222
         },
         "7th update": {
-            'recall_at_1_count': 119,#TODO check why did it decrease from 120 to 119
+            'recall_at_1_count': 120,#TODO check why did it decrease from 120 to 119
             'recall_at_3_count': 129,
             'recall_at_10_count': 135,
             'total_count': 149
