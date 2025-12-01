@@ -801,7 +801,13 @@ async def get_similar_studies(embedding, aspect: str, trial_id: str, authors: Li
 
     return reordered
 
-async def get_similar_studies_by_id(crg_report_id, aspect: str, trial_id: str, authors: List[str], cutoff: str, k: int, client: AsyncQdrantClient, return_details: bool):
+async def get_similar_studies_by_id(crg_report_id, aspect: str, cutoff: str, k: int, client: AsyncQdrantClient, return_details: bool):
+    
+    report = await get_report_by_id_internal(crg_report_id)
+    authors = [item.strip() for item in report.Authors.split("//")]
+    raw_report = RawReport(title=report.Title, abstract=report.Abstract, authors=authors)
+    trial_id = extract_trial_id(raw_report)
+    
     positive_id = transform_to_uuid(crg_report_id)
     
     found_study_ids = {}
@@ -818,29 +824,29 @@ async def get_similar_studies_by_id(crg_report_id, aspect: str, trial_id: str, a
         ))        
     
     if trial_id:
-        
         response = await get_study_id_by_trial_id_internal(trial_id, cutoff)
         if response:
             for result in response:
                 found_study_ids[result] = 1.0
                 debug_map[result] = [{"source_id":trial_id}]
 
-        filters.append(
-                models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="belongs_to_trial_id",
-                            match=models.MatchValue(value=False)
-                        )
-                    ],
-                    must_not=[
-                        models.FieldCondition(
-                            key="belongs_to_study",
-                            match=models.MatchAny(any=list(found_study_ids.keys()))
-                        )
-                    ]
+        if len(found_study_ids.keys()) > 0:
+            filters.append(
+                    models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="belongs_to_trial_id",
+                                match=models.MatchValue(value=False)
+                            )
+                        ],
+                        must_not=[
+                            models.FieldCondition(
+                                key="belongs_to_study",
+                                match=models.MatchAny(any=list(found_study_ids.keys()))
+                            )
+                        ]
+                    )
                 )
-            )
     
     filter = models.Filter(must=filters)
 
@@ -963,7 +969,7 @@ async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(
 
 async def analyze(embeddings, top_k, title, abstract, authors, cutoff, client):
     
-    trial_id = await extract_trial_id(RawReport(title=title,abstract=abstract, authors=[]))
+    trial_id = extract_trial_id(RawReport(title=title,abstract=abstract, authors=[]))
     pre_result = await get_similar_studies(embeddings['embedding'], "default", trial_id, authors, cutoff, top_k, client, return_details=True)
 
     found_study_ids = {}
@@ -1106,8 +1112,8 @@ class AspectEmbedding(BaseModel):
     embedding: List[float]
 
 @router.get("/reports/{report_id}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="")
-async def similarity_search_studies_by_id(report_id: int, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):
-    return await get_similar_studies_by_id(report_id, aspect, trial_id, authors, cutoff, k, client, return_details)
+async def similarity_search_studies_by_id(report_id: int, aspect: str = Query("default"),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):
+    return await get_similar_studies_by_id(report_id, aspect, cutoff, k, client, return_details)
 
 @router.post("/similarity_search/studies", dependencies=[Depends(is_verified_api_call)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_studies or /reports/{report_id}/studies instead", deprecated=True)
 async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):
