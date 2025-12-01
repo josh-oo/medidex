@@ -3,7 +3,7 @@ FROM python:3.13-slim
 #ENV STREAMLIT_SERVER_HEADLESS=true
 ENV PYTHONDONTWRITEBYTECODE 1
 
-RUN addgroup -S appgroup && adduser -S -G appgroup appuser
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
 WORKDIR /app
 
