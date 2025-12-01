@@ -10,7 +10,7 @@ RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding
 # Stage 2: Main app
 FROM python:3.13-slim
 
-RUN addgroup -S appgroup && adduser -S -G appgroup appuser
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
 ENV PYTHONDONTWRITEBYTECODE 1
 
