@@ -41,6 +41,7 @@ from .resources import add_report_studies_by_id_internal, delete_report_studies_
 
 from sqlmodel import select, delete, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy import event
 from .utils.database_models import TmpReport, TmpReportBatch, metadata_user_data
 
 load_dotenv()
@@ -130,6 +131,12 @@ class TagCategories(str, enum.Enum):
     conditions = 'conditions'
     outcomes = 'outcomes'
     participants = 'participants'
+
+@event.listens_for(engine.sync_engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON;")
+    cursor.close()
 
 @router.on_event("startup")
 async def startup_event():
