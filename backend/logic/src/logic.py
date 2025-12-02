@@ -867,7 +867,9 @@ async def get_similar_studies_by_id(crg_report_id, aspect: str, cutoff: str, k: 
             group_size=1,  # Max amount of points per group
             query_filter=filter,
             with_payload=True,
-            #with_vectors=True,
+            search_params=models.SearchParams(
+                quantization=models.QuantizationSearchParams(rescore=False)
+            ),
         )
 
         reranked_results = search_results.groups
