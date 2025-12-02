@@ -25,6 +25,7 @@ from nameparser import HumanName
 
 from sqlmodel import select, func, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy import event
 
 from .utils.database_models import Report, Study, StudyCondition, StudyDesign, StudyIntervention, StudyOutcome, StudyParticipant, StudyReport
 from .utils.database_models import Condition, Intervention, Design, Outcome, Participant
@@ -76,6 +77,13 @@ def load_author_frequencies():
 trial_person_mapping = load_trial_person_mapping()
 trial_id_mapping = load_trial_id_mapping()
 author_frequencies = load_author_frequencies()
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON;")
+    cursor.close()
     
 @router.on_event("startup")
 async def startup_event():
