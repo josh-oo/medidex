@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 
 from .auth import is_verified_api_call
 from typing import List, Optional
+import enum
+from pydantic import BaseModel
 
 
 from googleapiclient.discovery import build
@@ -105,6 +107,31 @@ report_id_path = Path(..., description="CRGReportIDs")
 """
 Study Endpoints
 """
+
+class StudyStatus(str, enum.Enum):
+    closed = "Closed"
+    stopped_early = "Stopped early"
+    open = "Open/Ongoing"
+    planned = "Planned"
+
+class CENTRALSubmissionStatus(str, enum.Enum):
+    accepted = "Accepted"
+    pending = "Pending"
+    rejected = "Rejected"
+    not_cochrane = "Not Cochrane"
+
+class StudyParams(BaseModel):
+    short_name: str
+    status_of_study: StudyStatus
+    countries: List[str]
+    central_submission_status :CENTRALSubmissionStatus
+    duration: str
+    number_of_participants : int
+    comparison : str
+
+@router.put("/studies", summary="Add new study to meerkat.")
+async def add_study(study_params: StudyParams, session: AsyncSession = Depends(get_session)) -> Study:
+    return await _add_study(study_params, session)
 
 @router.get("/studies", summary="Get study details for all studies specified in the query.")
 async def get_studies(study_ids: List[int] = study_ids_query, session: AsyncSession = Depends(get_session)) -> List[Study]:
@@ -626,6 +653,32 @@ async def get_studies_internal(study_ids):
 async def _get_studies(study_ids, session):
     stmt = select(Study).where(Study.CRGStudyID.in_(study_ids))
     return (await session.execute(stmt)).scalars().all()
+
+async def add_study_internal(study_params):
+    async with AsyncSession(engine) as session:
+        return await _add_study(study_params, session)
+
+async def _add_study(study_params: StudyParams, session: AsyncSession):
+    #TODO add more sophisticated checks
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    
+    new_study = Study(
+        ShortName=study_params.short_name,
+        StatusofStudy=study_params.status_of_study.value,
+        Countries="//".join(study_params.countries),
+        CENTRALSubmissionStatus=study_params.central_submission_status.value,
+        Duration=study_params.duration,
+        NumberofParticipants=study_params.number_of_participants,
+        Comparison=study_params.comparison,
+        DateEntered=timestamp,
+        DateEdited=timestamp,
+    )
+    
+    async with write_lock:
+        session.add(new_study)
+        await session.commit()
+        await session.refresh(new_study)
+        return new_study
 
 async def _get_study_aspect(stmt, session):
     rows = (await session.execute(stmt)).all()  # -> [(StudyID, ID, Description), ...]

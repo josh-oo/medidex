@@ -57,7 +57,7 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
 class Study(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudy"
 
-    CENTRALStudyID: Optional[int]
+    CENTRALStudyID: Optional[int] = 0
     CRGStudyID: int = Field(primary_key=True)
     ShortName: str
     StatusofStudy: str
