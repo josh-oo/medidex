@@ -10,9 +10,6 @@ from typing import List, Optional
 import enum
 from pydantic import BaseModel
 
-
-from googleapiclient.discovery import build
-from google.oauth2 import service_account
 from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
 
@@ -23,7 +20,7 @@ import asyncio
 
 from nameparser import HumanName
 
-from sqlmodel import select, func, text
+from sqlmodel import select, func, text, delete
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy import event
 
@@ -254,58 +251,6 @@ async def get_pdf_numbers_by_report_ids(report_ids: List[int] = report_ids_query
     rows = (await session.execute(stmt)).all()
     return {row[0]: row[1] for row in rows}
 
-@router.get("/reports/pdf_links", include_in_schema=False)
-async def get_pdf_links_by_report_ids(report_ids: List[int] = report_ids_query,session: AsyncSession = Depends(get_session)) -> Dict[int, Optional[str]]:
-
-    pdf_numbers = await get_pdf_numbers_by_report_ids(report_ids, session)
-    return get_pdf_links_by_report_numbers(pdf_numbers)
-
-def get_pdf_links_by_report_numbers(pdf_numbers: Dict[int, int]) -> Dict[int, Optional[str]]:
-    results = {}
-
-    SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-    creds = service_account.Credentials.from_service_account_file(
-        os.path.join(DATABASE_VOLUME,"resources", 'service-account.json'), scopes=SCOPES
-    )
-    service = build('drive', 'v3', credentials=creds)
-
-    folder_name = "Meerkat_PDFs"
-    folder_results = service.files().list(
-        q=f"sharedWithMe and mimeType='application/vnd.google-apps.folder' and name='{folder_name}' and trashed=false",
-        includeItemsFromAllDrives=True,
-        supportsAllDrives=True,
-        fields="files(id, name)"
-    ).execute()
-
-    folders = folder_results.get('files', [])
-    if not folders:
-        return {rid: None for rid in pdf_numbers.keys()}
-
-    folder_id = folders[0]['id']
-
-    for rid, report_number in pdf_numbers.items():
-        if not report_number:
-            results[rid] = None
-            continue
-
-        pdf_name = str(report_number).zfill(5) + ".pdf"
-        pdf_results = service.files().list(
-            q=f"'{folder_id}' in parents and name='{pdf_name}' and mimeType='application/pdf' and trashed=false",
-            includeItemsFromAllDrives=True,
-            supportsAllDrives=True,
-            fields="files(id, name, owners)",
-        ).execute()
-
-        pdfs = pdf_results.get('files', [])
-        if not pdfs:
-            results[rid] = None
-        else:
-            f = pdfs[0]
-            results[rid] = f"https://drive.google.com/file/d/{f['id']}/view"
-            #results[rid] = f"https://drive.google.com/uc?export=download&id={f['id']}"
-
-    return results
-
 @router.get("/reports/{report_id}", summary="Get details for a specific report.")
 async def get_reports_by_id(report_id: int = report_id_path, session: AsyncSession = Depends(get_session)) -> Report:
     return await _get_report_by_id(report_id, session)
@@ -322,11 +267,6 @@ async def get_report_studies_by_id(
 @router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
 async def get_pdf_number_by_report_id(report_id: int = report_id_path, session: AsyncSession = Depends(get_session)) -> int:
     return (await get_pdf_numbers_by_report_ids(report_ids=[report_id], session=session))[report_id]
-
-@router.get("/reports/{report_id}/pdf_link", summary="Get the link to the fulltext pdf for a given report")
-async def get_pdf_link_by_reports(report_id: int = report_id_path, session : AsyncSession = Depends(get_session)) -> str:
-
-    return (await get_pdf_links_by_report_ids([report_id],session))[report_id]
 
 @router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
 async def get_pdf_by_report(report_id: int = report_id_path, session : AsyncSession = Depends(get_session)) -> FileResponse:
@@ -867,7 +807,6 @@ async def _add_report_studies_by_id(
         {
           "report_id": int,
           "created_count": int,
-          "already_linked": List[int],
           "invalid_study_ids": List[int],
           "created_links": List[Dict[str, int]]
         }
@@ -877,49 +816,47 @@ async def _add_report_studies_by_id(
         return {
             "report_id": report_id,
             "created_count": 0,
-            "already_linked": [],
             "invalid_study_ids": [],
             "created_links": []
         }
 
-    # Validate report exists
-    report = await session.get(Report, report_id)
-    if not report:
-        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+    try:
+        # Validate report exists
+        report = await session.get(Report, report_id)
+        if not report:
+            raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
-    # Validate studies exist
-    valid_id_rows = await session.execute(
-        select(Study.CRGStudyID).where(Study.CRGStudyID.in_(study_ids))
-    )
-    valid_ids = set(valid_id_rows.scalars().all())
-    invalid_ids = [sid for sid in study_ids if sid not in valid_ids]
+        # Validate studies exist
+        valid_id_rows = await session.execute(
+            select(Study.CRGStudyID).where(Study.CRGStudyID.in_(study_ids))
+        )
+        valid_ids = set(valid_id_rows.scalars().all())
+        invalid_ids = [sid for sid in study_ids if sid not in valid_ids]
 
-    # Find already existing links for this report
-    existing_rows = await session.execute(
-        select(StudyReport.CRGStudyID).where(StudyReport.CRGReportID == report_id)
-    )
-    existing_links = set(existing_rows.scalars().all())
+        # Delete existing links for this report
+        await session.execute(delete(StudyReport).where(StudyReport.CRGReportID == report_id))
 
-    # Determine which links to create (deduplicate input)
-    to_create = [sid for sid in sorted(valid_ids) if sid not in existing_links]
+        # Create new links
+        created_links: List[Dict[str, int]] = []
+        for sid in valid_ids:
+            session.add(StudyReport(CRGReportID=report_id, CRGStudyID=sid))
+            created_links.append({"CRGReportID": report_id, "CRGStudyID": sid})
 
-    created_links: List[Dict[str, int]] = []
-    for sid in to_create:
-        session.add(StudyReport(CRGReportID=report_id, CRGStudyID=sid))
-        created_links.append({"CRGReportID": report_id, "CRGStudyID": sid})
-
-    if to_create:
         await session.commit()
 
-    already_linked = [sid for sid in study_ids if sid in existing_links]
-
-    return {
-        "report_id": report_id,
-        "created_count": len(to_create),
-        "already_linked": already_linked,
-        "invalid_study_ids": invalid_ids,
-        "created_links": created_links
-    }
+        return {
+            "report_id": report_id,
+            "created_count": len(valid_ids),
+            "invalid_study_ids": invalid_ids,
+            "created_links": created_links
+        }
+    
+    except HTTPException:
+        await session.rollback()
+        raise
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update report-study links: {str(e)}")
 
 async def delete_report_studies_by_id_internal(report_id: int) -> Dict[str, Any]:
     """
@@ -937,31 +874,43 @@ async def _delete_report_studies_by_id(
     """
     Internal implementation to delete all links between a report and studies.
     """
-    # Validate report exists
-    report = await session.get(Report, report_id)
-    if not report:
-        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+    try:
+        # Validate report exists
+        report = await session.get(Report, report_id)
+        if not report:
+            raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
-    # Fetch all links
-    rows = (
-        await session.execute(
-            select(StudyReport).where(StudyReport.CRGReportID == report_id)
-        )
-    ).scalars().all()
+        # Fetch all links for response
+        rows = (
+            await session.execute(
+                select(StudyReport).where(StudyReport.CRGReportID == report_id)
+            )
+        ).scalars().all()
 
-    deleted_links: List[Dict[str, int]] = []
-    for sr in rows:
-        deleted_links.append({"CRGReportID": sr.CRGReportID, "CRGStudyID": sr.CRGStudyID})
-        await session.delete(sr)
+        deleted_links: List[Dict[str, int]] = [
+            {"CRGReportID": sr.CRGReportID, "CRGStudyID": sr.CRGStudyID}
+            for sr in rows
+        ]
 
-    if rows:
-        await session.commit()
+        # Bulk delete all links
+        if rows:
+            await session.execute(
+                delete(StudyReport).where(StudyReport.CRGReportID == report_id)
+            )
+            await session.commit()
 
-    return {
-        "report_id": report_id,
-        "deleted_count": len(rows),
-        "deleted_links": deleted_links
-    }
+        return {
+            "report_id": report_id,
+            "deleted_count": len(rows),
+            "deleted_links": deleted_links
+        }
+    
+    except HTTPException:
+        await session.rollback()
+        raise
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete report-study links: {str(e)}")
 
 async def add_new_report(report: dict):
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -1016,44 +965,21 @@ async def add_new_report(report: dict):
         
 
 async def delete_reports_by_ids(report_ids: List[int]) -> Dict[str, Any]:
-    """
-    Delete multiple reports and their associated study-report relationships.
-    Returns the count of deleted reports and any failed deletions.
-    
-    Args:
-        report_ids: List of CRGReportIDs to delete
-        
-    Returns:
-        Dictionary containing deleted_count, failed_deletions, and total_requested
-    """
     async with write_lock:
         async with AsyncSession(engine) as session:
-            deleted_count = 0
-            failed_ids = []
-            
-            for report_id in report_ids:
-                try:
-                    # First delete associated study-report relationships
-                    stmt_study_report = select(StudyReport).where(StudyReport.CRGReportID == report_id)
-                    study_reports = (await session.execute(stmt_study_report)).scalars().all()
-                    for sr in study_reports:
-                        await session.delete(sr)
-                    
-                    # Then delete the report itself
-                    report = await session.get(Report, report_id)
-                    if report:
-                        await session.delete(report)
-                        deleted_count += 1
-                    else:
-                        failed_ids.append({"id": report_id, "reason": "Report not found"})
-                        
-                except Exception as e:
-                    failed_ids.append({"id": report_id, "reason": str(e)})
-            
-            await session.commit()
-            
-            return {
-                "deleted_count": deleted_count,
-                "failed_deletions": failed_ids,
-                "total_requested": len(report_ids)
-            }
+            try:                
+                # Bulk delete reports
+                result = await session.execute(
+                    delete(Report).where(Report.CRGReportID.in_(report_ids))
+                )
+                
+                await session.commit()
+                
+                return {
+                    "deleted_count": result.rowcount,
+                    "failed_deletions": [],
+                    "total_requested": len(report_ids)
+                }
+            except Exception as e:
+                await session.rollback()
+                raise HTTPException(status_code=500, detail=f"Failed to delete reports: {str(e)}")
