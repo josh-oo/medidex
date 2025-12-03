@@ -576,8 +576,8 @@ async def get_batched_report(batch_hash: str, report_index: int, db: AsyncSessio
     return report
 
 
-@router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=204)
-async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), db : AsyncSession = Depends(get_session)):
+@router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=200)
+async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), db : AsyncSession = Depends(get_session), vectorstore: AsyncQdrantClient = Depends(get_vectorstore)):
     stmt = (
         select(TmpReport.CRGReportID)
         .where(
@@ -592,12 +592,20 @@ async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = 
 
     await add_report_studies_by_id_internal(crg_report_id, study_ids)
 
+    await vectorstore.set_payload(
+        collection_name=COLLECTION_NAME,
+        payload={
+            "belongs_to_study": study_ids,
+        },
+        points=[transform_to_uuid(crg_report_id)],
+    )
+
     await publish_batch_update(batch_hash)
 
-    return Response(status_code=204)
+    return await get_batched_report(batch_hash, report_index, db, vectorstore)
 
-@router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=204)
-async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, db : AsyncSession = Depends(get_session)):
+@router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=200)
+async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, db : AsyncSession = Depends(get_session), vectorstore: AsyncQdrantClient = Depends(get_vectorstore)):
     stmt = (
         select(TmpReport.CRGReportID)
         .where(
@@ -612,9 +620,17 @@ async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_inde
 
     await delete_report_studies_by_id_internal(crg_report_id)
 
+    await vectorstore.set_payload(
+        collection_name=COLLECTION_NAME,
+        payload={
+            "belongs_to_study": [],
+        },
+        points=[transform_to_uuid(crg_report_id)],
+    )
+
     await publish_batch_update(batch_hash)
 
-    return Response(status_code=204)
+    return await get_batched_report(batch_hash, report_index, db, vectorstore)
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
 async def similar_tags(batch_hash: str = batch_hash_path, report_index: int = report_index_path, sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(None, description="The tag category which you are interested in"), k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_session)) -> List[TagResponse]:
@@ -808,14 +824,18 @@ async def get_similar_studies(embedding, aspect: str, trial_id: str, authors: Li
 
     return reordered
 
-async def get_similar_studies_by_id(crg_report_id, aspect: str, cutoff: str, k: int, client: AsyncQdrantClient, return_details: bool):
+async def get_similar_studies_by_id(crg_report_id : int, aspect: str, cutoff: str, k: int, negative_samples: List[int], client: AsyncQdrantClient, return_details: bool):
     
     report = await get_report_by_id_internal(crg_report_id)
     authors = [item.strip() for item in report.Authors.split("//")]
     raw_report = RawReport(title=report.Title, abstract=report.Abstract, authors=authors)
     trial_id = extract_trial_id(raw_report)
+
+    if not negative_samples:
+        negative_samples = []
     
-    positive_id = transform_to_uuid(crg_report_id)
+    positive_ids = [transform_to_uuid(crg_report_id)]
+    negative_ids = [transform_to_uuid(negative_id) for negative_id in negative_samples]
     
     found_study_ids = {}
     debug_map = {}
@@ -864,8 +884,9 @@ async def get_similar_studies_by_id(crg_report_id, aspect: str, cutoff: str, k: 
             collection_name=COLLECTION_NAME,
             query=models.RecommendQuery(
                 recommend=models.RecommendInput(
-                    positive=[positive_id],
-                    negative=[]
+                    positive=positive_ids,
+                    negative=negative_ids,
+                    strategy=models.RecommendStrategy.AVERAGE_VECTOR,
                 )
             ),
             using=aspect,
@@ -1121,8 +1142,8 @@ class AspectEmbedding(BaseModel):
     embedding: List[float]
 
 @router.get("/reports/{report_id}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="")
-async def similarity_search_studies_by_id(report_id: int, aspect: str = Query("default"),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):
-    return await get_similar_studies_by_id(report_id, aspect, cutoff, k, client, return_details)
+async def similarity_search_studies_by_id(report_id: int, aspect: str = Query("default"),  cutoff: str = Query(None), k : int = Query(10), negative_samples : List[int]=Query(None), client=Depends(get_vectorstore), return_details=False):
+    return await get_similar_studies_by_id(report_id, aspect, cutoff, k, negative_samples, client, return_details)
 
 @router.post("/similarity_search/studies", dependencies=[Depends(is_verified_api_call)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_studies or /reports/{report_id}/studies instead", deprecated=True)
 async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):

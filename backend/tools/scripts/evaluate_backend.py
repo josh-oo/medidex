@@ -34,29 +34,106 @@ async def wait_for_services(timeout=120):
     print(f"❌ Backend API not ready at {BACKEND_API}/readyz")
     raise TimeoutError(f"Backend service not ready after {timeout} seconds")
 
-def evaluate_with_cutoff(cutoff):
-    return asyncio.run(evaluate_with_cutoff_async(cutoff))
+async def calculate_rank_score(crg_report_id, cutoff, client, fixed_k=None):
 
-async def calculate_rank(crg_report_id, cutoff, client):
+    ks = [1, 10,100,1_000,10_000]
+    if fixed_k:
+        ks = [fixed_k]
     
     dt = datetime.strptime(cutoff, "%Y-%m-%d %H:%M:%S")
     exclusive_cutoff = dt - timedelta(days=1)
 
     response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/studies", params={"date_to": exclusive_cutoff})
     ground_truth = [item['CRGStudyID'] for item in response.json()]
+
+    rank = 10_000
+    score = -1
     
     if len(ground_truth) == 1:
         ground_truth = ground_truth[0]
-        params = {"cutoff":cutoff}
-        response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params=params)
-        predicted_studies = response.json()['CRGStudyID']
+        for k in ks:
+            params = {"cutoff":cutoff, 'k': k}
+            response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params=params)
+            predicted_studies = response.json()['CRGStudyID']
 
-        rank = 11
-        if ground_truth in predicted_studies:
-            rank = predicted_studies.index(ground_truth) + 1
+            if ground_truth in predicted_studies:
+                index = predicted_studies.index(ground_truth)
+                score = response.json()['Relevance'][index]
+                rank = index + 1
+                break
+        return (rank, score)
+    
+async def calculate_rank_score_negative_hints(crg_report_id, cutoff, client, fixed_k=None):
 
-        return rank
+    ks = [1, 10,100,1_000,10_000]
+    if fixed_k:
+        ks = [fixed_k]
+    
+    dt = datetime.strptime(cutoff, "%Y-%m-%d %H:%M:%S")
+    exclusive_cutoff = dt - timedelta(days=1)
 
+    response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/studies", params={"date_to": exclusive_cutoff})
+    ground_truth = [item['CRGStudyID'] for item in response.json()]
+
+    rank = 10_000
+    score = -1
+
+    negative_samples = []
+    
+    if len(ground_truth) == 1:
+        ground_truth = ground_truth[0]
+        for k in ks:
+            params = {"cutoff":cutoff, 'k': k, 'negative_samples': negative_samples}
+            try:
+                response = await client.get(
+                    BACKEND_API + f"/reports/{crg_report_id}/similar_studies",
+                    params=params,
+                    timeout=120.0  # Override timeout for this specific call
+                )
+            except httpx.ReadTimeout:
+                print(f"Timeout for report {crg_report_id}, skipping SAMPLES ",negative_samples)
+                break
+            predicted_studies = response.json()['CRGStudyID']
+
+            if ground_truth in predicted_studies:
+                index = predicted_studies.index(ground_truth)
+                score = response.json()['Relevance'][index]
+                rank = index + 1
+                break
+            negative_reports = await client.get(BACKEND_API + f"/studies/{predicted_studies[0]}/reports")
+            new_negative_samples = [item['CRGReportID'] for item in negative_reports.json()]
+            negative_samples.extend(new_negative_samples[:1])
+        return (rank, score)
+
+async def calculate_rank_score_negative_hints_(crg_report_id, cutoff, client):    
+    dt = datetime.strptime(cutoff, "%Y-%m-%d %H:%M:%S")
+    exclusive_cutoff = dt - timedelta(days=1)
+
+    response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/studies", params={"date_to": exclusive_cutoff})
+    ground_truth = [item['CRGStudyID'] for item in response.json()]
+
+    rank = 10_000
+    score = -1
+
+    negative_samples = []
+    
+    if len(ground_truth) == 1:
+        ground_truth = ground_truth[0]
+        while True:
+            params = {"cutoff":cutoff, 'k': 10, 'negative_samples': negative_samples}
+            print(crg_report_id, len(negative_samples))
+            response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params=params)
+            predicted_studies = response.json()['CRGStudyID']
+
+            if ground_truth in predicted_studies:
+                index = predicted_studies.index(ground_truth)
+                score = response.json()['Relevance'][index]
+                rank = len(negative_samples) + index + 1
+                break
+            else:
+                negative_samples.extend(predicted_studies)
+
+        return (rank, score)
 
 async def evaluate_with_cutoff_async(cutoff):
 
@@ -90,20 +167,22 @@ async def evaluate_with_cutoff_async(cutoff):
             if tasks:
                 done, pending = await asyncio.wait(tasks, timeout=0)
                 for d in done:
-                    rank = d.result()
-                    if rank:
+                    result = d.result()
+                    if result:
+                        rank = result[0]
                         recall_at_1.append(int(rank == 1))
                         recall_at_3.append(int(rank <= 3))
                         recall_at_10.append(int(rank <= 10))
                     pbar.update(1)
                 tasks = pending
 
-            tasks.add(asyncio.create_task(calculate_rank(crg_report_id, cutoff, client)))
+            tasks.add(asyncio.create_task(calculate_rank_score(crg_report_id, cutoff, client, fixed_k=10)))
 
         if tasks:
             for d in asyncio.as_completed(tasks):
-                rank = await d
-                if rank:
+                result = await d
+                if result:
+                    rank = result[0]
                     recall_at_1.append(int(rank == 1))
                     recall_at_3.append(int(rank <= 3))
                     recall_at_10.append(int(rank <= 10))
@@ -123,6 +202,64 @@ async def evaluate_with_cutoff_async(cutoff):
     
     return metrics
 
+def evaluate_with_cutoff(cutoff):
+    return asyncio.run(evaluate_with_cutoff_async(cutoff))
+
+async def evaluate_with_cutoff_async_(cutoff):
+
+    timeout = httpx.Timeout(
+        read=20.0,
+        connect=10.0,
+        write=30.0,
+        pool=30.0
+    )
+
+    limits = httpx.Limits(
+        max_keepalive_connections=20,
+        max_connections=50,
+        keepalive_expiry=30.0
+    )
+    
+    async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=timeout, limits=limits) as client:
+
+        response =  await client.get(f"{BACKEND_API}/reports", params={"date_from": cutoff, "date_to": cutoff})
+        current_crg_report_ids = [item['CRGReportID'] for item in response.json()]
+
+        pbar = tqdm(total=len(current_crg_report_ids))
+
+        tasks = set()
+
+        ranks = []
+        scores = []
+
+        for crg_report_id in current_crg_report_ids:
+            if tasks:
+                done, pending = await asyncio.wait(tasks, timeout=0)
+                for d in done:
+                    result = d.result()
+                    if result:
+                        ranks.append(result[0])
+                        scores.append(result[1])
+                    pbar.update(1)
+                tasks = pending
+
+            tasks.add(asyncio.create_task(calculate_rank_score_negative_hints(crg_report_id, cutoff, client)))
+
+        if tasks:
+            for d in asyncio.as_completed(tasks):
+                result = await d
+                if result:
+                    ranks.append(result[0])
+                    scores.append(result[1])
+                pbar.update(1)
+
+    print()
+    print(f"Total studies visited {sum(ranks)}")
+    print(f"Lowest rank for positive study {max(ranks)}")
+    print(f"Lowest score for positive study {min(scores)}")
+
+def evaluate_with_cutoff_(cutoff):
+    return asyncio.run(evaluate_with_cutoff_async_(cutoff))
 
 def run_integration_tests():
     """Run all integration tests and verify exact metric matches using integer counts"""
@@ -137,7 +274,7 @@ def run_integration_tests():
     # Define expected exact results (using integer counts)
     EXPECTED_RESULTS = {
         "5th update": {
-            'recall_at_1_count': 157,
+            'recall_at_1_count': 158,
             'recall_at_3_count': 176,
             'recall_at_10_count': 181,
             'total_count': 191
@@ -209,36 +346,18 @@ def run_integration_tests():
     
     return all_passed
 
-
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--ci":
         success = run_integration_tests()
         sys.exit(0 if success else 1)
     else:
+        #evaluate_with_cutoff_("2024-01-24 00:00:00")
         # Original behavior for manual testing
         print("Evaluate 5th update")
         evaluate_with_cutoff("2024-01-24 00:00:00") # 5th update
-        #expected
-        """
-        Recall@1  0.8219895287958116 (157/191)
-        Recall@3  0.9214659685863874 (176/191)
-        Recall@10 0.9476439790575916 (181/191)
-        """
 
         print("Evaluate 6th update")
         evaluate_with_cutoff("2024-07-26 00:00:00") # 6th update
-        #expected
-        """
-        Recall@1  0.8378378378378378 (186/222)
-        Recall@3  0.9279279279279279 (206/222)
-        Recall@10 0.9459459459459459 (210/222)
-        """
 
         print("Evaluate 7th update")
         evaluate_with_cutoff("2025-01-13 00:00:00") # 7th update
-        #expected
-        """
-        Recall@1  0.8053691275167785 (120/149)
-        Recall@3  0.8657718120805369 (129/149)
-        Recall@10 0.9060402684563759 (135/149)
-        """
