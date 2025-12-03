@@ -529,7 +529,7 @@ async def get_study_reports_by_ids_internal(study_ids: List[int], cutoff: str, f
         return await _get_study_reports_by_ids(study_ids, cutoff, fields, session)
 
 async def _get_study_reports_by_ids(study_ids: List[int], cutoff: str, fields: Optional[List[str]], session: AsyncSession) -> Dict[int, List[Report]]:
-    cutoff = cutoff or date.today().isoformat()
+    #cutoff = cutoff or date.today().isoformat()
 
     # If no fields are specified, select all columns from Report
     if fields is None:
@@ -550,11 +550,12 @@ async def _get_study_reports_by_ids(study_ids: List[int], cutoff: str, fields: O
     stmt = (
         select(StudyReport.CRGStudyID, *[getattr(Report, f) for f in selected_fields])
         .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
-        .where(
-            StudyReport.CRGStudyID.in_(study_ids),
-            Report.Dateentered < cutoff
-        )
+        .where(StudyReport.CRGStudyID.in_(study_ids))
     )
+
+    if cutoff:
+        stmt = stmt.where(Report.Dateentered < cutoff)
+
 
     rows = (await session.execute(stmt)).all()
 
