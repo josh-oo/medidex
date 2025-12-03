@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile
 from fastapi import Depends, HTTPException, Query, Path
 from fastapi.responses import FileResponse
 import os
@@ -278,6 +278,56 @@ async def get_pdf_by_report(report_id: int = report_id_path, session : AsyncSess
     if not os.path.exists(file_name):
         raise HTTPException(status_code=404, detail="PDF file not found.")
     return FileResponse(file_name, media_type="application/pdf")
+
+@router.put("/reports/pdf", summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
+async def uploaed_pdf(
+    file: UploadFile = File(..., description="PDF file to upload"),
+    session: AsyncSession = Depends(get_session)
+) -> Dict[str, Any]:
+    # Validate file is a PDF
+    if not file.content_type == "application/pdf":
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+    
+    # Extract report number from filename (e.g., "00123.pdf" -> 123)
+    filename = file.filename
+    if not filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="File must have .pdf extension")
+    
+    try:
+        report_number = int(filename.replace(".pdf", "").lstrip("0") or "0")
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Filename '{filename}' does not contain a valid report number")
+    
+    # Check if report number exists in database
+    stmt = select(Report.CRGReportID).where(Report.ReportNumber == report_number)
+    result = await session.execute(stmt)
+    report_id = result.scalar_one_or_none()
+    
+    if report_id is None:
+        raise HTTPException(status_code=404, detail=f"Report number {report_number} not found in database")
+    
+    # Ensure PDF directory exists
+    os.makedirs(PDF_PATH, exist_ok=True)
+    
+    # Use the original filename from the upload
+    file_path = os.path.join(PDF_PATH, filename)
+    
+    try:
+        async with write_lock:
+            with open(file_path, "wb") as f:
+                content = await file.read()
+                f.write(content)
+        
+        return {
+            "report_id": report_id,
+            "report_number": report_number,
+            "filename": filename,
+            "file_path": file_path,
+            "size_bytes": len(content)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save PDF: {str(e)}")
+    
 """
 Aspect Endpoints
 """
