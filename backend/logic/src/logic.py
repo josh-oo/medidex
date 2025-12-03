@@ -688,7 +688,7 @@ async def similar_studies(batch_hash: str = batch_hash_path, report_index: int =
     #authors = [item.strip() for item in report.Authors.split("//")]
     #trial_id = report.TrialRegistrationID
 
-    return await get_similar_studies_by_id(crg_report_id, aspect, cutoff, k, client, return_details)
+    return await get_similar_studies_by_id(crg_report_id, aspect, cutoff, k, None, client, return_details)
 
 async def get_similar_tags(embedding, sources: List[str], aspect: str, k: int, client=Depends(get_vectorstore)):
     
