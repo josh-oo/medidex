@@ -25,7 +25,6 @@ from sqlalchemy import event
 
 from .utils.database_models import Report, Study, StudyCondition, StudyDesign, StudyIntervention, StudyOutcome, StudyParticipant, StudyReport
 from .utils.database_models import Condition, Intervention, Design, Outcome, Participant
-from .utils.database_models import metadata_resources
 
 from .utils.pdf.processor import process_pdf
 from .utils.trial_registration_id import extract_trial_id
@@ -49,6 +48,27 @@ write_lock = asyncio.Lock()
 
 class ReportResponse(Report):
     PDFLinks: Optional[str] = None
+
+class StudyStatus(str, enum.Enum):
+    closed = "Closed"
+    stopped_early = "Stopped early"
+    open = "Open/Ongoing"
+    planned = "Planned"
+
+class CENTRALSubmissionStatus(str, enum.Enum):
+    accepted = "Accepted"
+    pending = "Pending"
+    rejected = "Rejected"
+    not_cochrane = "Not Cochrane"
+
+class StudyParams(BaseModel):
+    short_name: str
+    status_of_study: StudyStatus
+    countries: List[str]
+    central_submission_status :CENTRALSubmissionStatus
+    duration: str
+    number_of_participants : int
+    comparison : str
 
 async def get_session() -> AsyncSession:
     async with AsyncSession(engine) as session:
@@ -89,7 +109,7 @@ def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
 @router.on_event("startup")
 async def startup_event():
     async with engine.begin() as conn:
-        await conn.run_sync(metadata_resources.create_all)
+        #await conn.run_sync(metadata_resources.create_all)
         await conn.execute(text("PRAGMA journal_mode=WAL"))
         await conn.execute(text("PRAGMA synchronous=NORMAL"))
         await conn.execute(text("PRAGMA foreign_keys = ON;"))
@@ -117,27 +137,6 @@ report_id_path = Path(..., description="CRGReportIDs")
 Study Endpoints
 """
 
-class StudyStatus(str, enum.Enum):
-    closed = "Closed"
-    stopped_early = "Stopped early"
-    open = "Open/Ongoing"
-    planned = "Planned"
-
-class CENTRALSubmissionStatus(str, enum.Enum):
-    accepted = "Accepted"
-    pending = "Pending"
-    rejected = "Rejected"
-    not_cochrane = "Not Cochrane"
-
-class StudyParams(BaseModel):
-    short_name: str
-    status_of_study: StudyStatus
-    countries: List[str]
-    central_submission_status :CENTRALSubmissionStatus
-    duration: str
-    number_of_participants : int
-    comparison : str
-
 @router.put("/studies", summary="Add new study to meerkat.")
 async def add_study(study_params: StudyParams, session: AsyncSession = Depends(get_session)) -> Study:
     return await _add_study(study_params, session)
@@ -155,63 +154,75 @@ async def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str 
     return await _get_study_persons(study_ids,cutoff,normalize_names,session)
 
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
-async def get_studies_single(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> List[Study]:
-    stmt = select(Study).where(Study.CRGStudyID == study_id)
-    return (await session.execute(stmt)).first()
+async def get_study_by_id(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> Study:
+    study = await session.get(Study, study_id)
+    if study is None:
+        raise HTTPException(status_code=404, detail=f"Study {study_id} not found")
+    return study
 
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
-async def get_study_reports_by_id(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> List[ReportResponse]:
-    data = (await get_study_reports_by_ids(study_ids=[study_id], fields=None, cutoff=None, session=session))[study_id]
-    return data
+async def get_study_reports_by_id(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[ReportResponse]:
+    result = (await get_study_reports_by_ids(study_ids=[study.CRGStudyID], fields=None, cutoff=None, session=session))
+    if study.CRGStudyID in result:
+        return result[study.CRGStudyID]
+    raise []
 
 @router.get("/studies/{trial_id}/study_id", summary="Get the CRGStudyID given a matching trial registration id")
 async def get_study_id_by_trial_id(trial_id: str = Path(..., description="A regular trial id (e.g. ACTRN12605000202662, NCT00034892)"), cutoff: str = cutoff_query, session: AsyncSession = Depends(get_session)) -> List[int]:
-    result = (await _get_study_id_by_trial_ids([trial_id],cutoff,session))[trial_id]
-    return result
+    result = (await _get_study_id_by_trial_ids([trial_id],cutoff,session))
+    if trial_id in result:
+        return result[trial_id]
+    raise HTTPException(status_code=404, detail=f"Trial {trial_id} not found")
 
 @router.get("/studies/{study_id}/date_entered", summary="Get the date when the study was entered into the database")
 async def get_study_date_by_id(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> str:
     stmt = select(Study.DateEntered).where(Study.CRGStudyID == study_id)
-    return (await session.execute(stmt)).scalars().first()
+    result = (await session.execute(stmt)).scalar_one_or_none()
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Study {study_id} not found")
+    return result
 
 @router.get("/studies/{study_id}/interventions", summary="Get interventions for a specific study (e.g. 'Placebo', 'Group Therapy', ...)")
-async def get_study_interventions_single(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)):
-    result = await get_study_interventions(study_ids=[study_id], session=session)
-    if study_id in result.keys():
-        return result[study_id]
-    return None
+async def get_study_interventions_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
+    result = await get_study_interventions(study_ids=[study.CRGStudyID], session=session)
+    if study.CRGStudyID in result.keys():
+        return result[study.CRGStudyID]
+    raise []
 
 @router.get("/studies/{study_id}/conditions", summary="Get the health conditions of participants in a specific study (e.g., 'COVID-19', 'Diabetes', ...).")
-async def get_study_conditions_single(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)):
-    result =await get_study_conditions(study_ids=[study_id], session=session)
-    if study_id in result.keys():
-        return result[study_id]
-    return None
+async def get_study_conditions_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
+    result =await get_study_conditions(study_ids=[study.CRGStudyID], session=session)
+    if study.CRGStudyID in result.keys():
+        return result[study.CRGStudyID]
+    raise []
 
 @router.get("/studies/{study_id}/outcomes", summary="Get outcomes for a specific study (e.g. 'Mortality', 'Hospitalization', ...)")
-async def get_study_outcomes_single(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)):
-    result =await get_study_outcomes(study_ids=[study_id], session=session)
-    if study_id in result.keys():
-        return result[study_id]
-    return None
+async def get_study_outcomes_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
+    result =await get_study_outcomes(study_ids=[study.CRGStudyID], session=session)
+    if study.CRGStudyID in result.keys():
+        return result[study.CRGStudyID]
+    raise []
 
 @router.get("/studies/{study_id}/participants", summary="Get participant description for a specific study (e.g. Male, Female, Adult, Child, ...)")
-async def get_study_participants_single(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> Optional[List[str]]:
-    result = await get_study_participants(study_ids=[study_id], session=session)
-    if study_id in result.keys():
-        return result[study_id]
-    return None
+async def get_study_participants_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
+    result = await get_study_participants(study_ids=[study.CRGStudyID], session=session)
+    if study.CRGStudyID in result.keys():
+        return result[study.CRGStudyID]
+    raise []
 
 @router.get("/studies/{study_id}/design", summary="Get the study design of the corresponding study ('Randomized Controlled Trial', 'Controlled Clinical Trial')")
-async def get_study_design_single(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> Optional[List[str]]:
-    result = await get_study_design(study_ids=[study_id], session=session)
-    if study_id in result.keys():
-        return result[study_id]
-    return None
+async def get_study_design_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
+    result = await get_study_design(study_ids=[study.CRGStudyID], session=session)
+    if study.CRGStudyID in result.keys():
+        return result[study.CRGStudyID]
+    raise []
 
 @router.get("/studies/{study_id}/persons", summary="Get all persons (usually only authors) associated with a specific study")
-async def get_study_persons_single(study_id: int = study_id_path, cutoff: str = cutoff_query, session: AsyncSession = Depends(get_session)) -> Dict[int, List[str]]:
-    return await get_study_persons(study_ids=[study_id], cutoff=cutoff, session=session)
+async def get_study_persons_single(study: Study = Depends(get_study_by_id), cutoff: str = cutoff_query, session: AsyncSession = Depends(get_session)) -> List[str]:
+    result = await get_study_persons(study_ids=[study.CRGStudyID], cutoff=cutoff, session=session)
+    if study.CRGStudyID in result:
+        return result[study.CRGStudyID]
+    return []
 
 
 """
@@ -233,64 +244,7 @@ async def get_all_reports(
         stmt = stmt.where(Report.Dateentered >= date_from)
     if date_to:
         stmt = stmt.where(Report.Dateentered <= date_to)
-    return (await session.execute(stmt)).scalars().all()
-
-@router.get("/reports/pdf_number", include_in_schema=False)
-async def get_pdf_numbers_by_report_ids(report_ids: List[int] = report_ids_query, session: AsyncSession = Depends(get_session)) -> Dict[int, int]:
-    stmt = select(Report.CRGReportID, Report.ReportNumber).where(Report.CRGReportID.in_(report_ids))
-    rows = (await session.execute(stmt)).all()
-    return {row[0]: row[1] for row in rows}
-
-@router.get("/reports/{report_id}", summary="Get details for a specific report.")
-async def get_reports_by_id(report_id: int = report_id_path, session: AsyncSession = Depends(get_session)) -> Report:
-    return await _get_report_by_id(report_id, session)
-
-@router.get("/reports/{report_id}/studies", summary="Get the studies linked to this specific report.")
-async def get_report_studies_by_id(
-    report_id: int = report_id_path,
-    date_from: Optional[str] = Query(None, description="Filter studies with DateEntered >= this ISO datetime (e.g. '2025-01-13 00:00:00')"),
-    date_to: Optional[str] = Query(None, description="Filter studies with DateEntered <= this ISO datetime (e.g. '2025-01-31 23:59:59')"),
-    session: AsyncSession = Depends(get_session)
-) -> List[Study]:
-    return await _get_report_studies_by_id(report_id, session, date_from, date_to)
-
-@router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
-async def get_pdf_number_by_report_id(report_id: int = report_id_path, session: AsyncSession = Depends(get_session)) -> int:
-    return (await get_pdf_numbers_by_report_ids(report_ids=[report_id], session=session))[report_id]
-
-@router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
-async def get_pdf(report_number = Depends(get_pdf_number_by_report_id)) -> FileResponse:
-    pdf_name = str(report_number).zfill(5) + ".pdf"
-    file_name = os.path.join(PDF_PATH, pdf_name)
-
-    if not os.path.exists(file_name):
-        raise HTTPException(status_code=404, detail="PDF file not found.")
-    return FileResponse(file_name, media_type="application/pdf")
-
-@router.get("/reports/{report_id}/pdf/metadata", summary="Get pdf metadata.")
-async def get_pdf_metadata(report_number = Depends(get_pdf_number_by_report_id)) -> FileResponse:
-    report_number = str(report_number).zfill(5) 
-    file_name_json = os.path.join(METADATA_PATH, report_number + ".json")
-    file_name_pdf = os.path.join(PDF_PATH, report_number + ".pdf")
-
-    if os.path.exists(file_name_json):
-        with open(file_name_json, "r") as f:
-            return json.load(f)
-    elif os.path.exists(file_name_pdf ):
-        return await process_pdf(PDF_PATH, METADATA_PATH, report_number)
-    raise HTTPException(status_code=404, detail="PDF file not found.")
-
-@router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
-async def get_report_trial_ids(report = Depends(get_reports_by_id), include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search.")) -> List[str]:
-    if not report:
-        raise HTTPException(status_code=404, detail="Report not found.")
-    if include_fulltext:
-        meta_data = await get_pdf_metadata(report.ReportNumber)
-        return meta_data['trial_id']
-    authors = [item.strip() for item in report.Authors.split("//")]
-    all_ids = extract_trial_id(report.Title, report.Abstract, authors)
-    return all_ids
-
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 @router.put("/reports/pdf", summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
 async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to upload"), session: AsyncSession = Depends(get_session)) -> Dict[str, Any]:
@@ -337,6 +291,65 @@ async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to uplo
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save PDF: {str(e)}")
+
+@router.get("/reports/pdf_number", include_in_schema=False)
+async def get_pdf_numbers_by_report_ids(report_ids: List[int] = report_ids_query, session: AsyncSession = Depends(get_session)) -> Dict[int, int]:
+    stmt = select(Report.CRGReportID, Report.ReportNumber).where(Report.CRGReportID.in_(report_ids))
+    rows = (await session.execute(stmt)).all()
+    return {row[0]: row[1] for row in rows}
+
+@router.get("/reports/{report_id}", summary="Get details for a specific report.")
+async def get_reports_by_id(report_id: int = report_id_path, session: AsyncSession = Depends(get_session)) -> Report:
+    return await _get_report_by_id(report_id, session)
+
+@router.get("/reports/{report_id}/studies", summary="Get the studies linked to this specific report.")
+async def get_report_studies_by_id(
+    report_id: int = report_id_path,
+    date_from: Optional[str] = Query(None, description="Filter studies with DateEntered >= this ISO datetime (e.g. '2025-01-13 00:00:00')"),
+    date_to: Optional[str] = Query(None, description="Filter studies with DateEntered <= this ISO datetime (e.g. '2025-01-31 23:59:59')"),
+    session: AsyncSession = Depends(get_session)
+) -> List[Study]:
+    return await _get_report_studies_by_id(report_id, session, date_from, date_to)
+
+@router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
+async def get_pdf_number_by_report_id(report_id: int = report_id_path, session: AsyncSession = Depends(get_session)) -> int:
+    result = await get_pdf_numbers_by_report_ids(report_ids=[report_id], session=session)
+    if report_id not in result:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+    return result[report_id]
+
+@router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
+async def get_pdf(report_number = Depends(get_pdf_number_by_report_id)) -> FileResponse:
+    pdf_name = str(report_number).zfill(5) + ".pdf"
+    file_name = os.path.join(PDF_PATH, pdf_name)
+
+    if not os.path.exists(file_name):
+        raise HTTPException(status_code=404, detail="PDF file not found.")
+    return FileResponse(file_name, media_type="application/pdf")
+
+@router.get("/reports/{report_id}/pdf/metadata", summary="Get pdf metadata.")
+async def get_pdf_metadata(report_number = Depends(get_pdf_number_by_report_id)) -> FileResponse:
+    report_number = str(report_number).zfill(5) 
+    file_name_json = os.path.join(METADATA_PATH, report_number + ".json")
+    file_name_pdf = os.path.join(PDF_PATH, report_number + ".pdf")
+
+    if os.path.exists(file_name_json):
+        with open(file_name_json, "r") as f:
+            return json.load(f)
+    elif os.path.exists(file_name_pdf ):
+        return await process_pdf(PDF_PATH, METADATA_PATH, report_number)
+    raise HTTPException(status_code=404, detail="PDF file not found.")
+
+@router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
+async def get_report_trial_ids(report = Depends(get_reports_by_id), include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search.")) -> List[str]:
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found.")
+    if include_fulltext:
+        meta_data = await get_pdf_metadata(report.ReportNumber)
+        return meta_data['trial_id']
+    authors = [item.strip() for item in report.Authors.split("//")]
+    all_ids = extract_trial_id(report.Title, report.Abstract, authors)
+    return all_ids
     
 """
 Aspect Endpoints
@@ -562,10 +575,7 @@ async def _get_study_reports_by_ids(study_ids: List[int], cutoff: str, fields: O
         report_columns = {col.name for col in Report.__table__.columns}
         invalid_fields = [f for f in fields if f not in report_columns]
         if invalid_fields:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid field(s): {', '.join(invalid_fields)}"
-            )
+            raise HTTPException(status_code=400,detail=f"Invalid field(s): {', '.join(invalid_fields)}")
         selected_fields = fields
 
     # --- Optimized Query ---
@@ -864,6 +874,10 @@ async def get_report_studies_by_id_internal(report_id, date_from=None, date_to=N
         return await _get_report_studies_by_id(report_id, session, date_from, date_to)
 
 async def _get_report_studies_by_id(report_id, session, date_from=None, date_to=None):
+    report = await session.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+    
     stmt = (
         select(Study)
         .join(StudyReport, StudyReport.CRGStudyID == Study.CRGStudyID)
