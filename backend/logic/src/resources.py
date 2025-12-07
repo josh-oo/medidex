@@ -13,7 +13,6 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
 
-from datetime import date
 import re
 import json
 import asyncio
@@ -28,7 +27,11 @@ from .utils.database_models import Report, Study, StudyCondition, StudyDesign, S
 from .utils.database_models import Condition, Intervention, Design, Outcome, Participant
 from .utils.database_models import metadata_resources
 
+from .utils.pdf.processor import process_pdf
+from .utils.trial_registration_id import extract_trial_id
+
 from datetime import datetime, timezone
+import unicodedata
 
 load_dotenv()
 
@@ -38,6 +41,7 @@ router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified_api_cal
 
 DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"resources","meerkat.db")
 PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
+METADATA_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdf_metadata")
 
 engine = create_async_engine(DATABASE_URL, echo=True)
 
@@ -104,7 +108,7 @@ def convert_to_id_based_dict(rows, multi_values=True):
     return result
 
 cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
-study_ids_query =  Query(..., description="List of CRGStudyIDs (used to filter your results)")
+study_ids_query =  Query(None, description="List of CRGStudyIDs (used to filter your results)")
 study_id_path = Path(..., description="CRGStudyID")
 report_ids_query = Query(None, description="List of CRGReportIDs (used to filter your results)")
 report_id_path = Path(..., description="CRGReportIDs")
@@ -147,8 +151,8 @@ async def get_study_reports_by_ids(study_ids: List[int] = study_ids_query, cutof
     return await _get_study_reports_by_ids(study_ids, cutoff, fields, session)
 
 @router.get("/studies/persons", include_in_schema=False)
-async def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, session: AsyncSession = Depends(get_session)) -> Dict[int, List[str]]:
-    return await _get_study_persons(study_ids,cutoff,session)
+async def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, normalize_names = Query(False), session: AsyncSession = Depends(get_session)) -> Dict[int, List[str]]:
+    return await _get_study_persons(study_ids,cutoff,normalize_names,session)
 
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
 async def get_studies_single(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> List[Study]:
@@ -156,27 +160,13 @@ async def get_studies_single(study_id: int = study_id_path, session: AsyncSessio
     return (await session.execute(stmt)).first()
 
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
-async def get_study_reports_by_id(study_id: int = study_id_path, include_pdf_links : bool = Query(None), session: AsyncSession = Depends(get_session)) -> List[ReportResponse]:
+async def get_study_reports_by_id(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> List[ReportResponse]:
     data = (await get_study_reports_by_ids(study_ids=[study_id], fields=None, cutoff=None, session=session))[study_id]
-    if not include_pdf_links:
-        return data
-
-    pdf_numbers = {item['CRGReportID']:item['ReportNumber'] for item in data}
-    
-    pdf_links = get_pdf_links_by_report_numbers(pdf_numbers)
-
-    for i in range(0, len(data)):
-        key = data[i]['CRGReportID']
-        if key in pdf_links.keys():
-            data[i]['PDFLinks'] = pdf_links[key]
-        else:
-            data[i]['PDFLinks'] = None
-
     return data
 
 @router.get("/studies/{trial_id}/study_id", summary="Get the CRGStudyID given a matching trial registration id")
 async def get_study_id_by_trial_id(trial_id: str = Path(..., description="A regular trial id (e.g. ACTRN12605000202662, NCT00034892)"), cutoff: str = cutoff_query, session: AsyncSession = Depends(get_session)) -> List[int]:
-    result = await _get_study_id_by_trial_id(trial_id,cutoff,session)
+    result = (await _get_study_id_by_trial_ids([trial_id],cutoff,session))[trial_id]
     return result
 
 @router.get("/studies/{study_id}/date_entered", summary="Get the date when the study was entered into the database")
@@ -269,9 +259,7 @@ async def get_pdf_number_by_report_id(report_id: int = report_id_path, session: 
     return (await get_pdf_numbers_by_report_ids(report_ids=[report_id], session=session))[report_id]
 
 @router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
-async def get_pdf_by_report(report_id: int = report_id_path, session : AsyncSession = Depends(get_session)) -> FileResponse:
-
-    report_number = (await get_pdf_numbers_by_report_ids(report_ids=[report_id], session=session))[report_id]
+async def get_pdf(report_number = Depends(get_pdf_number_by_report_id)) -> FileResponse:
     pdf_name = str(report_number).zfill(5) + ".pdf"
     file_name = os.path.join(PDF_PATH, pdf_name)
 
@@ -279,11 +267,33 @@ async def get_pdf_by_report(report_id: int = report_id_path, session : AsyncSess
         raise HTTPException(status_code=404, detail="PDF file not found.")
     return FileResponse(file_name, media_type="application/pdf")
 
+@router.get("/reports/{report_id}/pdf/metadata", summary="Get pdf metadata.")
+async def get_pdf_metadata(report_number = Depends(get_pdf_number_by_report_id)) -> FileResponse:
+    report_number = str(report_number).zfill(5) 
+    file_name_json = os.path.join(METADATA_PATH, report_number + ".json")
+    file_name_pdf = os.path.join(PDF_PATH, report_number + ".pdf")
+
+    if os.path.exists(file_name_json):
+        with open(file_name_json, "r") as f:
+            return json.load(f)
+    elif os.path.exists(file_name_pdf ):
+        return await process_pdf(PDF_PATH, METADATA_PATH, report_number)
+    raise HTTPException(status_code=404, detail="PDF file not found.")
+
+@router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
+async def get_report_trial_ids(report = Depends(get_reports_by_id), include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search.")) -> List[str]:
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found.")
+    if include_fulltext:
+        meta_data = await get_pdf_metadata(report.ReportNumber)
+        return meta_data['trial_id']
+    authors = [item.strip() for item in report.Authors.split("//")]
+    all_ids = extract_trial_id(report.Title, report.Abstract, authors)
+    return all_ids
+
+
 @router.put("/reports/pdf", summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
-async def uploaed_pdf(
-    file: UploadFile = File(..., description="PDF file to upload"),
-    session: AsyncSession = Depends(get_session)
-) -> Dict[str, Any]:
+async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to upload"), session: AsyncSession = Depends(get_session)) -> Dict[str, Any]:
     # Validate file is a PDF
     if not file.content_type == "application/pdf":
         raise HTTPException(status_code=400, detail="File must be a PDF")
@@ -317,7 +327,7 @@ async def uploaed_pdf(
             with open(file_path, "wb") as f:
                 content = await file.read()
                 f.write(content)
-        
+        process_pdf(file_path)
         return {
             "report_id": report_id,
             "report_number": report_number,
@@ -418,18 +428,28 @@ def normalize_author_names(authors: List[str]) -> List[str]:
 
         return list(set(processed_authors))
     
-    def normalize_author_names(name):  
-        name = re.sub(r'\bvan\b\s+\bden\b', 'Van Den', name, flags=re.IGNORECASE)     
-        name = re.sub(r'(?<=\b[A-Z])-(?=[A-Z]\b)', '', name)
+    def normalize_author_name(name):
+        # Basic prep
+        name = name.strip()
+        name = unicodedata.normalize('NFKC', name)
 
-        name_check = re.match(r"\b([A-Z][a-z]+ )+[A-Z]+\b", name)
-
-        if not name_check:
+        if re.search(r'\d', name):
             return None
+
+        # Transform: Remove everything except letters
+        clean_name = re.sub(r'[^a-zA-Z]', '', name)
+
+        if not clean_name:
+            return None
+
+        # Validate: Start Upper, End Upper, Contains Lower
+        if (clean_name[0].isupper() and 
+            clean_name[-1].isupper() and 
+            any(c.islower() for c in clean_name)):
+            
+            return clean_name
         
-        #name = name.split()
-        #name = name[0] + " " + name[0][0] #if there are multiple initials just use the first one
-        return name#.lower()
+        return None
 
     normalized_authors = []
     for author in authors:
@@ -437,7 +457,7 @@ def normalize_author_names(authors: List[str]) -> List[str]:
         if author in trial_person_mapping:
             current_authors = get_person_from_trial_id(author)
         for current_author in current_authors:
-            normalized_author = normalize_author_names(current_author)
+            normalized_author = normalize_author_name(current_author)
             if normalized_author:
                 normalized_authors.append(normalized_author)
     
@@ -450,6 +470,8 @@ def get_author_frequencies(authors: List[str]) -> Dict[str, int]:
     for author in normalized_author_names:
         if author in author_frequencies:
             result[author] = author_frequencies[author]
+        else:
+            result[author] = 1
 
     return result
 
@@ -550,8 +572,10 @@ async def _get_study_reports_by_ids(study_ids: List[int], cutoff: str, fields: O
     stmt = (
         select(StudyReport.CRGStudyID, *[getattr(Report, f) for f in selected_fields])
         .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
-        .where(StudyReport.CRGStudyID.in_(study_ids))
     )
+
+    if study_ids:
+        stmt = stmt.where(StudyReport.CRGStudyID.in_(study_ids))
 
     if cutoff:
         stmt = stmt.where(Report.Dateentered < cutoff)
@@ -566,18 +590,18 @@ async def _get_study_reports_by_ids(study_ids: List[int], cutoff: str, fields: O
         grouped.setdefault(study_id, []).append(report_data)
     return grouped
 
-async def get_study_persons_internal(study_ids: List[int], cutoff: str):
+async def get_study_persons_internal(study_ids: List[int], cutoff: str, normalize_names : bool):
     async with AsyncSession(engine) as session:
-        return await _get_study_persons(study_ids, cutoff, session)
+        return await _get_study_persons(study_ids, cutoff, normalize_names, session)
 
-async def _get_study_persons(study_ids: List[int], cutoff: str, session: AsyncSession) -> Dict[int, List[str]]:
-    cutoff_date = cutoff or date.today().isoformat()
-
+async def _get_study_persons(study_ids: List[int], cutoff: str, normalize_names : bool, session: AsyncSession) -> Dict[int, List[str]]:
     stmt = (
         select(StudyReport.CRGStudyID.label("StudyID"), Report.Authors)
         .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
-        .where(Report.Dateentered < cutoff_date)
     )
+
+    if cutoff:
+        stmt = stmt.where(Report.Dateentered < cutoff)
 
     if study_ids is not None:
         stmt = stmt.where(StudyReport.CRGStudyID.in_(study_ids))
@@ -591,66 +615,74 @@ async def _get_study_persons(study_ids: List[int], cutoff: str, session: AsyncSe
         key = item[0]
         value = item[1]
         authors = [author.strip() for author in value.split("//")]
-        normalized_authors = normalize_author_names(authors=authors)
+        if normalize_names:
+            authors = normalize_author_names(authors=authors)
 
-        final_result[key] = normalized_authors
+        final_result[key] = authors
 
     return final_result
 
-async def get_study_id_by_trial_id_internal(trial_id: str, cutoff: str) -> List[int]:
+async def get_study_id_by_trial_ids_internal(trial_id: List[str], cutoff: str) ->  Dict[str, List[int]]:
     async with AsyncSession(engine) as session:
-        return await _get_study_id_by_trial_id(trial_id,cutoff, session)
+        return await _get_study_id_by_trial_ids(trial_id,cutoff, session)
 
-async def _get_study_id_by_trial_id(trial_id: str, cutoff: str, session: AsyncSession) -> List[int]:
-    
-    cutoff = cutoff or date.today().isoformat()
+async def _get_study_id_by_trial_ids(trial_ids: List[str], cutoff: str, session: AsyncSession) -> Dict[str, List[int]]:
+    trial_ids_norm = [trial_id.replace("/", "-") for trial_id in trial_ids]
+    result_map = {}
 
-    trial_id = trial_id.replace("/", "-")
-    alternative_ids = []
-    if trial_id in trial_id_mapping:
-        alternative_ids = trial_id_mapping[trial_id]
+    for orig_trial_id, trial_id in zip(trial_ids, trial_ids_norm):
+        alternative_ids = [trial_id]
+        if trial_id in trial_id_mapping.keys():
+            alternative_ids.extend(trial_id_mapping[trial_id])
+        alternative_ids = [current_id.replace("/", "-") for current_id in alternative_ids]
 
-    alternative_ids += [trial_id]
-    alternative_ids = [current_id.replace("/", "-") for current_id in alternative_ids]
+        # Build dynamic LIKE conditions for Authors
+        authors_filter = func.replace(Report.Authors, "/", "-").like(f"%{alternative_ids[0]}%")
+        for current_id in alternative_ids[1:]:
+            authors_filter = authors_filter | func.replace(Report.Authors, "/", "-").like(f"%{current_id}%")
 
-    # --- First query: tblStudy ---
-    stmt_study = select(func.distinct(Study.CRGStudyID)).where(
-        (func.replace(Study.ShortName, "/", "-").in_(alternative_ids)) |
-        (func.replace(Study.TrialRegistrationID, "/", "-").in_(alternative_ids)),
-        Study.DateEntered < cutoff
-    )
+        trial_filter = func.replace(Report.TrialRegistrationID, "/", "-").in_(alternative_ids)
 
-    rows_study = (await session.execute(stmt_study)).scalars().all()
-    
-
-    # --- Second query: tblStudyReport JOIN tblReport ---
-    # Build dynamic LIKE conditions for Authors
-    authors_filter = func.replace(Report.Authors, "/", "-").like(f"%{trial_id}%")
-    for current_id in alternative_ids[1:]:
-        authors_filter = authors_filter | func.replace(Report.Authors, "/", "-").like(f"%{current_id}%")
-
-    trial_filter = func.replace(Report.TrialRegistrationID, "/", "-").in_(alternative_ids)
-
-    stmt_reports = (
-        select(func.distinct(StudyReport.CRGStudyID))
-        .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
-        .where(
-            (authors_filter | trial_filter),
-            Report.Dateentered < cutoff
+        stmt_study = select(Study.CRGStudyID, text("'study' as source")).where(
+            (Study.ShortName.in_(alternative_ids)) |
+            (Study.TrialRegistrationID.in_(alternative_ids))
         )
-    )
 
-    rows_reports = (await session.execute(stmt_reports)).scalars().all()
-    rows_study.extend(rows_reports)
+        stmt_reports = (
+            select(StudyReport.CRGStudyID, text("'report' as source"))
+            .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
+            .where(authors_filter | trial_filter)
+        )
 
-    return list(set(rows_study))
+        if cutoff is not None:
+            stmt_study = stmt_study.where(Study.DateEntered < cutoff)
+            stmt_reports = stmt_reports.where(Report.Dateentered < cutoff)
+
+        combined_stmt = stmt_study.union_all(stmt_reports)
+        rows = (await session.execute(combined_stmt)).all()  # [(CRGStudyID, source), ...]
+
+        # Sort: 'study' source first, then 'report'
+        sorted_rows = sorted(rows, key=lambda x: 0 if x[1] == 'study' else 1)
+
+        # Remove duplicates, preserving order (study > report)
+        seen = set()
+        ordered_ids = []
+        for study_id, _ in sorted_rows:
+            if study_id not in seen:
+                seen.add(study_id)
+                ordered_ids.append(study_id)
+        result_map[orig_trial_id] = ordered_ids
+
+    return result_map
 
 async def get_studies_internal(study_ids):
     async with AsyncSession(engine) as session:
         return await _get_studies(study_ids, session)
 
 async def _get_studies(study_ids, session):
-    stmt = select(Study).where(Study.CRGStudyID.in_(study_ids))
+    stmt = select(Study)
+    if study_ids:
+        stmt = stmt.where(Study.CRGStudyID.in_(study_ids))
     return (await session.execute(stmt)).scalars().all()
 
 async def add_study_internal(study_params):
@@ -736,8 +768,10 @@ async def _get_study_outcomes(study_ids: List[int] = study_ids_query, session: A
             Outcome.OutcomeDescription.label("Description"),
         )
         .join(Outcome, Outcome.OutcomeID == StudyOutcome.OutcomeID)
-        .where(StudyOutcome.CRGStudyID.in_(study_ids))
     )
+
+    if study_ids:
+        stmt = stmt.where(StudyOutcome.CRGStudyID.in_(study_ids))
 
     return await _get_study_aspect(stmt,session)
 
@@ -749,8 +783,10 @@ async def _get_study_design(study_ids: List[int], session: AsyncSession) -> Dict
     stmt = (
         select(StudyDesign.CRGStudyID, Design.DesignDescription)
         .join(Design, Design.DesignID == StudyDesign.DesignID)
-        .where(StudyDesign.CRGStudyID.in_(study_ids))
     )
+
+    if study_ids:
+        stmt = stmt.where(StudyDesign.CRGStudyID.in_(study_ids))
 
     rows = (await session.execute(stmt)).all()  # list of tuples [(StudyID, DesignDescription), ...]
 
@@ -769,8 +805,10 @@ async def _get_study_participants(study_ids: List[int], session: AsyncSession) -
     stmt = (
         select(StudyParticipant.CRGStudyID, Participant.ParticipantDescription)
         .join(Participant, Participant.ParticipantsID == StudyParticipant.ParticipantsID)
-        .where(StudyParticipant.CRGStudyID.in_(study_ids))
     )
+
+    if study_ids:
+        stmt = stmt.where(StudyParticipant.CRGStudyID.in_(study_ids))
 
     rows = (await session.execute(stmt)).all()  # list of tuples [(StudyID, ParticipantDescription), ...]
 
@@ -817,6 +855,8 @@ async def get_report_by_id_internal(report_id):
 
 async def _get_report_by_id(report_id, session):
     result = await session.get(Report, report_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
     return result
 
 async def get_report_studies_by_id_internal(report_id, date_from=None, date_to=None):

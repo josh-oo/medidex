@@ -7,6 +7,7 @@ from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.models import Filter, FieldCondition, DatetimeRange
 from qdrant_client.http.models import PointStruct
 from typing import Dict, List, Optional,  Any
+import math
 import os
 
 from datetime import datetime
@@ -22,7 +23,7 @@ import io
 
 from datetime import datetime, timezone
 
-from .utils.trial_registration_id import extract_trial_registration_ids
+from .utils.trial_registration_id import extract_trial_id
 from .utils.vectorstore import transform_to_uuid, get_vectors_by_crg_report_id, delete_vectors_by_crg_report_ids
 from .utils.embedding import _embed_aspect, _embed_report
 
@@ -33,11 +34,12 @@ import enum
 
 from .auth import is_verified_api_call
 
-from .resources import get_study_id_by_trial_id_internal, get_studies_internal, get_study_persons_internal, get_author_frequencies
+from .resources import get_study_id_by_trial_ids_internal, get_studies_internal, get_study_persons_internal, get_author_frequencies
 from .resources import get_study_interventions_internal , get_study_conditions_internal, get_study_outcomes_internal, get_study_participants_internal, get_study_design_internal
 from .resources import get_all_interventions_internal, get_all_conditions_internal, get_all_outcomes_internal, get_study_reports_by_ids_internal
 from .resources import add_new_report, delete_reports_by_ids, get_report_studies_by_id_internal, get_report_by_id_internal
 from .resources import add_report_studies_by_id_internal, delete_report_studies_by_id_internal
+from .resources import get_pdf_metadata, get_report_trial_ids
 
 from sqlmodel import select, delete, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -127,6 +129,7 @@ class RawReport(BaseModel):
     authors: Optional[List[str]]
 
 class TagCategories(str, enum.Enum):
+    default = 'default'
     interventions = 'interventions'
     conditions = 'conditions'
     outcomes = 'outcomes'
@@ -161,9 +164,9 @@ async def process_report(report, batch_hash, index, vectorstore):
     abstract = report['abstract']
     authors = report['authors']
     
-    raw_report = RawReport(title=title, abstract=abstract, authors=authors)
-    trial_registration_id = extract_trial_id(raw_report)
-    report['trial_registration_id'] = trial_registration_id
+    trial_registration_id = extract_trial_id(title=title, abstract=abstract, authors=authors)
+    if len(trial_registration_id) == 1:
+        report['trial_registration_id'] = trial_registration_id
 
     text_to_process = []
     if title:
@@ -529,8 +532,7 @@ async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSes
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-@router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified_api_call)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
-async def get_batched_report(batch_hash: str, report_index: int, db: AsyncSession = Depends(get_session), vectorstore: AsyncQdrantClient = Depends(get_vectorstore)):
+async def batch_hash_id_to_crg_report_id(batch_hash: str = batch_hash_path, report_index: int = report_index_path, db : AsyncSession = Depends(get_session)):
     stmt = (
         select(TmpReport.CRGReportID)
         .where(
@@ -541,14 +543,20 @@ async def get_batched_report(batch_hash: str, report_index: int, db: AsyncSessio
     )
 
     result = await db.execute(stmt)
-    crg_report_id = result.scalar_one_or_none()  # gets the TmpReport object directly
+    crg_report_id = result.scalar_one_or_none()
+    if not crg_report_id:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return crg_report_id
+
+@router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified_api_call)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
+async def get_batched_report(vectorstore: AsyncQdrantClient = Depends(get_vectorstore), crg_report_id= Depends(batch_hash_id_to_crg_report_id)):
 
     if not crg_report_id:
         return None  # or raise 404
 
     # Run DB/vectorstore calls in parallel
-    report_task = get_report_by_id_internal(crg_report_id)
     vectors_task = get_vectors_by_crg_report_id(crg_report_id, vectorstore, COLLECTION_NAME)
+    report_task = get_report_by_id_internal(crg_report_id)
     assigned_studies_task = get_report_studies_by_id_internal(crg_report_id)
 
     report_obj, vectors, assigned_studies = await asyncio.gather(
@@ -575,21 +583,8 @@ async def get_batched_report(batch_hash: str, report_index: int, db: AsyncSessio
 
     return report
 
-
 @router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=200)
-async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), db : AsyncSession = Depends(get_session), vectorstore: AsyncQdrantClient = Depends(get_vectorstore)):
-    stmt = (
-        select(TmpReport.CRGReportID)
-        .where(
-            TmpReport.batch_hash == batch_hash,
-            TmpReport.batch_inner_id == report_index
-        )
-        .limit(1)
-    )
-
-    result = await db.execute(stmt)
-    crg_report_id = result.scalar_one_or_none()
-
+async def assign_studies(batch_hash: str = batch_hash_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), vectorstore: AsyncQdrantClient = Depends(get_vectorstore), crg_report_id= Depends(batch_hash_id_to_crg_report_id)):
     await add_report_studies_by_id_internal(crg_report_id, study_ids)
 
     await vectorstore.set_payload(
@@ -602,21 +597,10 @@ async def assign_studies(batch_hash: str = batch_hash_path, report_index: int = 
 
     await publish_batch_update(batch_hash)
 
-    return await get_batched_report(batch_hash, report_index, db, vectorstore)
+    return await get_batched_report(vectorstore, crg_report_id)
 
 @router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=200)
-async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, db : AsyncSession = Depends(get_session), vectorstore: AsyncQdrantClient = Depends(get_vectorstore)):
-    stmt = (
-        select(TmpReport.CRGReportID)
-        .where(
-            TmpReport.batch_hash == batch_hash,
-            TmpReport.batch_inner_id == report_index
-        )
-        .limit(1)
-    )
-
-    result = await db.execute(stmt)
-    crg_report_id = result.scalar_one_or_none()
+async def delete_assigned_studies(batch_hash: str = batch_hash_path, vectorstore: AsyncQdrantClient = Depends(get_vectorstore), crg_report_id= Depends(batch_hash_id_to_crg_report_id)):
 
     await delete_report_studies_by_id_internal(crg_report_id)
 
@@ -630,26 +614,12 @@ async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_inde
 
     await publish_batch_update(batch_hash)
 
-    return await get_batched_report(batch_hash, report_index, db, vectorstore)
+    return await get_batched_report(vectorstore, crg_report_id)
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
-async def similar_tags(batch_hash: str = batch_hash_path, report_index: int = report_index_path, sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(None, description="The tag category which you are interested in"), k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_session)) -> List[TagResponse]:
-    stmt = (
-        select(TmpReport.CRGReportID)
-        .where(
-            TmpReport.batch_hash == batch_hash,
-            TmpReport.batch_inner_id == report_index
-        )
-        .limit(1)
-    )
+async def similar_tags(sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(None, description="The tag category which you are interested in"), k : int = k_query, client=Depends(get_vectorstore), crg_report_id= Depends(batch_hash_id_to_crg_report_id)) -> List[TagResponse]:
 
-    result = await db.execute(stmt)
-    row = result.first()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Report not found")
-
-    vectors = await get_vectors_by_crg_report_id(row[0], client, COLLECTION_NAME)
+    vectors = await get_vectors_by_crg_report_id(crg_report_id, client, COLLECTION_NAME)
 
     vector_names = {'interventions': 'intervention', 'conditions': 'condition', 'outcomes': 'outcome'}
 
@@ -664,29 +634,7 @@ async def similar_tags(batch_hash: str = batch_hash_path, report_index: int = re
     return result
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
-async def similar_studies(batch_hash: str = batch_hash_path, report_index: int = report_index_path, aspect: TagCategories = Query(None, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, client=Depends(get_vectorstore), db = Depends(get_session), return_details=False):
-    if not aspect:
-        aspect = "default"
-    
-    stmt = (
-        select(TmpReport.CRGReportID)
-        .where(
-            TmpReport.batch_hash == batch_hash,
-            TmpReport.batch_inner_id == report_index
-        )
-        .limit(1)
-    )
-
-    result = await db.execute(stmt)
-    crg_report_id = result.scalar()
-
-    if not crg_report_id:
-        raise HTTPException(status_code=404, detail="Report not found")
-    
-    #report = await get_report_by_id_internal(crg_report_id)
-
-    #authors = [item.strip() for item in report.Authors.split("//")]
-    #trial_id = report.TrialRegistrationID
+async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, client=Depends(get_vectorstore), crg_report_id= Depends(batch_hash_id_to_crg_report_id), return_details=False):
 
     return await get_similar_studies_by_id(crg_report_id, aspect, cutoff, k, None, client, return_details)
 
@@ -743,7 +691,7 @@ async def get_similar_studies(embedding, aspect: str, trial_id: str, authors: Li
     
     if trial_id:
         
-        response = await get_study_id_by_trial_id_internal(trial_id, cutoff)
+        response = await get_study_id_by_trial_ids_internal(trial_id, cutoff)
         if response:
             for result in response:
                 found_study_ids[result] = 1.0
@@ -824,20 +772,29 @@ async def get_similar_studies(embedding, aspect: str, trial_id: str, authors: Li
 
     return reordered
 
-async def get_similar_studies_by_id(crg_report_id : int, aspect: str, cutoff: str, k: int, negative_samples: List[int], client: AsyncQdrantClient, return_details: bool):
+async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], client: AsyncQdrantClient, return_details: bool):
     
     report = await get_report_by_id_internal(crg_report_id)
-    authors = [item.strip() for item in report.Authors.split("//")]
-    raw_report = RawReport(title=report.Title, abstract=report.Abstract, authors=authors)
-    trial_id = extract_trial_id(raw_report)
+    pdf_metadata = await get_pdf_metadata(report.ReportNumber)
 
-    if not negative_samples:
-        negative_samples = []
+    authors = [item.strip() for item in report.Authors.split("//")]
+    trial_ids = await get_report_trial_ids(report)
+
+    if not trial_ids or len(trial_ids) == 0:
+        trial_ids = pdf_metadata['trial_id']
+
+    if not negative_studies:
+        negative_studies = []
+
+    if not negative_reports:
+        negative_reports = []
     
     positive_ids = [transform_to_uuid(crg_report_id)]
-    negative_ids = [transform_to_uuid(negative_id) for negative_id in negative_samples]
+    negative_ids = [transform_to_uuid(negative_id) for negative_id in negative_reports]
+    #TODO remove negative samples from trial id retrieval
     
     found_study_ids = {}
+    #found_study_titles = {}
     debug_map = {}
 
     return_details= return_details or DEBUG
@@ -848,32 +805,45 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: str, cutoff: st
             must=[
                 FieldCondition(key="date_entered",range=DatetimeRange(lt=datetime.fromisoformat(cutoff)))
             ]
-        ))        
+        ))    
     
-    if trial_id:
-        response = await get_study_id_by_trial_id_internal(trial_id, cutoff)
+    if len(trial_ids) > 0:
+        response = await get_study_id_by_trial_ids_internal(trial_ids, cutoff)
+        penalty = 0.00
         if response:
-            for result in response:
-                found_study_ids[result] = 1.0
-                debug_map[result] = [{"source_id":trial_id}]
+            for trial_id in trial_ids:
+                study_ids = response[trial_id]
+                for study_id in study_ids:
+                    if study_id in negative_studies:
+                        continue
+                    found_study_ids[study_id] = 1.00 - penalty
+                    debug_map[study_id] = [{"source_id":trial_id}]
+                    penalty += 0.01
 
+    blacklist = list(found_study_ids.keys()) + negative_studies
+    if len(blacklist) > 0:
+            
         if len(found_study_ids.keys()) > 0:
             filters.append(
-                    models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="belongs_to_trial_id",
-                                match=models.MatchValue(value=False)
-                            )
-                        ],
-                        must_not=[
-                            models.FieldCondition(
-                                key="belongs_to_study",
-                                match=models.MatchAny(any=list(found_study_ids.keys()))
-                            )
-                        ]
-                    )
+                models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="belongs_to_trial_id",
+                            match=models.MatchValue(value=False)
+                        )
+                    ],
                 )
+            )
+        filters.append(
+                models.Filter(
+                    must_not=[
+                        models.FieldCondition(
+                            key="belongs_to_study",
+                            match=models.MatchAny(any=blacklist)
+                        )
+                    ]
+                )
+            )
     
     filter = models.Filter(must=filters)
 
@@ -907,7 +877,9 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: str, cutoff: st
                 for item in hit.payload['belongs_to_study']:
                     if item not in found_study_ids:
                         found_study_ids[item] = hit.score
-                    debug_map[item] = debug_map.get(item, []) + [hit.payload]
+                    info = dict(hit.payload)
+                    info['score'] = hit.score
+                    debug_map[item] = debug_map.get(item, []) + [info]
 
     all_studies = await get_studies_internal(list(found_study_ids.keys()))
     #list of dicts to dict of lists:
@@ -915,8 +887,13 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: str, cutoff: st
     #Remove this block for evaluation without authors
     scores_authors = await get_scores_authors(report_authors=authors, study_ids=list(found_study_ids.keys()), cutoff=cutoff)
     for study_id, score in scores_authors.items():
-        if found_study_ids[study_id] < 1.0:
-            found_study_ids[study_id] = min(0.99, found_study_ids[study_id] + score)
+        debug_map[study_id].append({'source_id': 'author_reranking', 'score': 0.65 * score})
+        found_study_ids[study_id] = min(1.00, found_study_ids[study_id] + 0.65 * score)
+
+    #author_features = await get_author_features(authors, list(found_study_ids.keys()), cutoff)
+    #for study_id, author_features in author_features.items():
+    #    features = [author_features['num_overlap'], author_features['inv_freq_sum'], author_features['num_report'], author_features['num_study'],author_features['jaccard'],  found_study_ids[study_id]]
+    #    found_study_ids[study_id] = float(reranking_model.predict([features])[0])
 
     #result['Relevance'] = list(found_study_ids.values())
     for i in range(0, len(all_studies)):
@@ -943,7 +920,7 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: str, cutoff: st
 
 async def get_scores_authors(report_authors: List[str], study_ids: List[int], cutoff: str):
 
-    study_persons = await get_study_persons_internal(study_ids, cutoff)
+    study_persons = await get_study_persons_internal(study_ids, cutoff, normalize_names=True)
     current_persons = get_author_frequencies(report_authors)
 
     report_authors = set(current_persons.keys())
@@ -951,18 +928,55 @@ async def get_scores_authors(report_authors: List[str], study_ids: List[int], cu
     result = {}
     num_report_authors = len(report_authors)
     if num_report_authors == 0:
-        print(report_authors)
         return {}
     for study_id, study_authors in study_persons.items():
         total_score = 0
         num_total_authors = len(study_authors) + num_report_authors
         intersection = set(study_authors) & report_authors
         for matching_author in intersection:
-            total_score += 1 / current_persons[matching_author]
+            if matching_author in current_persons:
+                total_score += 1 / math.log(current_persons[matching_author] + 2)
         total_score = total_score / num_total_authors if num_total_authors > 0 else 0
         result[int(study_id)] = total_score
 
     return result
+
+#['Asarnow RF', 'Marder SR', 'Mintz J', 'Van Putten T', 'Zimmerman KE']
+#1743, 2959, 3730
+
+@router.get("/features/authors", dependencies=[Depends(is_verified_api_call)], include_in_schema=False)
+async def get_author_features(authors : List[str] = Query(...), study_ids : List[int] = Query(...), cutoff : str = Query(None)):
+    data = {}
+    study_persons = await get_study_persons_internal(study_ids, cutoff, normalize_names=True)
+    current_person_freq = get_author_frequencies(authors)
+    for study_id, study_authors in study_persons.items():
+        features = build_features( study_authors, current_person_freq)
+        data[study_id] = features
+    return data
+
+def build_features(study_authors, current_person_freq):
+    ra = set(current_person_freq.keys()) # report_authors
+    sa = set(study_authors)
+
+    overlap = ra & sa
+    num_overlap = len(overlap)
+
+    inv_freq_sum = sum(1 / current_person_freq[a] for a in overlap) if overlap else 0
+    inv_freq_sum_log = sum(1 / math.log(current_person_freq[a] + 2) for a in overlap) if overlap else 0
+
+    num_report = len(ra)
+    num_study = len(sa)
+    jaccard = num_overlap / len(ra | sa) if (ra | sa) else 0
+
+    return {
+        "num_overlap": num_overlap,
+        "inv_freq_sum": inv_freq_sum,
+        "inv_freq_sum_log": inv_freq_sum_log,
+        "num_report": num_report,
+        "num_study": num_study,
+        "jaccard": jaccard,
+    }
+
 
 @router.get("/{tag_category}/{tag_value}/related_studies", dependencies=[Depends(is_verified_api_call)], summary="Get studies related to a specific tag (intervention, outcome, ...) currently only vector-similarity search is available.", description="Retrieve studies that are related to a specific tag value (e.g., 'Placebo' for interventions) using vector similarity search based on the embedding of the tag value. The similarity search is done at runtime.")
 async def get_aspect_related_studies(tag_category: TagCategories = Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value: str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), k : int = k_query, client=Depends(get_vectorstore), channel = Depends(get_grpc_channel)):
@@ -1000,6 +1014,7 @@ async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(
 async def analyze(embeddings, top_k, title, abstract, authors, cutoff, client):
     
     trial_id = extract_trial_id(RawReport(title=title,abstract=abstract, authors=[]))
+    trial_id = trial_id[0] if len(trial_id) == 1 else None
     pre_result = await get_similar_studies(embeddings['embedding'], "default", trial_id, authors, cutoff, top_k, client, return_details=True)
 
     found_study_ids = {}
@@ -1112,26 +1127,6 @@ async def analyze(embeddings, top_k, title, abstract, authors, cutoff, client):
 
     return result
 
-@router.post("/processing/extract_trial_id", dependencies=[Depends(is_verified_api_call)], include_in_schema=False)
-def extract_trial_id(raw_report: RawReport):
-    ids = extract_trial_registration_ids(raw_report.title)
-    if len(ids) == 1:
-        return ids[0]
-
-    if raw_report.authors:
-        for author in raw_report.authors:
-            ids = extract_trial_registration_ids(author)
-            if len(ids) == 1:
-                return ids[0]
-    if raw_report.abstract:
-        ids = extract_trial_registration_ids(raw_report.abstract)
-        if len(ids) == 1:
-            return ids[0]
-    
-    return None
-
-#TODO deprecated endpoints, remove later
-
 class ReportEmbedding(BaseModel):
     model_id: str
     main_embedding: List[float]
@@ -1142,11 +1137,11 @@ class AspectEmbedding(BaseModel):
     embedding: List[float]
 
 @router.get("/reports/{report_id}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="")
-async def similarity_search_studies_by_id(report_id: int, aspect: str = Query("default"),  cutoff: str = Query(None), k : int = Query(10), negative_samples : List[int]=Query(None), client=Depends(get_vectorstore), return_details=False):
-    return await get_similar_studies_by_id(report_id, aspect, cutoff, k, negative_samples, client, return_details)
+async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),  cutoff: str = Query(None), k : int = Query(10), negative_studies : List[int]=Query(None),negative_reports : List[int]=Query(None), client=Depends(get_vectorstore), return_details=False):
+    return await get_similar_studies_by_id(report_id, aspect, cutoff, k, negative_studies, negative_reports, client, return_details)
 
 @router.post("/similarity_search/studies", dependencies=[Depends(is_verified_api_call)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_studies or /reports/{report_id}/studies instead", deprecated=True)
-async def similarity_search_studies(embedding: ReportEmbedding, aspect: str = Query("default"), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):
+async def similarity_search_studies(embedding: ReportEmbedding, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):
     
     return await get_similar_studies(embedding.main_embedding, embedding.model_id, aspect, trial_id, authors, cutoff, k, client, return_details)
 
