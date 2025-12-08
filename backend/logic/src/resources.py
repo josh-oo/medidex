@@ -21,7 +21,6 @@ from nameparser import HumanName
 
 from sqlmodel import select, func, text, delete
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy import event
 
 from .utils.database_models import Report, Study, StudyCondition, StudyDesign, StudyIntervention, StudyOutcome, StudyParticipant, StudyReport
 from .utils.database_models import Condition, Intervention, Design, Outcome, Participant
@@ -37,20 +36,18 @@ load_dotenv()
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-POSTGRES_DB = os.getenv("POSTGRES_DB")
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
-POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+POSTGRES_DB_RESOURCES = os.getenv("POSTGRES_DB_RESOURCES")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT")
 
 router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified_api_call)])
 
 #DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"resources","meerkat.db")
-DATABASE_URL = f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+DATABASE_URL = f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB_RESOURCES}"
 PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
 METADATA_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdf_metadata")
 
 engine = create_async_engine(DATABASE_URL, echo=True)
-
-write_lock = asyncio.Lock()
 
 class ReportResponse(Report):
     PDFLinks: Optional[str] = None
@@ -284,10 +281,9 @@ async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to uplo
     file_path = os.path.join(PDF_PATH, filename)
     
     try:
-        async with write_lock:
-            with open(file_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
         process_pdf(file_path)
         return {
             "report_id": report_id,
@@ -722,11 +718,10 @@ async def _add_study(study_params: StudyParams, session: AsyncSession):
         DateEdited=timestamp,
     )
     
-    async with write_lock:
-        session.add(new_study)
-        await session.commit()
-        await session.refresh(new_study)
-        return new_study
+    session.add(new_study)
+    await session.commit()
+    await session.refresh(new_study)
+    return new_study
 
 async def _get_study_aspect(stmt, session):
     rows = (await session.execute(stmt)).all()  # -> [(StudyID, ID, Description), ...]
@@ -901,11 +896,9 @@ async def _get_report_studies_by_id(report_id, session, date_from=None, date_to=
 async def add_report_studies_by_id_internal(report_id: int, study_ids: List[int]) -> Dict[str, Any]:
     """
     Create StudyReport links for the given report_id to the provided study_ids.
-    Uses write_lock to serialize writes.
     """
-    async with write_lock:
-        async with AsyncSession(engine) as session:
-            return await _add_report_studies_by_id(report_id, study_ids, session)
+    async with AsyncSession(engine) as session:
+        return await _add_report_studies_by_id(report_id, study_ids, session)
 
 async def _add_report_studies_by_id(
     report_id: int,
@@ -973,11 +966,9 @@ async def _add_report_studies_by_id(
 async def delete_report_studies_by_id_internal(report_id: int) -> Dict[str, Any]:
     """
     Delete all StudyReport links for the given report_id.
-    Uses write_lock to serialize writes.
     """
-    async with write_lock:
-        async with AsyncSession(engine) as session:
-            return await _delete_report_studies_by_id(report_id, session)
+    async with AsyncSession(engine) as session:
+        return await _delete_report_studies_by_id(report_id, session)
 
 async def _delete_report_studies_by_id(
     report_id: int,
@@ -1067,31 +1058,29 @@ async def add_new_report(report: dict):
         )
     
     #TODO double check CRGReportID creation (Alessandro/Farhad)
-    async with write_lock:
-        async with AsyncSession(engine) as session:
-            
-            session.add(new_report)
-            await session.commit()
-            await session.refresh(new_report)
-            return new_report.CRGReportID
+    async with AsyncSession(engine) as session:
+        
+        session.add(new_report)
+        await session.commit()
+        await session.refresh(new_report)
+        return new_report.CRGReportID
         
 
 async def delete_reports_by_ids(report_ids: List[int]) -> Dict[str, Any]:
-    async with write_lock:
-        async with AsyncSession(engine) as session:
-            try:                
-                # Bulk delete reports
-                result = await session.execute(
-                    delete(Report).where(Report.CRGReportID.in_(report_ids))
-                )
-                
-                await session.commit()
-                
-                return {
-                    "deleted_count": result.rowcount,
-                    "failed_deletions": [],
-                    "total_requested": len(report_ids)
-                }
-            except Exception as e:
-                await session.rollback()
-                raise HTTPException(status_code=500, detail=f"Failed to delete reports: {str(e)}")
+    async with AsyncSession(engine) as session:
+        try:                
+            # Bulk delete reports
+            result = await session.execute(
+                delete(Report).where(Report.CRGReportID.in_(report_ids))
+            )
+            
+            await session.commit()
+            
+            return {
+                "deleted_count": result.rowcount,
+                "failed_deletions": [],
+                "total_requested": len(report_ids)
+            }
+        except Exception as e:
+            await session.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to delete reports: {str(e)}")

@@ -5,9 +5,9 @@ from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
-from sqlmodel import select, SQLModel
+from sqlmodel import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from .utils.database_models import APIKey, User, metadata_user_data
+from .utils.database_models import APIKey, User
 
 from asyncio import get_running_loop
 
@@ -26,9 +26,14 @@ import hashlib
 
 load_dotenv()
 
-DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 JWT_SECRET = os.getenv("JWT_SECRET")
 DEBUG = os.getenv("DEBUG") == "TRUE"
+
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+POSTGRES_DB_USERS = os.getenv("POSTGRES_DB_USERS")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT")
 
 router = APIRouter(tags=["auth"])
 
@@ -37,7 +42,8 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"persistent","users.db")
+DATABASE_URL = f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB_USERS}"
+
 
 engine = create_async_engine(DATABASE_URL, echo=True)
 
@@ -65,10 +71,10 @@ async def get_session() -> AsyncSession:
     async with AsyncSession(engine) as session:
         yield session
 
-@router.on_event("startup")
-async def startup_event():
-    async with engine.begin() as conn:
-        await conn.run_sync(metadata_user_data.create_all)
+#@router.on_event("startup")
+#async def startup_event():
+#    async with engine.begin() as conn:
+#        await conn.run_sync(metadata_user_data.create_all)
 
 def verify_token(token):
     if not token:

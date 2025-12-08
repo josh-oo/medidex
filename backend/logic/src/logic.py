@@ -41,19 +41,23 @@ from .resources import add_new_report, delete_reports_by_ids, get_report_studies
 from .resources import add_report_studies_by_id_internal, delete_report_studies_by_id_internal
 from .resources import get_pdf_metadata, get_report_trial_ids
 
-from sqlmodel import select, delete, text
+from sqlmodel import select, delete
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy import event
-from .utils.database_models import TmpReport, TmpReportBatch, metadata_user_data
+from .utils.database_models import TmpReport, TmpReportBatch
 
 load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_SERVICE_HOST")
 MODEL_PORT = os.getenv("EMBEDDING_SERVICE_PORT")
-DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 VECTORSTORE_HOST = os.getenv("VECTORSTORE_SERVICE_HOST")
 VECTORSTORE_PORT = os.getenv("VECTORSTORE_SERVICE_PORT")
 COLLECTION_NAME = os.getenv("VECTORSTORE_COLLECTION_NAME")
+
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+POSTGRES_DB_USERS = os.getenv("POSTGRES_DB_USERS")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT")
 
 DEBUG = os.getenv("DEBUG", "FALSE") == "TRUE"
 
@@ -65,7 +69,7 @@ batch_hash_path = Path(..., description="The batch's hash/id")
 
 k_query = Query(10, description="Maximum number of returned results.")
 
-DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"persistent","users.db")
+DATABASE_URL = f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB_USERS}"
 
 engine = create_async_engine(DATABASE_URL, echo=True)
 
@@ -135,17 +139,17 @@ class TagCategories(str, enum.Enum):
     outcomes = 'outcomes'
     participants = 'participants'
 
-@event.listens_for(engine.sync_engine, "connect")
-def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON;")
-    cursor.close()
+#@event.listens_for(engine.sync_engine, "connect")
+#def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+#    cursor = dbapi_connection.cursor()
+#    cursor.execute("PRAGMA foreign_keys=ON;")
+#    cursor.close()
 
-@router.on_event("startup")
-async def startup_event():
-    async with engine.begin() as conn:
-        await conn.run_sync(metadata_user_data.create_all)
-        await conn.execute(text("PRAGMA foreign_keys = ON;"))
+#@router.on_event("startup")
+#async def startup_event():
+#    async with engine.begin() as conn:
+#        await conn.run_sync(metadata_user_data.create_all)
+#        await conn.execute(text("PRAGMA foreign_keys = ON;"))
 
 @lru_cache()
 def get_grpc_channel():
@@ -868,7 +872,9 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
             query_filter=filter,
             with_payload=True,
             search_params=models.SearchParams(
-                quantization=models.QuantizationSearchParams(rescore=False)
+                #hnsw_ef= 16,
+                #exact=False,
+                #quantization=models.QuantizationSearchParams(rescore=False)
             ),
         )
 
