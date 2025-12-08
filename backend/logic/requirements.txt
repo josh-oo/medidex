@@ -17,3 +17,4 @@ aiofiles==25.1.0
 PyMuPDF==1.26.6
 RapidFuzz==3.14.3
 greenlet==3.2.4
+asyncpg==0.31.0

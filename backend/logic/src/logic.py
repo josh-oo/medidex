@@ -167,6 +167,8 @@ async def process_report(report, batch_hash, index, vectorstore):
     trial_registration_id = extract_trial_id(title=title, abstract=abstract, authors=authors)
     if len(trial_registration_id) == 1:
         report['trial_registration_id'] = trial_registration_id
+    else:
+        report['trial_registration_id'] = None
 
     text_to_process = []
     if title:
@@ -188,7 +190,7 @@ async def process_report(report, batch_hash, index, vectorstore):
         'authors': authors,
         'date_entered': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         'belongs_to_study': [],
-        'belongs_to_trial_id': trial_registration_id is not None,
+        'belongs_to_trial_id': len(trial_registration_id) == 1,
     }
     new_vectors = {"default": vectors.pop("embedding"), "authors": vectors.pop("author_embedding")}
     for key, value in vectors.items():
@@ -636,7 +638,7 @@ async def similar_tags(sources: List[str] = Query(..., description="Which source
 @router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
 async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, client=Depends(get_vectorstore), crg_report_id= Depends(batch_hash_id_to_crg_report_id), return_details=False):
 
-    return await get_similar_studies_by_id(crg_report_id, aspect, cutoff, k, None, client, return_details)
+    return await get_similar_studies_by_id(crg_report_id, aspect, cutoff, k, None, None, client, return_details)
 
 async def get_similar_tags(embedding, sources: List[str], aspect: str, k: int, client=Depends(get_vectorstore)):
     

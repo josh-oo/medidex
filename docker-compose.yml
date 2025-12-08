@@ -1,9 +1,29 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/_data/postgres-init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal_net
+
   qdrant:
     container_name: qdrant
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1-unprivileged
     restart: always
     expose:
       - 6333
@@ -63,6 +83,11 @@ services:
       - VECTORSTORE_SERVICE_PORT=${VECTORSTORE_SERVICE_PORT}
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME}
       - JWT_SECRET=${JWT_SECRET}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
       - DEBUG=${DEBUG}
 
   frontend:
@@ -94,3 +119,5 @@ networks:
   public_net:
     external: true
 
+volumes:
+  postgres_data:

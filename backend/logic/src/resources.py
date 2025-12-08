@@ -35,10 +35,16 @@ import unicodedata
 load_dotenv()
 
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+POSTGRES_DB = os.getenv("POSTGRES_DB")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 
 router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified_api_call)])
 
-DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"resources","meerkat.db")
+#DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"resources","meerkat.db")
+DATABASE_URL = f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
 METADATA_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdf_metadata")
 
@@ -100,19 +106,20 @@ trial_id_mapping = load_trial_id_mapping()
 author_frequencies = load_author_frequencies()
 
 
-@event.listens_for(engine.sync_engine, "connect")
-def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON;")
-    cursor.close()
+#@event.listens_for(engine.sync_engine, "connect")
+#def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+#    cursor = dbapi_connection.cursor()
+#    cursor.execute("PRAGMA foreign_keys=ON;")
+#    cursor.close()
     
-@router.on_event("startup")
-async def startup_event():
-    async with engine.begin() as conn:
+#@router.on_event("startup")
+#async def startup_event():
+#    async with engine.begin() as conn:
+#        pass
         #await conn.run_sync(metadata_resources.create_all)
-        await conn.execute(text("PRAGMA journal_mode=WAL"))
-        await conn.execute(text("PRAGMA synchronous=NORMAL"))
-        await conn.execute(text("PRAGMA foreign_keys = ON;"))
+        #await conn.execute(text("PRAGMA journal_mode=WAL"))
+        #await conn.execute(text("PRAGMA synchronous=NORMAL"))
+        #await conn.execute(text("PRAGMA foreign_keys = ON;"))
 
 
 def convert_to_id_based_dict(rows, multi_values=True):
@@ -244,7 +251,7 @@ async def get_all_reports(
         stmt = stmt.where(Report.Dateentered >= date_from)
     if date_to:
         stmt = stmt.where(Report.Dateentered <= date_to)
-    return (await session.execute(stmt)).scalar_one_or_none()
+    return (await session.execute(stmt)).scalars().all()
 
 @router.put("/reports/pdf", summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
 async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to upload"), session: AsyncSession = Depends(get_session)) -> Dict[str, Any]:
@@ -1024,8 +1031,8 @@ async def add_new_report(report: dict):
     abstract = report['abstract']
     authors = report['authors']
 
-    year = report['year']
-    report_number = report['report_number']
+    year = int(report['year']) if report.get('year') else None  # Convert to int
+    report_number = int(report['report_number']) if report.get('report_number') else 0  # Ensure int
     journal = report['journal']
     pages = report['pages']
     place = report['place']

@@ -23,12 +23,12 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
     Authors: str
     Journal: str
     Year: int
-    Volume: Optional[int]
+    Volume: Optional[str]
     Issue: Optional[str]
     Pages: Optional[str]
     Language: Optional[str]
     Abstract: Optional[str]
-    CENTRALSubmissionStatus : Optional[str]
+    CENTRALSubmissionStatus : Optional[int]
     CopyStatus: Optional[str]
     DatetoCENTRAL: Optional[str]
     Dateentered: str
@@ -48,9 +48,9 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
     UDef5: Optional[str]
     PMID: Optional[str]
     TrialRegistrationID: Optional[str]
-    UDef9 : Optional[str]
-    UDef10: Optional[str]
-    UDef8: Optional[str]
+    UDef9 : Optional[float]
+    UDef10: Optional[float]
+    UDef8: Optional[float]
     
     #PDFLinks: Optional[str] = Field(default=None, sa_column=None)
 
