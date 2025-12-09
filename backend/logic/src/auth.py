@@ -16,8 +16,10 @@ import os
 
 from passlib.context import CryptContext
 
-from jose import jwt
-from jose.exceptions import ExpiredSignatureError, JWTError
+import jwt
+from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
+
+import httpx
 
 from datetime import datetime, timedelta, timezone
 
@@ -27,7 +29,7 @@ import hashlib
 load_dotenv()
 
 JWT_SECRET = os.getenv("JWT_SECRET")
-DEBUG = os.getenv("DEBUG") == "TRUE"
+JWKS_URL = os.getenv("JWKS_URL")
 
 POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
@@ -44,8 +46,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 DATABASE_URL = f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB_USERS}"
 
-
-engine = create_async_engine(DATABASE_URL, echo=True)
+engine = create_async_engine(DATABASE_URL, echo=False)
 
 if not JWT_SECRET or len(JWT_SECRET) < 32:
     raise RuntimeError("JWT_SECRET must be set and at least 32 characters long")
@@ -71,22 +72,96 @@ async def get_session() -> AsyncSession:
     async with AsyncSession(engine) as session:
         yield session
 
-#@router.on_event("startup")
-#async def startup_event():
-#    async with engine.begin() as conn:
-#        await conn.run_sync(metadata_user_data.create_all)
+# Cache for JWKS keys - reload on failure
+_jwks_cache = None
 
-def verify_token(token):
+async def get_jwks_keys(force_refresh: bool = False):
+    """Fetch and cache JWKS keys. Reloads on failure or when forced."""
+    global _jwks_cache
+    
+    if _jwks_cache and not force_refresh:
+        return _jwks_cache
+    
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(JWKS_URL)
+            response.raise_for_status()
+            jwks_data = response.json()
+            _jwks_cache = jwks_data.get("keys", [])
+            return _jwks_cache
+    except Exception:
+        # If cache exists, return it even if refresh failed
+        if _jwks_cache:
+            return _jwks_cache
+        # Otherwise, let the exception propagate
+        raise
+
+async def verify_token_jwks(token: str):
+    """Verify token using JWKS endpoint. Returns decoded token or raises exception."""
+    # Get the kid from token header
+    unverified_header = jwt.get_unverified_header(token)
+    kid = unverified_header.get("kid")
+    
+    if not kid:
+        return None
+    
+    # Try with cached keys first
+    keys = await get_jwks_keys(force_refresh=False)
+    
+    # Find matching key
+    jwk_key = None
+    for key in keys:
+        if key.get("kid") == kid:
+            jwk_key = key
+            break
+    
+    # If key not found, try refreshing the cache once
+    if not jwk_key:
+        keys = await get_jwks_keys(force_refresh=True)
+        for key in keys:
+            if key.get("kid") == kid:
+                jwk_key = key
+                break
+    
+    if not jwk_key:
+        return None
+    
+    # Get algorithm from JWK
+    algorithm = jwk_key.get("alg", "EdDSA")
+    
+    # Convert JWK to public key
+    public_key = jwt.algorithms.get_default_algorithms()[algorithm].from_jwk(jwk_key)
+    
+    # Verify and decode token
+    decoded = jwt.decode(
+        token,
+        public_key,
+        algorithms=[algorithm],
+        options={"verify_aud": False}
+    )
+    return decoded
+
+async def verify_token(token):
+    """Verify token with JWKS support. Routes to JWKS or legacy based on kid presence."""
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    
     try:
-        # Decode and verify the JWT
-        decoded = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return decoded
+        # Check if token has kid (new system) or not (legacy)
+        unverified_header = jwt.get_unverified_header(token)
+        
+        if unverified_header.get("kid"):
+            # New JWKS-based token
+            decoded = await verify_token_jwks(token)
+            return decoded
+        else:
+            # Legacy JWT_SECRET token
+            decoded = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            return decoded
 
     except ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
-    except JWTError:
+    except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token. Please log in again.")
 
 def generate_token(user):
@@ -105,14 +180,19 @@ def generate_api_key_pair():
 Authentication
 """
 
-def is_admin(token: str = Security(oauth2_scheme)):
-    decoded = verify_token(token)
+async def is_admin(token: str = Security(oauth2_scheme)):
+    decoded = await verify_token(token)
     if decoded['role'] != "admin":
         raise HTTPException(status_code=401, detail="Not allowed")
     return token
 
+async def get_user_info(token: Optional[str] = Security(oauth2_scheme)):
+    if not token:
+        return None
+    result = await verify_token(token)
+    return result
 
-def is_verified(token: Optional[str] = Security(oauth2_scheme)):
+async def is_verified(token: Optional[str] = Security(oauth2_scheme)):
     """Validate a JWT token if provided. Returns the token string when valid, otherwise None.
 
     Note: auto_error=False lets callers decide whether a missing token is acceptable (so
@@ -120,10 +200,8 @@ def is_verified(token: Optional[str] = Security(oauth2_scheme)):
     """
     if not token:
         return None
-    if DEBUG:
-        return token
-    decoded = verify_token(token)
-    if decoded.get('verified') != 1:
+    decoded = await verify_token(token)
+    if decoded.get('verified', 0) != 1 and decoded.get('iss', None) != "https://medidex.vercel.app": #TODO remove that later
         raise HTTPException(status_code=401, detail="Not allowed")
     
     return token

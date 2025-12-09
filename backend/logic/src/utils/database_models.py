@@ -144,6 +144,25 @@ class StudyOutcome(SQLModel, table=True, metadata=metadata_resources):
     CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
     OutcomeID: int = Field(primary_key=True, foreign_key="tblOutcome.OutcomeID", ondelete="CASCADE")
 
+class Batch(SQLModel, table=True, metadata=metadata_resources):
+    __tablename__ = "tblBatch"
+    BatchID: int = Field(primary_key=True) #TODO can be removed
+    BatchHash: str
+    BatchDescription: str
+    DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    UploadedBy: Optional[str]
+
+class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
+    __tablename__ = "tblReportAdded"
+    CRGReportID: int = Field(primary_key=True, foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
+    BatchHash: str = Field(foreign_key="tblBatch.BatchHash", ondelete="CASCADE")
+
+class StudyReportAdded(SQLModel, table=True, metadata=metadata_resources):
+    __tablename__ = "tblStudyReportAdded"
+
+    StudyReportID: int = Field(primary_key=True, foreign_key="tblStudyReport.StudyReportID", ondelete="CASCADE")
+    DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    CreatedBy: Optional[str]
 
 """
 Authentication
@@ -164,7 +183,6 @@ class APIKey(SQLModel, table=True, metadata=metadata_user_data):
     id: str = Field(primary_key=True, index=True)
     owner: int = Field(foreign_key="users.id", ondelete="CASCADE")
     hash: str = Field(index=True)
-
 
 """
 User Data

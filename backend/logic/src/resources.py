@@ -5,7 +5,7 @@ import os
 
 from dotenv import load_dotenv
 
-from .auth import is_verified_api_call
+from .auth import is_verified_api_call, get_user_info
 from typing import List, Optional
 import enum
 from pydantic import BaseModel
@@ -15,7 +15,6 @@ from typing import List, Optional, Dict, Any
 
 import re
 import json
-import asyncio
 
 from nameparser import HumanName
 
@@ -24,6 +23,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
 from .utils.database_models import Report, Study, StudyCondition, StudyDesign, StudyIntervention, StudyOutcome, StudyParticipant, StudyReport
 from .utils.database_models import Condition, Intervention, Design, Outcome, Participant
+from .utils.database_models import Batch, ReportAdded, StudyReportAdded
 
 from .utils.pdf.processor import process_pdf
 from .utils.trial_registration_id import extract_trial_id
@@ -47,7 +47,7 @@ DATABASE_URL = f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTG
 PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
 METADATA_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdf_metadata")
 
-engine = create_async_engine(DATABASE_URL, echo=True)
+engine = create_async_engine(DATABASE_URL, echo=False)
 
 class ReportResponse(Report):
     PDFLinks: Optional[str] = None
@@ -101,23 +101,6 @@ def load_author_frequencies():
 trial_person_mapping = load_trial_person_mapping()
 trial_id_mapping = load_trial_id_mapping()
 author_frequencies = load_author_frequencies()
-
-
-#@event.listens_for(engine.sync_engine, "connect")
-#def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
-#    cursor = dbapi_connection.cursor()
-#    cursor.execute("PRAGMA foreign_keys=ON;")
-#    cursor.close()
-    
-#@router.on_event("startup")
-#async def startup_event():
-#    async with engine.begin() as conn:
-#        pass
-        #await conn.run_sync(metadata_resources.create_all)
-        #await conn.execute(text("PRAGMA journal_mode=WAL"))
-        #await conn.execute(text("PRAGMA synchronous=NORMAL"))
-        #await conn.execute(text("PRAGMA foreign_keys = ON;"))
-
 
 def convert_to_id_based_dict(rows, multi_values=True):
     result = {}
@@ -310,9 +293,13 @@ async def get_report_studies_by_id(
     report_id: int = report_id_path,
     date_from: Optional[str] = Query(None, description="Filter studies with DateEntered >= this ISO datetime (e.g. '2025-01-13 00:00:00')"),
     date_to: Optional[str] = Query(None, description="Filter studies with DateEntered <= this ISO datetime (e.g. '2025-01-31 23:59:59')"),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user = Depends(get_user_info),
 ) -> List[Study]:
-    return await _get_report_studies_by_id(report_id, session, date_from, date_to)
+    user_id = None
+    if user:
+        user_id = user['id']
+    return await _get_report_studies_by_id(report_id, date_from, date_to, user_id, session)
 
 @router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
 async def get_pdf_number_by_report_id(report_id: int = report_id_path, session: AsyncSession = Depends(get_session)) -> int:
@@ -871,11 +858,12 @@ async def _get_report_by_id(report_id, session):
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
     return result
 
-async def get_report_studies_by_id_internal(report_id, date_from=None, date_to=None):
+async def get_report_studies_by_id_internal(report_id, date_from=None, date_to=None, user=None):
     async with AsyncSession(engine) as session:
-        return await _get_report_studies_by_id(report_id, session, date_from, date_to)
+        return await _get_report_studies_by_id(report_id, date_from, date_to, user, session)
 
-async def _get_report_studies_by_id(report_id, session, date_from=None, date_to=None):
+async def _get_report_studies_by_id(report_id, date_from, date_to, user, session):
+    user = str(user) if user is not None else None #TODO remove later
     report = await session.get(Report, report_id)
     if not report:
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
@@ -883,8 +871,13 @@ async def _get_report_studies_by_id(report_id, session, date_from=None, date_to=
     stmt = (
         select(Study)
         .join(StudyReport, StudyReport.CRGStudyID == Study.CRGStudyID)
+        .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
         .where(StudyReport.CRGReportID == report_id)
     )
+    
+    # If user is provided, filter by CreatedBy
+    if user:
+        stmt = stmt.where(StudyReportAdded.CreatedBy == user)
     
     if date_from:
         stmt = stmt.where(Study.DateEntered >= date_from)
@@ -893,18 +886,14 @@ async def _get_report_studies_by_id(report_id, session, date_from=None, date_to=
     
     return (await session.execute(stmt)).scalars().all()
 
-async def add_report_studies_by_id_internal(report_id: int, study_ids: List[int]) -> Dict[str, Any]:
+async def add_report_studies_by_id_internal(report_id: int, study_ids: List[int], user : str) -> Dict[str, Any]:
     """
     Create StudyReport links for the given report_id to the provided study_ids.
     """
     async with AsyncSession(engine) as session:
-        return await _add_report_studies_by_id(report_id, study_ids, session)
+        return await _add_report_studies_by_id(report_id, study_ids, user, session)
 
-async def _add_report_studies_by_id(
-    report_id: int,
-    study_ids: List[int],
-    session: AsyncSession
-) -> Dict[str, Any]:
+async def _add_report_studies_by_id(report_id: int, study_ids: List[int], user: str, session: AsyncSession) -> Dict[str, Any]:
     """
     Internal implementation to link a report to multiple studies.
 
@@ -916,6 +905,7 @@ async def _add_report_studies_by_id(
           "created_links": List[Dict[str, int]]
         }
     """
+    user = str(user) if user is not None else None #TODO remove later
     study_ids = study_ids or []
     if not study_ids:
         return {
@@ -938,13 +928,38 @@ async def _add_report_studies_by_id(
         valid_ids = set(valid_id_rows.scalars().all())
         invalid_ids = [sid for sid in study_ids if sid not in valid_ids]
 
-        # Delete existing links for this report
-        await session.execute(delete(StudyReport).where(StudyReport.CRGReportID == report_id))
+        # Only delete existing links created by this user (or with no creator)
+        if user:
+            # Get StudyReportIDs that match the user filter
+            stmt = (
+                select(StudyReport.StudyReportID)
+                .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+                .where(StudyReport.CRGReportID == report_id)
+                .where(StudyReportAdded.CreatedBy == user)
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+            if rows:
+                await session.execute(
+                    delete(StudyReport).where(StudyReport.StudyReportID.in_(rows))
+                )
+        else:
+            # If no user specified, delete all existing links for this report
+            await session.execute(delete(StudyReport).where(StudyReport.CRGReportID == report_id))
 
-        # Create new links
+        # Create new links and track them in StudyReportAdded
         created_links: List[Dict[str, int]] = []
         for sid in valid_ids:
-            session.add(StudyReport(CRGReportID=report_id, CRGStudyID=sid))
+            new_study_report = StudyReport(CRGReportID=report_id, CRGStudyID=sid)
+            session.add(new_study_report)
+            await session.flush()  # Flush to get the StudyReportID
+            
+            print(f"Add user: {new_study_report.StudyReportID}", user)
+            # Track who created this link
+            session.add(StudyReportAdded(
+                StudyReportID=new_study_report.StudyReportID,
+                CreatedBy=user
+            ))
+            
             created_links.append({"CRGReportID": report_id, "CRGStudyID": sid})
 
         await session.commit()
@@ -963,42 +978,49 @@ async def _add_report_studies_by_id(
         await session.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to update report-study links: {str(e)}")
 
-async def delete_report_studies_by_id_internal(report_id: int) -> Dict[str, Any]:
+async def delete_report_studies_by_id_internal(report_id: int, user: str) -> Dict[str, Any]:
     """
     Delete all StudyReport links for the given report_id.
     """
     async with AsyncSession(engine) as session:
-        return await _delete_report_studies_by_id(report_id, session)
+        return await _delete_report_studies_by_id(report_id, user, session)
 
-async def _delete_report_studies_by_id(
-    report_id: int,
-    session: AsyncSession
-) -> Dict[str, Any]:
+async def _delete_report_studies_by_id(report_id: int, user: str, session: AsyncSession) -> Dict[str, Any]:
     """
     Internal implementation to delete all links between a report and studies.
+    Only deletes links created by the specified user or links with no creator.
     """
+    user = str(user) if user is not None else None #TODO remove later
     try:
         # Validate report exists
         report = await session.get(Report, report_id)
         if not report:
             raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
-        # Fetch all links for response
-        rows = (
-            await session.execute(
-                select(StudyReport).where(StudyReport.CRGReportID == report_id)
-            )
-        ).scalars().all()
+        # Build query joining StudyReport with StudyReportAdded
+        stmt = (
+            select(StudyReport, StudyReportAdded.CreatedBy)
+            .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+            .where(StudyReport.CRGReportID == report_id)
+        )
+        
+        # If user is provided, filter by CreatedBy
+        if user:
+            stmt = stmt.where(StudyReportAdded.CreatedBy == user)
+
+        # Fetch all matching links
+        rows = (await session.execute(stmt)).all()
 
         deleted_links: List[Dict[str, int]] = [
             {"CRGReportID": sr.CRGReportID, "CRGStudyID": sr.CRGStudyID}
-            for sr in rows
+            for sr, _ in rows
         ]
 
-        # Bulk delete all links
+        # Bulk delete matching links
         if rows:
+            study_report_ids = [sr.StudyReportID for sr, _ in rows]
             await session.execute(
-                delete(StudyReport).where(StudyReport.CRGReportID == report_id)
+                delete(StudyReport).where(StudyReport.StudyReportID.in_(study_report_ids))
             )
             await session.commit()
 
@@ -1014,73 +1036,29 @@ async def _delete_report_studies_by_id(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to delete report-study links: {str(e)}")
-
-async def add_new_report(report: dict):
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-    title = report['title']
-    abstract = report['abstract']
-    authors = report['authors']
-
-    year = int(report['year']) if report.get('year') else None  # Convert to int
-    report_number = int(report['report_number']) if report.get('report_number') else 0  # Ensure int
-    journal = report['journal']
-    pages = report['pages']
-    place = report['place']
-    language = report['language']
-    issue = report['issue']
-    volume = report['volume']
-    doi = report['doi']
-    publisher = report['publisher']
-    trial_registration_id = report['trial_registration_id']
-
-    new_report = Report(
-            Title=title,
-            ReportNumber=report_number,
-            Authors="//".join(authors),
-            Journal=journal,
-            Year=year,
-            Volume=volume,
-            Issue=issue,
-            Pages=pages,
-            Language=language,
-            Abstract=abstract,
-            Dateentered=timestamp,
-            DateEdited=timestamp,
-            City=place,
-            DOI=doi,
-            TrialRegistrationID=trial_registration_id,
-            CopyStatus= "Copy Obtained" if report_number != 0 else "Seeking Source",
-            Publisher=publisher,
-            TypeofReportID=0, #TODO ask alessandro
-            PublicationTypeID=1, #TODO ask alessandro
-            #TODO Dupstring missing
-        )
     
-    #TODO double check CRGReportID creation (Alessandro/Farhad)
-    async with AsyncSession(engine) as session:
-        
-        session.add(new_report)
-        await session.commit()
-        await session.refresh(new_report)
-        return new_report.CRGReportID
-        
+async def add_new_report_batch(batch_hash, batch_description, reports, user, session: AsyncSession = Depends(get_session)):
+    new_batch = Batch(
+        BatchHash=batch_hash,
+        BatchDescription=batch_description,
+        UploadedBy=user
+    )
+    session.add(new_batch)
 
-async def delete_reports_by_ids(report_ids: List[int]) -> Dict[str, Any]:
-    async with AsyncSession(engine) as session:
-        try:                
-            # Bulk delete reports
-            result = await session.execute(
-                delete(Report).where(Report.CRGReportID.in_(report_ids))
-            )
-            
-            await session.commit()
-            
-            return {
-                "deleted_count": result.rowcount,
-                "failed_deletions": [],
-                "total_requested": len(report_ids)
-            }
-        except Exception as e:
-            await session.rollback()
-            raise HTTPException(status_code=500, detail=f"Failed to delete reports: {str(e)}")
+    # Add all reports at once
+    session.add_all(reports)
+    await session.flush()  # Flush once to get all IDs
+    
+    # Create all ReportAdded entries
+    report_added_entries = [
+        ReportAdded(CRGReportID=report.CRGReportID, BatchHash=batch_hash)
+        for report in reports
+    ]
+    session.add_all(report_added_entries)
+    
+    await session.commit()
+
+    for report in reports:
+        await session.refresh(report)
+
+    return reports
