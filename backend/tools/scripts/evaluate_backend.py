@@ -120,8 +120,10 @@ async def evaluate_with_cutoff_async(cutoff):
         max_connections=50,
         keepalive_expiry=30.0
     )
-    
-    async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=timeout, limits=limits) as client:
+
+    headers = {'X-API-Key': BACKEND_API_KEY}
+
+    async with httpx.AsyncClient(headers=headers, timeout=timeout, limits=limits) as client:
 
         response =  await client.get(f"{BACKEND_API}/reports", params={"date_from": cutoff, "date_to": cutoff})
         current_crg_report_ids = [item['CRGReportID'] for item in response.json()]
@@ -179,7 +181,9 @@ async def evaluate_with_cutoff_async_(cutoff):
         keepalive_expiry=30.0
     )
     
-    async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=timeout, limits=limits) as client:
+    headers = {'X-API-Key': BACKEND_API_KEY}
+
+    async with httpx.AsyncClient(headers=headers, timeout=timeout, limits=limits) as client:
 
         response =  await client.get(f"{BACKEND_API}/reports", params={"date_from": cutoff, "date_to": cutoff})
         current_crg_report_ids = [item['CRGReportID'] for item in response.json()]

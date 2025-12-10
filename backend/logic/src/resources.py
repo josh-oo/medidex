@@ -877,7 +877,7 @@ async def _get_report_studies_by_id(report_id, date_from, date_to, user, session
     
     # If user is provided, filter by CreatedBy
     if user:
-        stmt = stmt.where(StudyReportAdded.CreatedBy == user)
+        stmt = stmt.where((StudyReportAdded.CreatedBy == user) | (StudyReportAdded.CreatedBy.is_(None)))
     
     if date_from:
         stmt = stmt.where(Study.DateEntered >= date_from)
