@@ -406,6 +406,7 @@ async def batch_hash_id_to_crg_report_id(batch_hash: str = batch_hash_path, repo
         .where(
             ReportAdded.BatchHash == batch_hash,
         )
+        .order_by(ReportAdded.CRGReportID)
         .offset(report_index)
         .limit(1)
     )
