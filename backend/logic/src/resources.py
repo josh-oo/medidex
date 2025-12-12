@@ -141,11 +141,11 @@ async def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str 
     return await _get_study_persons(study_ids,cutoff,normalize_names,session)
 
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
-async def get_study_by_id(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> Study:
+async def get_study_by_id(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> List[Study]:
     study = await session.get(Study, study_id)
     if study is None:
         raise HTTPException(status_code=404, detail=f"Study {study_id} not found")
-    return study
+    return [study] #TODO added array for legacy reasons -> remove later
 
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
 async def get_study_reports_by_id(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[ReportResponse]:
