@@ -150,8 +150,8 @@ async def get_study_by_id(study_id: int = study_id_path, session: AsyncSession =
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
 async def get_study_reports_by_id(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[ReportResponse]:
     result = (await get_study_reports_by_ids(study_ids=[study.CRGStudyID], fields=None, cutoff=None, session=session))
-    if study.CRGStudyID in result:
-        return result[study.CRGStudyID]
+    if study[0].CRGStudyID in result:
+        return result[study[0].CRGStudyID]
     raise []
 
 @router.get("/studies/{trial_id}/study_id", summary="Get the CRGStudyID given a matching trial registration id")
