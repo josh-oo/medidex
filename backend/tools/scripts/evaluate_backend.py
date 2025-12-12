@@ -44,6 +44,7 @@ async def calculate_rank_score(crg_report_id, cutoff, client, fixed_k=None):
     exclusive_cutoff = dt - timedelta(days=1)
 
     response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/studies", params={"date_to": exclusive_cutoff})
+    response.raise_for_status()
     ground_truth = [item['CRGStudyID'] for item in response.json()]
 
     rank = 10_000
@@ -87,6 +88,7 @@ async def calculate_rank_score_negative_hints(crg_report_id, cutoff, client, fix
             #params = {"cutoff":cutoff, 'k': k, 'negative_studies': negative_studies, 'negative_reports': negative_reports}
             params = {"cutoff":cutoff, 'k': k, 'negative_reports': negative_reports}
             response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params=params)
+            response.raise_for_status()
             result = response.json()
             predicted_studies = result['CRGStudyID']
 
@@ -126,6 +128,7 @@ async def evaluate_with_cutoff_async(cutoff):
     async with httpx.AsyncClient(headers=headers, timeout=timeout, limits=limits) as client:
 
         response =  await client.get(f"{BACKEND_API}/reports", params={"date_from": cutoff, "date_to": cutoff})
+        response.raise_for_status()
         current_crg_report_ids = [item['CRGReportID'] for item in response.json()]
 
         pbar = tqdm(total=len(current_crg_report_ids))
