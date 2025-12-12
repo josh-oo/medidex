@@ -732,7 +732,7 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
             limit=k,  # Max amount of groups
             group_size=1,  # Max amount of points per group
             query_filter=filter,
-            with_payload=True,
+            with_payload=["belongs_to_study", "title", "authors", "source_id"],
             search_params=models.SearchParams(
                 #hnsw_ef= 16,
                 #exact=False,

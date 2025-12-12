@@ -307,7 +307,7 @@ async def update_user(user_id: int, role: Literal["user", "admin"], session: Asy
 
 @router.put("/users/me/api_keys", summary="Create a new API key for the given user.", status_code=201)
 async def create_api_key(token: str = Depends(is_verified), session: AsyncSession = Depends(get_session)) -> ApiKeyResponse:
-    decoded = verify_token(token)
+    decoded = await verify_token(token)
     user_id = decoded['id']
 
     key_id, key_hash, full_key = generate_api_key_pair()
@@ -321,7 +321,7 @@ async def create_api_key(token: str = Depends(is_verified), session: AsyncSessio
 
 @router.delete("/users/me/api_keys/{key_id}", summary="Delete an API key belonging to the given user.", status_code=204)
 async def delete_api_key(key_id: str, token: str = Depends(is_verified), session: AsyncSession = Depends(get_session)):
-    decoded = verify_token(token)
+    decoded = await verify_token(token)
     user_id = decoded['id']
 
     statement = select(APIKey).where(APIKey.id == key_id, APIKey.owner == user_id)
@@ -337,7 +337,7 @@ async def delete_api_key(key_id: str, token: str = Depends(is_verified), session
 
 @router.get("/users/me/api_keys", summary="Get all API keys created by the given user.")
 async def get_api_keys(token: str = Depends(is_verified), session: AsyncSession = Depends(get_session)) -> List[str]:
-    decoded = verify_token(token)
+    decoded = await verify_token(token)
     user_id = decoded['id']
 
     statement = select(APIKey.id).where(APIKey.owner == user_id) # Excluding password
