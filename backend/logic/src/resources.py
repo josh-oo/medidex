@@ -145,11 +145,11 @@ async def get_study_by_id(study_id: int = study_id_path, session: AsyncSession =
     study = await session.get(Study, study_id)
     if study is None:
         raise HTTPException(status_code=404, detail=f"Study {study_id} not found")
-    return [study] #TODO added array for legacy reasons -> remove later
+    return [study] #TODO added array for legacy reasons -> remove later also change this lines: if study[0].CRGStudyID in result:
 
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
 async def get_study_reports_by_id(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[ReportResponse]:
-    result = (await get_study_reports_by_ids(study_ids=[study.CRGStudyID], fields=None, cutoff=None, session=session))
+    result = (await get_study_reports_by_ids(study_ids=[study[0].CRGStudyID], fields=None, cutoff=None, session=session))
     if study[0].CRGStudyID in result:
         return result[study[0].CRGStudyID]
     raise []
