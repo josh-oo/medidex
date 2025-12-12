@@ -1,5 +1,6 @@
 from sqlmodel import SQLModel, Field
 from sqlalchemy import MetaData
+from sqlalchemy import Index
 from pydantic import EmailStr
 from typing import Optional
 import datetime
@@ -23,12 +24,12 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
     Authors: str
     Journal: str
     Year: int
-    Volume: Optional[int]
+    Volume: Optional[str]
     Issue: Optional[str]
     Pages: Optional[str]
     Language: Optional[str]
     Abstract: Optional[str]
-    CENTRALSubmissionStatus : Optional[str]
+    CENTRALSubmissionStatus : Optional[int]
     CopyStatus: Optional[str]
     DatetoCENTRAL: Optional[str]
     Dateentered: str
@@ -48,11 +49,16 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
     UDef5: Optional[str]
     PMID: Optional[str]
     TrialRegistrationID: Optional[str]
-    UDef9 : Optional[str]
-    UDef10: Optional[str]
-    UDef8: Optional[str]
+    UDef9 : Optional[float]
+    UDef10: Optional[float]
+    UDef8: Optional[float]
     
     #PDFLinks: Optional[str] = Field(default=None, sa_column=None)
+    __table_args__ = (
+        Index('idx_report_dateentered', 'Dateentered'),  # For date filtering
+        Index('idx_report_report_number', 'ReportNumber'),  # For PDF lookups
+        Index('idx_report_trial_id', 'TrialRegistrationID'),  # For trial ID searches
+    )
 
 class Study(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudy"
@@ -77,12 +83,23 @@ class Study(SQLModel, table=True, metadata=metadata_resources):
     UDef6: Optional[str]
     TrialRegistrationID: Optional[str]
 
+    __table_args__ = (
+        Index('idx_study_dateentered', 'DateEntered'),  # For cutoff filtering
+        Index('idx_study_shortname', 'ShortName'),  # For trial ID matching
+        Index('idx_study_trial_id', 'TrialRegistrationID'),  # For trial ID lookups
+    )
+
 class StudyReport(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyReport"
 
     StudyReportID: int = Field(primary_key=True)
     CRGStudyID: int = Field(foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
     CRGReportID: int = Field(foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
+
+    __table_args__ = (
+        Index('idx_studyreport_report', 'CRGReportID'),  # For report->studies lookups
+        Index('idx_studyreport_study', 'CRGStudyID'),  # For study->reports lookups
+    )
 
 class Participant(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblParticipant"
@@ -144,6 +161,32 @@ class StudyOutcome(SQLModel, table=True, metadata=metadata_resources):
     CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
     OutcomeID: int = Field(primary_key=True, foreign_key="tblOutcome.OutcomeID", ondelete="CASCADE")
 
+class Batch(SQLModel, table=True, metadata=metadata_resources):
+    __tablename__ = "tblBatch"
+    BatchHash: str = Field(primary_key=True)
+    BatchDescription: str
+    DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    UploadedBy: Optional[str]
+
+class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
+    __tablename__ = "tblReportAdded"
+    CRGReportID: int = Field(primary_key=True, foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
+    BatchHash: str = Field(foreign_key="tblBatch.BatchHash", ondelete="CASCADE")
+    
+    __table_args__ = (
+        Index('idx_reportadded_batch_report', 'BatchHash', 'CRGReportID'),
+    )
+
+class StudyReportAdded(SQLModel, table=True, metadata=metadata_resources):
+    __tablename__ = "tblStudyReportAdded"
+
+    StudyReportID: int = Field(primary_key=True, foreign_key="tblStudyReport.StudyReportID", ondelete="CASCADE")
+    DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    CreatedBy: Optional[str]
+
+    __table_args__ = (
+        Index('idx_studyreportadded_created_by', 'CreatedBy'),  # For user filtering
+    )
 
 """
 Authentication
@@ -164,22 +207,3 @@ class APIKey(SQLModel, table=True, metadata=metadata_user_data):
     id: str = Field(primary_key=True, index=True)
     owner: int = Field(foreign_key="users.id", ondelete="CASCADE")
     hash: str = Field(index=True)
-
-
-"""
-User Data
-"""
-
-class TmpReportBatch(SQLModel, table=True, metadata=metadata_user_data):
-    __tablename__ = "tmp_report_batches"
-
-    batch_hash: str = Field(primary_key=True)
-    batch_description: Optional[str]
-    number_reports: Optional[int]
-    created_at: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
-
-class TmpReport(SQLModel, table=True, metadata=metadata_user_data):
-    __tablename__ = "tmp_reports"
-    CRGReportID: int
-    batch_hash: str = Field(primary_key=True, foreign_key="tmp_report_batches.batch_hash", ondelete="CASCADE")
-    batch_inner_id: int = Field(primary_key=True)

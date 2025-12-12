@@ -26,6 +26,13 @@ COPY logic/src/ ./src/
 COPY --from=proto-builder /proto/embedding_pb2.py .
 COPY --from=proto-builder /proto/embedding_pb2_grpc.py .
 
+ARG APP_UID=1000
+ARG APP_GID=1000
+
+RUN mkdir -p /data/resources/pdf_metadata
+RUN mkdir -p /data/resources/pdfs
+RUN chown -R appuser:appgroup /data/resources
+
 # Switch to the non-root user before running the application
 USER appuser
 

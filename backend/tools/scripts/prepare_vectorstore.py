@@ -2,7 +2,6 @@
 from dotenv import load_dotenv
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Distance, VectorParams, MultiVectorComparator, MultiVectorConfig
-from qdrant_client.models import Filter, FieldCondition, MatchValue
 from qdrant_client.http.models import PointStruct
 from tqdm import tqdm
 import requests
@@ -10,16 +9,18 @@ import os
 import re
 
 import asyncio
+from collections import Counter
+import json
 import httpx
 
 import grpc
 
 import xml.etree.ElementTree as ET
-import sys
+#import sys
 
-sys.path.append("../utils")
-import embedding_pb2
-import embedding_pb2_grpc
+#sys.path.append("../utils")
+#import embedding_pb2
+#import embedding_pb2_grpc
 
 
 load_dotenv()
@@ -32,6 +33,7 @@ VECTORSTORE_PORT = os.getenv("VECTORSTORE_SERVICE_PORT")
 MESH_DUMP_LOCATION = os.getenv("MESH_DUMP_LOCATION")
 
 BACKEND_API = os.getenv("BACKEND_API_URL")
+BACKEND_API_KEY = os.getenv("BACKEND_API_KEY")
 
 async def get_missing_ids(client, collection_name, ids):
     response = await client.retrieve(collection_name=collection_name, ids=ids)
@@ -41,7 +43,7 @@ async def get_missing_ids(client, collection_name, ids):
 
     return missing_ids 
 
-
+""""
 async def calculate_report_embeddings(data, client=None, batch_size=128):
     #ids = iter(ids)
 
@@ -182,7 +184,8 @@ async def refresh_vector_store(force_recompute_embeddings=False):
         relevant_data[id] = data[id]
 
     calculate_report_embeddings(relevant_data,client=client)
-
+"""
+    
 """
 def refresh_study_embeddings():
 
@@ -421,24 +424,32 @@ def add_date_entered_info():
 #refresh_mesh_tags()
 
 #from sklearn.feature_extraction.text import TfidfVectorizer
-from collections import Counter
-import json
 
-def author_frequency():
-    session = requests.Session()
-    session.headers.update({"Authorization": "Bearer DEBUG"})
-    response = session.get(BACKEND_API + f"/studies/persons", params={'cutoff':'2025-08'})
+async def author_frequency():
+    timeout = httpx.Timeout(
+        read=20.0,
+        connect=10.0,
+        write=30.0,
+        pool=30.0
+    )
 
-    all_authors = []
-    for value in response.json().values():
-        print(value)
-        all_authors.extend(set(value))
+    limits = httpx.Limits(
+        max_keepalive_connections=20,
+        max_connections=50,
+        keepalive_expiry=30.0
+    )
+    
+    async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=timeout, limits=limits) as client:
+        response = await client.get(BACKEND_API + f"/studies/persons", params={'normalize_names': True})
 
-    counts = Counter(all_authors)
-    print(counts)
+        all_authors = []
+        for value in response.json().values():
+            all_authors.extend(set(value))
 
-    with open("author_frequencies.json", "w") as json_file:
-        json.dump(counts, json_file)
+        counts = Counter(all_authors)
+
+        with open("../_data/backend/resources/author_frequencies.json", "w") as json_file:
+            json.dump(counts, json_file)
 
     #all_docs = []
     #for key, value in response.json().items():
@@ -452,4 +463,4 @@ def author_frequency():
     #print(tfidf_matrix)
     
 
-#author_frequency()
+asyncio.run(author_frequency())

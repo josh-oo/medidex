@@ -1,13 +1,14 @@
-name: Deploy to Production
+name: Deploy to Development server
 
 on:
   push:
     branches:
-      - prod
+      - dev
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: [self-hosted, dev]
+    environment: dev
     env:
       DOCKER_CONFIG: ${{ vars.DOCKER_CONFIG }}
       EMBEDDING_MODEL_PATH: ${{ vars.EMBEDDING_MODEL_PATH }}
@@ -26,19 +27,25 @@ jobs:
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
       BACKEND_API_URL: http://logic:8002
       BACKEND_API_KEY: ${{ secrets.BACKEND_API_KEY }}
-      DEBUG: "FALSE"
+      
+      POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      POSTGRES_DB_RESOURCES: ${{ vars.POSTGRES_DB_RESOURCES }}
+      POSTGRES_DB_USERS: ${{ vars.POSTGRES_DB_USERS }}
+      JWKS_URL: ${{ vars.JWKS_URL }}
+
 
     steps:
       - name: Ensure Docker config dir exists
         run: |
           mkdir -p $DOCKER_CONFIG
 
-      - name: Update production code
+      - name: Update development code
         run: |
           cd ~/meerkat-tool
           git fetch origin
-          git checkout prod
-          git pull origin prod
+          git checkout dev
+          git pull origin dev
 
       - name: Rebuild and deploy application
         run: |

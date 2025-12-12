@@ -5,6 +5,8 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 import requests
 import os
 import json
+import httpx
+import asyncio
 
 from tqdm import tqdm
 
@@ -137,8 +139,93 @@ def create_test_set(path, cutoff, model_id, only_single_report_studies=False):
             if scroll_offset is None:
                 break
 
-print("Create test set 7th update")
-create_test_set("test_set","2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223")#, only_single_report_studies=True) # 7th update
+async def create_author_features(crg_report_id, authors, cutoff, client):
 
-print("Create train set 6th update")
-create_test_set("train_set","2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223")#, only_single_report_studies=True) # 6th update
+    author_list = [a.strip() for a in authors.split("//") if a.strip()]
+    
+    response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/studies", params={"date_to": cutoff})
+    ground_truth = [item['CRGStudyID'] for item in response.json()]
+
+    samples = []
+    
+    if len(ground_truth) == 1:
+        ground_truth = ground_truth[0]
+        response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params= {"cutoff":cutoff, 'k': 10})
+        predicted_studies = response.json()['CRGStudyID'] #List[int]
+        relevance = response.json()['Relevance']# List[float]
+
+        if ground_truth in predicted_studies:
+            
+            response = await client.get(BACKEND_API + f"/features/authors",params={'authors': author_list, 'study_ids':predicted_studies, "cutoff":cutoff})
+            result =  response.json()
+            if str(ground_truth) not in result.keys():
+                return
+            positive_sample = result.pop(str(ground_truth))
+            positive_sample['label'] = 1
+            positive_sample['study'] = ground_truth
+            positive_sample['report'] = crg_report_id
+            ground_truth_index = predicted_studies.index(ground_truth)
+            positive_sample['relevance'] = relevance[ground_truth_index]
+            samples.append(positive_sample)
+            for key in list(result.keys()):
+                negative_sample = result.pop(key)
+                negative_sample['label'] = 0
+                negative_sample['study'] = int(key)
+                negative_sample['report'] = crg_report_id
+                study_id = int(key)
+                study_index = predicted_studies.index(study_id)
+                negative_sample['relevance'] = relevance[study_index]
+                samples.append(negative_sample)
+            return samples
+
+async def create_author_reranking(cutoff):
+
+    timeout = httpx.Timeout(
+        read=20.0,
+        connect=10.0,
+        write=30.0,
+        pool=30.0
+    )
+
+    limits = httpx.Limits(
+        max_keepalive_connections=10,
+        max_connections=20,
+        keepalive_expiry=30.0
+    )
+
+    features = []
+    semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent tasks
+    
+    async def bounded_task(crg_report_id, authors, cutoff, client):
+        async with semaphore:
+            return await create_author_features(crg_report_id, authors, cutoff, client)
+    
+    async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=timeout, limits=limits) as client:
+
+        response = await client.get(f"{BACKEND_API}/reports", params={"date_to": cutoff})
+        current_crg_report_ids = [(item['CRGReportID'], item['Authors']) for item in response.json()]
+
+        pbar = tqdm(total=len(current_crg_report_ids))
+
+        tasks = [
+            asyncio.create_task(bounded_task(crg_report_id, authors, cutoff, client))
+            for crg_report_id, authors in current_crg_report_ids
+        ]
+
+        for task in asyncio.as_completed(tasks):
+            result = await task
+            if result:
+                features.extend(result)
+            pbar.update(1)
+
+    with open("author_features.json", 'w') as json_file:
+        json.dump(features, json_file, indent=4)
+
+
+asyncio.run(create_author_reranking("2024-01-23"))
+
+#print("Create test set 7th update")
+#create_test_set("test_set","2025-01-13 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223")#, only_single_report_studies=True) # 7th update
+
+#print("Create train set 6th update")
+#create_test_set("train_set","2024-07-26 00:00:00", "josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223")#, only_single_report_studies=True) # 6th update
