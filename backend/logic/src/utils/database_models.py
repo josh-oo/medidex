@@ -188,6 +188,15 @@ class StudyReportAdded(SQLModel, table=True, metadata=metadata_resources):
         Index('idx_studyreportadded_created_by', 'CreatedBy'),  # For user filtering
     )
 
+class AnalyticsEvent(SQLModel, table=True, metadata=metadata_resources):
+    __tablename__ = "tblEvent"
+
+    EventID: Optional[int] = Field(default=None, primary_key=True)
+    DateCreated: datetime.datetime
+    CreatedBy: str
+    Type: str
+    RelatedReport: Optional[int]
+
 """
 Authentication
 """

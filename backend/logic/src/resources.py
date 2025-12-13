@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from .utils.database_models import Report, Study, StudyCondition, StudyDesign, StudyIntervention, StudyOutcome, StudyParticipant, StudyReport
 from .utils.database_models import Condition, Intervention, Design, Outcome, Participant
 from .utils.database_models import Batch, ReportAdded, StudyReportAdded
+from .utils.database_models import AnalyticsEvent
 
 from .utils.pdf.processor import process_pdf
 from .utils.trial_registration_id import extract_trial_id
@@ -72,6 +73,18 @@ class StudyParams(BaseModel):
     duration: str
     number_of_participants : int
     comparison : str
+
+class Event(BaseModel):
+    timestamp: str
+    event_type: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "timestamp": "2025-12-13T10:30:00Z",
+                "event_type": "start"
+            }
+        }
 
 async def get_session() -> AsyncSession:
     async with AsyncSession(engine) as session:
@@ -340,6 +353,74 @@ async def get_report_trial_ids(report = Depends(get_reports_by_id), include_full
     authors = [item.strip() for item in report.Authors.split("//")]
     all_ids = extract_trial_id(report.Title, report.Abstract, authors)
     return all_ids
+
+@router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
+async def post_report_event(report_id : int, event: Event, user = Depends(get_user_info), session: AsyncSession = Depends(get_session)):
+    user_id = None
+    if user:
+        user_id = str(user['id'])
+    
+    # Validate report exists
+    report = await session.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+    
+    # Parse timestamp from frontend
+    try:
+        event_datetime = datetime.fromisoformat(event.timestamp.replace('Z', '+00:00'))
+        # Convert to naive datetime (remove timezone info)
+        event_datetime = event_datetime.replace(tzinfo=None)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid timestamp format. Use ISO format (e.g., '2025-12-13T10:30:00Z')")
+
+    new_event = AnalyticsEvent(
+        DateCreated=event_datetime,
+        CreatedBy=user_id or "anonymous",
+        Type=event.event_type,
+        RelatedReport=report_id
+    )
+    
+    session.add(new_event)
+    await session.commit()
+    await session.refresh(new_event)
+    
+    return {
+        "report_id": report_id,
+        "timestamp": event.timestamp,
+        "event_type": event.event_type,
+        "user_id": user_id
+    }
+
+@router.post("/events", summary="Track general UI events.", description="Track general UI events using a timestamp and reasonable event_types for example 'login', 'logout', 'ui_interaction' or 'idle'. Feel free to use other descriptive event types.")
+async def post_event(event: Event, user = Depends(get_user_info), session: AsyncSession = Depends(get_session)):
+    user_id = None
+    if user:
+        user_id = str(user['id'])
+    
+    # Parse timestamp from frontend
+    try:
+        event_datetime = datetime.fromisoformat(event.timestamp.replace('Z', '+00:00'))
+        # Convert to naive datetime (remove timezone info)
+        event_datetime = event_datetime.replace(tzinfo=None)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid timestamp format. Use ISO format (e.g., '2025-12-13T10:30:00Z')")
+    
+    new_event = AnalyticsEvent(
+        DateCreated=event_datetime,
+        CreatedBy=user_id or "anonymous",
+        Type=event.event_type,
+        RelatedReport=None
+    )
+    
+    session.add(new_event)
+    await session.commit()
+    await session.refresh(new_event)
+    
+    return {
+        "timestamp": event.timestamp,
+        "event_type": event.event_type,
+        "user_id": user_id
+    }
     
 """
 Aspect Endpoints
@@ -391,7 +472,43 @@ async def get_study_outcomes(study_ids: List[int] = study_ids_query, session: As
 async def get_all_outcomes(ids: List[int] = Query(None,description="If you are only interested in specific outcomes. Leave this blank for retrieving all outcomes."), session: AsyncSession = Depends(get_session)) -> List[Outcome]:
     return await _get_all_outcomes(ids, session)
 
+@router.get("/countries", summary="Get all study countries or filter them by prefix.")
+async def get_all_countries(
+    prefix: Optional[str] = Query(None, description="Filter countries by prefix (case-insensitive)."),
+    session: AsyncSession = Depends(get_session)
+) -> List[str]:    
+    # Get all non-null Countries values
+    stmt = select(Study.Countries).where(Study.Countries.isnot(None))
+    rows = (await session.execute(stmt)).scalars().all()
+    
+    # Split by '//' and collect all unique countries
+    countries_set = set()
+    for countries_str in rows:
+        if countries_str:
+            # Split by '//' and strip whitespace from each country
+            cleaned = re.sub(r'\{[^}]*\}|\[[^\]]*\]', '', countries_str).strip()
+            country_list = [country.strip() for country in cleaned.replace("//", "/").split("/")]
+            for country in country_list:
+                if country == "USA and":
+                    print(countries_str)
+                countries_set.add(country)
 
+    blacklist = ["NR", "USA and USA", "USA and", "SlovakiaUSA", "Slovania", "Morroco", "Japan and Japan", "Greece OR UK", "Chile and China", ""]
+    
+    # Remove blacklisted items
+    for item in blacklist:
+        countries_set.discard(item)
+    
+    # Convert to sorted list
+    all_countries = sorted(countries_set)
+    
+    # Apply prefix filter if provided
+    if prefix:
+        prefix_lower = prefix.lower()
+        all_countries = [c for c in all_countries if c.lower().startswith(prefix_lower)]
+    
+    return all_countries
+    
 """
 Other Endpoints
 """
