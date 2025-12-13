@@ -287,9 +287,11 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
     await publish_batch_update(batch_hash)
 
-    reports_dict = [report.dict() for report in reports]
+    #TODO disabled for legacy reasons
+    #reports_dict = [report.dict() for report in reports]
+    #JSONResponse(content={"batch_hash": batch_hash, "batch_description": file.filename, "reports": reports_dict}, status_code=201)
 
-    return JSONResponse(content={"batch_hash": batch_hash, "batch_description": file.filename, "reports": reports_dict}, status_code=201)
+    return Response(status_code=201)
 
 async def get_batch_by_hash(batch_hash: str, db: AsyncSession = Depends(get_session)):
     batch = await db.execute(select(Batch).where(Batch.BatchHash == batch_hash))

@@ -1,32 +1,55 @@
-FROM python:3.13-slim
-
-#ENV STREAMLIT_SERVER_HEADLESS=true
-ENV PYTHONDONTWRITEBYTECODE 1
-
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
-
+# 1. Install dependencies
+FROM node:20-alpine AS deps
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Install git
+RUN apk add --no-cache git
 
-# Copy the rest of the app
-COPY . .
+# Clone the repository
+RUN git clone https://github.com/MaxiMittel/medidex.git .
 
-RUN mkdir -p /home/appuser/.streamlit && \
-    cat <<EOF > /home/appuser/.streamlit/config.toml
-[server]
-enableCORS = false
-enableXsrfProtection = false
-headless = true
-port = 8501
-address = "0.0.0.0"
-EOF
-RUN chown -R appuser:appgroup /home/appuser
+# Update API_BASE_URL in apiClient.ts
+#TODO remove this once API_BASE_URL is an env var
+RUN sed -i "s|const API_BASE_URL = 'https://meerkat.sebis.cit.tum.de/api/'|const API_BASE_URL = process.env.BACKEND_API_URL \|\| 'http://logic:8002'|g" lib/api/apiClient.ts
 
+# Provide dummy DATABASE_URL for prisma generate during npm ci
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+
+RUN npm ci
+
+# 2. Build the application
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+# Copy everything from deps stage (includes cloned repo + node_modules)
+COPY --from=deps /app ./
+
+# Generate Prisma Client (required before build)
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+RUN npx prisma generate
+RUN npm run build
+
+# 3. Production runner
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Copy built assets
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/app/generated ./app/generated
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/prisma ./prisma
+
+USER nextjs
 EXPOSE 8501
+ENV PORT=8501
 
-# Switch to the non-root user before running the application
-USER appuser
-
-ENTRYPOINT ["streamlit", "run", "Home.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["npm", "run", "start"]
