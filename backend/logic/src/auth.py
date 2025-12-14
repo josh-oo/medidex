@@ -201,7 +201,7 @@ async def is_verified(token: Optional[str] = Security(oauth2_scheme)):
     if not token:
         return None
     decoded = await verify_token(token)
-    if decoded.get('verified', 0) != 1 and decoded.get('iss', None) != "https://medidex.vercel.app": #TODO remove that later
+    if decoded.get('verified', 0) != 1 and decoded.get('iss', None) == None: #TODO remove that later
         raise HTTPException(status_code=401, detail="Not allowed")
     
     return token
