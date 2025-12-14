@@ -95,7 +95,7 @@ services:
       - "8501:8501"
     environment:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
-      - BETTER_AUTH_URL=http://localhost:8501
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL}
       - STAGE=local
       - MEERKAT_API_KEY=${BACKEND_API_KEY}
       - BACKEND_API_URL=${BACKEND_API_URL}
