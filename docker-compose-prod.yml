@@ -10,6 +10,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/_data/postgres-init:/docker-entrypoint-initdb.d
+      - ${POSTGRES_BACKUPS}:/backups
     expose:
       - 5432
     networks:
@@ -92,12 +93,11 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "8501:8501"
+      - "3000:3000"
     environment:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL}
       - STAGE=production
-      - MEERKAT_API_KEY=${BACKEND_API_KEY}
       - BACKEND_API_URL=${BACKEND_API_URL}
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/medidex?schema=public
     networks:
