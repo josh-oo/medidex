@@ -50,4 +50,4 @@ COPY --from=builder /app/prisma ./prisma
 
 USER nextjs
 
-CMD ["npm", "run", "start"]
+CMD ["npm", "run", "start", "--", "-H", "0.0.0.0"]
