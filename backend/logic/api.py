@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src import auth, logic, resources
 
 # Initialize FastAPI
-app = FastAPI(root_path="/api")
+app = FastAPI(root_path="/backend/api")
 
 app.add_middleware(
     CORSMiddleware,
