@@ -8,6 +8,10 @@ RUN apk add --no-cache git
 # Clone the repository
 RUN git clone https://github.com/MaxiMittel/medidex.git .
 
+# Update API_BASE_URL in apiClient.ts
+#TODO remove this once API_BASE_URL is an env var
+RUN sed -i "s|const API_BASE_URL = `${process.env.MEERKAT_API_URL}/api`|const API_BASE_URL = process.env.BACKEND_API_URL \|\| 'http://logic:8002'|g" lib/api/apiClient.ts
+
 # Provide dummy DATABASE_URL for prisma generate during npm ci
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 
