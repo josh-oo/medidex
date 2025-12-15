@@ -153,18 +153,22 @@ async def get_study_reports_by_ids(study_ids: List[int] = study_ids_query, cutof
 async def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, normalize_names = Query(False), session: AsyncSession = Depends(get_session)) -> Dict[int, List[str]]:
     return await _get_study_persons(study_ids,cutoff,normalize_names,session)
 
-@router.get("/studies/{study_id}", summary="Get study details for a specific study.")
 async def get_study_by_id(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> List[Study]:
     study = await session.get(Study, study_id)
     if study is None:
         raise HTTPException(status_code=404, detail=f"Study {study_id} not found")
-    return [study] #TODO added array for legacy reasons -> remove later also change this lines: if study[0].CRGStudyID in result:
+    return study
+
+@router.get("/studies/{study_id}", summary="Get study details for a specific study.")
+async def get_study_by_id_legacy(study: Study = Depends(get_study_by_id)) -> List[Study]:
+    #TODO remove this
+    return [study]
 
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
 async def get_study_reports_by_id(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[ReportResponse]:
-    result = (await get_study_reports_by_ids(study_ids=[study[0].CRGStudyID], fields=None, cutoff=None, session=session))
-    if study[0].CRGStudyID in result:
-        return result[study[0].CRGStudyID]
+    result = (await get_study_reports_by_ids(study_ids=[study.CRGStudyID], fields=None, cutoff=None, session=session))
+    if study.CRGStudyID in result:
+        return result[study.CRGStudyID]
     raise []
 
 @router.get("/studies/{trial_id}/study_id", summary="Get the CRGStudyID given a matching trial registration id")
@@ -186,36 +190,36 @@ async def get_study_date_by_id(study_id: int = study_id_path, session: AsyncSess
 async def get_study_interventions_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
     result = await get_study_interventions(study_ids=[study.CRGStudyID], session=session)
     if study.CRGStudyID in result.keys():
-        return result[study.CRGStudyID]
-    raise []
+        return [item['Description'] for item in result[study.CRGStudyID]]
+    return []
 
 @router.get("/studies/{study_id}/conditions", summary="Get the health conditions of participants in a specific study (e.g., 'COVID-19', 'Diabetes', ...).")
 async def get_study_conditions_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
     result =await get_study_conditions(study_ids=[study.CRGStudyID], session=session)
     if study.CRGStudyID in result.keys():
-        return result[study.CRGStudyID]
-    raise []
+        return [item['Description'] for item in result[study.CRGStudyID]]
+    return []
 
 @router.get("/studies/{study_id}/outcomes", summary="Get outcomes for a specific study (e.g. 'Mortality', 'Hospitalization', ...)")
 async def get_study_outcomes_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
     result =await get_study_outcomes(study_ids=[study.CRGStudyID], session=session)
     if study.CRGStudyID in result.keys():
-        return result[study.CRGStudyID]
-    raise []
+        return [item['Description'] for item in result[study.CRGStudyID]]
+    return []
 
 @router.get("/studies/{study_id}/participants", summary="Get participant description for a specific study (e.g. Male, Female, Adult, Child, ...)")
 async def get_study_participants_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
     result = await get_study_participants(study_ids=[study.CRGStudyID], session=session)
     if study.CRGStudyID in result.keys():
-        return result[study.CRGStudyID]
-    raise []
+        return [item['Description'] for item in result[study.CRGStudyID]]
+    return []
 
 @router.get("/studies/{study_id}/design", summary="Get the study design of the corresponding study ('Randomized Controlled Trial', 'Controlled Clinical Trial')")
 async def get_study_design_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
     result = await get_study_design(study_ids=[study.CRGStudyID], session=session)
     if study.CRGStudyID in result.keys():
         return result[study.CRGStudyID]
-    raise []
+    return []
 
 @router.get("/studies/{study_id}/persons", summary="Get all persons (usually only authors) associated with a specific study")
 async def get_study_persons_single(study: Study = Depends(get_study_by_id), cutoff: str = cutoff_query, session: AsyncSession = Depends(get_session)) -> List[str]:

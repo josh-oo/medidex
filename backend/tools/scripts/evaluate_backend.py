@@ -55,6 +55,7 @@ async def calculate_rank_score(crg_report_id, cutoff, client, fixed_k=None):
         for k in ks:
             params = {"cutoff":cutoff, 'k': k}
             response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params=params)
+            response.raise_for_status()
             predicted_studies = response.json()['CRGStudyID']
 
             if ground_truth in predicted_studies:

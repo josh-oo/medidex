@@ -7,6 +7,7 @@ RUN apk add --no-cache git
 
 # Clone the repository
 RUN git clone https://github.com/MaxiMittel/medidex.git .
+RUN git checkout abd6ac65dae826eeaa5c2d8895a1daf0233c0087
 
 # Update API_BASE_URL in apiClient.ts
 #TODO remove this once API_BASE_URL is an env var
