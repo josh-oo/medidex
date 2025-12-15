@@ -102,6 +102,7 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/medidex?schema=public
     networks:
       - internal_net
+      - public_net
 
 networks:
   internal_net:
