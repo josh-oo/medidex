@@ -138,7 +138,7 @@ def _configure_health_server(server: grpc.Server):
     health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)  # for default check
 
 def serve():
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
     embedding_pb2_grpc.add_EmbedServiceServicer_to_server(EmbedServiceServicer(), server)
     server.add_insecure_port('[::]:50051')
     _configure_health_server(server)

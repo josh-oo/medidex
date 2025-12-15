@@ -545,113 +545,21 @@ async def get_similar_tags(embedding, sources: List[str], aspect: str, k: int, c
 
     return results
 
-async def get_similar_studies(embedding, aspect: str, trial_id: str, authors: List[str], cutoff: str, k: int, client: AsyncQdrantClient, return_details: bool):
-    found_study_ids = {}
-    debug_map = {}
-
-    return_details= return_details or DEBUG
-    
-    filters = []
-    if cutoff:
-        filters.append(Filter(
-            must=[
-                FieldCondition(key="date_entered",range=DatetimeRange(lt=datetime.fromisoformat(cutoff)))
-            ]
-        ))        
-    
-    if trial_id:
-        
-        response = await get_study_id_by_trial_ids_internal(trial_id, cutoff)
-        if response:
-            for result in response:
-                found_study_ids[result] = 1.0
-                debug_map[result] = [{"source_id":trial_id}]
-
-        filters.append(
-                models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="belongs_to_trial_id",
-                            match=models.MatchValue(value=False)
-                        )
-                    ],
-                    must_not=[
-                        models.FieldCondition(
-                            key="belongs_to_study",
-                            match=models.MatchAny(any=list(found_study_ids.keys()))
-                        )
-                    ]
-                )
-            )
-    
-    filter = models.Filter(must=filters)
-
-    k = k - len(found_study_ids.keys())
-
-    if k > 0:
-        search_results = await client.query_points_groups(
-            collection_name=COLLECTION_NAME,
-            query=embedding,
-            using=aspect,
-            group_by="belongs_to_study",  # Path of the field to group by
-            limit=k,  # Max amount of groups
-            group_size=1,  # Max amount of points per group
-            query_filter=filter,
-            with_payload=True,
-            #with_vectors=True,
-        )
-
-        reranked_results = search_results.groups
-
-        for result in reranked_results:
-            for hit in result.hits:
-                for item in hit.payload['belongs_to_study']:
-                    if item not in found_study_ids:
-                        found_study_ids[item] = hit.score
-                    debug_map[item] = debug_map.get(item, []) + [hit.payload]
-
-    all_studies = await get_studies_internal(list(found_study_ids.keys()))
-    #list of dicts to dict of lists:
-
-    #Remove this block for evaluation without authors
-    scores_authors = await get_scores_authors(report_authors=authors, study_ids=list(found_study_ids.keys()), cutoff=cutoff)
-    for study_id, score in scores_authors.items():
-        if found_study_ids[study_id] < 1.0:
-            found_study_ids[study_id] = min(0.99, found_study_ids[study_id] + score)
-
-    #result['Relevance'] = list(found_study_ids.values())
-    for i in range(0, len(all_studies)):
-        item = all_studies[i].dict()
-        item['Relevance'] = found_study_ids[item['CRGStudyID']]
-        all_studies[i] = item
-
-    result = {}
-    for study in all_studies:
-        for key, value in study.items(): 
-            result.setdefault(key, []).append(value)
-
-    order = ['CRGStudyID', 'Relevance', 'ShortName', 'NumberParticipants', 'Duration', 'Comparison', 'Countries', 'DateEntered', 'DateEdited', 'StatusofStudy']
-    reordered = {key: result[key] for key in order}
-
-    if return_details:
-        reordered['details'] = [list({d['source_id']: d for d in debug_map[key]}.values()) for key in reordered['CRGStudyID']]
-
-    sorted_indices = sorted(range(len(reordered['Relevance'])), key=lambda i: reordered['Relevance'][i], reverse=True)
-    for k in reordered:
-        reordered[k] = [reordered[k][i] for i in sorted_indices]
-
-    return reordered
+async def get_similar_studies_by_embedding(embedding, aspect: str, trial_id: List[str], authors: List[str], cutoff: str, k: int, client: AsyncQdrantClient, return_details: bool):
+    return await get_similar_study_by_query(embedding,aspect,cutoff,k, [], [trial_id], authors, client=client, return_details=return_details)
 
 async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], client: AsyncQdrantClient, return_details: bool):
     
     report = await get_report_by_id_internal(crg_report_id)
-    pdf_metadata = await get_pdf_metadata(report.ReportNumber)
 
     authors = [item.strip() for item in report.Authors.split("//")]
-    trial_ids = await get_report_trial_ids(report)
-
-    if not trial_ids or len(trial_ids) == 0:
-        trial_ids = pdf_metadata['trial_id']
+    try:
+        trial_ids = await get_report_trial_ids(report, include_fulltext=True)
+    except HTTPException as e:
+        if e.status_code == 404: #PDF not found
+            trial_ids = []
+        else:
+            raise
 
     if not negative_studies:
         negative_studies = []
@@ -662,6 +570,47 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
     positive_ids = [transform_to_uuid(crg_report_id)]
     negative_ids = [transform_to_uuid(negative_id) for negative_id in negative_reports]
     #TODO remove negative samples from trial id retrieval
+
+    query=models.RecommendQuery(
+                recommend=models.RecommendInput(
+                    positive=positive_ids,
+                    negative=negative_ids,
+                    strategy=models.RecommendStrategy.AVERAGE_VECTOR,
+                )
+            )
+    
+    """
+    #TODO REMOVE TESTS#######################
+    import numpy as np
+    vectors = await get_vectors_by_crg_report_id(crg_report_id, client, COLLECTION_NAME)
+    query = vectors['default']
+
+    std_dev = 0.5
+
+    pre_noise = np.random.normal(0.0, std_dev, size=len(query))
+
+    query = query + pre_noise
+    ########################################
+    """
+    
+    result = await get_similar_study_by_query(query,aspect,cutoff,k,negative_studies, trial_ids, authors, client=client, return_details=return_details)
+
+    """
+    #TODO REMOVE TESTS#######################
+    post_noise = np.random.normal(0.0, std_dev, size=len(result['Relevance']))
+    for i in range(0, len(result['Relevance'])):
+        result['Relevance'][i] += post_noise[i]
+
+    sorted_indices = sorted(range(len(result['Relevance'])), key=lambda i: result['Relevance'][i], reverse=True)
+    for key in result.keys():
+        result[key] = [result[key][i] for i in sorted_indices]
+
+    ########################################
+    """
+
+    return result
+
+async def get_similar_study_by_query(query, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], trial_ids: List[str], authors:List[str], client: AsyncQdrantClient, return_details: bool):
     
     found_study_ids = {}
     #found_study_titles = {}
@@ -722,24 +671,13 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
     if k > 0:
         search_results = await client.query_points_groups(
             collection_name=COLLECTION_NAME,
-            query=models.RecommendQuery(
-                recommend=models.RecommendInput(
-                    positive=positive_ids,
-                    negative=negative_ids,
-                    strategy=models.RecommendStrategy.AVERAGE_VECTOR,
-                )
-            ),
+            query=query,
             using=aspect,
             group_by="belongs_to_study",  # Path of the field to group by
             limit=k,  # Max amount of groups
             group_size=1,  # Max amount of points per group
             query_filter=filter,
             with_payload=["belongs_to_study", "title", "authors", "source_id"],
-            search_params=models.SearchParams(
-                #hnsw_ef= 16,
-                #exact=False,
-                #quantization=models.QuantizationSearchParams(rescore=False)
-            ),
         )
 
         reranked_results = search_results.groups
@@ -753,6 +691,8 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
                     info['score'] = hit.score
                     debug_map[item] = debug_map.get(item, []) + [info]
 
+    if len(found_study_ids.keys()) == 0:
+        return {'CRGStudyID': [] }
     all_studies = await get_studies_internal(list(found_study_ids.keys()))
     #list of dicts to dict of lists:
 
@@ -762,12 +702,6 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
         debug_map[study_id].append({'source_id': 'author_reranking', 'score': 0.65 * score})
         found_study_ids[study_id] = min(1.00, found_study_ids[study_id] + 0.65 * score)
 
-    #author_features = await get_author_features(authors, list(found_study_ids.keys()), cutoff)
-    #for study_id, author_features in author_features.items():
-    #    features = [author_features['num_overlap'], author_features['inv_freq_sum'], author_features['num_report'], author_features['num_study'],author_features['jaccard'],  found_study_ids[study_id]]
-    #    found_study_ids[study_id] = float(reranking_model.predict([features])[0])
-
-    #result['Relevance'] = list(found_study_ids.values())
     for i in range(0, len(all_studies)):
         item = all_studies[i].dict()
         item['Relevance'] = found_study_ids[item['CRGStudyID']]
@@ -859,7 +793,7 @@ async def get_aspect_related_studies(tag_category: TagCategories = Path(..., des
     if tag_category in aspect_mapping.keys():
         aspect = aspect_mapping[tag_category]
 
-    return await get_similar_studies(embeddings['embedding'], aspect, None, [], None, k, client, return_details=False)
+    return await get_similar_studies_by_embedding(embeddings['embedding'], aspect, [], [], None, k, client, return_details=False)
 
 
 
@@ -886,8 +820,8 @@ async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(
 async def analyze(embeddings, top_k, title, abstract, authors, cutoff, client):
     
     trial_id = extract_trial_id(RawReport(title=title,abstract=abstract, authors=[]))
-    trial_id = trial_id[0] if len(trial_id) == 1 else None
-    pre_result = await get_similar_studies(embeddings['embedding'], "default", trial_id, authors, cutoff, top_k, client, return_details=True)
+    trial_id = [trial_id[0]] if len(trial_id) == 1 else None
+    pre_result = await get_similar_studies_by_embedding(embeddings['embedding'], "default", trial_id, authors, cutoff, top_k, client, return_details=True)
 
     found_study_ids = {}
     for key, score, details in zip(pre_result['CRGStudyID'], pre_result['Relevance'], pre_result['details']):
@@ -1011,13 +945,3 @@ class AspectEmbedding(BaseModel):
 @router.get("/reports/{report_id}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="")
 async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),  cutoff: str = Query(None), k : int = Query(10), negative_studies : List[int]=Query(None),negative_reports : List[int]=Query(None), client=Depends(get_vectorstore), return_details=False):
     return await get_similar_studies_by_id(report_id, aspect, cutoff, k, negative_studies, negative_reports, client, return_details)
-
-@router.post("/similarity_search/studies", dependencies=[Depends(is_verified_api_call)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_studies or /reports/{report_id}/studies instead", deprecated=True)
-async def similarity_search_studies(embedding: ReportEmbedding, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), trial_id: str = Query(None), authors: List[str] = Query(None),  cutoff: str = Query(None), k : int = Query(10), client=Depends(get_vectorstore), return_details=False):
-    
-    return await get_similar_studies(embedding.main_embedding, embedding.model_id, aspect, trial_id, authors, cutoff, k, client, return_details)
-
-@router.post("/similarity_search/tags", dependencies=[Depends(is_verified_api_call)], summary="DEPRECATED: Use /batches/{batch_hash}/{report_index}/similar_tags instead", deprecated=True)
-async def similarity_search_tags(embedding: AspectEmbedding, sources: List[str] = Query(...), type: str = Query(...), k : int = Query(10), client=Depends(get_vectorstore)):
-    
-    return await get_similar_tags(embedding.embedding, embedding.model_id + "_tags", sources, type, k, client)
