@@ -1,8 +1,23 @@
 from qdrant_client import models
 from qdrant_client.http.models import PointStruct
+from qdrant_client import AsyncQdrantClient
+from dotenv import load_dotenv
 from .embedding import _embed_report
+import os
 
 from datetime import datetime, timezone
+
+load_dotenv()
+
+VECTORSTORE_HOST = os.getenv("VECTORSTORE_SERVICE_HOST")
+VECTORSTORE_PORT = os.getenv("VECTORSTORE_SERVICE_PORT")
+COLLECTION_NAME = os.getenv("VECTORSTORE_COLLECTION_NAME")
+
+CLIENT = AsyncQdrantClient(
+    host=VECTORSTORE_HOST, 
+    grpc_port=VECTORSTORE_PORT, 
+    prefer_grpc=True
+)
 
 def transform_to_uuid(id, tag="0000"):
     id = str(id).lower()
@@ -10,20 +25,68 @@ def transform_to_uuid(id, tag="0000"):
     id = "0"*missing_zeros + id
     return f"00000000-{tag}-4000-a000-{id}"
 
-async def get_vectors_by_crg_report_id(crg_report_id, client, collection_name):
+async def get_collections():
+    return await CLIENT.get_collections()
+
+async def get_all_saved_crg_report_ids():
+    """
+    Remove orphan nodes from vectorstore - delete points whose source_id 
+    doesn't exist in the Meerkat database anymore.
+    """
+    # Get all points with their source_id from vectorstore
+    scroll_result = await CLIENT.scroll(
+        collection_name=COLLECTION_NAME ,
+        limit=10000,  # Adjust based on your collection size
+        with_payload=['source_id'],
+        with_vectors=False,
+    )
+    
+    all_points = scroll_result[0]
+    offset = scroll_result[1]
+    
+    # Continue scrolling if there are more points
+    while offset is not None:
+        scroll_result = await CLIENT.scroll(
+            collection_name=COLLECTION_NAME ,
+            limit=10000,
+            offset=offset,
+            with_payload=['source_id'],
+            with_vectors=False,
+        )
+        all_points.extend(scroll_result[0])
+        offset = scroll_result[1]
+    
+    # Extract source_ids from vectorstore
+    vectorstore_source_ids = set()
+    for point in all_points:
+        if point.payload and 'source_id' in point.payload:
+            vectorstore_source_ids.add(point.payload['source_id'])
+    
+    return vectorstore_source_ids
+
+async def update_payload(crg_report_id, study_ids):
+    await CLIENT.set_payload(
+        collection_name=COLLECTION_NAME,
+        payload={
+            "belongs_to_study": study_ids,
+        },
+        points=[transform_to_uuid(crg_report_id)],
+    )
+
+async def get_vectors_by_crg_report_id(crg_report_id):
     point_id = transform_to_uuid(crg_report_id)
-    result = await client.retrieve(
-        collection_name=collection_name,
+    result = await CLIENT.retrieve(
+        collection_name=COLLECTION_NAME ,
         ids=[point_id],
         with_vectors=True,
         with_payload=False,
     )
     return result[0].vector
 
-async def crg_report_exists(crg_report_id, client, collection_name):
+async def crg_report_exists(crg_report_id):
     point_id = transform_to_uuid(crg_report_id)
-    result = await client.retrieve(
-        collection_name=collection_name,
+    result = await CLIENT.retrieve(
+        collection_name=COLLECTION_NAME,
         ids=[point_id],
         with_vectors=False,
         with_payload=False,
@@ -32,16 +95,16 @@ async def crg_report_exists(crg_report_id, client, collection_name):
         return True
     return False
 
-async def delete_vectors_by_crg_report_ids(crg_report_ids, client, collection_name):
+async def delete_vectors_by_crg_report_ids(crg_report_ids):
     ids = [transform_to_uuid(crg_report_id) for crg_report_id in crg_report_ids]
-    await client.delete(
-        collection_name=collection_name,
+    await CLIENT.delete(
+        collection_name=COLLECTION_NAME ,
         points_selector=models.PointIdsList(
             points=ids,
         )
 )
 
-async def add_report_to_vectorstore(report, embedding_channel, client, collection_name):
+async def add_report_to_vectorstore(report, embedding_channel):
     title = report.Title
     abstract = report.Abstract
     authors = [item.strip() for item in report.Authors.split("//")]
@@ -72,4 +135,24 @@ async def add_report_to_vectorstore(report, embedding_channel, client, collectio
     new_vectors.pop("model_id")
 
     points = [PointStruct(id=new_id,vector=new_vectors, payload=payload)]
-    await client.upsert(wait=True, collection_name=collection_name, points=points)
+    await CLIENT.upsert(wait=True, collection_name=COLLECTION_NAME, points=points)
+
+async def search_report(query,aspect,k,filter):
+    return await CLIENT.query_points_groups(
+            collection_name=COLLECTION_NAME,
+            query=query,
+            using=aspect,
+            group_by="belongs_to_study",  # Path of the field to group by
+            limit=k,  # Max amount of groups
+            group_size=1,  # Max amount of points per group
+            query_filter=filter,
+            with_payload=["belongs_to_study", "title", "authors", "source_id"],
+        )
+
+async def search_tags(query, k, filter):
+    return await CLIENT.query_points(
+        collection_name=COLLECTION_NAME + "_tags",
+        query=query,
+        limit=k,
+        query_filter=filter,
+    )

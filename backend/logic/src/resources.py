@@ -240,15 +240,7 @@ async def get_all_reports(
     date_to: Optional[str] = Query(None, description="Filter reports with Dateentered <= this ISO datetime (e.g. '2025-01-31 23:59:59')"),
     session: AsyncSession = Depends(get_session)
 ) -> List[Report]:
-    stmt = select(Report).where((Report.Title.isnot(None)) | (Report.Abstract.isnot(None)))
-    if report_ids:
-        stmt = stmt.where(Report.CRGReportID.in_(report_ids))
-    # Dateentered filtering (string compare works with ISO-like 'YYYY-MM-DD HH:MM:SS')
-    if date_from:
-        stmt = stmt.where(Report.Dateentered >= date_from)
-    if date_to:
-        stmt = stmt.where(Report.Dateentered <= date_to)
-    return (await session.execute(stmt)).scalars().all()
+    return await _get_all_reports(report_ids, date_from, date_to, session)
 
 @router.put("/reports/pdf", summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
 async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to upload"), session: AsyncSession = Depends(get_session)) -> Dict[str, Any]:
@@ -669,6 +661,21 @@ async def get_possible_trial_ids_by_report(session: AsyncSession = Depends(get_s
 """
 Helper functions
 """
+
+async def get_all_reports_internal(report_ids,date_from,date_to):
+    async with AsyncSession(engine) as session:
+        return await _get_all_reports(report_ids,date_from,date_to, session)
+
+async def _get_all_reports(report_ids,date_from,date_to,session) -> List[Report]:
+    stmt = select(Report).where((Report.Title.isnot(None)) | (Report.Abstract.isnot(None)))
+    if report_ids:
+        stmt = stmt.where(Report.CRGReportID.in_(report_ids))
+    # Dateentered filtering (string compare works with ISO-like 'YYYY-MM-DD HH:MM:SS')
+    if date_from:
+        stmt = stmt.where(Report.Dateentered >= date_from)
+    if date_to:
+        stmt = stmt.where(Report.Dateentered <= date_to)
+    return (await session.execute(stmt)).scalars().all()
 
 async def get_study_reports_by_ids_internal(study_ids: List[int], cutoff: str, fields: Optional[List[str]]):
     async with AsyncSession(engine) as session:
