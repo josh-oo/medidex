@@ -98,7 +98,7 @@ services:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL}
       - STAGE=${STAGE}
-      - BACKEND_API_URL=${BACKEND_API_URL}
+      - MEERKAT_API_URL=${BACKEND_API_URL}
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/medidex?schema=public
     networks:
       - internal_net
