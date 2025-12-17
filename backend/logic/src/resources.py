@@ -136,16 +136,16 @@ report_id_path = Path(..., description="CRGReportIDs")
 Study Endpoints
 """
 
-@router.put("/studies", summary="Add new study to meerkat.")
+@router.put("/studies", summary="Add new study to meerkat.", response_model=Study)
 async def add_study(study_params: StudyParams, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> Study:
     result = await _add_study(study_params, user_id, session)
-    await post_report_event(-1, Event(event_type=f"study::{result.CRGStudyID}::created", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session)
+    await log_report_event(-1, Event(event_type=f"study::{result.CRGStudyID}::created", timestamp=datetime.now(timezone.utc).isoformat()),user_id)
     return result
 
 @router.get("/studies", summary="Get study details for all studies specified in the query.")
 async def get_studies(study_ids: List[int] = study_ids_query, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> List[Study]:
     result = await _get_studies(study_ids, session)
-    await asyncio.gather(*[post_report_event(-1, Event(event_type=f"study::{study_id}::visited", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session) for study_id in study_ids])
+    await asyncio.gather(*[post_report_event(-1, Event(event_type=f"study::{study_id}::visited", timestamp=datetime.now(timezone.utc).isoformat()), user_id) for study_id in study_ids])
     return result
 
 @router.get("/studies/reports", include_in_schema=False)
@@ -165,7 +165,7 @@ async def get_study_by_id(study_id: int = study_id_path, session: AsyncSession =
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
 async def get_study_by_id_legacy(study: Study = Depends(get_study_by_id), user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> List[Study]:
     #TODO remove this
-    post_report_event(-1, Event(event_type=f"study::{study.CRGStudyID}::visted", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session)
+    await post_report_event(-1, Event(event_type=f"study::{study.CRGStudyID}::visted", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session)
     return [study]
 
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
@@ -339,32 +339,26 @@ async def get_report_trial_ids(report = Depends(get_reports_by_id), include_full
     return await _get_report_trial_ids(report, include_fulltext, session)
 
 @router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
-async def post_report_event(report_id : int, event: Event, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)):
-    
-    # Validate report exists
-    if report_id != -1:
-        report = await session.get(Report, report_id)
-        if not report:
-            raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
-    
-    # Parse timestamp from frontend
-    try:
-        event_datetime = datetime.fromisoformat(event.timestamp.replace('Z', '+00:00'))
-        # Convert to naive datetime (remove timezone info)
-        event_datetime = event_datetime.replace(tzinfo=None)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid timestamp format. Use ISO format (e.g., '2025-12-13T10:30:00Z')")
-
-    new_event = AnalyticsEvent(
-        DateCreated=event_datetime,
-        CreatedBy=user_id or "anonymous",
-        Type=event.event_type,
-        RelatedReport=report_id
-    )
-    
-    session.add(new_event)
-    await session.commit()
-    await session.refresh(new_event)
+async def post_report_event(report_id : int, event: Event, user_id = Depends(get_user_id)):
+    async with AsyncSession(engine) as session:
+        # (copy the logic from post_report_event here, but without FastAPI dependencies)
+        if report_id != -1:
+            report = await session.get(Report, report_id)
+            if not report:
+                raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+        try:
+            event_datetime = datetime.fromisoformat(event.timestamp.replace('Z', '+00:00'))
+            event_datetime = event_datetime.replace(tzinfo=None)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid timestamp format. Use ISO format (e.g., '2025-12-13T10:30:00Z')")
+        new_event = AnalyticsEvent(
+            DateCreated=event_datetime,
+            CreatedBy=user_id or "anonymous",
+            Type=event.event_type,
+            RelatedReport=report_id
+        )
+        session.add(new_event)
+        await session.commit()
     
     return {
         "report_id": report_id,
