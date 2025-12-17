@@ -18,7 +18,8 @@ from functools import lru_cache
 from datetime import datetime
 
 from .utils.trial_registration_id import extract_trial_id
-from .utils.vectorstore import transform_to_uuid, get_vectors_by_crg_report_id, delete_vectors_by_crg_report_ids, add_report_to_vectorstore, crg_report_exists, link_report_to_study_ids, search_report, search_tags, get_collections
+from .utils.vectorstore import transform_to_uuid, transform_to_crg_report_id
+from .utils.vectorstore import get_vectors_by_crg_report_id, delete_vectors_by_crg_report_ids, add_report_to_vectorstore, crg_reports_exist, link_report_to_study_ids, search_report, search_tags, get_collections, calculate_score_pairs
 from .utils.embedding import _embed_aspect
 from .utils.ris_parser import parse_file
 
@@ -34,12 +35,12 @@ from .resources import get_study_interventions_internal , get_study_conditions_i
 from .resources import get_all_interventions_internal, get_all_conditions_internal, get_all_outcomes_internal, get_study_reports_by_ids_internal
 from .resources import add_new_report_batch, get_report_studies_by_id_internal, get_report_by_id_internal
 from .resources import add_report_studies_by_id_internal, delete_report_studies_by_id_internal
-from .resources import get_report_trial_ids
+from .resources import get_report_trial_ids_internal, get_similar_report_studies_internal
 from .resources import get_session
 
 from sqlmodel import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from .utils.database_models import Report, Batch, ReportAdded
+from .utils.database_models import Report, Batch, ReportAdded, BatchInnerScore
 
 load_dotenv()
 
@@ -69,40 +70,6 @@ batch_subscribers_lock = asyncio.Lock()
 
 # Track background tasks to prevent resource leaks
 background_tasks: set = set()
-
-async def publish_batch_update(batch_hash: str):
-    """Publish an update for a specific batch to all subscribers.
-    The published value is the batch_hash (keeps compatibility with existing handlers).
-    """
-    async with batch_subscribers_lock:
-        queues = list(batch_subscribers.get(batch_hash, []))
-
-    for q in queues:
-        try:
-            q.put_nowait(batch_hash)
-        except Exception:
-            # If put_nowait fails for whatever reason, schedule an async put.
-            task = asyncio.create_task(q.put(batch_hash))
-            # Track the task to prevent resource leaks and add cleanup callback
-            background_tasks.add(task)
-            # Use lambda to be explicit and handle potential exceptions in cleanup
-            task.add_done_callback(lambda t: background_tasks.discard(t))
-
-async def subscribe_to_batch(batch_hash: str) -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
-    async with batch_subscribers_lock:
-        batch_subscribers.setdefault(batch_hash, []).append(q)
-    return q
-
-async def unsubscribe_from_batch(batch_hash: str, q: asyncio.Queue):
-    async with batch_subscribers_lock:
-        lst = batch_subscribers.get(batch_hash)
-        if not lst:
-            return
-        if q in lst:
-            lst.remove(q)
-        if not lst:
-            batch_subscribers.pop(batch_hash, None)
 
 class BatchResponse(BaseModel):
     batch_hash: str
@@ -135,12 +102,89 @@ def get_grpc_channel():
     channel.get_state(try_to_connect=True)
     return channel
 
+async def publish_batch_update(batch_hash: str):
+    """Publish an update for a specific batch to all subscribers.
+    The published value is the batch_hash (keeps compatibility with existing handlers).
+    """
+    async with batch_subscribers_lock:
+        queues = list(batch_subscribers.get(batch_hash, []))
 
-async def process_report(report, batch_hash):
+    for q in queues:
+        try:
+            q.put_nowait(batch_hash)
+        except Exception:
+            # If put_nowait fails for whatever reason, schedule an async put.
+            task = asyncio.create_task(q.put(batch_hash))
+            # Track the task to prevent resource leaks and add cleanup callback
+            background_tasks.add(task)
+            # Use lambda to be explicit and handle potential exceptions in cleanup
+            task.add_done_callback(lambda t: background_tasks.discard(t))
+
+async def finalize_batch_upload(batch_hash:str, session: AsyncSession):
+    """
+    Finalize a batch upload by checking if all reports have been processed.
+    Updates batch status and notifies subscribers when complete.
+    """
+    # Get all reports in the batch
+    result = await session.execute(
+        select(ReportAdded.CRGReportID).where(ReportAdded.BatchHash == batch_hash)
+    )
+    crg_report_ids = result.scalars().all()
+    
+    if not crg_report_ids:
+        return
+    
+    # Check if all reports have embeddings
+    num_existing = await crg_reports_exist(crg_report_ids)
+    
+    all_processed = num_existing == len(crg_report_ids)
+    
+    if all_processed:
+        # Update batch status in database (you'll need to add a status field to Batch model)
+        batch = await session.execute(select(Batch).where(Batch.BatchHash == batch_hash))
+        batch_obj = batch.scalar_one_or_none()
+        if batch_obj:
+            #TODO
+            # batch_obj.Status = "completed"  # Add Status field to Batch model
+            # batch_obj.CompletedAt = datetime.now()  # Add CompletedAt field
+            await session.commit()
+        
+        # Notify all subscribers that batch is complete
+        score_pairs = await calculate_score_pairs(crg_report_ids)
+        all_scores = []
+        for pair in score_pairs:
+            all_scores.append(BatchInnerScore(CRGReportID=transform_to_crg_report_id(pair.a), OtherID=transform_to_crg_report_id(pair.b), Score=pair.score))
+
+        print(all_scores[:10])
+        session.add_all(all_scores)
+        await session.commit()
+
+        print("Batch finalized")
+        await publish_batch_update(batch_hash)
+
+async def subscribe_to_batch(batch_hash: str) -> asyncio.Queue:
+    q: asyncio.Queue = asyncio.Queue()
+    async with batch_subscribers_lock:
+        batch_subscribers.setdefault(batch_hash, []).append(q)
+    return q
+
+async def unsubscribe_from_batch(batch_hash: str, q: asyncio.Queue):
+    async with batch_subscribers_lock:
+        lst = batch_subscribers.get(batch_hash)
+        if not lst:
+            return
+        if q in lst:
+            lst.remove(q)
+        if not lst:
+            batch_subscribers.pop(batch_hash, None)
+
+async def process_report(report, batch_hash, session):
     
     await add_report_to_vectorstore(report, get_grpc_channel())
 
     await publish_batch_update(batch_hash)
+
+    await finalize_batch_upload(batch_hash, session)
 
 @router.get("/readyz", summary="Health check endpoint for readiness probe", tags=["health"])
 async def readyz(db: AsyncSession = Depends(get_session)) -> Dict[str, Any]:
@@ -273,7 +317,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
     # schedule background tasks
     for report in reports:
-        background_tasks.add_task(process_report, report, batch_hash)
+        background_tasks.add_task(process_report, report, batch_hash, session)
 
     await publish_batch_update(batch_hash)
 
@@ -299,14 +343,11 @@ async def get_batch_associated_reports(batch: Batch = Depends(get_batch_by_hash)
 async def get_batch_stats(batch: Batch = Depends(get_batch_by_hash), crg_report_ids : List[int] = Depends(get_batch_associated_reports), user_id : Optional[str] = Depends(get_user_id)) -> BatchResponse:
     # Fetch all report studies in parallel
     study_tasks = [get_report_studies_by_id_internal(report_id, user=user_id) for report_id in crg_report_ids]
-    report_vector_tasks = [crg_report_exists(report_id) for report_id in crg_report_ids]
-    results = await asyncio.gather(*study_tasks, *report_vector_tasks)
-    all_studies = results[:len(study_tasks)]
-    report_vectors_exist = results[len(study_tasks):]
+    all_studies = await asyncio.gather(*study_tasks)
+    generated_embeddings = await crg_reports_exist(crg_report_ids)
 
     # Count reports with assigned studies
     assigned_count = sum(1 for studies in all_studies if len(studies) > 0)
-    generated_embeddings = sum(report_vectors_exist)
 
     return BatchResponse(
         batch_hash=batch.BatchHash,
@@ -542,7 +583,7 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
 
     authors = [item.strip() for item in report.Authors.split("//")]
     try:
-        trial_ids = await get_report_trial_ids(report, include_fulltext=True)
+        trial_ids = await get_report_trial_ids_internal(report, include_fulltext=True)
     except HTTPException as e:
         if e.status_code == 404: #PDF not found
             trial_ids = []
@@ -590,6 +631,61 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
     """
     
     result = await get_similar_study_by_query(query,aspect,cutoff,k,negative_studies, trial_ids, authors, user_id, return_details=return_details)
+
+    # Check if there are any similar items in the same batch which are more similar than already retrieved existing studies
+    if result.get('Relevance'):
+        min_score = min(result['Relevance'])
+        batch_studies = await get_similar_report_studies_internal(crg_report_id, min_score, user_id)
+        
+        # Create a map of existing study IDs to their positions and scores
+        existing_study_map = {}
+        for idx, study_id in enumerate(result.get('CRGStudyID', [])):
+            existing_study_map[study_id] = {
+                'index': idx,
+                'score': result['Relevance'][idx]
+            }
+        
+        for study, score in batch_studies:
+            study_dict = study.dict()
+            study_id = study_dict.get('CRGStudyID')
+            
+            # If study already exists, update with higher score
+            if study_id in existing_study_map:
+                existing_info = existing_study_map[study_id]
+                if score > existing_info['score']:
+                    # Update the existing entry with the higher score
+                    result['Relevance'][existing_info['index']] = score
+            else:
+                # Add new study
+                result['Relevance'].append(score)
+                for key in result.keys():
+                    if key == "Relevance":
+                        continue
+                    result[key].append(study_dict.get(key))
+                
+                # Track the new study in our map
+                existing_study_map[study_id] = {
+                    'index': len(result['Relevance']) - 1,
+                    'score': score
+                }
+        
+        # Reorder all results by relevance score (descending)
+        if result['Relevance']:
+            sorted_indices = sorted(
+                range(len(result['Relevance'])), 
+                key=lambda i: result['Relevance'][i], 
+                reverse=True
+            )
+            for key in result.keys():
+                result[key] = [result[key][i] for i in sorted_indices]
+
+            # Truncate to k results if we have more
+            if len(result['Relevance']) > k:
+                for key in result.keys():
+                    result[key] = result[key][:k]
+
+    #print(studies)
+
 
     """
     #TODO REMOVE TESTS#######################
@@ -643,7 +739,7 @@ async def get_similar_study_by_query(query, aspect: TagCategories, cutoff: str, 
             
         if len(found_study_ids.keys()) > 0:
             filters.append(
-                models.Filter(
+                Filter(
                     must=[
                         models.FieldCondition(
                             key="belongs_to_trial_id",
@@ -653,7 +749,7 @@ async def get_similar_study_by_query(query, aspect: TagCategories, cutoff: str, 
                 )
             )
         filters.append(
-                models.Filter(
+                Filter(
                     must_not=[
                         models.FieldCondition(
                             key="belongs_to_study",
@@ -675,10 +771,6 @@ async def get_similar_study_by_query(query, aspect: TagCategories, cutoff: str, 
         for result in reranked_results:
             for hit in result.hits:
                 candidates = hit.payload['belongs_to_study']
-                if "temporary" in hit.payload:
-                    if not user_id in hit.payload['temporary']:
-                        continue
-                    candidates = hit.payload["temporary"][user_id]["belongs_to_study"]
                 for item in candidates:
                     if item not in found_study_ids:
                         found_study_ids[item] = hit.score

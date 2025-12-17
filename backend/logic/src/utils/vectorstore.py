@@ -25,6 +25,9 @@ def transform_to_uuid(id, tag="0000"):
     id = "0"*missing_zeros + id
     return f"00000000-{tag}-4000-a000-{id}"
 
+def transform_to_crg_report_id(uuid):
+    return int(uuid.split("-")[-1])
+
 async def get_collections():
     return await CLIENT.get_collections()
 
@@ -85,17 +88,34 @@ async def get_vectors_by_crg_report_id(crg_report_id):
     )
     return result[0].vector
 
-async def crg_report_exists(crg_report_id):
-    point_id = transform_to_uuid(crg_report_id)
+async def crg_reports_exist(crg_report_ids):
+    point_ids = [transform_to_uuid(crg_report_id) for crg_report_id in crg_report_ids]
     result = await CLIENT.retrieve(
         collection_name=COLLECTION_NAME,
-        ids=[point_id],
+        ids=point_ids,
         with_vectors=False,
         with_payload=False,
     )
-    if result:
-        return True
-    return False
+    if not result:
+        return 0
+    return len(result)
+
+async def calculate_score_pairs(crg_report_ids):
+    point_ids = [transform_to_uuid(crg_report_id) for crg_report_id in crg_report_ids]
+    filter = models.Filter(
+        must=[
+            models.HasIdCondition(has_id=point_ids),
+        ],
+    )
+    result = await CLIENT.search_matrix_pairs(
+        collection_name=COLLECTION_NAME,
+        sample=len(crg_report_ids),
+        limit=len(crg_report_ids),
+        query_filter=filter,
+        using="default"
+    )
+
+    return result.pairs
 
 async def delete_vectors_by_crg_report_ids(crg_report_ids):
     ids = [transform_to_uuid(crg_report_id) for crg_report_id in crg_report_ids]
@@ -127,7 +147,7 @@ async def add_report_to_vectorstore(report, embedding_channel):
         'source_id': report.CRGReportID,
         'authors': authors,
         'date_entered': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-        'belongs_to_study': ["X-" + str(report.CRGReportID)],
+        'belongs_to_study': [],
         'belongs_to_trial_id': False,
         'temporary': {},
     }

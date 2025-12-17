@@ -2,8 +2,6 @@ import asyncio
 import fitz
 import os
 import re
-import json
-import aiofiles
 from rapidfuzz import fuzz
 from ..trial_registration_id import extract_trial_ids_from_text
 
@@ -118,14 +116,10 @@ def extract_study_acronyms(text):
             acronyms.append(acronym)
     return acronyms
 
-async def process_pdf(in_folder : str, out_folder : str, filename : str):
+async def process_pdf(in_folder : str, filename : str):
     pdf_path = os.path.join(in_folder, filename + ".pdf")
     if identify_abstract_collection(pdf_path):
         meta_data = {'trial_id' : [], 'study_acronyms': [], 'report_type': 'abstract'}
-        json_path = os.path.join(out_folder, filename + ".json")
-
-        async with aiofiles.open(json_path, "w") as f:
-            await f.write(json.dumps(meta_data, indent=2))
 
         return meta_data
 
@@ -136,9 +130,5 @@ async def process_pdf(in_folder : str, out_folder : str, filename : str):
     #TODO add LLM extraction here
 
     meta_data = {'trial_id' : trial_ids, 'study_acronyms': study_acronyms}
-    json_path = os.path.join(out_folder, filename + ".json")
-
-    async with aiofiles.open(json_path, "w") as f:
-        await f.write(json.dumps(meta_data, indent=2))
 
     return meta_data

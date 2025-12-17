@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
 from .utils.database_models import Report, Study, StudyCondition, StudyDesign, StudyIntervention, StudyOutcome, StudyParticipant, StudyReport
 from .utils.database_models import Condition, Intervention, Design, Outcome, Participant
-from .utils.database_models import Batch, ReportAdded, StudyReportAdded, StudyAdded
+from .utils.database_models import Batch, ReportAdded, StudyReportAdded, StudyAdded, FulltextExtractions, BatchInnerScore
 from .utils.database_models import AnalyticsEvent
 
 from .utils.pdf.processor import process_pdf
@@ -46,7 +46,7 @@ router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified_api_cal
 #DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"resources","meerkat.db")
 DATABASE_URL = f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB_RESOURCES}"
 PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
-METADATA_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdf_metadata")
+#METADATA_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdf_metadata")
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 
@@ -324,28 +324,14 @@ async def get_pdf(report_number = Depends(get_pdf_number_by_report_id)) -> FileR
     return FileResponse(file_name, media_type="application/pdf")
 
 @router.get("/reports/{report_id}/pdf/metadata", summary="Get pdf metadata.")
-async def get_pdf_metadata(report_number = Depends(get_pdf_number_by_report_id)) -> FileResponse:
-    report_number = str(report_number).zfill(5) 
-    file_name_json = os.path.join(METADATA_PATH, report_number + ".json")
-    file_name_pdf = os.path.join(PDF_PATH, report_number + ".pdf")
-
-    if os.path.exists(file_name_json):
-        with open(file_name_json, "r") as f:
-            return json.load(f)
-    elif os.path.exists(file_name_pdf ):
-        return await process_pdf(PDF_PATH, METADATA_PATH, report_number)
-    raise HTTPException(status_code=404, detail="PDF file not found.")
+async def get_pdf_metadata(report_id:int, report_number = Depends(get_pdf_number_by_report_id), session: AsyncSession = Depends(get_session)) -> Dict:
+    return await _get_pdf_metadata(report_id, report_number, session)
 
 @router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
-async def get_report_trial_ids(report = Depends(get_reports_by_id), include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search.")) -> List[str]:
+async def get_report_trial_ids(report = Depends(get_reports_by_id), include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), session: AsyncSession = Depends(get_session)) -> List[str]:
     if not report:
         raise HTTPException(status_code=404, detail="Report not found.")
-    if include_fulltext:
-        meta_data = await get_pdf_metadata(report.ReportNumber)
-        return meta_data['trial_id']
-    authors = [item.strip() for item in report.Authors.split("//")]
-    all_ids = extract_trial_id(report.Title, report.Abstract, authors)
-    return all_ids
+    return await _get_report_trial_ids(report, include_fulltext, session)
 
 @router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
 async def post_report_event(report_id : int, event: Event, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)):
@@ -651,6 +637,110 @@ async def get_possible_trial_ids_by_report(session: AsyncSession = Depends(get_s
 """
 Helper functions
 """
+
+async def get_similar_report_studies_internal(report_id: int, min_score: float, user_id: str):
+    async with AsyncSession(engine) as session:
+        return await _get_similar_report_studies(report_id, min_score, user_id, session)
+
+async def _get_similar_report_studies(
+    report_id: int,
+    min_score: float,
+    user_id: str,
+    session: AsyncSession
+) -> List[Study]:
+    """
+    Internal implementation to get studies linked to similar reports.
+    
+    Args:
+        report_id: The reference report ID
+        min_score: Minimum similarity score threshold
+        user_id: Filter by user who created the study-report link
+        session: Database session
+        
+    Returns:
+        List of Study objects linked to similar reports, or empty list if report doesn't exist
+    """
+    # Check if report exists
+    report = await session.get(Report, report_id)
+    if not report:
+        return []
+    
+    # Query to get studies from similar reports
+    # Note: We select BatchInnerScore.Score to make it available for ORDER BY
+    stmt = (
+        select(Study, BatchInnerScore.Score)
+        .distinct()
+        .join(StudyReport, StudyReport.CRGStudyID == Study.CRGStudyID)
+        .join(
+            BatchInnerScore,
+            (BatchInnerScore.OtherID == StudyReport.CRGReportID) &
+            (BatchInnerScore.CRGReportID == report_id) &
+            (BatchInnerScore.Score >= min_score)
+        )
+        .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+    )
+    
+    # Filter by user if specified
+    if user_id:
+        stmt = stmt.where(
+            (StudyReportAdded.CreatedBy == user_id) | 
+            (StudyReportAdded.CreatedBy.is_(None))
+        )
+    
+    # Order by similarity score (descending)
+    stmt = stmt.order_by(BatchInnerScore.Score.desc())
+    
+    result = await session.execute(stmt)
+    
+    return result.all()
+
+async def get_report_trial_ids_internal(report, include_fulltext=True):
+    async with AsyncSession(engine) as session:
+        return await _get_report_trial_ids(report, include_fulltext, session) 
+
+async def _get_report_trial_ids(report: Report, include_fulltext: bool, session: AsyncSession) -> List[str]:
+    """Internal function to get trial IDs from a report"""
+    if include_fulltext:
+        meta_data = await _get_pdf_metadata(report.CRGReportID, report.ReportNumber, session)
+        return meta_data['trial_id']
+    authors = [item.strip() for item in report.Authors.split("//")]
+    all_ids = extract_trial_id(report.Title, report.Abstract, authors)
+    return all_ids
+
+async def get_pdf_metadata_internal(report_id):
+    async with AsyncSession(engine) as session:
+        return await _get_pdf_metadata(report_id, None, session) 
+
+async def _get_pdf_metadata(report_id:int, report_number: int, session: AsyncSession) -> Dict:
+    # Check if metadata exists in database
+    stmt = select(FulltextExtractions).where(FulltextExtractions.CRGReportID == report_id)
+    existing = (await session.execute(stmt)).scalar_one_or_none()
+    
+    if existing:
+        return existing.data
+    
+    # If not in DB, process PDF and save to database
+    if not report_number:
+        report_number = await get_pdf_number_by_report_id(report_id, session)
+
+    report_number_str = str(report_number).zfill(5)
+    file_name_pdf = os.path.join(PDF_PATH, report_number_str + ".pdf")
+    
+    if not os.path.exists(file_name_pdf):
+        raise HTTPException(status_code=404, detail="PDF file not found.")
+    
+    # Process PDF to extract metadata
+    metadata = await process_pdf(PDF_PATH, report_number_str)
+    
+    # Save to database
+    new_extraction = FulltextExtractions(
+        CRGReportID=report_id,
+        data=metadata
+    )
+    session.add(new_extraction)
+    await session.commit()
+    
+    return metadata
 
 async def get_all_reports_internal(report_ids,date_from,date_to):
     async with AsyncSession(engine) as session:
