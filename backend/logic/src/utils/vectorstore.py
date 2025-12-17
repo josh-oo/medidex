@@ -64,12 +64,14 @@ async def get_all_saved_crg_report_ids():
     
     return vectorstore_source_ids
 
-async def update_payload(crg_report_id, study_ids):
+async def link_report_to_study_ids(crg_report_id, study_ids, user):
+    field = "belongs_to_study"
+    if user:
+        field = "temporary"
+        study_ids = {user: {'belongs_to_study': study_ids}}
     await CLIENT.set_payload(
         collection_name=COLLECTION_NAME,
-        payload={
-            "belongs_to_study": study_ids,
-        },
+        payload={field: study_ids},
         points=[transform_to_uuid(crg_report_id)],
     )
 
@@ -125,8 +127,9 @@ async def add_report_to_vectorstore(report, embedding_channel):
         'source_id': report.CRGReportID,
         'authors': authors,
         'date_entered': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-        'belongs_to_study': [],
+        'belongs_to_study': ["X-" + str(report.CRGReportID)],
         'belongs_to_trial_id': False,
+        'temporary': {},
     }
     new_vectors = {"default": vectors.pop("embedding"), "authors": vectors.pop("author_embedding")}
     for key, value in vectors.items():
@@ -137,7 +140,7 @@ async def add_report_to_vectorstore(report, embedding_channel):
     points = [PointStruct(id=new_id,vector=new_vectors, payload=payload)]
     await CLIENT.upsert(wait=True, collection_name=COLLECTION_NAME, points=points)
 
-async def search_report(query,aspect,k,filter):
+async def search_report(query,aspect,k,filter, user):
     return await CLIENT.query_points_groups(
             collection_name=COLLECTION_NAME,
             query=query,
@@ -146,7 +149,7 @@ async def search_report(query,aspect,k,filter):
             limit=k,  # Max amount of groups
             group_size=1,  # Max amount of points per group
             query_filter=filter,
-            with_payload=["belongs_to_study", "title", "authors", "source_id"],
+            with_payload=["belongs_to_study", f"temporary.{user}.belongs_to_study", "title", "authors", "source_id"],
         )
 
 async def search_tags(query, k, filter):

@@ -186,11 +186,13 @@ async def is_admin(token: str = Security(oauth2_scheme)):
         raise HTTPException(status_code=401, detail="Not allowed")
     return token
 
-async def get_user_info(token: Optional[str] = Security(oauth2_scheme)):
+async def get_user_id(token: Optional[str] = Security(oauth2_scheme)):
     if not token:
         return None
     result = await verify_token(token)
-    return result
+    if not result:
+        return None
+    return str(result['id'])
 
 async def is_verified(token: Optional[str] = Security(oauth2_scheme)):
     """Validate a JWT token if provided. Returns the token string when valid, otherwise None.

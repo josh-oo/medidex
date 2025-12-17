@@ -73,7 +73,7 @@ class Study(SQLModel, table=True, metadata=metadata_resources):
     DateEntered: str
     DateToCENTRAL: Optional[str]
     DateEdited: Optional[str]
-    Search_Tagged: Optional[bool]
+    Search_Tagged: Optional[int]
     NumberParticipants: Optional[str]
     Countries: Optional[str]
     Duration: Optional[str]
@@ -176,6 +176,13 @@ class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
     __table_args__ = (
         Index('idx_reportadded_batch_report', 'BatchHash', 'CRGReportID'),
     )
+
+class StudyAdded(SQLModel, table=True, metadata=metadata_resources):
+    __tablename__ = "tblStudyAdded"
+
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    CreatedBy: Optional[str]
 
 class StudyReportAdded(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyReportAdded"

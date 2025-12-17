@@ -5,7 +5,7 @@ import os
 
 from dotenv import load_dotenv
 
-from .auth import is_verified_api_call, get_user_info
+from .auth import is_verified_api_call, get_user_id
 from typing import List, Optional
 import enum
 from pydantic import BaseModel
@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
 from .utils.database_models import Report, Study, StudyCondition, StudyDesign, StudyIntervention, StudyOutcome, StudyParticipant, StudyReport
 from .utils.database_models import Condition, Intervention, Design, Outcome, Participant
-from .utils.database_models import Batch, ReportAdded, StudyReportAdded
+from .utils.database_models import Batch, ReportAdded, StudyReportAdded, StudyAdded
 from .utils.database_models import AnalyticsEvent
 
 from .utils.pdf.processor import process_pdf
@@ -138,8 +138,8 @@ Study Endpoints
 """
 
 @router.put("/studies", summary="Add new study to meerkat.")
-async def add_study(study_params: StudyParams, session: AsyncSession = Depends(get_session)) -> Study:
-    return await _add_study(study_params, session)
+async def add_study(study_params: StudyParams, session: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)) -> Study:
+    return await _add_study(study_params, user_id, session)
 
 @router.get("/studies", summary="Get study details for all studies specified in the query.")
 async def get_studies(study_ids: List[int] = study_ids_query, session: AsyncSession = Depends(get_session)) -> List[Study]:
@@ -303,11 +303,8 @@ async def get_report_studies_by_id(
     date_from: Optional[str] = Query(None, description="Filter studies with DateEntered >= this ISO datetime (e.g. '2025-01-13 00:00:00')"),
     date_to: Optional[str] = Query(None, description="Filter studies with DateEntered <= this ISO datetime (e.g. '2025-01-31 23:59:59')"),
     session: AsyncSession = Depends(get_session),
-    user = Depends(get_user_info),
+    user_id = Depends(get_user_id),
 ) -> List[Study]:
-    user_id = None
-    if user:
-        user_id = user['id']
     return await _get_report_studies_by_id(report_id, date_from, date_to, user_id, session)
 
 @router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
@@ -351,10 +348,7 @@ async def get_report_trial_ids(report = Depends(get_reports_by_id), include_full
     return all_ids
 
 @router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
-async def post_report_event(report_id : int, event: Event, user = Depends(get_user_info), session: AsyncSession = Depends(get_session)):
-    user_id = None
-    if user:
-        user_id = str(user['id'])
+async def post_report_event(report_id : int, event: Event, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)):
     
     # Validate report exists
     report = await session.get(Report, report_id)
@@ -388,11 +382,7 @@ async def post_report_event(report_id : int, event: Event, user = Depends(get_us
     }
 
 @router.post("/events", summary="Track general UI events.", description="Track general UI events using a timestamp and reasonable event_types for example 'login', 'logout', 'ui_interaction' or 'idle'. Feel free to use other descriptive event types.")
-async def post_event(event: Event, user = Depends(get_user_info), session: AsyncSession = Depends(get_session)):
-    user_id = None
-    if user:
-        user_id = str(user['id'])
-    
+async def post_event(event: Event, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)):    
     # Parse timestamp from frontend
     try:
         event_datetime = datetime.fromisoformat(event.timestamp.replace('Z', '+00:00'))
@@ -813,11 +803,7 @@ async def _get_studies(study_ids, session):
         stmt = stmt.where(Study.CRGStudyID.in_(study_ids))
     return (await session.execute(stmt)).scalars().all()
 
-async def add_study_internal(study_params):
-    async with AsyncSession(engine) as session:
-        return await _add_study(study_params, session)
-
-async def _add_study(study_params: StudyParams, session: AsyncSession):
+async def _add_study(study_params: StudyParams, user: str, session: AsyncSession):
     #TODO add more sophisticated checks
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     
@@ -827,13 +813,21 @@ async def _add_study(study_params: StudyParams, session: AsyncSession):
         Countries="//".join(study_params.countries),
         CENTRALSubmissionStatus=study_params.central_submission_status.value,
         Duration=study_params.duration,
-        NumberofParticipants=study_params.number_of_participants,
+        NumberParticipants=str(study_params.number_of_participants),
         Comparison=study_params.comparison,
         DateEntered=timestamp,
         DateEdited=timestamp,
     )
     
     session.add(new_study)
+    await session.flush()
+
+    study_added_entry = StudyAdded(
+        CRGStudyID=new_study.CRGStudyID,
+        CreatedBy=user,
+    )
+    session.add(study_added_entry)
+
     await session.commit()
     await session.refresh(new_study)
     return new_study
@@ -991,7 +985,6 @@ async def get_report_studies_by_id_internal(report_id, date_from=None, date_to=N
         return await _get_report_studies_by_id(report_id, date_from, date_to, user, session)
 
 async def _get_report_studies_by_id(report_id, date_from, date_to, user, session):
-    user = str(user) if user is not None else None #TODO remove later
     report = await session.get(Report, report_id)
     if not report:
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
@@ -1014,6 +1007,45 @@ async def _get_report_studies_by_id(report_id, date_from, date_to, user, session
     
     return (await session.execute(stmt)).scalars().all()
 
+async def _remove_orphaned_studies(affected_study_ids: set, session: AsyncSession) -> List[int]:
+    """
+    Helper function to remove orphaned studies.
+    
+    Args:
+        affected_study_ids: Set of study IDs that were affected by link deletions
+        session: The database session
+        
+    Returns:
+        List of study IDs that were deleted
+    """
+    if not affected_study_ids:
+        return []
+    
+    # Get studies that were added by users (tracked in StudyAdded)
+    stmt = select(StudyAdded.CRGStudyID).where(StudyAdded.CRGStudyID.in_(affected_study_ids))
+    newly_added_studies = set((await session.execute(stmt)).scalars().all())
+    
+    if not newly_added_studies:
+        return []
+    
+    # Check which of these studies still have remaining links
+    stmt = select(StudyReport.CRGStudyID).where(StudyReport.CRGStudyID.in_(newly_added_studies))
+    still_linked = set((await session.execute(stmt)).scalars().all())
+    
+    # Orphaned studies are those with no remaining links
+    orphaned_studies = newly_added_studies - still_linked
+    
+    if not orphaned_studies:
+        return []
+    
+    orphan_list = list(orphaned_studies)
+    # Delete orphaned studies (cascades to StudyAdded)
+    await session.execute(
+        delete(Study).where(Study.CRGStudyID.in_(orphan_list))
+    )
+    
+    return orphan_list
+
 async def add_report_studies_by_id_internal(report_id: int, study_ids: List[int], user : str) -> Dict[str, Any]:
     """
     Create StudyReport links for the given report_id to the provided study_ids.
@@ -1033,7 +1065,6 @@ async def _add_report_studies_by_id(report_id: int, study_ids: List[int], user: 
           "created_links": List[Dict[str, int]]
         }
     """
-    user = str(user) if user is not None else None #TODO remove later
     study_ids = study_ids or []
     if not study_ids:
         return {
@@ -1056,23 +1087,38 @@ async def _add_report_studies_by_id(report_id: int, study_ids: List[int], user: 
         valid_ids = set(valid_id_rows.scalars().all())
         invalid_ids = [sid for sid in study_ids if sid not in valid_ids]
 
+        # Get existing links before deletion to check for orphans later
+        existing_stmt = (
+            select(StudyReport.CRGStudyID)
+            .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+            .where(StudyReport.CRGReportID == report_id)
+        )
+        if user:
+            existing_stmt = existing_stmt.where(StudyReportAdded.CreatedBy == user)
+        
+        affected_studies = set((await session.execute(existing_stmt)).scalars().all())
+
         # Only delete existing links created by this user (or with no creator)
         if user:
-            # Get StudyReportIDs that match the user filter
-            stmt = (
-                select(StudyReport.StudyReportID)
-                .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+            # Delete StudyReport links that were created by this user
+            await session.execute(
+                delete(StudyReport)
                 .where(StudyReport.CRGReportID == report_id)
-                .where(StudyReportAdded.CreatedBy == user)
+                .where(StudyReport.StudyReportID.in_(
+                    select(StudyReportAdded.StudyReportID)
+                    .where(StudyReportAdded.CreatedBy == user)
+                ))
             )
-            rows = (await session.execute(stmt)).scalars().all()
-            if rows:
-                await session.execute(
-                    delete(StudyReport).where(StudyReport.StudyReportID.in_(rows))
-                )
         else:
             # If no user specified, delete all existing links for this report
             await session.execute(delete(StudyReport).where(StudyReport.CRGReportID == report_id))
+
+        await session.flush()
+
+        # Check for orphaned newly-added studies
+        deleted_orphans = await _remove_orphaned_studies(affected_studies, session)
+        if deleted_orphans:
+            await session.flush()
 
         # Create new links and track them in StudyReportAdded
         created_links: List[Dict[str, int]] = []
@@ -1081,7 +1127,6 @@ async def _add_report_studies_by_id(report_id: int, study_ids: List[int], user: 
             session.add(new_study_report)
             await session.flush()  # Flush to get the StudyReportID
             
-            print(f"Add user: {new_study_report.StudyReportID}", user)
             # Track who created this link
             session.add(StudyReportAdded(
                 StudyReportID=new_study_report.StudyReportID,
@@ -1096,7 +1141,8 @@ async def _add_report_studies_by_id(report_id: int, study_ids: List[int], user: 
             "report_id": report_id,
             "created_count": len(valid_ids),
             "invalid_study_ids": invalid_ids,
-            "created_links": created_links
+            "created_links": created_links,
+            "deleted_orphans": deleted_orphans
         }
     
     except HTTPException:
@@ -1143,6 +1189,7 @@ async def _delete_report_studies_by_id(report_id: int, user: str, session: Async
             {"CRGReportID": sr.CRGReportID, "CRGStudyID": sr.CRGStudyID}
             for sr, _ in rows
         ]
+        deleted_orphans = []
 
         # Bulk delete matching links
         if rows:
@@ -1150,12 +1197,17 @@ async def _delete_report_studies_by_id(report_id: int, user: str, session: Async
             await session.execute(
                 delete(StudyReport).where(StudyReport.StudyReportID.in_(study_report_ids))
             )
+            # Check if some of the affected studies are now orphans and delete them
+            affected_studies = {item['CRGStudyID'] for item in deleted_links}
+            deleted_orphans = await _remove_orphaned_studies(affected_studies, session)
+
             await session.commit()
 
         return {
             "report_id": report_id,
             "deleted_count": len(rows),
-            "deleted_links": deleted_links
+            "deleted_links": deleted_links,
+            "deleted_orphans": deleted_orphans
         }
     
     except HTTPException:
