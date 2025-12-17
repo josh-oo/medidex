@@ -9,7 +9,7 @@ from typing import Dict, List, Optional,  Any
 import math
 import os
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import grpc
 
@@ -37,6 +37,7 @@ from .resources import add_new_report_batch, get_report_studies_by_id_internal, 
 from .resources import add_report_studies_by_id_internal, delete_report_studies_by_id_internal
 from .resources import get_report_trial_ids_internal, get_similar_report_studies_internal
 from .resources import get_session
+from .resources import post_report_event, Event
 
 from sqlmodel import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -483,24 +484,26 @@ async def get_batched_report(crg_report_id= Depends(batch_hash_id_to_crg_report_
     return report
 
 @router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=200)
-async def assign_studies(batch_hash: str = batch_hash_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), crg_report_id= Depends(batch_hash_id_to_crg_report_id), user_id: Optional[str] = Depends(get_user_id)):
+async def assign_studies(batch_hash: str = batch_hash_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), crg_report_id= Depends(batch_hash_id_to_crg_report_id), user_id: Optional[str] = Depends(get_user_id), session : AsyncSession = Depends(get_session)):
     await asyncio.gather(
         add_report_studies_by_id_internal(crg_report_id, study_ids, user_id),
         link_report_to_study_ids(crg_report_id, study_ids, user_id)
     )
 
     await publish_batch_update(batch_hash)
+    await post_report_event(crg_report_id, Event(event_type=f"study::links::changed", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session)
 
     return await get_batched_report(crg_report_id, user_id)
 
 @router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=200)
-async def delete_assigned_studies(batch_hash: str = batch_hash_path, crg_report_id= Depends(batch_hash_id_to_crg_report_id), user_id: Optional[str] = Depends(get_user_id)):
+async def delete_assigned_studies(batch_hash: str = batch_hash_path, crg_report_id= Depends(batch_hash_id_to_crg_report_id), user_id: Optional[str] = Depends(get_user_id), session : AsyncSession = Depends(get_session)):
     await asyncio.gather(
         delete_report_studies_by_id_internal(crg_report_id, user_id),
         link_report_to_study_ids(crg_report_id, [], user_id)
     )
 
     await publish_batch_update(batch_hash)
+    await post_report_event(crg_report_id, Event(event_type=f"study::links::changed", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session)
 
     return await get_batched_report(crg_report_id, user_id)
 

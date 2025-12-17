@@ -2,6 +2,7 @@ from fastapi import APIRouter, File, UploadFile
 from fastapi import Depends, HTTPException, Query, Path
 from fastapi.responses import FileResponse
 import os
+import asyncio
 
 from dotenv import load_dotenv
 
@@ -43,10 +44,8 @@ POSTGRES_PORT = os.getenv("POSTGRES_PORT")
 
 router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified_api_call)])
 
-#DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"resources","meerkat.db")
 DATABASE_URL = f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB_RESOURCES}"
 PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
-#METADATA_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdf_metadata")
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 
@@ -138,12 +137,16 @@ Study Endpoints
 """
 
 @router.put("/studies", summary="Add new study to meerkat.")
-async def add_study(study_params: StudyParams, session: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)) -> Study:
-    return await _add_study(study_params, user_id, session)
+async def add_study(study_params: StudyParams, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> Study:
+    result = await _add_study(study_params, user_id, session)
+    await post_report_event(-1, Event(event_type=f"study::{result.CRGStudyID}::created", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session)
+    return result
 
 @router.get("/studies", summary="Get study details for all studies specified in the query.")
-async def get_studies(study_ids: List[int] = study_ids_query, session: AsyncSession = Depends(get_session)) -> List[Study]:
-    return await _get_studies(study_ids, session)
+async def get_studies(study_ids: List[int] = study_ids_query, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> List[Study]:
+    result = await _get_studies(study_ids, session)
+    await asyncio.gather(*[post_report_event(-1, Event(event_type=f"study::{study_id}::visited", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session) for study_id in study_ids])
+    return result
 
 @router.get("/studies/reports", include_in_schema=False)
 async def get_study_reports_by_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, fields: Optional[List[str]] = Query(None), session: AsyncSession = Depends(get_session)) -> Dict[int, List[Report]]:
@@ -160,8 +163,9 @@ async def get_study_by_id(study_id: int = study_id_path, session: AsyncSession =
     return study
 
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
-async def get_study_by_id_legacy(study: Study = Depends(get_study_by_id)) -> List[Study]:
+async def get_study_by_id_legacy(study: Study = Depends(get_study_by_id), user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> List[Study]:
     #TODO remove this
+    post_report_event(-1, Event(event_type=f"study::{study.CRGStudyID}::visted", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session)
     return [study]
 
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
@@ -315,12 +319,13 @@ async def get_pdf_number_by_report_id(report_id: int = report_id_path, session: 
     return result[report_id]
 
 @router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
-async def get_pdf(report_number = Depends(get_pdf_number_by_report_id)) -> FileResponse:
+async def get_pdf(report_id: int, report_number = Depends(get_pdf_number_by_report_id),user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> FileResponse:
     pdf_name = str(report_number).zfill(5) + ".pdf"
     file_name = os.path.join(PDF_PATH, pdf_name)
 
     if not os.path.exists(file_name):
         raise HTTPException(status_code=404, detail="PDF file not found.")
+    await post_report_event(-1, Event(event_type=f"report::{report_id}::downloaded", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session)
     return FileResponse(file_name, media_type="application/pdf")
 
 @router.get("/reports/{report_id}/pdf/metadata", summary="Get pdf metadata.")
@@ -337,9 +342,10 @@ async def get_report_trial_ids(report = Depends(get_reports_by_id), include_full
 async def post_report_event(report_id : int, event: Event, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)):
     
     # Validate report exists
-    report = await session.get(Report, report_id)
-    if not report:
-        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+    if report_id != -1:
+        report = await session.get(Report, report_id)
+        if not report:
+            raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
     
     # Parse timestamp from frontend
     try:
@@ -891,7 +897,9 @@ async def _get_studies(study_ids, session):
     stmt = select(Study)
     if study_ids:
         stmt = stmt.where(Study.CRGStudyID.in_(study_ids))
-    return (await session.execute(stmt)).scalars().all()
+    result = (await session.execute(stmt)).scalars().all()
+    
+    return result
 
 async def _add_study(study_params: StudyParams, user: str, session: AsyncSession):
     #TODO add more sophisticated checks
