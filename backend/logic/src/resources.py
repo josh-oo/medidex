@@ -139,7 +139,7 @@ Study Endpoints
 @router.put("/studies", summary="Add new study to meerkat.", response_model=Study)
 async def add_study(study_params: StudyParams, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> Study:
     result = await _add_study(study_params, user_id, session)
-    await log_report_event(-1, Event(event_type=f"study::{result.CRGStudyID}::created", timestamp=datetime.now(timezone.utc).isoformat()),user_id)
+    await post_report_event(-1, Event(event_type=f"study::{result.CRGStudyID}::created", timestamp=datetime.now(timezone.utc).isoformat()),user_id)
     return result
 
 @router.get("/studies", summary="Get study details for all studies specified in the query.")
@@ -163,9 +163,9 @@ async def get_study_by_id(study_id: int = study_id_path, session: AsyncSession =
     return study
 
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
-async def get_study_by_id_legacy(study: Study = Depends(get_study_by_id), user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> List[Study]:
+async def get_study_by_id_legacy(study: Study = Depends(get_study_by_id), user_id = Depends(get_user_id)) -> List[Study]:
     #TODO remove this
-    await post_report_event(-1, Event(event_type=f"study::{study.CRGStudyID}::visted", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session)
+    await post_report_event(-1, Event(event_type=f"study::{study.CRGStudyID}::visted", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
     return [study]
 
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
@@ -325,7 +325,7 @@ async def get_pdf(report_id: int, report_number = Depends(get_pdf_number_by_repo
 
     if not os.path.exists(file_name):
         raise HTTPException(status_code=404, detail="PDF file not found.")
-    await post_report_event(-1, Event(event_type=f"report::{report_id}::downloaded", timestamp=datetime.now(timezone.utc).isoformat()), user_id, session)
+    await post_report_event(-1, Event(event_type=f"report::{report_id}::downloaded", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
     return FileResponse(file_name, media_type="application/pdf")
 
 @router.get("/reports/{report_id}/pdf/metadata", summary="Get pdf metadata.")
@@ -340,6 +340,7 @@ async def get_report_trial_ids(report = Depends(get_reports_by_id), include_full
 
 @router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
 async def post_report_event(report_id : int, event: Event, user_id = Depends(get_user_id)):
+    #needs own session to avoid overwriting
     async with AsyncSession(engine) as session:
         # (copy the logic from post_report_event here, but without FastAPI dependencies)
         if report_id != -1:
