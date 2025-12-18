@@ -702,8 +702,11 @@ async def get_report_trial_ids_internal(report, include_fulltext=True):
 async def _get_report_trial_ids(report: Report, include_fulltext: bool, session: AsyncSession) -> List[str]:
     """Internal function to get trial IDs from a report"""
     if include_fulltext:
-        meta_data = await _get_pdf_metadata(report.CRGReportID, report.ReportNumber, session)
-        return meta_data['trial_id']
+        try:
+            meta_data = await _get_pdf_metadata(report.CRGReportID, report.ReportNumber, session)
+            return meta_data['trial_id']
+        except:
+            pass
     authors = [item.strip() for item in report.Authors.split("//")]
     all_ids = extract_trial_id(report.Title, report.Abstract, authors)
     return all_ids

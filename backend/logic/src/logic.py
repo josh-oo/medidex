@@ -585,13 +585,7 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
     report = await get_report_by_id_internal(crg_report_id)
 
     authors = [item.strip() for item in report.Authors.split("//")]
-    try:
-        trial_ids = await get_report_trial_ids_internal(report, include_fulltext=True)
-    except HTTPException as e:
-        if e.status_code == 404: #PDF not found
-            trial_ids = []
-        else:
-            raise
+    trial_ids = await get_report_trial_ids_internal(report, include_fulltext=True)
 
     if not negative_studies:
         negative_studies = []
