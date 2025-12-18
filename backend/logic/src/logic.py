@@ -581,7 +581,7 @@ def get_random_sigma(user_id: str, report_id: int) -> float:
 
 
 async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], user_id : Optional[str], return_details: bool):
-    
+
     report = await get_report_by_id_internal(crg_report_id)
 
     authors = [item.strip() for item in report.Authors.split("//")]
@@ -705,6 +705,8 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
 
     ########################################
     """
+
+    await post_report_event(crg_report_id, Event(event_type=f"similar::studies::k::{k}", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
 
     return result
 
