@@ -276,7 +276,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
         if not title:
             title = entry.get('title', None)
 
-        authors = entry.get('authors',None)
+        authors = entry.get('authors', None)
         abstract = entry.get('abstract', None)
         report_number = int(entry.get('research_notes', 0))
 
@@ -286,10 +286,28 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
         else:
             trial_ids = None
 
+        try:
+            authors_str = "//".join(authors)
+        except Exception as e:
+            print(f"UPLOAD FILE: Error joining authors for entry: {entry}\nException: {e}")
+            authors_str = str(authors) if authors is not None else ""
+
+        try:
+            safe_title = title.replace("\n", " ") if title is not None else ""
+        except AttributeError as e:
+            print(f"UPLOAD FILE: Error replacing in title for entry: {entry}\nException: {e}")
+            safe_title = str(title) if title is not None else ""
+
+        try:
+            safe_abstract = abstract.replace("\n", " ") if abstract is not None else ""
+        except AttributeError as e:
+            print(f"UPLOAD FILE: Error replacing in abstract for entry: {entry}\nException: {e}")
+            safe_abstract = str(abstract) if abstract is not None else ""
+
         report = Report(
-            Title=title,
-            Abstract=abstract,
-            Authors="//".join(authors),
+            Title=safe_title,
+            Abstract=safe_abstract,
+            Authors=authors_str,
             ReportNumber=report_number,
             Journal=entry.get('secondary_title', None),
             Year=int(entry.get('year', None)),
@@ -308,7 +326,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
             #OriginalTitle: Optional[str] TODO
         )
 
-        fingerprint_string += title if title else "" + abstract if abstract else "" + authors if authors else ""
+        fingerprint_string += safe_title if safe_title else "" + safe_abstract if safe_abstract else "" + authors_str if authors_str else ""
 
         reports.append(report)
 

@@ -82,7 +82,8 @@ def extract_trial_ids_from_text(text):
 
 def extract_trial_id(title, abstract, authors):
     all_ids = []
-    all_ids.extend(extract_trial_ids_from_text(title.replace("\n", "")))
+    if title:
+        all_ids.extend(extract_trial_ids_from_text(title.replace("\n", "")))
 
     if authors:
         for author in authors:
