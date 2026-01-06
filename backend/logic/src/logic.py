@@ -522,7 +522,13 @@ async def delete_assigned_studies(batch_hash: str = batch_hash_path, crg_report_
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
 async def similar_tags(sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), k : int = k_query, crg_report_id= Depends(batch_hash_id_to_crg_report_id)) -> List[TagResponse]:
+    return get_similar_tags_by_id(crg_report_id, aspect, sources, k)
 
+@router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
+async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, crg_report_id= Depends(batch_hash_id_to_crg_report_id), user_id = Depends(get_user_id), return_details : bool = False):
+    return await get_similar_studies_by_id(crg_report_id, aspect, cutoff, k, None, None, user_id, return_details)
+
+async def get_similar_tags_by_id(crg_report_id, aspect, sources, k):
     if aspect == TagCategories.default:
         raise HTTPException(status_code=400, detail="No tags for 'default' embedding.")
     
@@ -538,12 +544,7 @@ async def similar_tags(sources: List[str] = Query(..., description="Which source
         {"id": i, "keyword": k, "relevance": r}
         for i, k, r in zip(data["ID"], data["Keyword"], data["Relevance"])
     ]
-    return result
-
-@router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
-async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, crg_report_id= Depends(batch_hash_id_to_crg_report_id), user_id = Depends(get_user_id), return_details : bool = False):
-
-    return await get_similar_studies_by_id(crg_report_id, aspect, cutoff, k, None, None, user_id, return_details)
+    return result    
 
 async def get_similar_tags(embedding, sources: List[str], aspect: str, k: int):
     
@@ -577,9 +578,6 @@ async def get_similar_tags(embedding, sources: List[str], aspect: str, k: int):
 
     return results
 
-async def get_similar_studies_by_embedding(embedding, aspect: str, trial_id: List[str], authors: List[str], cutoff: str, k: int, user_id: str, return_details: bool):
-    return await get_similar_study_by_query(embedding,aspect,cutoff,k, [], [trial_id], authors, user_id, return_details=return_details)
-
 import random
 import numpy as np
 
@@ -591,6 +589,9 @@ def get_random_sigma(user_id: str, report_id: int) -> float:
       return 0.0
     rng = random.Random(seed+1)
     return rng.random() 
+
+async def get_similar_studies_by_embedding(embedding, aspect: str, trial_id: List[str], authors: List[str], cutoff: str, k: int, user_id: str, return_details: bool):
+    return await get_similar_study_by_query(embedding,aspect,cutoff,k, [], [trial_id], authors, user_id, return_details=return_details)
 
 
 async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], user_id : Optional[str], return_details: bool):
@@ -916,6 +917,47 @@ async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(
     result = await analyze(input.embeddings, input.model_id, input.basic_input.topK, input.basic_input.title, input.basic_input.abstract, input.basic_input.authors, cutoff)
     return result
 
+async def search_related_tags(allowed_ids, embedding, type_vectorstore):
+
+        if len(allowed_ids) == 0:
+            return []
+
+        tag_filter = models.Filter(
+            must=[
+                models.FieldCondition(key="source", match=models.MatchValue(value="meerkat")),
+                models.FieldCondition(key="tree_ids",match=models.MatchAny(any=[type_vectorstore])),
+                models.FieldCondition(key="source_id",match=models.MatchAny(any=[str(item) for item in allowed_ids]))
+            ]
+        )
+
+        tag_results = await search_tags(embedding, len(allowed_ids), tag_filter)
+
+        related_tags = []
+        for point in tag_results.points:
+            item = {}
+            item['id'] = int(point.payload['source_id'])
+            item['score'] = point.score
+            related_tags.append(item)
+
+        all_ids = [item['id'] for item in related_tags]
+
+        name_mapping = {}
+            
+        if type_vectorstore == "interventions":
+            result = await get_all_interventions_internal(all_ids)
+            name_mapping = {item.InterventionID: item.InterventionDescription for item in result}
+        elif type_vectorstore == "conditions":
+            result = await get_all_conditions_internal(all_ids)
+            name_mapping = {item.HealthCareConditionID: item.HealthCareConditionDescription for item in result}
+        elif type_vectorstore == "outcomes":
+            result = await get_all_outcomes_internal(all_ids)
+            name_mapping = {item.OutcomeID: item.OutcomeDescription for item in result}
+
+        for item in related_tags:
+            item['name'] = name_mapping[item['id']].strip()
+        
+        return related_tags
+
 async def analyze(embeddings, top_k, title, abstract, authors, cutoff):
     
     trial_id = extract_trial_id(RawReport(title=title,abstract=abstract, authors=[]))
@@ -985,45 +1027,9 @@ async def analyze(embeddings, top_k, title, abstract, authors, cutoff):
     
         result['related_studies'].append(study_item)
 
-    async def search_related_tags(allowed_ids, type_embedding, type_vectorstore):
-
-        if len(allowed_ids) == 0:
-            return []
-
-        tag_filter = models.Filter(
-            must=[
-                models.FieldCondition(key="source", match=models.MatchValue(value="meerkat")),
-                models.FieldCondition(key="tree_ids",match=models.MatchAny(any=[type_vectorstore])),
-                models.FieldCondition(key="source_id",match=models.MatchAny(any=[str(item) for item in allowed_ids]))
-            ]
-        )
-
-        tag_results = search_tags(embeddings[type_embedding], len(allowed_ids), tag_filter)
-
-        related_tags = []
-        for point in tag_results.points:
-            item = {}
-            item['id'] = point.payload['source_id']
-            item['score'] = point.score
-            related_tags.append(item)
-
-        all_ids = [item['id'] for item in related_tags]
-            
-        if type_vectorstore == "interventions":
-            result = await get_all_interventions_internal(all_ids)
-        elif type_vectorstore == "conditions":
-            result = await get_all_conditions_internal(all_ids)
-        elif type_vectorstore == "outcomes":
-            result = await get_all_outcomes_internal(all_ids)
-  
-        for item in related_tags:
-            item['name'] = result[item['id']][0].strip()
-        
-        return related_tags
-
-    result['related_interventions'] = await search_related_tags(all_related_interventions, "intervention", "interventions")
-    result['related_conditions'] = await search_related_tags(all_related_conditions, "condition", "conditions")
-    result['related_outcomes'] = await search_related_tags(all_related_outcomes, "outcome", "outcomes")
+    result['related_interventions'] = await search_related_tags(all_related_interventions, embeddings["interventions"], "interventions")
+    result['related_conditions'] = await search_related_tags(all_related_conditions,  embeddings["conditions"], "conditions")
+    result['related_outcomes'] = await search_related_tags(all_related_outcomes, embeddings["outcomes"], "outcomes")
 
     return result
 
@@ -1039,3 +1045,28 @@ class AspectEmbedding(BaseModel):
 @router.get("/reports/{report_id}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="")
 async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),  cutoff: str = Query(None), k : int = Query(10), negative_studies : List[int]=Query(None),negative_reports : List[int]=Query(None), return_details=False, user_id : str = Depends(get_user_id)):
     return await get_similar_studies_by_id(report_id, aspect, cutoff, k, negative_studies, negative_reports, user_id, return_details)
+
+@router.get("/reports/{report_id}/similar_studies/tags", dependencies=[Depends(is_verified_api_call)], summary="")
+async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), k : int = Query(..., description="The number of related studies considered for retrieving relevant tags.")):
+    report = await get_report_by_id_internal(report_id)
+    
+    similar_studies = await get_similar_studies_by_id(report_id, "default", report.Dateentered, k, None, None, None, False)
+    predicted_studies = similar_studies['CRGStudyID']
+
+    vectors = await get_vectors_by_crg_report_id(report_id)
+    
+    related_tags = []
+    if aspect == TagCategories.interventions:
+        related_tags = await get_study_interventions_internal(predicted_studies)
+        related_ids = {item["ID"] for items in related_tags.values() for item in items}
+        return await search_related_tags(related_ids, vectors["intervention"], "interventions")
+    elif aspect == TagCategories.conditions:
+        related_tags = await get_study_conditions_internal(predicted_studies)
+        related_ids = {item["ID"] for items in related_tags.values() for item in items}
+        return await search_related_tags(related_ids, vectors["condition"], "conditions")
+    elif aspect == TagCategories.outcomes:
+        related_tags = await get_study_outcomes_internal(predicted_studies)
+        related_ids = {item["ID"] for items in related_tags.values() for item in items}
+        return await search_related_tags(related_ids, vectors["outcome"], "outcomes")
+    else:
+        raise HTTPException(status_code=501, detail="Not implemented")
