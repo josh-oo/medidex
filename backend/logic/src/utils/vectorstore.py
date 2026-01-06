@@ -4,6 +4,7 @@ from qdrant_client import AsyncQdrantClient
 from dotenv import load_dotenv
 from .embedding import _embed_report
 import os
+import numpy as np
 
 from datetime import datetime, timezone
 
@@ -101,21 +102,29 @@ async def crg_reports_exist(crg_report_ids):
     return len(result)
 
 async def calculate_score_pairs(crg_report_ids):
+    # Fetch all vectors
     point_ids = [transform_to_uuid(crg_report_id) for crg_report_id in crg_report_ids]
-    filter = models.Filter(
-        must=[
-            models.HasIdCondition(has_id=point_ids),
-        ],
-    )
-    result = await CLIENT.search_matrix_pairs(
+    results = await CLIENT.retrieve(
         collection_name=COLLECTION_NAME,
-        sample=len(crg_report_ids),
-        limit=len(crg_report_ids),
-        query_filter=filter,
-        using="default"
+        ids=point_ids,
+        with_vectors=True,
+        with_payload=False,
     )
+    vectors = np.array([point.vector['default'] for point in results])
+    # Compute cosine similarity matrix
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    normalized = vectors / norms
+    similarity_matrix = np.dot(normalized, normalized.T)
+    # Return as list of (i, j, score) tuples
+    pairs = []
+    n = len(crg_report_ids)
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            pairs.append((crg_report_ids[i], crg_report_ids[j], float(similarity_matrix[i, j])))
+    return pairs
 
-    return result.pairs
 
 async def delete_vectors_by_crg_report_ids(crg_report_ids):
     ids = [transform_to_uuid(crg_report_id) for crg_report_id in crg_report_ids]
@@ -139,6 +148,7 @@ async def add_report_to_vectorstore(report, embedding_channel):
     text_to_process = "\n".join(text_to_process)
    
     vectors = await _embed_report(text_to_process, embedding_channel)
+    #TODO maybe the batch is already deleted, then this vector should not be added
 
     new_id = transform_to_uuid(report.CRGReportID)
     payload = {

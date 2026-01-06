@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request
 from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import Response, StreamingResponse, JSONResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from qdrant_client import models
@@ -18,7 +18,7 @@ from functools import lru_cache
 from datetime import datetime
 
 from .utils.trial_registration_id import extract_trial_id
-from .utils.vectorstore import transform_to_uuid, transform_to_crg_report_id
+from .utils.vectorstore import transform_to_uuid
 from .utils.vectorstore import get_vectors_by_crg_report_id, delete_vectors_by_crg_report_ids, add_report_to_vectorstore, crg_reports_exist, link_report_to_study_ids, search_report, search_tags, get_collections, calculate_score_pairs
 from .utils.embedding import _embed_aspect
 from .utils.ris_parser import parse_file
@@ -39,7 +39,7 @@ from .resources import get_report_trial_ids_internal, get_similar_report_studies
 from .resources import get_session
 from .resources import post_report_event, Event
 
-from sqlmodel import select, delete
+from sqlmodel import select, delete, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from .utils.database_models import Report, Batch, ReportAdded, BatchInnerScore
 
@@ -141,26 +141,13 @@ async def finalize_batch_upload(batch_hash:str, session: AsyncSession):
     all_processed = num_existing == len(crg_report_ids)
     
     if all_processed:
-        # Update batch status in database (you'll need to add a status field to Batch model)
-        batch = await session.execute(select(Batch).where(Batch.BatchHash == batch_hash))
-        batch_obj = batch.scalar_one_or_none()
-        if batch_obj:
-            #TODO
-            # batch_obj.Status = "completed"  # Add Status field to Batch model
-            # batch_obj.CompletedAt = datetime.now()  # Add CompletedAt field
-            await session.commit()
-        
-        # Notify all subscribers that batch is complete
         score_pairs = await calculate_score_pairs(crg_report_ids)
-        all_scores = []
-        for pair in score_pairs:
-            all_scores.append(BatchInnerScore(CRGReportID=transform_to_crg_report_id(pair.a), OtherID=transform_to_crg_report_id(pair.b), Score=pair.score))
-
-        print(all_scores[:10])
-        session.add_all(all_scores)
+        stmt = insert(BatchInnerScore)
+        session.execute(stmt, score_pairs)
         await session.commit()
 
         print("Batch finalized")
+        # Notify all subscribers that batch is complete
         await publish_batch_update(batch_hash)
 
 async def subscribe_to_batch(batch_hash: str) -> asyncio.Queue:
@@ -180,6 +167,14 @@ async def unsubscribe_from_batch(batch_hash: str, q: asyncio.Queue):
             batch_subscribers.pop(batch_hash, None)
 
 async def process_report(report, batch_hash, session):
+    # Check if batch still exists before proceeding
+    result = await session.execute(
+        select(Batch).where(Batch.BatchHash == batch_hash)
+    )
+    batch = result.scalar_one_or_none()
+    if not batch:
+        # Batch was deleted, skip processing
+        return
     
     await add_report_to_vectorstore(report, get_grpc_channel())
 
