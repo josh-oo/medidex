@@ -656,7 +656,7 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
 
     #To avoid biases add the deducted scores again 
     for i in range(0, len(result['Relevance'])):
-        result['Relevance'][i] = min(random_value + result['Relevance'][i], 1.0)
+        result['Relevance'][i] = min(result['Relevance'][i] / (1.01-random_value), 1.0)
 
     # Check if there are any similar items in the same batch which are more similar than already retrieved existing studies
     if result.get('Relevance'):
