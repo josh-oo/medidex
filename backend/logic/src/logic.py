@@ -581,7 +581,7 @@ async def get_similar_tags(embedding, sources: List[str], aspect: str, k: int):
 import random
 import numpy as np
 
-def get_random_sigma(user_id: str, report_id: int) -> float:
+def get_random_value(user_id: str, report_id: int) -> float:
     data = f"{user_id}|{report_id}".encode("utf-8")
     seed = int(hashlib.sha256(data).hexdigest(), 16)
     rng = random.Random(seed)
@@ -596,10 +596,19 @@ async def get_similar_studies_by_embedding(embedding, aspect: str, trial_id: Lis
 
 async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], user_id : Optional[str], return_details: bool):
 
+    ########### Add noise according to study design
+    if not user_id:
+        user_id = "user"
+    random_value = get_random_value(user_id, crg_report_id)
+
     report = await get_report_by_id_internal(crg_report_id)
 
     authors = [item.strip() for item in report.Authors.split("//")]
     trial_ids = await get_report_trial_ids_internal(report, include_fulltext=True)
+
+    if random_value > 0.0:
+        trial_ids = []
+        authors = []
 
     if not negative_studies:
         negative_studies = []
@@ -619,27 +628,29 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
                 )
             )
     
-    #if len(trial_ids) > 0:
-    #    return None
-    
-    """
+    #"""
     #TODO REMOVE TESTS#######################
     vectors = await get_vectors_by_crg_report_id(crg_report_id)
     query = np.array(vectors['default'])
 
-    alpha = get_random_sigma("A", crg_report_id)
-
     np.random.seed(crg_report_id)
 
     direction = np.random.normal(0.0, 1.0, size=len(query))
-    direction = direction / np.linalg.norm(direction)
 
-    #pre_noise = np.random.normal(0.0, np.std(query) * alpha, size=len(query))
+    # make it orthogonal to query
+    direction -= np.dot(direction, query) * query
+    direction /= np.linalg.norm(direction)
 
-    #query = query * (1-alpha) + direction * alpha
-    #print(query.shape)
+    # target cosine goes linearly from 1 → 0
+    cos_target = 1.0 - random_value
+    sin_target = np.sqrt(1.0 - cos_target**2)
+
+    # spherical interpolation
+    new_query = cos_target * query + sin_target * direction
+
+    query = new_query
     ########################################
-    """
+    #"""
     
     result = await get_similar_study_by_query(query,aspect,cutoff,k,negative_studies, trial_ids, authors, user_id, return_details=return_details)
 
