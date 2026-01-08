@@ -654,6 +654,10 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
     
     result = await get_similar_study_by_query(query,aspect,cutoff,k,negative_studies, trial_ids, authors, user_id, return_details=return_details)
 
+    #To avoid biases add the deducted scores again 
+    for i in range(0, len(result['Relevance'])):
+        result['Relevance'][i] = min(random_value + result['Relevance'][i], 1.0)
+
     # Check if there are any similar items in the same batch which are more similar than already retrieved existing studies
     if result.get('Relevance'):
         min_score = min(result['Relevance'])
