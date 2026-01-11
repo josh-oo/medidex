@@ -785,7 +785,7 @@ async def get_similar_study_by_query(query, aspect: TagCategories, cutoff: str, 
                     debug_map[item] = debug_map.get(item, []) + [info]
 
     if len(found_study_ids.keys()) == 0:
-        return {'CRGStudyID': [] }
+        return {'CRGStudyID': [] , 'Relevance' : []}
     all_studies = await study_repo.get_studies(list(found_study_ids.keys()))
     #list of dicts to dict of lists:
 
@@ -977,7 +977,7 @@ async def analyze(embeddings, top_k : int, title : str, abstract : str, authors,
         study_repo.get_study_outcomes(list(found_study_ids.keys())),
         study_repo.get_study_participants(list(found_study_ids.keys())),
         study_repo.get_study_design(list(found_study_ids.keys())),
-        study_repo.get_study_reports_by_ids(list(found_study_ids.keys()), ['CRGReportID', 'Title', 'Abstract', 'Authors'], cutoff)
+        study_repo.get_study_reports_by_study_ids(list(found_study_ids.keys()), ['CRGReportID', 'Title', 'Abstract', 'Authors'], cutoff)
     )
 
     for id, name, num_participants, countries, durations,report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], related_studies['NumberParticipants'], related_studies['Countries'], related_studies['Duration'], report_hits, scores):            

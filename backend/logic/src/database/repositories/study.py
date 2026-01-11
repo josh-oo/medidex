@@ -37,14 +37,13 @@ class StudyRepository:
         if fields is None:
             # Use Report.__table__.columns to dynamically get all field names
             fields = [col.name for col in Report.__table__.columns]
-            return tuple(getattr(Report, f) for f in fields)
         else:
             # Validate provided field names exist on the Report model
             report_columns = {col.name for col in Report.__table__.columns}
             invalid_fields = [f for f in fields if f not in report_columns]
             if invalid_fields:
                 raise ValueError(f"Invalid field(s): {', '.join(invalid_fields)}")
-            return tuple(getattr(Report, f) for f in fields)
+        return tuple(getattr(Report, f) for f in fields), fields
 
     async def add_study(self, short_name : str, study_status: str, countries : List[str], duration : str, central_submission_status : str, number_of_participants : int, comparison : str) -> Study:
         #TODO add more sophisticated checks
@@ -89,35 +88,11 @@ class StudyRepository:
     async def get_study_by_id(self, study_id: int) -> List[Study]:
         return await self.db.get(Study, study_id)
     
-    async def get_study_reports_by_ids(self, study_ids: List[int], cutoff: str, fields: Optional[List[str]]) -> Dict[int, List[Report]]:
-        selected_fields = self.process_fields(fields)
-
-        stmt = (
-            select(StudyReport.CRGStudyID, selected_fields)
-            .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
-        )
-
-        if study_ids:
-            stmt = stmt.where(StudyReport.CRGStudyID.in_(study_ids))
-
-        if cutoff:
-            stmt = stmt.where(Report.Dateentered < cutoff)
-
-
-        rows = (await self.db.execute(stmt)).all()
-
-        grouped = {}
-        for row in rows:
-            study_id = row[0]  # first item is StudyID
-            report_data = dict(zip(selected_fields, row[1:]))  # remaining fields as dict
-            grouped.setdefault(study_id, []).append(report_data)
-        return grouped
-    
     async def get_study_reports_by_study_ids(self, study_ids: List[int], cutoff: str, fields: Optional[List[str]]) -> Dict[int, List[Report]]:
-        selected_fields = self.process_fields(fields)
+        select_fields, field_names = self.process_fields(fields)
 
         stmt = (
-            select(StudyReport.CRGStudyID, selected_fields)
+            select(StudyReport.CRGStudyID, *select_fields)
             .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
         )
 
@@ -132,7 +107,7 @@ class StudyRepository:
         grouped = {}
         for row in rows:
             study_id = row[0]  # first item is StudyID
-            report_data = dict(zip(selected_fields, row[1:]))  # remaining fields as dict
+            report_data = dict(zip(field_names, row[1:]))  # remaining fields as dict
             grouped.setdefault(study_id, []).append(report_data)
         return grouped
 
@@ -168,6 +143,12 @@ class StudyRepository:
             final_result[key] = authors
 
         return final_result
+    
+    async def get_study_persons_single(self, study_id : int, cutoff: str, normalize_names: bool) -> List[str]:
+        result = await self.get_study_persons(study_ids=[study_id], cutoff=cutoff, normalize_names=normalize_names)
+        if study_id in result:
+            return result[study_id]
+        return []
     
     async def get_study_id_by_trial_ids(self, trial_ids: List[str], cutoff: str) -> Dict[str, List[int]]:
         trial_ids_norm = [trial_id.replace("/", "-") for trial_id in trial_ids]
@@ -242,6 +223,8 @@ class StudyRepository:
         return final_result
     
     async def get_study_interventions(self, study_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
+        if not study_ids:
+            return {}
         stmt = (
             select(
                 StudyIntervention.CRGStudyID.label("StudyID"),
@@ -261,6 +244,8 @@ class StudyRepository:
         return []
     
     async def get_study_conditions(self, study_ids: List[int]):
+        if not study_ids:
+            return {}
         stmt = (
             select(
                 StudyCondition.CRGStudyID.label("StudyID"),
@@ -280,6 +265,8 @@ class StudyRepository:
         return []
     
     async def get_study_outcomes(self, study_ids: List[int]):
+        if not study_ids:
+            return {}
         stmt = (
             select(
                 StudyOutcome.CRGStudyID.label("StudyID"),
@@ -287,10 +274,8 @@ class StudyRepository:
                 Outcome.OutcomeDescription.label("Description"),
             )
             .join(Outcome, Outcome.OutcomeID == StudyOutcome.OutcomeID)
+            .where(StudyOutcome.CRGStudyID.in_(study_ids))
         )
-
-        if study_ids:
-            stmt = stmt.where(StudyOutcome.CRGStudyID.in_(study_ids))
 
         return await self._get_study_aspect(stmt)
 
@@ -301,22 +286,19 @@ class StudyRepository:
         return []
 
     async def get_study_participants(self, study_ids: List[int]) -> Dict[int, List[str]]:
+        if not study_ids:
+            return {}
         stmt = (
-            select(StudyParticipant.CRGStudyID, Participant.ParticipantDescription)
+            select(
+                StudyParticipant.CRGStudyID.label("StudyID"),
+                StudyParticipant.ParticipantsID.label("ID"),
+                Participant.ParticipantDescription.label("Description"),
+                )
             .join(Participant, Participant.ParticipantsID == StudyParticipant.ParticipantsID)
+            .where(StudyParticipant.CRGStudyID.in_(study_ids))
         )
 
-        if study_ids:
-            stmt = stmt.where(StudyParticipant.CRGStudyID.in_(study_ids))
-
-        rows = (await self.db.execute(stmt)).all()  # list of tuples [(StudyID, ParticipantDescription), ...]
-
-        # Convert to dictionary grouped by StudyID
-        final_result: Dict[int, List[str]] = {}
-        for study_id, description in rows:
-            final_result.setdefault(study_id, []).append(description)
-
-        return final_result
+        return await self._get_study_aspect(stmt)
 
     async def get_study_participants_single(self, study_id: int) -> List[str]:
         result = await self.get_study_participants(study_ids=[study_id])
@@ -325,32 +307,23 @@ class StudyRepository:
         return []
     
     async def get_study_design(self, study_ids: List[int]) -> Dict[int, List[str]]:
+        if not study_ids:
+            return {}
         stmt = (
-            select(StudyDesign.CRGStudyID, Design.DesignDescription)
+            select(
+                StudyDesign.CRGStudyID.label("StudyID"),
+                StudyDesign.DesignID.label("ID"),
+                Design.DesignDescription.label("Description"),
+                )
             .join(Design, Design.DesignID == StudyDesign.DesignID)
+            .where(StudyDesign.CRGStudyID.in_(study_ids))
         )
 
-        if study_ids:
-            stmt = stmt.where(StudyDesign.CRGStudyID.in_(study_ids))
-
-        rows = (await self.db.execute(stmt)).all()  # list of tuples [(StudyID, DesignDescription), ...]
-
-        # Group by StudyID
-        final_result: Dict[int, List[str]] = {}
-        for study_id, description in rows:
-            final_result.setdefault(study_id, []).append(description)
-
-        return final_result
+        return await self._get_study_aspect(stmt)
 
     async def get_study_design_single(self, study_id : int) -> List[str]:
         result = await self.get_study_design(study_ids=[study_id])
         if study_id in result.keys():
-            return result[study_id]
-        return []
-
-    async def get_study_persons_single(self, study_id : int, cutoff: str) -> List[str]:
-        result = await self.get_study_persons(study_ids=[study_id], cutoff=cutoff)
-        if study_id in result:
             return result[study_id]
         return []
     

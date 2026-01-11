@@ -114,7 +114,7 @@ async def get_studies(study_ids: List[int] = study_ids_query, user_id = Depends(
     return result
 
 @router.get("/studies/reports", include_in_schema=False)
-async def get_study_reports_by_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, fields: Optional[List[str]] = Query(None), study_repo : StudyRepository = Depends(get_study_repo)) -> Dict[int, List[Report]]:
+async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, fields: Optional[List[str]] = Query(None), study_repo : StudyRepository = Depends(get_study_repo)) -> Dict[int, List[Report]]:
     return await study_repo.get_study_reports_by_study_ids(study_ids, cutoff, fields)
 
 @router.get("/studies/persons", include_in_schema=False)
@@ -140,7 +140,7 @@ async def get_study_id_by_trial_id(trial_id: str = Path(..., description="A regu
 
 @router.get("/studies/{study_id}/date_entered", summary="Get the date when the study was entered into the database")
 async def get_study_date_by_id(study_id: int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> str:
-    result = study_repo.get_study_date_by_id(study_id)
+    result = await study_repo.get_study_date_by_id(study_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Study {study_id} not found")
     return result
@@ -158,16 +158,16 @@ async def get_study_outcomes_single(study_id : int = study_id_path, study_repo :
     return await study_repo.get_study_outcomes_single(study_id)
 
 @router.get("/studies/{study_id}/participants", summary="Get participant description for a specific study (e.g. Male, Female, Adult, Child, ...)")
-async def get_study_participants_single(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[str]:
+async def get_study_participants_single(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[Dict[str, Any]]:
     return await study_repo.get_study_participants_single(study_id)
 
 @router.get("/studies/{study_id}/design", summary="Get the study design of the corresponding study ('Randomized Controlled Trial', 'Controlled Clinical Trial')")
-async def get_study_design_single(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[str]:
+async def get_study_design_single(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[Dict[str, Any]]:
     return await study_repo.get_study_design_single(study_id)
 
 @router.get("/studies/{study_id}/persons", summary="Get all persons (usually only authors) associated with a specific study")
-async def get_study_persons_single(study_id : int = study_id_path, cutoff: str = cutoff_query, study_repo : StudyRepository = Depends(get_study_repo)) -> List[str]:
-    return await study_repo.get_study_persons_single(study_ids=[study_id], cutoff=cutoff)
+async def get_study_persons_single(study_id : int = study_id_path, cutoff: str = cutoff_query, normalize_names = Query(False), study_repo : StudyRepository = Depends(get_study_repo)) -> List[str]:
+    return await study_repo.get_study_persons_single(study_id=study_id, cutoff=cutoff, normalize_names=normalize_names)
 
 #LEGACY
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
@@ -262,7 +262,7 @@ async def get_pdf_number_by_report_id(report_id: int = report_id_path, report_re
 
 @router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
 async def get_pdf(report_id : int, report_repo : ReportRepository = Depends(get_report_repo),user_id = Depends(get_user_id)) -> FileResponse:
-    pdf_path = report_repo.get_pdf_path(report_id)
+    pdf_path = await report_repo.get_pdf_path(report_id)
 
     if not pdf_path:
         raise HTTPException(status_code=404, detail="PDF file not found.")
@@ -279,13 +279,13 @@ async def get_pdf_metadata(report_id:int, report_repo: ReportRepository = Depend
 @router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
 async def get_report_trial_ids(report_id : int, include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), report_repo : ReportRepository = Depends(get_report_repo)) -> List[str]:
     result = await report_repo.get_report_trial_ids(report_id, include_fulltext)
-    if not result:
+    if result is None:
         raise HTTPException(status_code=404, detail="Report not found.")
     return result
 
 @router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
 async def post_report_event(report_id : int, event: Event, user_id = Depends(get_user_id), report_repo : ReportRepository = Depends(get_report_repo)):
-    if report_id != -1 and report_repo.get_report_by_id(report_id) is None:
+    if report_id != -1 and await report_repo.get_report_by_id(report_id) is None:
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
     
     if not user_id:

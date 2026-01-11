@@ -252,7 +252,7 @@ class ReportRepository:
         return {row[0]: row[1] for row in rows}
     
     async def get_pdf_metadata(self, report_id:int) -> Dict:
-        report_number = self.get_pdf_numbers_by_report_ids([report_id]).get(report_id, None)
+        report_number = (await self.get_pdf_numbers_by_report_ids([report_id])).get(report_id, None)
         if report_number is None:
             return None
         # Check if metadata exists in database
@@ -302,7 +302,7 @@ class ReportRepository:
         return all_ids
     
     async def get_pdf_path(self, report_id: int) -> str:
-        report_number = self.get_pdf_numbers_by_report_ids([report_id]).get(report_id, None)
+        report_number = (await self.get_pdf_numbers_by_report_ids([report_id])).get(report_id, None)
         if report_number is None:
             return None
         
