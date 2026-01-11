@@ -7,7 +7,7 @@ from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from .utils.database_models import APIKey, User
+from ..database.models import APIKey, User
 
 from asyncio import get_running_loop
 

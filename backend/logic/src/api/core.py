@@ -8,8 +8,9 @@ from qdrant_client.models import Filter, FieldCondition, DatetimeRange
 from typing import Dict, List, Optional,  Any
 import math
 import os
+import logging
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import grpc
 
@@ -17,11 +18,12 @@ from functools import lru_cache
 
 from datetime import datetime
 
-from .utils.trial_registration_id import extract_trial_id
-from .utils.vectorstore import transform_to_uuid
-from .utils.vectorstore import get_vectors_by_crg_report_id, delete_vectors_by_crg_report_ids, add_report_to_vectorstore, crg_reports_exist, link_report_to_study_ids, search_report, search_tags, get_collections, calculate_score_pairs
-from .utils.embedding import _embed_aspect
-from .utils.ris_parser import parse_file
+from ..utils.trial_registration_id import extract_trial_id
+from ..utils.vectorstore import transform_to_uuid
+from ..utils.vectorstore import get_vectors_by_crg_report_id, delete_vectors_by_crg_report_ids, add_report_to_vectorstore, crg_reports_exist, link_report_to_study_ids, search_report, search_tags, get_collections, calculate_score_pairs
+from ..utils.embedding import _embed_aspect
+from ..utils.ris_parser import parse_file
+from ..utils.logger import setup_logging
 
 import hashlib
 import asyncio
@@ -30,18 +32,15 @@ import enum
 
 from .auth import is_verified_api_call, get_user_id
 
-from .resources import get_study_id_by_trial_ids_internal, get_studies_internal, get_study_persons_internal, get_author_frequencies
-from .resources import get_study_interventions_internal , get_study_conditions_internal, get_study_outcomes_internal, get_study_participants_internal, get_study_design_internal
-from .resources import get_all_interventions_internal, get_all_conditions_internal, get_all_outcomes_internal, get_study_reports_by_ids_internal
-from .resources import add_new_report_batch, get_report_studies_by_id_internal, get_report_by_id_internal
-from .resources import add_report_studies_by_id_internal, delete_report_studies_by_id_internal
-from .resources import get_report_trial_ids_internal, get_similar_report_studies_internal
-from .resources import get_session
-from .resources import post_report_event, Event
+from .resources import get_author_frequencies
+from ..database.sessions import get_aspect_repo, get_study_repo, get_batch_repo, get_report_repo, db_ready
 
-from sqlmodel import select, delete, insert
-from sqlalchemy.ext.asyncio import AsyncSession
-from .utils.database_models import Report, Batch, ReportAdded, BatchInnerScore
+from ..database.repositories.study import StudyRepository
+from ..database.repositories.report import ReportRepository
+from ..database.repositories.batch import BatchRepository
+from ..database.repositories.aspects import AspectRepository
+
+from ..database.models import Report, Batch
 
 load_dotenv()
 
@@ -49,13 +48,10 @@ MODEL_HOST = os.getenv("EMBEDDING_SERVICE_HOST")
 MODEL_PORT = os.getenv("EMBEDDING_SERVICE_PORT")
 COLLECTION_NAME = os.getenv("VECTORSTORE_COLLECTION_NAME")
 
-POSTGRES_USER = os.getenv("POSTGRES_USER")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-POSTGRES_DB_USERS = os.getenv("POSTGRES_DB_USERS")
-POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-POSTGRES_PORT = os.getenv("POSTGRES_PORT")
-
 DEBUG = os.getenv("DEBUG", "FALSE") == "TRUE"
+
+setup_logging("events.log")
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["logic"])
 
@@ -121,16 +117,13 @@ async def publish_batch_update(batch_hash: str):
             # Use lambda to be explicit and handle potential exceptions in cleanup
             task.add_done_callback(lambda t: background_tasks.discard(t))
 
-async def finalize_batch_upload(batch_hash:str, session: AsyncSession):
+async def finalize_batch_upload(batch_hash : str, batch_repo : BatchRepository):
     """
     Finalize a batch upload by checking if all reports have been processed.
     Updates batch status and notifies subscribers when complete.
     """
     # Get all reports in the batch
-    result = await session.execute(
-        select(ReportAdded.CRGReportID).where(ReportAdded.BatchHash == batch_hash)
-    )
-    crg_report_ids = result.scalars().all()
+    crg_report_ids = await batch_repo.get_batch_associated_reports(batch_hash)
     
     if not crg_report_ids:
         return
@@ -142,9 +135,7 @@ async def finalize_batch_upload(batch_hash:str, session: AsyncSession):
     
     if all_processed:
         score_pairs = await calculate_score_pairs(crg_report_ids)
-        stmt = insert(BatchInnerScore)
-        session.execute(stmt, score_pairs)
-        await session.commit()
+        await batch_repo.insert_batch_scores(score_pairs)
 
         print("Batch finalized")
         # Notify all subscribers that batch is complete
@@ -166,12 +157,9 @@ async def unsubscribe_from_batch(batch_hash: str, q: asyncio.Queue):
         if not lst:
             batch_subscribers.pop(batch_hash, None)
 
-async def process_report(report, batch_hash, session):
+async def process_report(report, batch_hash : str, batch_repo : BatchRepository):
     # Check if batch still exists before proceeding
-    result = await session.execute(
-        select(Batch).where(Batch.BatchHash == batch_hash)
-    )
-    batch = result.scalar_one_or_none()
+    batch = await batch_repo.get_batch_by_hash(batch_hash)
     if not batch:
         # Batch was deleted, skip processing
         return
@@ -180,10 +168,10 @@ async def process_report(report, batch_hash, session):
 
     await publish_batch_update(batch_hash)
 
-    await finalize_batch_upload(batch_hash, session)
+    await finalize_batch_upload(batch_hash, batch_repo)
 
 @router.get("/readyz", summary="Health check endpoint for readiness probe", tags=["health"])
-async def readyz(db: AsyncSession = Depends(get_session)) -> Dict[str, Any]:
+async def readyz(db_ready: str = Depends(db_ready)) -> Dict[str, Any]:
     """
     Check if the service is ready to accept requests.
     
@@ -195,11 +183,10 @@ async def readyz(db: AsyncSession = Depends(get_session)) -> Dict[str, Any]:
     overall_status = "ready"
     
     # Check database connectivity
-    try:
-        await db.execute(select(1))
+    if db_ready == "ready":
         checks["database"] = {"status": "healthy", "message": "Database connection successful"}
-    except Exception as e:
-        checks["database"] = {"status": "unhealthy", "message": f"Database error: {str(e)}"}
+    else:
+        checks["database"] = {"status": "unhealthy", "message": f"Database error: {db_ready}"}
         overall_status = "not_ready"
     
     # Check vector store connectivity
@@ -260,7 +247,7 @@ async def readyz(db: AsyncSession = Depends(get_session)) -> Dict[str, Any]:
     return response
 
 @router.post("/batches", dependencies=[Depends(is_verified_api_call)], summary="Upload a batch of new reports that need to be assigned to studies (usually in the .ris file format)", description="Uploading a new batch triggers the embedding process. Batches are mainly used to do these compute heavy calculations in the background and only once. All needed data and the calculated embedding vectors are stored temporarily.", status_code=201) 
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), session : AsyncSession = Depends(get_session)):
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), batch_repo : BatchRepository = Depends(get_batch_repo)):
 
     entries = await parse_file(file)
 
@@ -327,8 +314,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
     batch_hash = hashlib.sha256(fingerprint_string.encode()).hexdigest()
 
-    reports = await add_new_report_batch(batch_hash,file.filename,reports, user="unknown", session=session)
-
+    reports = await batch_repo.add_new_batch(batch_hash,file.filename,reports)
     # schedule background tasks
     for report in reports:
         background_tasks.add_task(process_report, report, batch_hash, session)
@@ -341,22 +327,21 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
     return Response(status_code=201)
 
-async def get_batch_by_hash(batch_hash: str, db: AsyncSession = Depends(get_session)):
-    batch = await db.execute(select(Batch).where(Batch.BatchHash == batch_hash))
-    result = batch.scalar_one_or_none()
-    if not result:
+async def get_batch_by_hash(batch_hash: str, batch_repo: BatchRepository = Depends(get_batch_repo)):
+    batch = await batch_repo.get_batch_by_hash(batch_hash)
+    if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
-    return result
+    return batch
 
-async def get_batch_associated_reports(batch: Batch = Depends(get_batch_by_hash), db: AsyncSession = Depends(get_session)):
-    result = await db.execute(
-        select(ReportAdded.CRGReportID).where(ReportAdded.BatchHash == batch.BatchHash)
-    )
-    return result.scalars().all()
+async def get_batch_associated_reports(batch: Batch = Depends(get_batch_by_hash), batch_repo: BatchRepository = Depends(get_batch_repo)):
+    return batch_repo.get_batch_associated_reports(batch.BatchHash)
 
-async def get_batch_stats(batch: Batch = Depends(get_batch_by_hash), crg_report_ids : List[int] = Depends(get_batch_associated_reports), user_id : Optional[str] = Depends(get_user_id)) -> BatchResponse:
+async def get_batch_stats(batch: Batch = Depends(get_batch_by_hash), crg_report_ids : List[int] = Depends(get_batch_associated_reports), report_repo: ReportRepository = Depends(get_report_repo)) -> BatchResponse:
+#async def get_batch_stats(batch_hash : str, batch_repo: BatchRepository = Depends(get_batch_repo), report_repo: ReportRepository = Depends(get_report_repo)) -> BatchResponse:
     # Fetch all report studies in parallel
-    study_tasks = [get_report_studies_by_id_internal(report_id, user=user_id) for report_id in crg_report_ids]
+    #batch = batch_repo.get_batch_by_hash(hash)
+    #crg_report_ids = batch_repo.get_batch_associated_reports(batch_hash)
+    study_tasks = [report_repo.get_linked_studies(report_id) for report_id in crg_report_ids]
     all_studies = await asyncio.gather(*study_tasks)
     generated_embeddings = await crg_reports_exist(crg_report_ids)
 
@@ -373,16 +358,15 @@ async def get_batch_stats(batch: Batch = Depends(get_batch_by_hash), crg_report_
     )
 
 @router.get("/batches", dependencies=[Depends(is_verified_api_call)], summary="Get an overview of current report batches.", description="For each batch the current progress of embedding calculation and the number of already assigned reports is returned")
-async def get_available_batches(db: AsyncSession = Depends(get_session), user_id : Optional[str] = Depends(get_user_id)) -> List[BatchResponse]:
+async def get_available_batches(batch_repo: BatchRepository = Depends(get_batch_repo), report_repo: ReportRepository = Depends(get_report_repo)) -> List[BatchResponse]:
     # Get all batches
-    result = await db.execute(select(Batch))
-    batches = result.scalars().all()
+    batches = await batch_repo.get_all_batches()
 
     # Process all batches in parallel
     tasks = []
     for batch in batches:
-        crg_report_ids = await get_batch_associated_reports(batch, db)
-        tasks.append(get_batch_stats(batch, crg_report_ids, user_id))
+        crg_report_ids = await batch_repo.get_batch_associated_reports(batch)
+        tasks.append(get_batch_stats(batch, crg_report_ids, report_repo))
     batch_responses = await asyncio.gather(*tasks)
 
     return batch_responses
@@ -392,20 +376,19 @@ async def get_batch_stats_by_hash(batch_stats : BatchResponse = Depends(get_batc
     return batch_stats
 
 @router.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified_api_call)], summary="Delete a report batch and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
-async def delete_batch(batch: Batch = Depends(get_batch_by_hash), crg_report_ids : List[int] = Depends(get_batch_associated_reports), db: AsyncSession = Depends(get_session)):
+async def delete_batch(batch_hash : str, crg_report_ids : List[int] = Depends(get_batch_associated_reports), batch_repo: BatchRepository = Depends(get_batch_repo)):
     
     #Deletes the batch and through cascade and triggers everythig related to it
-    await db.execute(delete(Batch).where(Batch.BatchHash == batch.BatchHash))
-    await db.commit()
+    await batch_repo.delete_batch(batch_hash)
 
     await delete_vectors_by_crg_report_ids(crg_report_ids)
 
-    await publish_batch_update(batch.BatchHash)
+    await publish_batch_update(batch_hash)
     
     return Response(status_code=204)
 
 @router.get("/batches/{batch_hash}/subscribe",dependencies=[Depends(is_verified_api_call)], summary="Stream updated batch information.")
-async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSession = Depends(get_session)) -> StreamingResponse:
+async def stream_batch_updates(batch_hash : str,  request: Request, batch_repo: BatchRepository = Depends(get_batch_repo)) -> StreamingResponse:
     async def event_stream():
         HEARTBEAT_INTERVAL = 10  # seconds
 
@@ -419,7 +402,7 @@ async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSes
 
                 # Check if batch still exists
                 try:
-                    batch_exists = await get_batch_by_hash(batch_hash, db)
+                    batch_exists = await get_batch_by_hash(batch_hash, batch_repo)
                 except HTTPException as e:
                     if e.status_code == 404:
                         yield f"event: batch_deleted\ndata: Batch deleted\n\n"
@@ -431,7 +414,7 @@ async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSes
                     data = await asyncio.wait_for(q.get(), timeout=HEARTBEAT_INTERVAL)
                     if data == batch_hash:
                         try:
-                            result = await get_batch_by_hash(batch_hash, db)
+                            result = await get_batch_by_hash(batch_hash, batch_repo)
                             yield f"data: {result.json()}\n\n"
                         except HTTPException as e:
                             if e.status_code == 404:
@@ -447,30 +430,19 @@ async def stream_batch_updates(batch_hash : str,  request: Request, db: AsyncSes
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-async def batch_hash_id_to_crg_report_id(batch_hash: str = batch_hash_path, report_index: int = report_index_path, db : AsyncSession = Depends(get_session)):
-    stmt = (
-        select(ReportAdded.CRGReportID)
-        .where(
-            ReportAdded.BatchHash == batch_hash,
-        )
-        .order_by(ReportAdded.CRGReportID)
-        .offset(report_index)
-        .limit(1)
-    )
-
-    result = await db.execute(stmt)
-    crg_report_id = result.scalar_one_or_none()
-    if not crg_report_id:
+async def batch_hash_id_to_crg_report_id(batch_hash: str = batch_hash_path, report_index: int = report_index_path,  batch_repo: BatchRepository = Depends(get_batch_repo)):
+    report_id = await batch_repo.batch_item_to_report_id(batch_hash, report_index)
+    if not report_id:
         raise HTTPException(status_code=404, detail="Report not found")
-    return crg_report_id
+    return report_id
 
 @router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified_api_call)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
-async def get_batched_report(crg_report_id= Depends(batch_hash_id_to_crg_report_id), user_id : Optional[str] = Depends(get_user_id)):
+async def get_batched_report(crg_report_id : int = Depends(batch_hash_id_to_crg_report_id), report_repo : ReportRepository = Depends(get_report_repo)):
 
     # Run DB/vectorstore calls in parallel
     vectors_task = get_vectors_by_crg_report_id(crg_report_id)
-    report_task = get_report_by_id_internal(crg_report_id)
-    assigned_studies_task = get_report_studies_by_id_internal(crg_report_id, user=user_id)
+    report_task =  report_repo.get_report_by_id(crg_report_id)
+    assigned_studies_task = report_repo.get_linked_studies(crg_report_id)
 
     report_obj, vectors, assigned_studies = await asyncio.gather(
         report_task, vectors_task, assigned_studies_task
@@ -497,36 +469,40 @@ async def get_batched_report(crg_report_id= Depends(batch_hash_id_to_crg_report_
     return report
 
 @router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=200)
-async def assign_studies(batch_hash: str = batch_hash_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), crg_report_id= Depends(batch_hash_id_to_crg_report_id), user_id: Optional[str] = Depends(get_user_id)):
+async def assign_studies(batch_hash: str = batch_hash_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), crg_report_id : int = Depends(batch_hash_id_to_crg_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id)):
     await asyncio.gather(
-        add_report_studies_by_id_internal(crg_report_id, study_ids, user_id),
+        report_repo.link_studies(crg_report_id, study_ids),
         link_report_to_study_ids(crg_report_id, study_ids, user_id)
     )
 
     await publish_batch_update(batch_hash)
-    await post_report_event(crg_report_id, Event(event_type=f"study::links::changed", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
+    
+    payload = {"user": user_id, "event_type": "study::links::changed", "report_id": crg_report_id, "original_timestamp": "-"}
+    logger.info("ReportInteraction", extra={"payload": payload})
 
     return await get_batched_report(crg_report_id, user_id)
 
 @router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=200)
-async def delete_assigned_studies(batch_hash: str = batch_hash_path, crg_report_id= Depends(batch_hash_id_to_crg_report_id), user_id: Optional[str] = Depends(get_user_id)):
+async def delete_assigned_studies(batch_hash: str = batch_hash_path, crg_report_id : int = Depends(batch_hash_id_to_crg_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id)):
     await asyncio.gather(
-        delete_report_studies_by_id_internal(crg_report_id, user_id),
+        report_repo.unlink_studies(crg_report_id),
         link_report_to_study_ids(crg_report_id, [], user_id)
     )
 
     await publish_batch_update(batch_hash)
-    await post_report_event(crg_report_id, Event(event_type=f"study::links::changed", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
+
+    payload = {"user": user_id, "event_type": "study::links::changed", "report_id": crg_report_id, "original_timestamp": "-"}
+    logger.info("ReportInteraction", extra={"payload": payload})
 
     return await get_batched_report(crg_report_id, user_id)
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
-async def similar_tags(sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), k : int = k_query, crg_report_id= Depends(batch_hash_id_to_crg_report_id)) -> List[TagResponse]:
+async def similar_tags(sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), k : int = k_query, crg_report_id : int = Depends(batch_hash_id_to_crg_report_id)) -> List[TagResponse]:
     return get_similar_tags_by_id(crg_report_id, aspect, sources, k)
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
-async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, crg_report_id= Depends(batch_hash_id_to_crg_report_id), user_id = Depends(get_user_id), return_details : bool = False):
-    return await get_similar_studies_by_id(crg_report_id, aspect, cutoff, k, None, None, user_id, return_details)
+async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, crg_report_id : int = Depends(batch_hash_id_to_crg_report_id), user_id : str = Depends(get_user_id), report_repo : ReportRepository = Depends(get_report_repo), batch_repo : BatchRepository = Depends(get_batch_repo), study_repo : StudyRepository = Depends(get_study_repo), return_details : bool = False):
+    return await get_similar_studies_by_id(crg_report_id, aspect, cutoff, k, None, None, user_id, report_repo, batch_repo,study_repo, return_details)
 
 async def get_similar_tags_by_id(crg_report_id, aspect, sources, k):
     if aspect == TagCategories.default:
@@ -594,17 +570,18 @@ async def get_similar_studies_by_embedding(embedding, aspect: str, trial_id: Lis
     return await get_similar_study_by_query(embedding,aspect,cutoff,k, [], [trial_id], authors, user_id, return_details=return_details)
 
 
-async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], user_id : Optional[str], return_details: bool):
+async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], user_id : Optional[str], report_repo : ReportRepository, batch_repo : BatchRepository, study_repo : StudyRepository, return_details: bool):
 
     ########### Add noise according to study design
     if not user_id:
         user_id = "user"
     random_value = get_random_value(user_id, crg_report_id)
+    random_value = 0.0
 
-    report = await get_report_by_id_internal(crg_report_id)
+    report = await report_repo.get_report_by_id(crg_report_id)
 
     authors = [item.strip() for item in report.Authors.split("//")]
-    trial_ids = await get_report_trial_ids_internal(report, include_fulltext=True)
+    trial_ids = await report_repo.get_report_trial_ids(crg_report_id, include_fulltext=True)
 
     if random_value > 0.0:
         trial_ids = []
@@ -652,7 +629,7 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
     ########################################
     #"""
     
-    result = await get_similar_study_by_query(query,aspect,cutoff,k,negative_studies, trial_ids, authors, user_id, return_details=return_details)
+    result = await get_similar_study_by_query(query,aspect,cutoff,k,negative_studies, trial_ids, authors, user_id, study_repo, return_details=return_details)
 
     #To avoid biases add the deducted scores again 
     for i in range(0, len(result['Relevance'])):
@@ -661,7 +638,7 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
     # Check if there are any similar items in the same batch which are more similar than already retrieved existing studies
     if result.get('Relevance'):
         min_score = min(result['Relevance'])
-        batch_studies = await get_similar_report_studies_internal(crg_report_id, min_score, user_id)
+        batch_studies = await batch_repo.get_similar_report_studies(crg_report_id, min_score)
         
         # Create a map of existing study IDs to their positions and scores
         existing_study_map = {}
@@ -729,11 +706,12 @@ async def get_similar_studies_by_id(crg_report_id : int, aspect: TagCategories, 
     ########################################
     """
 
-    await post_report_event(crg_report_id, Event(event_type=f"similar::studies::k::{k}", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
+    payload = {"user": user_id, "event_type": f"similar::studies::k::{k}", "report_id": crg_report_id, "original_timestamp": "-"}
+    logger.info("ReportInteraction", extra={"payload": payload})
 
     return result
 
-async def get_similar_study_by_query(query, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], trial_ids: List[str], authors:List[str], user_id: Optional[str], return_details: bool):
+async def get_similar_study_by_query(query, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], trial_ids: List[str], authors:List[str], user_id: Optional[str], study_repo : StudyRepository, return_details: bool):
     
     found_study_ids = {}
     #found_study_titles = {}
@@ -750,7 +728,7 @@ async def get_similar_study_by_query(query, aspect: TagCategories, cutoff: str, 
         ))    
     
     if len(trial_ids) > 0:
-        response = await get_study_id_by_trial_ids_internal(trial_ids, cutoff)
+        response = await study_repo.get_study_id_by_trial_ids(trial_ids, cutoff)
         penalty = 0.00
         if response:
             for trial_id in trial_ids:
@@ -808,11 +786,11 @@ async def get_similar_study_by_query(query, aspect: TagCategories, cutoff: str, 
 
     if len(found_study_ids.keys()) == 0:
         return {'CRGStudyID': [] }
-    all_studies = await get_studies_internal(list(found_study_ids.keys()))
+    all_studies = await study_repo.get_studies(list(found_study_ids.keys()))
     #list of dicts to dict of lists:
 
     #Remove this block for evaluation without authors
-    scores_authors = await get_scores_authors(report_authors=authors, study_ids=list(found_study_ids.keys()), cutoff=cutoff)
+    scores_authors = await get_scores_authors(report_authors=authors, study_ids=list(found_study_ids.keys()), cutoff=cutoff, study_repo=study_repo)
     for study_id, score in scores_authors.items():
         debug_map[study_id].append({'source_id': 'author_reranking', 'score': 0.65 * score})
         found_study_ids[study_id] = min(1.00, found_study_ids[study_id] + 0.65 * score)
@@ -839,9 +817,9 @@ async def get_similar_study_by_query(query, aspect: TagCategories, cutoff: str, 
 
     return reordered
 
-async def get_scores_authors(report_authors: List[str], study_ids: List[int], cutoff: str):
+async def get_scores_authors(report_authors: List[str], study_ids: List[int], cutoff: str, study_repo : StudyRepository):
 
-    study_persons = await get_study_persons_internal(study_ids, cutoff, normalize_names=True)
+    study_persons = await study_repo.get_study_persons(study_ids, cutoff, normalize_names=True)
     current_persons = get_author_frequencies(report_authors)
 
     report_authors = set(current_persons.keys())
@@ -866,9 +844,9 @@ async def get_scores_authors(report_authors: List[str], study_ids: List[int], cu
 #1743, 2959, 3730
 
 @router.get("/features/authors", dependencies=[Depends(is_verified_api_call)], include_in_schema=False)
-async def get_author_features(authors : List[str] = Query(...), study_ids : List[int] = Query(...), cutoff : str = Query(None)):
+async def get_author_features(authors : List[str] = Query(...), study_ids : List[int] = Query(...), cutoff : str = Query(None), study_repo : StudyRepository = Depends(get_study_repo)):
     data = {}
-    study_persons = await get_study_persons_internal(study_ids, cutoff, normalize_names=True)
+    study_persons = await study_repo.get_study_persons(study_ids, cutoff, normalize_names=True)
     current_person_freq = get_author_frequencies(authors)
     for study_id, study_authors in study_persons.items():
         features = build_features( study_authors, current_person_freq)
@@ -928,11 +906,10 @@ class RetrievalInputEmbedding(BaseModel):
     model_id: str
     
 @router.post("/processing/analyze_embedding", dependencies=[Depends(is_verified_api_call)], include_in_schema=False)
-async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None)):
-    result = await analyze(input.embeddings, input.model_id, input.basic_input.topK, input.basic_input.title, input.basic_input.abstract, input.basic_input.authors, cutoff)
-    return result
+async def analyze_embedding(input: RetrievalInputEmbedding, cutoff: str = Query(None), study_repo : StudyRepository = Depends(get_study_repo), aspect_repo : AspectRepository = Depends(get_aspect_repo)):
+    return await analyze(input.embeddings, input.model_id, input.basic_input.topK, input.basic_input.title, input.basic_input.abstract, input.basic_input.authors, cutoff, study_repo, aspect_repo)
 
-async def search_related_tags(allowed_ids, embedding, type_vectorstore):
+async def search_related_tags(allowed_ids : List[int], embedding : List[float], type_vectorstore : str, aspects_repo : AspectRepository):
 
         if len(allowed_ids) == 0:
             return []
@@ -959,13 +936,13 @@ async def search_related_tags(allowed_ids, embedding, type_vectorstore):
         name_mapping = {}
             
         if type_vectorstore == "interventions":
-            result = await get_all_interventions_internal(all_ids)
+            result = await aspects_repo.get_all_interventions(all_ids)
             name_mapping = {item.InterventionID: item.InterventionDescription for item in result}
         elif type_vectorstore == "conditions":
-            result = await get_all_conditions_internal(all_ids)
+            result = await aspects_repo.get_all_conditions(all_ids)
             name_mapping = {item.HealthCareConditionID: item.HealthCareConditionDescription for item in result}
         elif type_vectorstore == "outcomes":
-            result = await get_all_outcomes_internal(all_ids)
+            result = await aspects_repo.get_all_outcomes(all_ids)
             name_mapping = {item.OutcomeID: item.OutcomeDescription for item in result}
 
         for item in related_tags:
@@ -973,7 +950,7 @@ async def search_related_tags(allowed_ids, embedding, type_vectorstore):
         
         return related_tags
 
-async def analyze(embeddings, top_k, title, abstract, authors, cutoff):
+async def analyze(embeddings, top_k : int, title : str, abstract : str, authors, cutoff : str, study_repo : StudyRepository, aspect_repo : AspectRepository):
     
     trial_id = extract_trial_id(RawReport(title=title,abstract=abstract, authors=[]))
     trial_id = [trial_id[0]] if len(trial_id) == 1 else None
@@ -994,13 +971,13 @@ async def analyze(embeddings, top_k, title, abstract, authors, cutoff):
     report_hits = [item['report_hit'] for item in found_study_ids.values()]
 
     (related_studies, study_interventions, study_conditions, study_outcomes, study_participants_desc, study_design, study_reports) = await asyncio.gather(
-        get_studies_internal(list(found_study_ids.keys())),
-        get_study_interventions_internal(list(found_study_ids.keys())),
-        get_study_conditions_internal(list(found_study_ids.keys())),
-        get_study_outcomes_internal(list(found_study_ids.keys())),
-        get_study_participants_internal(list(found_study_ids.keys())),
-        get_study_design_internal(list(found_study_ids.keys())),
-        get_study_reports_by_ids_internal(list(found_study_ids.keys()), ['CRGReportID', 'Title', 'Abstract', 'Authors'], cutoff)
+        study_repo.get_studies(list(found_study_ids.keys())),
+        study_repo.get_study_interventions(list(found_study_ids.keys())),
+        study_repo.get_study_conditions(list(found_study_ids.keys())),
+        study_repo.get_study_outcomes(list(found_study_ids.keys())),
+        study_repo.get_study_participants(list(found_study_ids.keys())),
+        study_repo.get_study_design(list(found_study_ids.keys())),
+        study_repo.get_study_reports_by_ids(list(found_study_ids.keys()), ['CRGReportID', 'Title', 'Abstract', 'Authors'], cutoff)
     )
 
     for id, name, num_participants, countries, durations,report_hit, score in zip(related_studies['CRGStudyID'], related_studies['ShortName'], related_studies['NumberParticipants'], related_studies['Countries'], related_studies['Duration'], report_hits, scores):            
@@ -1042,9 +1019,9 @@ async def analyze(embeddings, top_k, title, abstract, authors, cutoff):
     
         result['related_studies'].append(study_item)
 
-    result['related_interventions'] = await search_related_tags(all_related_interventions, embeddings["interventions"], "interventions")
-    result['related_conditions'] = await search_related_tags(all_related_conditions,  embeddings["conditions"], "conditions")
-    result['related_outcomes'] = await search_related_tags(all_related_outcomes, embeddings["outcomes"], "outcomes")
+    result['related_interventions'] = await search_related_tags(all_related_interventions, embeddings["interventions"], "interventions", aspect_repo)
+    result['related_conditions'] = await search_related_tags(all_related_conditions,  embeddings["conditions"], "conditions", aspect_repo)
+    result['related_outcomes'] = await search_related_tags(all_related_outcomes, embeddings["outcomes"], "outcomes", aspect_repo)
 
     return result
 
@@ -1058,30 +1035,30 @@ class AspectEmbedding(BaseModel):
     embedding: List[float]
 
 @router.get("/reports/{report_id}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="")
-async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),  cutoff: str = Query(None), k : int = Query(10), negative_studies : List[int]=Query(None),negative_reports : List[int]=Query(None), return_details=False, user_id : str = Depends(get_user_id)):
-    return await get_similar_studies_by_id(report_id, aspect, cutoff, k, negative_studies, negative_reports, user_id, return_details)
+async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),  cutoff: str = Query(None), k : int = Query(10), negative_studies : List[int]=Query(None),negative_reports : List[int]=Query(None), return_details : bool = False, user_id : str = Depends(get_user_id), report_repo : ReportRepository = Depends(get_report_repo), batch_repo : BatchRepository = Depends(get_batch_repo), study_repo : StudyRepository = Depends(get_study_repo)):
+    return await get_similar_studies_by_id(report_id, aspect, cutoff, k, negative_studies, negative_reports, user_id, report_repo, batch_repo, study_repo, return_details)
 
 @router.get("/reports/{report_id}/similar_studies/tags", dependencies=[Depends(is_verified_api_call)], summary="")
-async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), k : int = Query(..., description="The number of related studies considered for retrieving relevant tags.")):
-    report = await get_report_by_id_internal(report_id)
+async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), k : int = Query(..., description="The number of related studies considered for retrieving relevant tags."), report_repo : ReportRepository = Depends(get_report_repo), batch_repo : BatchRepository = Depends(get_batch_repo), study_repo : StudyRepository = Depends(get_study_repo), aspect_repo : AspectRepository = Depends(get_aspect_repo)):
+    report = await report_repo.get_report_by_id(report_id)
     
-    similar_studies = await get_similar_studies_by_id(report_id, "default", report.Dateentered, k, None, None, None, False)
+    similar_studies = await get_similar_studies_by_id(report_id, "default", report.Dateentered, k, None, None, None, report_repo, batch_repo, study_repo, False)
     predicted_studies = similar_studies['CRGStudyID']
 
     vectors = await get_vectors_by_crg_report_id(report_id)
     
     related_tags = []
     if aspect == TagCategories.interventions:
-        related_tags = await get_study_interventions_internal(predicted_studies)
+        related_tags = await study_repo.get_study_interventions(predicted_studies)
         related_ids = {item["ID"] for items in related_tags.values() for item in items}
-        return await search_related_tags(related_ids, vectors["intervention"], "interventions")
+        return await search_related_tags(related_ids, vectors["intervention"], "interventions", aspect_repo)
     elif aspect == TagCategories.conditions:
-        related_tags = await get_study_conditions_internal(predicted_studies)
+        related_tags = await study_repo.get_study_conditions(predicted_studies)
         related_ids = {item["ID"] for items in related_tags.values() for item in items}
-        return await search_related_tags(related_ids, vectors["condition"], "conditions")
+        return await search_related_tags(related_ids, vectors["condition"], "conditions", aspect_repo)
     elif aspect == TagCategories.outcomes:
-        related_tags = await get_study_outcomes_internal(predicted_studies)
+        related_tags = await study_repo.get_study_outcomes(predicted_studies)
         related_ids = {item["ID"] for items in related_tags.values() for item in items}
-        return await search_related_tags(related_ids, vectors["outcome"], "outcomes")
+        return await search_related_tags(related_ids, vectors["outcome"], "outcomes", aspect_repo)
     else:
         raise HTTPException(status_code=501, detail="Not implemented")

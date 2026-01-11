@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends
 from .auth import is_verified_api_call
-from .utils.vectorstore import get_all_saved_crg_report_ids, delete_vectors_by_crg_report_ids
-from .resources import get_all_reports_internal
+from ..utils.vectorstore import get_all_saved_crg_report_ids, delete_vectors_by_crg_report_ids
+from ..database.sessions import get_report_repo
+from ..database.repositories.report import ReportRepository
 from dotenv import load_dotenv
 import asyncio
 
@@ -10,10 +11,10 @@ load_dotenv()
 router = APIRouter(tags=["maintenance"], dependencies=[Depends(is_verified_api_call)])
 
 @router.post("/maintenance/vectorstore/clean_up", summary="Clean up vectorstore, remove orphan nodes.")
-async def vectorstore_clean_up():
+async def vectorstore_clean_up(report_repo : ReportRepository = Depends(get_report_repo)):
     all_report_ids_vectorstore, all_report_ids_db = await asyncio.gather(
         get_all_saved_crg_report_ids(),
-        get_all_reports_internal(None, None, None)
+        report_repo.get_all_reports()
     )
 
     all_report_ids_vectorstore = set(all_report_ids_vectorstore)

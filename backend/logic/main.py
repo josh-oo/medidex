@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src import auth, logic, resources, maintenance
+from src.api import auth, resources, core
+from src.api import maintenance
 
 # Initialize FastAPI
 app = FastAPI(root_path="/backend/api")
@@ -15,6 +16,6 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
-app.include_router(logic.router)
+app.include_router(core.router)
 app.include_router(resources.router)
 app.include_router(maintenance.router)
