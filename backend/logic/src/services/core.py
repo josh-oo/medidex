@@ -181,9 +181,10 @@ class StudySimilaritySearchService:
         
         result = await self.get_similar_study_by_query(query,aspect,cutoff,k,negative_studies, trial_ids, authors, return_details=return_details)
 
-        #To avoid biases add the deducted scores again 
-        for i in range(0, len(result['Relevance'])):
-            result['Relevance'][i] = min(result['Relevance'][i] / (1.01-random_value), 1.0)
+        if self.add_noise:
+            #To avoid biases add the deducted scores again 
+            for i in range(0, len(result['Relevance'])):
+                result['Relevance'][i] = min(result['Relevance'][i] / (1.01-random_value), 1.0)
 
         # Check if there are any similar items in the same batch which are more similar than already retrieved existing studies
         if result.get('Relevance'):
