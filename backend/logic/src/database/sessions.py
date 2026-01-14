@@ -1,18 +1,10 @@
 import os
-from fastapi import Depends
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import select
 
 from dotenv import load_dotenv
-
-from ..api.auth import get_user_id
-
-from .repositories.study import StudyRepository
-from .repositories.batch import BatchRepository
-from .repositories.report import ReportRepository
-from .repositories.aspects import AspectRepository
 
 load_dotenv()
 
@@ -34,25 +26,9 @@ AsyncSessionLocal = sessionmaker(
     expire_on_commit=False  # keep objects available after commit
 )
 
-async def get_session() -> AsyncSession:
-    async with AsyncSessionLocal() as session:
-        yield session
-
-async def db_ready(db: AsyncSession = Depends(get_session)):
+async def test_db(db : AsyncSession):
     try:
         await db.execute(select(1))
         return "ready"
     except Exception as e:
         return str(e)
-        
-def get_study_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)):
-    return StudyRepository(db=db, user_id=user_id)
-
-def get_batch_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)):
-    return BatchRepository(db=db, user_id=user_id)
-
-def get_report_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)):
-    return ReportRepository(db=db, user_id=user_id)
-
-def get_aspect_repo(db: AsyncSession = Depends(get_session)):
-    return AspectRepository(db=db)

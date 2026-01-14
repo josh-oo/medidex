@@ -12,7 +12,6 @@ Resources
 """
 
 metadata_resources = MetaData()
-metadata_user_data = MetaData()
 
 class Report(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblReport"
@@ -237,23 +236,3 @@ class AnalyticsEvent(SQLModel, table=True, metadata=metadata_resources):
     CreatedBy: str
     Type: str
     RelatedReport: Optional[int]
-
-"""
-Authentication
-"""
-
-class User(SQLModel, table=True, metadata=metadata_user_data):
-    __tablename__ = "users"
-
-    id: int = Field(default=None, primary_key=True)
-    email: EmailStr = Field(index=True, unique=True)
-    role: str = Field(default="user")
-    verified: bool = Field(default=False)
-    password: str
-
-class APIKey(SQLModel, table=True, metadata=metadata_user_data):
-    __tablename__ = "api_keys"
-
-    id: str = Field(primary_key=True, index=True)
-    owner: int = Field(foreign_key="users.id", ondelete="CASCADE")
-    hash: str = Field(index=True)

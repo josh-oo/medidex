@@ -7,7 +7,10 @@ from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from ..database.models import APIKey, User
+
+from sqlmodel import SQLModel, Field
+from sqlalchemy import MetaData
+from pydantic import EmailStr
 
 from asyncio import get_running_loop
 
@@ -50,6 +53,28 @@ engine = create_async_engine(DATABASE_URL, echo=False)
 
 if not JWT_SECRET or len(JWT_SECRET) < 32:
     raise RuntimeError("JWT_SECRET must be set and at least 32 characters long")
+
+"""
+Authentication
+"""
+
+metadata_user_data = MetaData()
+
+class User(SQLModel, table=True, metadata=metadata_user_data):
+    __tablename__ = "users"
+
+    id: int = Field(default=None, primary_key=True)
+    email: EmailStr = Field(index=True, unique=True)
+    role: str = Field(default="user")
+    verified: bool = Field(default=False)
+    password: str
+
+class APIKey(SQLModel, table=True, metadata=metadata_user_data):
+    __tablename__ = "api_keys"
+
+    id: str = Field(primary_key=True, index=True)
+    owner: int = Field(foreign_key="users.id", ondelete="CASCADE")
+    hash: str = Field(index=True)
 
 class UserDataResponse(BaseModel):
     id: int

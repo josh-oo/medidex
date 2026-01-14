@@ -26,7 +26,7 @@ from ..utils.logger import setup_logging
 from ..database.repositories.study import StudyRepository
 from ..database.repositories.aspects import AspectRepository
 from ..database.repositories.report import ReportRepository
-from ..database.sessions import get_study_repo, get_aspect_repo, get_report_repo
+from ..database import get_study_repo, get_aspect_repo, get_report_repo
 
 load_dotenv()
 
@@ -222,6 +222,7 @@ async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to uplo
         with open(file_path, "wb") as f:
             content = await file.read()
             f.write(content)
+        #Extract and save metadata
         process_pdf(file_path)
         return {
             "report_id": report.CRGReportID,
