@@ -2,10 +2,11 @@ from fastapi import APIRouter, File, UploadFile
 from fastapi import Depends, HTTPException, Query, Path
 from fastapi.responses import FileResponse
 import os
+import asyncio
 
 from dotenv import load_dotenv
 
-from .auth import is_verified_api_call, get_user_info
+from .auth import is_verified_api_call, get_user_id
 from typing import List, Optional
 import enum
 from pydantic import BaseModel
@@ -23,7 +24,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
 from .utils.database_models import Report, Study, StudyCondition, StudyDesign, StudyIntervention, StudyOutcome, StudyParticipant, StudyReport
 from .utils.database_models import Condition, Intervention, Design, Outcome, Participant
-from .utils.database_models import Batch, ReportAdded, StudyReportAdded
+from .utils.database_models import Batch, ReportAdded, StudyReportAdded, StudyAdded, FulltextExtractions, BatchInnerScore
 from .utils.database_models import AnalyticsEvent
 
 from .utils.pdf.processor import process_pdf
@@ -43,10 +44,8 @@ POSTGRES_PORT = os.getenv("POSTGRES_PORT")
 
 router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified_api_call)])
 
-#DATABASE_URL = "sqlite+aiosqlite:///" + os.path.join(DATABASE_VOLUME,"resources","meerkat.db")
 DATABASE_URL = f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB_RESOURCES}"
 PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
-METADATA_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdf_metadata")
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 
@@ -137,13 +136,17 @@ report_id_path = Path(..., description="CRGReportIDs")
 Study Endpoints
 """
 
-@router.put("/studies", summary="Add new study to meerkat.")
-async def add_study(study_params: StudyParams, session: AsyncSession = Depends(get_session)) -> Study:
-    return await _add_study(study_params, session)
+@router.put("/studies", summary="Add new study to meerkat.", response_model=Study)
+async def add_study(study_params: StudyParams, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> Study:
+    result = await _add_study(study_params, user_id, session)
+    await post_report_event(-1, Event(event_type=f"study::{result.CRGStudyID}::created", timestamp=datetime.now(timezone.utc).isoformat()),user_id)
+    return result
 
 @router.get("/studies", summary="Get study details for all studies specified in the query.")
-async def get_studies(study_ids: List[int] = study_ids_query, session: AsyncSession = Depends(get_session)) -> List[Study]:
-    return await _get_studies(study_ids, session)
+async def get_studies(study_ids: List[int] = study_ids_query, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> List[Study]:
+    result = await _get_studies(study_ids, session)
+    await asyncio.gather(*[post_report_event(-1, Event(event_type=f"study::{study_id}::visited", timestamp=datetime.now(timezone.utc).isoformat()), user_id) for study_id in study_ids])
+    return result
 
 @router.get("/studies/reports", include_in_schema=False)
 async def get_study_reports_by_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, fields: Optional[List[str]] = Query(None), session: AsyncSession = Depends(get_session)) -> Dict[int, List[Report]]:
@@ -153,18 +156,23 @@ async def get_study_reports_by_ids(study_ids: List[int] = study_ids_query, cutof
 async def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, normalize_names = Query(False), session: AsyncSession = Depends(get_session)) -> Dict[int, List[str]]:
     return await _get_study_persons(study_ids,cutoff,normalize_names,session)
 
-@router.get("/studies/{study_id}", summary="Get study details for a specific study.")
 async def get_study_by_id(study_id: int = study_id_path, session: AsyncSession = Depends(get_session)) -> List[Study]:
     study = await session.get(Study, study_id)
     if study is None:
         raise HTTPException(status_code=404, detail=f"Study {study_id} not found")
-    return [study] #TODO added array for legacy reasons -> remove later also change this lines: if study[0].CRGStudyID in result:
+    return study
+
+@router.get("/studies/{study_id}", summary="Get study details for a specific study.")
+async def get_study_by_id_legacy(study: Study = Depends(get_study_by_id), user_id = Depends(get_user_id)) -> List[Study]:
+    #TODO remove this
+    await post_report_event(-1, Event(event_type=f"study::{study.CRGStudyID}::visted", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
+    return [study]
 
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
 async def get_study_reports_by_id(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[ReportResponse]:
-    result = (await get_study_reports_by_ids(study_ids=[study[0].CRGStudyID], fields=None, cutoff=None, session=session))
-    if study[0].CRGStudyID in result:
-        return result[study[0].CRGStudyID]
+    result = (await get_study_reports_by_ids(study_ids=[study.CRGStudyID], fields=None, cutoff=None, session=session))
+    if study.CRGStudyID in result:
+        return result[study.CRGStudyID]
     raise []
 
 @router.get("/studies/{trial_id}/study_id", summary="Get the CRGStudyID given a matching trial registration id")
@@ -183,39 +191,39 @@ async def get_study_date_by_id(study_id: int = study_id_path, session: AsyncSess
     return result
 
 @router.get("/studies/{study_id}/interventions", summary="Get interventions for a specific study (e.g. 'Placebo', 'Group Therapy', ...)")
-async def get_study_interventions_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
+async def get_study_interventions_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[Dict[str, Any]]:
     result = await get_study_interventions(study_ids=[study.CRGStudyID], session=session)
     if study.CRGStudyID in result.keys():
         return result[study.CRGStudyID]
-    raise []
+    return []
 
 @router.get("/studies/{study_id}/conditions", summary="Get the health conditions of participants in a specific study (e.g., 'COVID-19', 'Diabetes', ...).")
-async def get_study_conditions_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
+async def get_study_conditions_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[Dict[str, Any]]:
     result =await get_study_conditions(study_ids=[study.CRGStudyID], session=session)
     if study.CRGStudyID in result.keys():
         return result[study.CRGStudyID]
-    raise []
+    return []
 
 @router.get("/studies/{study_id}/outcomes", summary="Get outcomes for a specific study (e.g. 'Mortality', 'Hospitalization', ...)")
-async def get_study_outcomes_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
+async def get_study_outcomes_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[Dict[str, Any]]:
     result =await get_study_outcomes(study_ids=[study.CRGStudyID], session=session)
     if study.CRGStudyID in result.keys():
         return result[study.CRGStudyID]
-    raise []
+    return []
 
 @router.get("/studies/{study_id}/participants", summary="Get participant description for a specific study (e.g. Male, Female, Adult, Child, ...)")
 async def get_study_participants_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
     result = await get_study_participants(study_ids=[study.CRGStudyID], session=session)
     if study.CRGStudyID in result.keys():
         return result[study.CRGStudyID]
-    raise []
+    return []
 
 @router.get("/studies/{study_id}/design", summary="Get the study design of the corresponding study ('Randomized Controlled Trial', 'Controlled Clinical Trial')")
 async def get_study_design_single(study: Study = Depends(get_study_by_id), session: AsyncSession = Depends(get_session)) -> List[str]:
     result = await get_study_design(study_ids=[study.CRGStudyID], session=session)
     if study.CRGStudyID in result.keys():
         return result[study.CRGStudyID]
-    raise []
+    return []
 
 @router.get("/studies/{study_id}/persons", summary="Get all persons (usually only authors) associated with a specific study")
 async def get_study_persons_single(study: Study = Depends(get_study_by_id), cutoff: str = cutoff_query, session: AsyncSession = Depends(get_session)) -> List[str]:
@@ -236,15 +244,7 @@ async def get_all_reports(
     date_to: Optional[str] = Query(None, description="Filter reports with Dateentered <= this ISO datetime (e.g. '2025-01-31 23:59:59')"),
     session: AsyncSession = Depends(get_session)
 ) -> List[Report]:
-    stmt = select(Report).where((Report.Title.isnot(None)) | (Report.Abstract.isnot(None)))
-    if report_ids:
-        stmt = stmt.where(Report.CRGReportID.in_(report_ids))
-    # Dateentered filtering (string compare works with ISO-like 'YYYY-MM-DD HH:MM:SS')
-    if date_from:
-        stmt = stmt.where(Report.Dateentered >= date_from)
-    if date_to:
-        stmt = stmt.where(Report.Dateentered <= date_to)
-    return (await session.execute(stmt)).scalars().all()
+    return await _get_all_reports(report_ids, date_from, date_to, session)
 
 @router.put("/reports/pdf", summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
 async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to upload"), session: AsyncSession = Depends(get_session)) -> Dict[str, Any]:
@@ -307,11 +307,8 @@ async def get_report_studies_by_id(
     date_from: Optional[str] = Query(None, description="Filter studies with DateEntered >= this ISO datetime (e.g. '2025-01-13 00:00:00')"),
     date_to: Optional[str] = Query(None, description="Filter studies with DateEntered <= this ISO datetime (e.g. '2025-01-31 23:59:59')"),
     session: AsyncSession = Depends(get_session),
-    user = Depends(get_user_info),
+    user_id = Depends(get_user_id),
 ) -> List[Study]:
-    user_id = None
-    if user:
-        user_id = user['id']
     return await _get_report_studies_by_id(report_id, date_from, date_to, user_id, session)
 
 @router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
@@ -322,67 +319,47 @@ async def get_pdf_number_by_report_id(report_id: int = report_id_path, session: 
     return result[report_id]
 
 @router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
-async def get_pdf(report_number = Depends(get_pdf_number_by_report_id)) -> FileResponse:
+async def get_pdf(report_id: int, report_number = Depends(get_pdf_number_by_report_id),user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)) -> FileResponse:
     pdf_name = str(report_number).zfill(5) + ".pdf"
     file_name = os.path.join(PDF_PATH, pdf_name)
 
     if not os.path.exists(file_name):
         raise HTTPException(status_code=404, detail="PDF file not found.")
+    await post_report_event(-1, Event(event_type=f"report::{report_id}::downloaded", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
     return FileResponse(file_name, media_type="application/pdf")
 
 @router.get("/reports/{report_id}/pdf/metadata", summary="Get pdf metadata.")
-async def get_pdf_metadata(report_number = Depends(get_pdf_number_by_report_id)) -> FileResponse:
-    report_number = str(report_number).zfill(5) 
-    file_name_json = os.path.join(METADATA_PATH, report_number + ".json")
-    file_name_pdf = os.path.join(PDF_PATH, report_number + ".pdf")
-
-    if os.path.exists(file_name_json):
-        with open(file_name_json, "r") as f:
-            return json.load(f)
-    elif os.path.exists(file_name_pdf ):
-        return await process_pdf(PDF_PATH, METADATA_PATH, report_number)
-    raise HTTPException(status_code=404, detail="PDF file not found.")
+async def get_pdf_metadata(report_id:int, report_number = Depends(get_pdf_number_by_report_id), session: AsyncSession = Depends(get_session)) -> Dict:
+    return await _get_pdf_metadata(report_id, report_number, session)
 
 @router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
-async def get_report_trial_ids(report = Depends(get_reports_by_id), include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search.")) -> List[str]:
+async def get_report_trial_ids(report = Depends(get_reports_by_id), include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), session: AsyncSession = Depends(get_session)) -> List[str]:
     if not report:
         raise HTTPException(status_code=404, detail="Report not found.")
-    if include_fulltext:
-        meta_data = await get_pdf_metadata(report.ReportNumber)
-        return meta_data['trial_id']
-    authors = [item.strip() for item in report.Authors.split("//")]
-    all_ids = extract_trial_id(report.Title, report.Abstract, authors)
-    return all_ids
+    return await _get_report_trial_ids(report, include_fulltext, session)
 
 @router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
-async def post_report_event(report_id : int, event: Event, user = Depends(get_user_info), session: AsyncSession = Depends(get_session)):
-    user_id = None
-    if user:
-        user_id = str(user['id'])
-    
-    # Validate report exists
-    report = await session.get(Report, report_id)
-    if not report:
-        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
-    
-    # Parse timestamp from frontend
-    try:
-        event_datetime = datetime.fromisoformat(event.timestamp.replace('Z', '+00:00'))
-        # Convert to naive datetime (remove timezone info)
-        event_datetime = event_datetime.replace(tzinfo=None)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid timestamp format. Use ISO format (e.g., '2025-12-13T10:30:00Z')")
-
-    new_event = AnalyticsEvent(
-        DateCreated=event_datetime,
-        CreatedBy=user_id or "anonymous",
-        Type=event.event_type,
-        RelatedReport=report_id
-    )
-    
-    session.add(new_event)
-    await session.commit()
-    await session.refresh(new_event)
+async def post_report_event(report_id : int, event: Event, user_id = Depends(get_user_id)):
+    #needs own session to avoid overwriting
+    async with AsyncSession(engine) as session:
+        # (copy the logic from post_report_event here, but without FastAPI dependencies)
+        if report_id != -1:
+            report = await session.get(Report, report_id)
+            if not report:
+                raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+        try:
+            event_datetime = datetime.fromisoformat(event.timestamp.replace('Z', '+00:00'))
+            event_datetime = event_datetime.replace(tzinfo=None)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid timestamp format. Use ISO format (e.g., '2025-12-13T10:30:00Z')")
+        new_event = AnalyticsEvent(
+            DateCreated=event_datetime,
+            CreatedBy=user_id or "anonymous",
+            Type=event.event_type,
+            RelatedReport=report_id
+        )
+        session.add(new_event)
+        await session.commit()
     
     return {
         "report_id": report_id,
@@ -392,11 +369,7 @@ async def post_report_event(report_id : int, event: Event, user = Depends(get_us
     }
 
 @router.post("/events", summary="Track general UI events.", description="Track general UI events using a timestamp and reasonable event_types for example 'login', 'logout', 'ui_interaction' or 'idle'. Feel free to use other descriptive event types.")
-async def post_event(event: Event, user = Depends(get_user_info), session: AsyncSession = Depends(get_session)):
-    user_id = None
-    if user:
-        user_id = str(user['id'])
-    
+async def post_event(event: Event, user_id = Depends(get_user_id), session: AsyncSession = Depends(get_session)):    
     # Parse timestamp from frontend
     try:
         event_datetime = datetime.fromisoformat(event.timestamp.replace('Z', '+00:00'))
@@ -666,6 +639,128 @@ async def get_possible_trial_ids_by_report(session: AsyncSession = Depends(get_s
 Helper functions
 """
 
+async def get_similar_report_studies_internal(report_id: int, min_score: float, user_id: str):
+    async with AsyncSession(engine) as session:
+        return await _get_similar_report_studies(report_id, min_score, user_id, session)
+
+async def _get_similar_report_studies(
+    report_id: int,
+    min_score: float,
+    user_id: str,
+    session: AsyncSession
+) -> List[Study]:
+    """
+    Internal implementation to get studies linked to similar reports.
+    
+    Args:
+        report_id: The reference report ID
+        min_score: Minimum similarity score threshold
+        user_id: Filter by user who created the study-report link
+        session: Database session
+        
+    Returns:
+        List of Study objects linked to similar reports, or empty list if report doesn't exist
+    """
+    # Check if report exists
+    report = await session.get(Report, report_id)
+    if not report:
+        return []
+    
+    # Query to get studies from similar reports
+    # Note: We select BatchInnerScore.Score to make it available for ORDER BY
+    stmt = (
+        select(Study, BatchInnerScore.Score)
+        .distinct()
+        .join(StudyReport, StudyReport.CRGStudyID == Study.CRGStudyID)
+        .join(
+            BatchInnerScore,
+            (BatchInnerScore.OtherID == StudyReport.CRGReportID) &
+            (BatchInnerScore.CRGReportID == report_id) &
+            (BatchInnerScore.Score >= min_score)
+        )
+        .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+    )
+    
+    # Filter by user if specified
+    if user_id:
+        stmt = stmt.where(
+            (StudyReportAdded.CreatedBy == user_id) | 
+            (StudyReportAdded.CreatedBy.is_(None))
+        )
+    
+    # Order by similarity score (descending)
+    stmt = stmt.order_by(BatchInnerScore.Score.desc())
+    
+    result = await session.execute(stmt)
+    
+    return result.all()
+
+async def get_report_trial_ids_internal(report, include_fulltext=True):
+    async with AsyncSession(engine) as session:
+        return await _get_report_trial_ids(report, include_fulltext, session) 
+
+async def _get_report_trial_ids(report: Report, include_fulltext: bool, session: AsyncSession) -> List[str]:
+    """Internal function to get trial IDs from a report"""
+    if include_fulltext:
+        try:
+            meta_data = await _get_pdf_metadata(report.CRGReportID, report.ReportNumber, session)
+            return meta_data['trial_id']
+        except:
+            pass
+    authors = [item.strip() for item in report.Authors.split("//")]
+    all_ids = extract_trial_id(report.Title, report.Abstract, authors)
+    return all_ids
+
+async def get_pdf_metadata_internal(report_id):
+    async with AsyncSession(engine) as session:
+        return await _get_pdf_metadata(report_id, None, session) 
+
+async def _get_pdf_metadata(report_id:int, report_number: int, session: AsyncSession) -> Dict:
+    # Check if metadata exists in database
+    stmt = select(FulltextExtractions).where(FulltextExtractions.CRGReportID == report_id)
+    existing = (await session.execute(stmt)).scalar_one_or_none()
+    
+    if existing:
+        return existing.data
+    
+    # If not in DB, process PDF and save to database
+    if not report_number:
+        report_number = await get_pdf_number_by_report_id(report_id, session)
+
+    report_number_str = str(report_number).zfill(5)
+    file_name_pdf = os.path.join(PDF_PATH, report_number_str + ".pdf")
+    
+    if not os.path.exists(file_name_pdf):
+        raise HTTPException(status_code=404, detail="PDF file not found.")
+    
+    # Process PDF to extract metadata
+    metadata = await process_pdf(PDF_PATH, report_number_str)
+    
+    # Save to database
+    new_extraction = FulltextExtractions(
+        CRGReportID=report_id,
+        data=metadata
+    )
+    session.add(new_extraction)
+    await session.commit()
+    
+    return metadata
+
+async def get_all_reports_internal(report_ids,date_from,date_to):
+    async with AsyncSession(engine) as session:
+        return await _get_all_reports(report_ids,date_from,date_to, session)
+
+async def _get_all_reports(report_ids,date_from,date_to,session) -> List[Report]:
+    stmt = select(Report).where((Report.Title.isnot(None)) | (Report.Abstract.isnot(None)))
+    if report_ids:
+        stmt = stmt.where(Report.CRGReportID.in_(report_ids))
+    # Dateentered filtering (string compare works with ISO-like 'YYYY-MM-DD HH:MM:SS')
+    if date_from:
+        stmt = stmt.where(Report.Dateentered >= date_from)
+    if date_to:
+        stmt = stmt.where(Report.Dateentered <= date_to)
+    return (await session.execute(stmt)).scalars().all()
+
 async def get_study_reports_by_ids_internal(study_ids: List[int], cutoff: str, fields: Optional[List[str]]):
     async with AsyncSession(engine) as session:
         return await _get_study_reports_by_ids(study_ids, cutoff, fields, session)
@@ -800,13 +895,11 @@ async def _get_studies(study_ids, session):
     stmt = select(Study)
     if study_ids:
         stmt = stmt.where(Study.CRGStudyID.in_(study_ids))
-    return (await session.execute(stmt)).scalars().all()
+    result = (await session.execute(stmt)).scalars().all()
+    
+    return result
 
-async def add_study_internal(study_params):
-    async with AsyncSession(engine) as session:
-        return await _add_study(study_params, session)
-
-async def _add_study(study_params: StudyParams, session: AsyncSession):
+async def _add_study(study_params: StudyParams, user: str, session: AsyncSession):
     #TODO add more sophisticated checks
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     
@@ -816,13 +909,21 @@ async def _add_study(study_params: StudyParams, session: AsyncSession):
         Countries="//".join(study_params.countries),
         CENTRALSubmissionStatus=study_params.central_submission_status.value,
         Duration=study_params.duration,
-        NumberofParticipants=study_params.number_of_participants,
+        NumberParticipants=str(study_params.number_of_participants),
         Comparison=study_params.comparison,
         DateEntered=timestamp,
         DateEdited=timestamp,
     )
     
     session.add(new_study)
+    await session.flush()
+
+    study_added_entry = StudyAdded(
+        CRGStudyID=new_study.CRGStudyID,
+        CreatedBy=user,
+    )
+    session.add(study_added_entry)
+
     await session.commit()
     await session.refresh(new_study)
     return new_study
@@ -980,7 +1081,6 @@ async def get_report_studies_by_id_internal(report_id, date_from=None, date_to=N
         return await _get_report_studies_by_id(report_id, date_from, date_to, user, session)
 
 async def _get_report_studies_by_id(report_id, date_from, date_to, user, session):
-    user = str(user) if user is not None else None #TODO remove later
     report = await session.get(Report, report_id)
     if not report:
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
@@ -1003,6 +1103,45 @@ async def _get_report_studies_by_id(report_id, date_from, date_to, user, session
     
     return (await session.execute(stmt)).scalars().all()
 
+async def _remove_orphaned_studies(affected_study_ids: set, session: AsyncSession) -> List[int]:
+    """
+    Helper function to remove orphaned studies.
+    
+    Args:
+        affected_study_ids: Set of study IDs that were affected by link deletions
+        session: The database session
+        
+    Returns:
+        List of study IDs that were deleted
+    """
+    if not affected_study_ids:
+        return []
+    
+    # Get studies that were added by users (tracked in StudyAdded)
+    stmt = select(StudyAdded.CRGStudyID).where(StudyAdded.CRGStudyID.in_(affected_study_ids))
+    newly_added_studies = set((await session.execute(stmt)).scalars().all())
+    
+    if not newly_added_studies:
+        return []
+    
+    # Check which of these studies still have remaining links
+    stmt = select(StudyReport.CRGStudyID).where(StudyReport.CRGStudyID.in_(newly_added_studies))
+    still_linked = set((await session.execute(stmt)).scalars().all())
+    
+    # Orphaned studies are those with no remaining links
+    orphaned_studies = newly_added_studies - still_linked
+    
+    if not orphaned_studies:
+        return []
+    
+    orphan_list = list(orphaned_studies)
+    # Delete orphaned studies (cascades to StudyAdded)
+    await session.execute(
+        delete(Study).where(Study.CRGStudyID.in_(orphan_list))
+    )
+    
+    return orphan_list
+
 async def add_report_studies_by_id_internal(report_id: int, study_ids: List[int], user : str) -> Dict[str, Any]:
     """
     Create StudyReport links for the given report_id to the provided study_ids.
@@ -1022,7 +1161,6 @@ async def _add_report_studies_by_id(report_id: int, study_ids: List[int], user: 
           "created_links": List[Dict[str, int]]
         }
     """
-    user = str(user) if user is not None else None #TODO remove later
     study_ids = study_ids or []
     if not study_ids:
         return {
@@ -1045,23 +1183,38 @@ async def _add_report_studies_by_id(report_id: int, study_ids: List[int], user: 
         valid_ids = set(valid_id_rows.scalars().all())
         invalid_ids = [sid for sid in study_ids if sid not in valid_ids]
 
+        # Get existing links before deletion to check for orphans later
+        existing_stmt = (
+            select(StudyReport.CRGStudyID)
+            .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+            .where(StudyReport.CRGReportID == report_id)
+        )
+        if user:
+            existing_stmt = existing_stmt.where(StudyReportAdded.CreatedBy == user)
+        
+        affected_studies = set((await session.execute(existing_stmt)).scalars().all())
+
         # Only delete existing links created by this user (or with no creator)
         if user:
-            # Get StudyReportIDs that match the user filter
-            stmt = (
-                select(StudyReport.StudyReportID)
-                .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+            # Delete StudyReport links that were created by this user
+            await session.execute(
+                delete(StudyReport)
                 .where(StudyReport.CRGReportID == report_id)
-                .where(StudyReportAdded.CreatedBy == user)
+                .where(StudyReport.StudyReportID.in_(
+                    select(StudyReportAdded.StudyReportID)
+                    .where(StudyReportAdded.CreatedBy == user)
+                ))
             )
-            rows = (await session.execute(stmt)).scalars().all()
-            if rows:
-                await session.execute(
-                    delete(StudyReport).where(StudyReport.StudyReportID.in_(rows))
-                )
         else:
             # If no user specified, delete all existing links for this report
             await session.execute(delete(StudyReport).where(StudyReport.CRGReportID == report_id))
+
+        await session.flush()
+
+        # Check for orphaned newly-added studies
+        deleted_orphans = await _remove_orphaned_studies(affected_studies, session)
+        if deleted_orphans:
+            await session.flush()
 
         # Create new links and track them in StudyReportAdded
         created_links: List[Dict[str, int]] = []
@@ -1070,7 +1223,6 @@ async def _add_report_studies_by_id(report_id: int, study_ids: List[int], user: 
             session.add(new_study_report)
             await session.flush()  # Flush to get the StudyReportID
             
-            print(f"Add user: {new_study_report.StudyReportID}", user)
             # Track who created this link
             session.add(StudyReportAdded(
                 StudyReportID=new_study_report.StudyReportID,
@@ -1085,7 +1237,8 @@ async def _add_report_studies_by_id(report_id: int, study_ids: List[int], user: 
             "report_id": report_id,
             "created_count": len(valid_ids),
             "invalid_study_ids": invalid_ids,
-            "created_links": created_links
+            "created_links": created_links,
+            "deleted_orphans": deleted_orphans
         }
     
     except HTTPException:
@@ -1132,6 +1285,7 @@ async def _delete_report_studies_by_id(report_id: int, user: str, session: Async
             {"CRGReportID": sr.CRGReportID, "CRGStudyID": sr.CRGStudyID}
             for sr, _ in rows
         ]
+        deleted_orphans = []
 
         # Bulk delete matching links
         if rows:
@@ -1139,12 +1293,17 @@ async def _delete_report_studies_by_id(report_id: int, user: str, session: Async
             await session.execute(
                 delete(StudyReport).where(StudyReport.StudyReportID.in_(study_report_ids))
             )
+            # Check if some of the affected studies are now orphans and delete them
+            affected_studies = {item['CRGStudyID'] for item in deleted_links}
+            deleted_orphans = await _remove_orphaned_studies(affected_studies, session)
+
             await session.commit()
 
         return {
             "report_id": report_id,
             "deleted_count": len(rows),
-            "deleted_links": deleted_links
+            "deleted_links": deleted_links,
+            "deleted_orphans": deleted_orphans
         }
     
     except HTTPException:

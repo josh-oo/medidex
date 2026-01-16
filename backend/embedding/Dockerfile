@@ -18,7 +18,7 @@ WORKDIR /model
 RUN pip3 install --no-cache-dir grpcio-tools==1.72.1
 RUN pip3 install --no-cache-dir transformers==4.52.4
 RUN pip3 install --no-cache-dir python-dotenv==1.1.0
-RUN pip3 install --no-cache-dir torch==2.7.0
+RUN pip3 install --no-cache-dir torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
 
 COPY embedding/model_loader.py .
 RUN python model_loader.py
@@ -32,6 +32,10 @@ FROM python:3.13-slim
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
 ENV PYTHONDONTWRITEBYTECODE 1
+
+ENV OMP_NUM_THREADS=4
+ENV MKL_NUM_THREADS=4
+ENV TOKENIZERS_PARALLELISM=false
 
 WORKDIR /app
 

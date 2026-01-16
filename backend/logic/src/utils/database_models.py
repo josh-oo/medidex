@@ -1,8 +1,10 @@
 from sqlmodel import SQLModel, Field
 from sqlalchemy import MetaData
 from sqlalchemy import Index
+from sqlalchemy import Column
+from sqlalchemy.dialects.postgresql import JSONB
 from pydantic import EmailStr
-from typing import Optional
+from typing import Optional, Dict, Any
 import datetime
 
 """
@@ -73,7 +75,7 @@ class Study(SQLModel, table=True, metadata=metadata_resources):
     DateEntered: str
     DateToCENTRAL: Optional[str]
     DateEdited: Optional[str]
-    Search_Tagged: Optional[bool]
+    Search_Tagged: Optional[int]
     NumberParticipants: Optional[str]
     Countries: Optional[str]
     Duration: Optional[str]
@@ -163,19 +165,58 @@ class StudyOutcome(SQLModel, table=True, metadata=metadata_resources):
 
 class Batch(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblBatch"
+
     BatchHash: str = Field(primary_key=True)
     BatchDescription: str
     DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
     UploadedBy: Optional[str]
 
+class FulltextExtractions(SQLModel, table=True):
+    __tablename__ = "tblFulltextExtractions"
+
+    CRGReportID: int = Field(primary_key=True, foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
+    data: Dict[str, Any] = Field(
+        sa_column=Column(JSONB, nullable=False)
+    )
+
 class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblReportAdded"
+
     CRGReportID: int = Field(primary_key=True, foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
     BatchHash: str = Field(foreign_key="tblBatch.BatchHash", ondelete="CASCADE")
     
     __table_args__ = (
         Index('idx_reportadded_batch_report', 'BatchHash', 'CRGReportID'),
     )
+
+class BatchInnerScore(SQLModel, table=True):
+    __tablename__ = "tblBatchInnerScore"
+
+    CRGReportID: int = Field(primary_key=True, foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
+    OtherID: int = Field(primary_key=True, foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
+    Score: float
+
+    __table_args__ = (
+        Index(
+            "idx_batchinnerscore_report_score",
+            "CRGReportID",
+            "Score",
+            postgresql_using="btree",
+        ),
+        Index(
+            "idx_batchinnerscore_other_score",
+            "OtherID",
+            "Score",
+            postgresql_using="btree",
+        ),
+    )
+
+class StudyAdded(SQLModel, table=True, metadata=metadata_resources):
+    __tablename__ = "tblStudyAdded"
+
+    CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
+    DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    CreatedBy: Optional[str]
 
 class StudyReportAdded(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyReportAdded"
