@@ -19,7 +19,7 @@ WORKDIR /app
 COPY logic/requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-COPY logic/api.py .
+COPY logic/main.py .
 COPY logic/src/ ./src/
 
 # 👇 Copy compiled proto files from the builder stage
@@ -36,5 +36,5 @@ RUN chown -R appuser:appgroup /data/resources
 # Switch to the non-root user before running the application
 USER appuser
 
-# uvicorn api:app --host 0.0.0.0 --port 8002
-ENTRYPOINT ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8002"]
+# uvicorn main:app --host 0.0.0.0 --port 8002
+ENTRYPOINT ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]
