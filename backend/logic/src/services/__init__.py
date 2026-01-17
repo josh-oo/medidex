@@ -32,5 +32,5 @@ def get_tag_similarity_service(vectorstore : VectorstoreService = Depends(get_ve
 def get_tag_scoring_service(aspect_repo : AspectRepository = Depends(get_aspect_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> TagScoringService:
     return TagScoringService(vectorstore=vectorstore, aspect_repo=aspect_repo)
 
-def get_related_tag_service(tag_scoring_service : TagScoringService = Depends(get_tag_scoring_service), study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service), report_repo : ReportRepository = Depends(get_report_repo), study_repo : StudyRepository = Depends(get_study_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> RelatedTagSearchService:
-    return RelatedTagSearchService(vectorstore=vectorstore, tag_scoring_service=tag_scoring_service, study_similarity_service=study_similarity_service, report_repo=report_repo, study_repo=study_repo)
+def get_related_tag_service(tag_scoring_service : TagScoringService = Depends(get_tag_scoring_service), study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service), study_repo : StudyRepository = Depends(get_study_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> RelatedTagSearchService:
+    return RelatedTagSearchService(vectorstore=vectorstore, tag_scoring_service=tag_scoring_service, study_similarity_service=study_similarity_service, study_repo=study_repo)

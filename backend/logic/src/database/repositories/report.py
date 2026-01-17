@@ -209,7 +209,7 @@ class ReportRepository:
             await self.db.rollback()
             raise Exception(f"Failed to delete report-study links: {str(e)}")
         
-    async def get_linked_studies(self, report_id : int, date_from : str, date_to : str):
+    async def get_linked_studies(self, report_id : int, date_from : Optional[str] = None, date_to : Optional[str] = None):
         report = await self.db.get(Report, report_id)
         if not report:
             return None

@@ -230,11 +230,11 @@ class VectorstoreService():
 
         return results
     
-    async def score_tags(self, embedding : List[float], tag_ids : List[int]):
+    async def score_tags(self, embedding : List[float], tag_ids : List[int], aspect : str):
         tag_filter = models.Filter(
             must=[
                 models.FieldCondition(key="source", match=models.MatchValue(value="meerkat")),
-                #models.FieldCondition(key="tree_ids",match=models.MatchAny(any=[type_vectorstore])),
+                models.FieldCondition(key="tree_ids",match=models.MatchAny(any=[aspect])),
                 models.FieldCondition(key="source_id",match=models.MatchAny(any=[str(item) for item in tag_ids]))
             ]
         )

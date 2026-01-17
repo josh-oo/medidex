@@ -13,7 +13,7 @@ class BatchRepository:
         new_batch = Batch(
             BatchHash=batch_hash,
             BatchDescription=batch_description,
-            UploadedBy=self.user
+            UploadedBy=self.user_id
         )
         self.db.add(new_batch)
 

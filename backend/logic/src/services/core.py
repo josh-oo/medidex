@@ -22,11 +22,11 @@ class TagSimilaritySearchService:
     def __init__(self, vectorstore : VectorstoreService):
         self.vectorstore = vectorstore
 
-    async def get_similar_tags_by_id(self, report_id : int, aspect : str, sources : List[str], k : int):
+    async def get_similar_tags_by_id(self, report_id : int, aspect : TagCategories, sources : List[str], k : int):
         
         vectors = await self.vectorstore.get_vectors_by_crg_report_id(report_id)
 
-        vector_names = {'interventions': 'intervention', 'conditions': 'condition', 'outcomes': 'outcome'}
+        vector_names = {TagCategories.interventions: 'intervention', TagCategories.conditions: 'condition', TagCategories.outcomes: 'outcome'}
 
         embedding = vectors[vector_names[aspect]]
 
@@ -44,24 +44,23 @@ class TagScoringService:
         self.vectorstore = vectorstore
         self.aspect_repo =aspect_repo
 
-    async def score_related_tags(self, tag_ids : List[int], embedding : List[float], aspect : str):
-
+    async def score_related_tags(self, tag_ids : List[int], embedding : List[float], aspect : TagCategories):
         if len(tag_ids) == 0:
             return []
-
-        tag_scores = await self.vectorstore.score_tags(embedding, tag_ids)
+        
+        tag_scores = await self.vectorstore.score_tags(embedding, tag_ids, aspect)
 
         all_ids = [item['id'] for item in tag_scores]
 
         name_mapping = {}
             
-        if aspect == "intervention":
+        if aspect == TagCategories.interventions:
             result = await self.aspect_repo.get_all_interventions(all_ids)
             name_mapping = {item.InterventionID: item.InterventionDescription for item in result}
-        elif aspect == "condition":
+        elif aspect == TagCategories.conditions:
             result = await self.aspect_repo.get_all_conditions(all_ids)
             name_mapping = {item.HealthCareConditionID: item.HealthCareConditionDescription for item in result}
-        elif aspect == "outcome":
+        elif aspect == TagCategories.outcomes:
             result = await self.aspect_repo.get_all_outcomes(all_ids)
             name_mapping = {item.OutcomeID: item.OutcomeDescription for item in result}
 
@@ -243,32 +242,33 @@ class StudySimilaritySearchService:
 
 class RelatedTagSearchService:
 
-    def __init__(self, vectorstore : VectorstoreService, tag_scoring_Service : TagScoringService, study_similarity_service : StudySimilaritySearchService, report_repo : ReportRepository, study_repo : StudyRepository):
+    def __init__(self, vectorstore : VectorstoreService, tag_scoring_service : TagScoringService, study_similarity_service : StudySimilaritySearchService, study_repo : StudyRepository):
         self.vectorstore = vectorstore
-        self.tag_scoring_service = tag_scoring_Service
+        self.tag_scoring_service = tag_scoring_service
         self.study_similarity_service = study_similarity_service
-        self.report_repo = report_repo
         self.study_repo = study_repo
+
+    async def search_related_tags_by_study_ids(self, study_ids: List[int], aspect : TagCategories, vectors : Any):
+        
+        related_tags = []
+        if aspect == TagCategories.interventions:
+            related_tags = await self.study_repo.get_study_interventions(study_ids)
+            related_ids = {item["ID"] for items in related_tags.values() for item in items}
+            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["intervention"], TagCategories.interventions)
+        elif aspect == TagCategories.conditions:
+            related_tags = await self.study_repo.get_study_conditions(study_ids)
+            related_ids = {item["ID"] for items in related_tags.values() for item in items}
+            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["condition"], TagCategories.conditions)
+        elif aspect == TagCategories.outcomes:
+            related_tags = await self.study_repo.get_study_outcomes(study_ids=s)
+            related_ids = {item["ID"] for items in related_tags.values() for item in items}
+            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["outcome"], TagCategories.outcomes)
     
-    async def search_related_tags(self, report_id: int, aspect: TagCategories, k : int):
+    async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : str):
         
-        report = await self.report_repo.get_report_by_id(report_id)
-        
-        similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, "default", report.Dateentered, k, None, None, None, False)
+        similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, TagCategories.default, cutoff, k, None, None, False)
         predicted_studies = similar_studies['CRGStudyID']
 
         vectors = await self.vectorstore.get_vectors_by_crg_report_id(report_id)
         
-        related_tags = []
-        if aspect == TagCategories.interventions:
-            related_tags = await self.study_repo.get_study_interventions(predicted_studies)
-            related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["intervention"], "intervention")
-        elif aspect == TagCategories.conditions:
-            related_tags = await self.study_repo.get_study_conditions(predicted_studies)
-            related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["condition"], "condition")
-        elif aspect == TagCategories.outcomes:
-            related_tags = await self.study_repo.get_study_outcomes(predicted_studies)
-            related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["outcome"], "outcome")
+        return await self.search_related_tags_by_study_ids(predicted_studies, aspect, vectors)
