@@ -39,14 +39,8 @@ ONNX_SESSION = ort.InferenceSession("model.onnx", sess_options=options, provider
 
 class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
     def __init__(self):
-        #self.device = DEVICE
         self.tokenizer = TOKENIZER
-
-        #self.model = MODEL
         self.onnx_session = ONNX_SESSION
-
-        self.report_queue = asyncio.Queue()
-        self.report_worker_task = asyncio.create_task(self._report_worker())
 
     async def preprocess(self, text):
         def _preprocess(text):
@@ -61,43 +55,6 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
             normalized_text = unicodedata.normalize("NFKC", utf8_string)
             return normalized_text
         return await asyncio.to_thread(_preprocess, text)
-    
-    async def _report_worker(self):
-        while True:
-            print(f"Currently queued report requests: {self.report_queue.qsize()}")
-            # Get the first item (waits if queue is empty)
-            first_item = await self.report_queue.get()
-            batch = [first_item]
-            # Drain up to 3 more items (for a max batch size of 4)
-            for _ in range(7):
-                try:
-                    item = self.report_queue.get_nowait()
-                    batch.append(item)
-                except asyncio.QueueEmpty:
-                    break
-
-            # Process the batch
-            try:
-                # Preprocess all texts in batch
-                texts = await asyncio.gather(*[self.preprocess(req.text) for req, _, _ in batch])
-                embeddings, aspect_embeddings = self.get_embeddings(texts)
-
-                for i, (request, context, response_future) in enumerate(batch):
-                    embedding_val = embeddings[i]
-                    aspect_embeddings_val = aspect_embeddings[i]
-                    aspect_embeddings_proto = [embedding_pb2.EmbeddingVector(values=aspect.tolist()) for aspect in aspect_embeddings_val]
-                    response = embedding_pb2.EmbedResponseReport(
-                        id=request.id,
-                        embedding=embedding_pb2.EmbeddingVector(values=embedding_val.tolist()),
-                        aspect_embeddings=aspect_embeddings_proto
-                    )
-                    response_future.set_result(response)
-            except Exception as e:
-                for _, _, response_future in batch:
-                    response_future.set_exception(e)
-            finally:
-                for _ in batch:
-                    self.report_queue.task_done()
 
     def get_embeddings(self, texts, return_aspects=True):
         prefix = ""
@@ -114,8 +71,6 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
         # Convert to numpy arrays for ONNX
         input_ids_np = np.array(input_ids, dtype=np.int64)
         attention_mask_np = np.array(attention_mask, dtype=np.int64)
-
-        print("Input: ", input_ids_np.shape)
 
         # ONNX inference
         ort_inputs = {
@@ -155,9 +110,18 @@ class EmbedServiceServicer(embedding_pb2_grpc.EmbedServiceServicer):
             ('dimension', str(MODEL_DIM))
         ))
 
-        response_future = asyncio.get_event_loop().create_future()
-        await self.report_queue.put((request, context, response_future))
-        response = await response_future
+        text = await self.preprocess(request.text)
+        embeddings, aspect_embeddings = self.get_embeddings([text])
+
+        embedding_val = embeddings[0]
+        aspect_embeddings_val = aspect_embeddings[0]
+        aspect_embeddings_proto = [embedding_pb2.EmbeddingVector(values=aspect.tolist()) for aspect in aspect_embeddings_val]
+        response = embedding_pb2.EmbedResponseReport(
+            id=request.id,
+            embedding=embedding_pb2.EmbeddingVector(values=embedding_val.tolist()),
+            aspect_embeddings=aspect_embeddings_proto
+        )
+
         return response
 
 async def _configure_health_server(server: grpc.Server):
