@@ -2,7 +2,7 @@
 FROM python:3.13-slim AS proto-builder
 
 WORKDIR /proto
-RUN pip3 install --no-cache-dir grpcio-tools==1.72.1
+RUN pip3 install --no-cache-dir grpcio-tools==1.76.0
 
 COPY utils/embedding.proto .
 RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding.proto

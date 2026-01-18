@@ -158,8 +158,7 @@ class VectorstoreService():
             text_to_process.append(abstract)
         text_to_process = "\n".join(text_to_process)
     
-        vectors = await self.embedding_service.embed_report(text_to_process)
-        #TODO maybe the batch is already deleted, then this vector should not be added
+        vectors = await self.embedding_service.embed_report(report.CRGReportID, text_to_process)
 
         new_id = transform_to_uuid(report.CRGReportID)
         payload = {

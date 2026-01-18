@@ -107,16 +107,21 @@ async def publish_batch_update(batch_hash: str):
             # Use lambda to be explicit and handle potential exceptions in cleanup
             task.add_done_callback(lambda t: background_tasks.discard(t))
 
-async def process_report(report, batch_hash : str, batch_repo : BatchRepository, vectorstore : VectorstoreService):
-    # Check if batch still exists before proceeding
+async def process_report(reports : List[Report], batch_hash : str, batch_repo : BatchRepository, vectorstore : VectorstoreService):
+    async def process(report):
+        batch = await batch_repo.get_batch_by_hash(batch_hash)
+        if not batch:
+            return  # Skip processing if batch was deleted
+        await vectorstore.add_report_to_vectorstore(report)
+        await publish_batch_update(batch_hash)
+    
+    all_tasks = [process(report) for report in reports]
+    await asyncio.gather(*all_tasks)
+
     batch = await batch_repo.get_batch_by_hash(batch_hash)
     if not batch:
-        # Batch was deleted, skip processing
-        return
-    
-    await vectorstore.add_report_to_vectorstore(report)
-
-    await publish_batch_update(batch_hash)
+       pass
+       #TODO clean up if the batch was deleted in the meantime
 
     await finalize_batch_upload(batch_hash, batch_repo, vectorstore)
 
@@ -306,8 +311,9 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
     reports = await batch_repo.add_new_batch(batch_hash,file.filename,reports)
     # schedule background tasks
-    for report in reports:
-        background_tasks.add_task(process_report, report, batch_hash, batch_repo, vectorstore)
+    #for report in reports:
+    #    print("Report provcess appended")
+    background_tasks.add_task(process_report, reports, batch_hash, batch_repo, vectorstore)
 
     await publish_batch_update(batch_hash)
 
