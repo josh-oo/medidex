@@ -38,6 +38,8 @@ from ..services import get_vectorstore_service, VectorstoreService
 
 from ..services import get_embedding_service, EmbeddingService
 
+from ..services import get_maintenance_service, MaintenanceService
+
 load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_SERVICE_HOST")
@@ -107,7 +109,7 @@ async def publish_batch_update(batch_hash: str):
             # Use lambda to be explicit and handle potential exceptions in cleanup
             task.add_done_callback(lambda t: background_tasks.discard(t))
 
-async def process_report(reports : List[Report], batch_hash : str, batch_repo : BatchRepository, vectorstore : VectorstoreService):
+async def process_report(reports : List[Report], batch_hash : str, batch_repo : BatchRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService):
     async def process(report):
         batch = await batch_repo.get_batch_by_hash(batch_hash)
         if not batch:
@@ -118,14 +120,9 @@ async def process_report(reports : List[Report], batch_hash : str, batch_repo : 
     all_tasks = [process(report) for report in reports]
     await asyncio.gather(*all_tasks)
 
-    batch = await batch_repo.get_batch_by_hash(batch_hash)
-    if not batch:
-       pass
-       #TODO clean up if the batch was deleted in the meantime
+    await finalize_batch_upload(batch_hash, batch_repo, vectorstore, maintenance_service)
 
-    await finalize_batch_upload(batch_hash, batch_repo, vectorstore)
-
-async def finalize_batch_upload(batch_hash : str, batch_repo : BatchRepository, vectorstore : VectorstoreService):
+async def finalize_batch_upload(batch_hash : str, batch_repo : BatchRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService):
     """
     Finalize a batch upload by checking if all reports have been processed.
     Updates batch status and notifies subscribers when complete.
@@ -134,20 +131,16 @@ async def finalize_batch_upload(batch_hash : str, batch_repo : BatchRepository, 
     crg_report_ids = await batch_repo.get_batch_associated_reports(batch_hash)
     
     if not crg_report_ids:
+        #Batch not available
+        await maintenance_service.vectorstore_clean_up()
         return
     
-    # Check if all reports have embeddings
-    num_existing = await vectorstore.crg_reports_exist(crg_report_ids)
-    
-    all_processed = num_existing == len(crg_report_ids)
-    
-    if all_processed:
-        score_pairs = await vectorstore.calculate_score_pairs(crg_report_ids)
-        await batch_repo.insert_batch_scores(score_pairs)
+    score_pairs = await vectorstore.calculate_score_pairs(crg_report_ids)
+    await batch_repo.insert_batch_scores(score_pairs)
 
-        print("Batch finalized")
-        # Notify all subscribers that batch is complete
-        await publish_batch_update(batch_hash)
+    print("Batch finalized")
+    # Notify all subscribers that batch is complete
+    await publish_batch_update(batch_hash)
 
 async def subscribe_to_batch(batch_hash: str) -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue()
