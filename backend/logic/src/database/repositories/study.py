@@ -394,3 +394,15 @@ class StudyRepository:
         all_reports = [row[0] for row in result_reports]
 
         return all_studies + all_reports
+    
+    async def get_study_acronyms(self) -> List[str]:
+        stmt = select(Study.ShortName)
+        rows = (await self.db.execute(stmt)).all()
+
+        acronyms = []
+        for (short_name,) in rows:
+            # Exclude if more than 2 digits in the ShortName
+            if len(re.findall(r"\d", short_name)) > 2:
+                continue
+            acronyms.append(short_name)
+        return acronyms

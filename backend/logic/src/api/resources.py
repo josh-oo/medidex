@@ -19,7 +19,7 @@ from .auth import is_verified_api_call, get_user_id
 from ..database.models import Report, Study
 from ..database.models import Condition, Intervention, Design, Outcome, Participant
 
-from ..utils.pdf.processor import process_pdf
+#from ..utils.pdf.processor import process_pdf
 from ..utils.postprocessing import normalize_author_names
 from ..utils.logger import setup_logging
 
@@ -28,10 +28,12 @@ from ..database.repositories.aspects import AspectRepository
 from ..database.repositories.report import ReportRepository
 from ..database import get_study_repo, get_aspect_repo, get_report_repo
 
+from ..services import get_document_service, get_report_service, DocumentService, ReportService
+
 load_dotenv()
 
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
-PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
+#PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
 
 setup_logging("events.log")
 logger = logging.getLogger(__name__)
@@ -190,50 +192,6 @@ async def get_all_reports(
 ) -> List[Report]:
     return await report_repo.get_all_reports(report_ids, date_from, date_to)
 
-@router.put("/reports/pdf", summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
-async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to upload"), report_repo : ReportRepository = Depends(get_report_repo)) -> Dict[str, Any]:
-    # Validate file is a PDF
-    if not file.content_type == "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-    
-    # Extract report number from filename (e.g., "00123.pdf" -> 123)
-    filename = file.filename
-    if not filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="File must have .pdf extension")
-    
-    try:
-        report_number = int(filename.replace(".pdf", "").lstrip("0") or "0")
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Filename '{filename}' does not contain a valid report number")
-    
-    # Check if report number exists in database
-    report = await report_repo.get_report_by_id()
-    
-    if report is None:
-        raise HTTPException(status_code=404, detail=f"Report number {report_number} not found in database")
-    
-    # Ensure PDF directory exists
-    os.makedirs(PDF_PATH, exist_ok=True)
-    
-    # Use the original filename from the upload
-    file_path = os.path.join(PDF_PATH, filename)
-    
-    try:
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        #Extract and save metadata
-        process_pdf(file_path)
-        return {
-            "report_id": report.CRGReportID,
-            "report_number": report_number,
-            "filename": filename,
-            "file_path": file_path,
-            "size_bytes": len(content)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save PDF: {str(e)}")
-
 @router.get("/reports/pdf_number", include_in_schema=False)
 async def get_pdf_numbers_by_report_ids(report_ids: List[int] = report_ids_query, report_repo: ReportRepository = Depends(get_report_repo)) -> Dict[int, int]:
     return await report_repo.get_pdf_numbers_by_report_ids(report_ids)
@@ -254,28 +212,65 @@ async def get_report_studies_by_id(
 ) -> List[Study]:
     return await report_repo.get_linked_studies(report_id, date_from, date_to)
 
-@router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
-async def get_pdf_number_by_report_id(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)) -> int:
-    result = await report_repo.get_pdf_numbers_by_report_ids(report_ids=[report_id])
-    if report_id not in result:
-        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
-    return result[report_id]
+@router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
+async def get_pdf_metadata(report_service : ReportService = Depends(get_report_service)) -> Dict:
+    return await report_service.get_metadata()
+
+#@router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
+#async def get_pdf_number_by_report_id(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)) -> int:
+#    result = await report_repo.get_pdf_numbers_by_report_id(report_id)
+#    if not report_id:
+#        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+#    return result
 
 @router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
-async def get_pdf(report_id : int, report_repo : ReportRepository = Depends(get_report_repo),user_id = Depends(get_user_id)) -> FileResponse:
-    pdf_path = await report_repo.get_pdf_path(report_id)
-
-    if not pdf_path:
+async def get_pdf(report_id : int, document_service : DocumentService = Depends(get_document_service),user_id = Depends(get_user_id)) -> FileResponse:
+    try:
+        pdf_path = await document_service.get_path()
+        await post_report_event(-1, Event(event_type=f"report::{report_id}::downloaded", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
+        return FileResponse(pdf_path, media_type="application/pdf")
+    except:
         raise HTTPException(status_code=404, detail="PDF file not found.")
-    await post_report_event(-1, Event(event_type=f"report::{report_id}::downloaded", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
-    return FileResponse(pdf_path, media_type="application/pdf")
+    
+    
 
-@router.get("/reports/{report_id}/pdf/metadata", summary="Get pdf metadata.")
-async def get_pdf_metadata(report_id:int, report_repo: ReportRepository = Depends(get_report_repo)) -> Dict:
-    result = await report_repo.get_pdf_metadata(report_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="PDF file not found.")
-    return result
+@router.put("/reports/{report_id}/pdf", summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
+async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
+    # Validate file is a PDF
+    if not file.content_type == "application/pdf":
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+    
+    # Extract report number from filename (e.g., "00123.pdf" -> 123)
+    filename = file.filename
+    if not filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="File must have .pdf extension")
+    
+    #try:
+    #    report_number = int(filename.replace(".pdf", "").lstrip("0") or "0")
+    #except ValueError:
+    #    raise HTTPException(status_code=400, detail=f"Filename '{filename}' does not contain a valid report number")
+    
+    # Check if report number exists in database
+    #report = await report_repo.get_report_by_id()
+    
+    #if report is None:
+    #    raise HTTPException(status_code=404, detail=f"Report number {report_number} not found in database")
+    
+    # Ensure PDF directory exists
+    #os.makedirs(PDF_PATH, exist_ok=True)
+    
+    # Use the original filename from the upload
+    #file_path = os.path.join(PDF_PATH, filename)
+    
+    try:
+        #with open(file_path, "wb") as f:
+        #    content = await file.read()
+        #    f.write(content)
+        #Extract and save metadata
+        #process_pdf(file_path)
+        return document_service.upload_pdf(file)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save PDF: {str(e)}")
 
 @router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
 async def get_report_trial_ids(report_id : int, include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), report_repo : ReportRepository = Depends(get_report_repo)) -> List[str]:
