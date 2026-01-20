@@ -4,6 +4,7 @@ from .vectorstore import VectorstoreService
 from .core import TagSimilaritySearchService, RelatedTagSearchService, TagScoringService, StudySimilaritySearchService
 from .authors import AuthorFeatureService
 from .embedding import EmbeddingService
+from .maintenance import MaintenanceService
 
 from ..database import get_aspect_repo, get_report_repo, get_study_repo, get_batch_repo
 
@@ -34,3 +35,6 @@ def get_tag_scoring_service(aspect_repo : AspectRepository = Depends(get_aspect_
 
 def get_related_tag_service(tag_scoring_service : TagScoringService = Depends(get_tag_scoring_service), study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service), study_repo : StudyRepository = Depends(get_study_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> RelatedTagSearchService:
     return RelatedTagSearchService(vectorstore=vectorstore, tag_scoring_service=tag_scoring_service, study_similarity_service=study_similarity_service, study_repo=study_repo)
+
+def get_maintenance_service(report_repo : ReportRepository = Depends(get_report_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> RelatedTagSearchService:
+    return MaintenanceService(report_repo=report_repo, vectorstore=vectorstore)
