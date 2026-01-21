@@ -1,82 +1,23 @@
 from ..database.repositories.study import StudyRepository
-from ..database.repositories.aspects import AspectRepository
-from ..database.repositories.report import ReportRepository
 from ..database.repositories.batch import BatchRepository
 from .authors import AuthorFeatureService
 from .vectorstore import VectorstoreService
-import enum
+from .report import ReportService
+from .aspects import TagScoringService, TagCategories
 
 from typing import List, Any
 
 from ..utils.random import get_random_value, add_noise_to_vector
 
-class TagCategories(str, enum.Enum):
-    default = 'default'
-    interventions = 'interventions'
-    conditions = 'conditions'
-    outcomes = 'outcomes'
-    participants = 'participants'
-
-class TagSimilaritySearchService:
-
-    def __init__(self, vectorstore : VectorstoreService):
-        self.vectorstore = vectorstore
-
-    async def get_similar_tags_by_id(self, report_id : int, aspect : TagCategories, sources : List[str], k : int):
-        
-        vectors = await self.vectorstore.get_vectors_by_crg_report_id(report_id)
-
-        vector_names = {TagCategories.interventions: 'intervention', TagCategories.conditions: 'condition', TagCategories.outcomes: 'outcome'}
-
-        embedding = vectors[vector_names[aspect]]
-
-        data = await self.vectorstore.get_similar_tags(embedding, sources, aspect, k)
-
-        result = [
-            {"id": i, "keyword": k, "relevance": r}
-            for i, k, r in zip(data["ID"], data["Keyword"], data["Relevance"])
-        ]
-        return result  
-    
-class TagScoringService:
-
-    def __init__(self, vectorstore : VectorstoreService, aspect_repo : AspectRepository):
-        self.vectorstore = vectorstore
-        self.aspect_repo =aspect_repo
-
-    async def score_related_tags(self, tag_ids : List[int], embedding : List[float], aspect : TagCategories):
-        if len(tag_ids) == 0:
-            return []
-        
-        tag_scores = await self.vectorstore.score_tags(embedding, tag_ids, aspect)
-
-        all_ids = [item['id'] for item in tag_scores]
-
-        name_mapping = {}
-            
-        if aspect == TagCategories.interventions:
-            result = await self.aspect_repo.get_all_interventions(all_ids)
-            name_mapping = {item.InterventionID: item.InterventionDescription for item in result}
-        elif aspect == TagCategories.conditions:
-            result = await self.aspect_repo.get_all_conditions(all_ids)
-            name_mapping = {item.HealthCareConditionID: item.HealthCareConditionDescription for item in result}
-        elif aspect == TagCategories.outcomes:
-            result = await self.aspect_repo.get_all_outcomes(all_ids)
-            name_mapping = {item.OutcomeID: item.OutcomeDescription for item in result}
-
-        for item in tag_scores:
-            item['name'] = name_mapping[item['id']].strip()
-        
-        return tag_scores
     
 class StudySimilaritySearchService:
-    def __init__(self, user_id : str, vectorstore : VectorstoreService, study_repo : StudyRepository, report_repo : ReportRepository, batch_repo : BatchRepository, author_feature_service : AuthorFeatureService):
+    def __init__(self, user_id : str, vectorstore : VectorstoreService, study_repo : StudyRepository, batch_repo : BatchRepository, author_feature_service : AuthorFeatureService, report_service : ReportService):
         self.user_id = user_id
         self.vectorstore = vectorstore
         self.study_repo = study_repo
-        self.report_repo = report_repo
         self.batch_repo = batch_repo
         self.author_feature_service = author_feature_service
+        self.report_service = report_service
 
         self.add_noise = True #Studydesign
         self.debug = False
@@ -156,27 +97,27 @@ class StudySimilaritySearchService:
 
         return reordered
 
-    async def get_similar_studies_by_id(self, crg_report_id : int, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], return_details: bool):
+    async def get_similar_studies_by_id(self, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], return_details: bool):
 
         if not negative_studies:
             negative_studies = []
 
-        report = await self.report_repo.get_report_by_id(crg_report_id)
+        report = await self.report_service.get_report()
 
         authors = [item.strip() for item in report.Authors.split("//")]
-        trial_ids = await self.report_repo.get_report_trial_ids(crg_report_id, include_fulltext=True)
+        trial_ids = await self.report_service.get_trial_ids(include_fulltext=True)
 
         if self.add_noise:
-            random_value = get_random_value(self.user_id, crg_report_id)
+            random_value = get_random_value(self.user_id, report.CRGReportID)
             if random_value > 0.0:
                 trial_ids = []
                 authors = []
 
-            vectors = await self.vectorstore.get_vectors_by_crg_report_id(crg_report_id)
-            query = add_noise_to_vector(vectors['default'], random_value, crg_report_id)
+            vectors = await self.vectorstore.get_vectors_by_crg_report_id(report.CRGReportID)
+            query = add_noise_to_vector(vectors['default'], random_value, report.CRGReportID)
 
         else:
-            query = await self.vectorstore.recommendation_query_builder(crg_report_id, negative_reports)
+            query = await self.vectorstore.recommendation_query_builder(report.CRGReportID, negative_reports)
         
         result = await self.get_similar_study_by_query(query,aspect,cutoff,k,negative_studies, trial_ids, authors, return_details=return_details)
 
@@ -188,7 +129,7 @@ class StudySimilaritySearchService:
         # Check if there are any similar items in the same batch which are more similar than already retrieved existing studies
         if result.get('Relevance'):
             min_score = min(result['Relevance'])
-            batch_studies = await self.batch_repo.get_similar_report_studies(crg_report_id, min_score)
+            batch_studies = await self.batch_repo.get_similar_report_studies(report.CRGReportID, min_score)
             
             # Create a map of existing study IDs to their positions and scores
             existing_study_map = {}

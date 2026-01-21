@@ -1,6 +1,18 @@
 version: '3.8'
 
 services:
+  docling:
+    image: quay.io/docling-project/docling-serve-cpu:v1.10.0
+    container_name: docling
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "1"
+    expose:
+      - 5001
+    ports:
+      - "5001:5001"
+    networks:
+      - internal_net
+
   postgres:
     image: postgres:18-alpine
     container_name: postgres
@@ -49,8 +61,8 @@ services:
     networks:
       - internal_net
     environment:
-      - EMBEDDING_MODEL_MODEL_PATH=${EMBEDDING_MODEL_PATH}
-      - EMBEDDING_MODEL_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
+      - EMBEDDING_MODEL_PATH=${EMBEDDING_MODEL_PATH}
+      - EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
       - EMBEDDING_MODEL_DIM=${EMBEDDING_MODEL_DIM}
       - EMBEDDING_MODEL_MAX_INPUT_LENGTH=${EMBEDDING_MODEL_MAX_INPUT_LENGTH}
       - EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
@@ -85,6 +97,8 @@ services:
       - POSTGRES_DB_USERS=${POSTGRES_DB_USERS}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DOCLING_URL=${DOCLING_URL}
       - DEBUG=${DEBUG}
 
   frontend:
