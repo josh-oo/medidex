@@ -276,8 +276,8 @@ class ReportService:
             report = await self.get_report()
             return await self.llm_service.extract_pico(report.Title, report.Abstract, fulltext)
 
-        trial_ids_task = self.get_trial_ids(include_fulltext=not is_abstract, use_cache=False)
-        study_acronyms_task = self.get_study_acronyms(include_fulltext=not is_abstract, use_cache=False)
+        trial_ids_task = self.get_trial_ids(include_fulltext=not is_abstract)
+        study_acronyms_task = self.get_study_acronyms(include_fulltext=not is_abstract)
         extract_pico_task = _extract_pico()
         trial_ids, study_acronyms, pico_values = await asyncio.gather(trial_ids_task, study_acronyms_task, extract_pico_task)
 
