@@ -521,6 +521,12 @@ async def get_aspect_related_studies(tag_category: TagCategories = Path(..., des
 
     return await study_similarity_service.get_similar_study_by_query(embeddings['embedding'],aspect, None, k, [], [], [], return_details=False)
 
+@router.get("/{tag_category}/{tag_value}/similar_tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
+async def similar_tags(tag_category: TagCategories =Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value : str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), k : int = k_query, tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[TagResponse]:
+    if tag_category == TagCategories.default:
+        raise HTTPException(status_code=400, detail="No tags for 'default' embedding.")
+    return await tag_similarity_service.get_similar_tags_by_string(tag_value, tag_category, sources, k)
+
 """
 Only used for internal API key protected embedding analysis
 """

@@ -3,7 +3,6 @@ from sqlalchemy import MetaData
 from sqlalchemy import Index
 from sqlalchemy import Column
 from sqlalchemy.dialects.postgresql import JSONB
-from pydantic import EmailStr
 from typing import Optional, Dict, Any
 import datetime
 
@@ -18,9 +17,9 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
 
     CENTRALReportID: Optional[int]
     CRGReportID: int = Field(primary_key=True)
+    ReportNumber: int = -1
     Title: str
     Notes: Optional[str]
-    ReportNumber: int
     OriginalTitle: Optional[str]
     Authors: str
     Journal: str

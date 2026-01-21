@@ -75,8 +75,12 @@ class StudyRepository:
 
         #await log_event(-1, Event(event_type=f"study::{new_study.CRGStudyID}::created", timestamp=datetime.now(timezone.utc).isoformat()),self.user_id)
         return new_study
+    
+    async def search_studies(self, trial_ids : Optional[List[str]] = None, number_of_participants : Optional[List[int]] = None, authors : Optional[List[str]] = None):
+        study_ids = []
+        return await self.get_studies(study_ids=study_ids)
 
-    async def get_studies(self, study_ids: List[int]) -> List[Study]:
+    async def get_studies(self, study_ids: Optional[List[int]] = None) -> List[Study]:
         stmt = select(Study)
         if study_ids:
             stmt = stmt.where(Study.CRGStudyID.in_(study_ids))
@@ -88,7 +92,7 @@ class StudyRepository:
     async def get_study_by_id(self, study_id: int) -> List[Study]:
         return await self.db.get(Study, study_id)
     
-    async def get_study_reports_by_study_ids(self, study_ids: List[int], cutoff: str, fields: Optional[List[str]]) -> Dict[int, List[Report]]:
+    async def get_study_reports_by_study_ids(self, study_ids: Optional[List[int]], cutoff: Optional[str] = None, fields: Optional[List[str]] = None) -> Dict[int, List[Report]]:
         select_fields, field_names = self.process_fields(fields)
 
         stmt = (
@@ -117,7 +121,7 @@ class StudyRepository:
             return result[study_id]
         raise []
     
-    async def get_study_persons(self, study_ids: List[int], cutoff: str, normalize_names: bool) -> Dict[int, List[str]]:
+    async def get_study_persons(self, study_ids: Optional[List[int]] = None, cutoff: Optional[str] = None, normalize_names: bool = True) -> Dict[int, List[str]]:
         stmt = (
             select(StudyReport.CRGStudyID.label("StudyID"), Report.Authors)
             .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
@@ -144,13 +148,13 @@ class StudyRepository:
 
         return final_result
     
-    async def get_study_persons_single(self, study_id : int, cutoff: str, normalize_names: bool) -> List[str]:
+    async def get_study_persons_single(self, study_id : int, cutoff: Optional[str] = None, normalize_names: bool = True) -> List[str]:
         result = await self.get_study_persons(study_ids=[study_id], cutoff=cutoff, normalize_names=normalize_names)
         if study_id in result:
             return result[study_id]
         return []
     
-    async def get_study_id_by_trial_ids(self, trial_ids: List[str], cutoff: str) -> Dict[str, List[int]]:
+    async def get_study_id_by_trial_ids(self, trial_ids: List[str], cutoff: Optional[str] = None) -> Dict[str, List[int]]:
         trial_ids_norm = [trial_id.replace("/", "-") for trial_id in trial_ids]
         result_map = {}
 
@@ -199,7 +203,7 @@ class StudyRepository:
 
         return result_map
 
-    async def get_study_id_by_trial_id(self, trial_id: str, cutoff: str) -> List[int]:
+    async def get_study_id_by_trial_id(self, trial_id: str, cutoff: Optional[str] = None) -> List[int]:
         result = (await self.get_study_id_by_trial_ids([trial_id],cutoff))
         if trial_id in result:
             return result[trial_id]
@@ -390,3 +394,15 @@ class StudyRepository:
         all_reports = [row[0] for row in result_reports]
 
         return all_studies + all_reports
+    
+    async def get_study_acronyms(self) -> List[str]:
+        stmt = select(Study.ShortName)
+        rows = (await self.db.execute(stmt)).all()
+
+        acronyms = []
+        for (short_name,) in rows:
+            # Exclude if more than 2 digits in the ShortName
+            if len(re.findall(r"\d", short_name)) > 2:
+                continue
+            acronyms.append(short_name)
+        return acronyms

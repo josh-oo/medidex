@@ -4,17 +4,6 @@ from sqlmodel import select, delete
 from ..models import Report, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions
 from typing import List, Dict, Any, Optional
 
-from ...utils.pdf.processor import process_pdf
-from ...utils.trial_registration_id import extract_trial_id
-
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
-PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
-
 class ReportRepository:
     def __init__(self, db : AsyncSession, user_id : str):
         self.db = db
@@ -246,71 +235,52 @@ class ReportRepository:
     async def get_report_by_id(self, report_id: int) -> Report:
         return await self.db.get(Report, report_id)
     
-    async def get_pdf_numbers_by_report_ids(self, report_ids: List[int]) -> Dict[int, int]:
-        stmt = select(Report.CRGReportID, Report.ReportNumber).where(Report.CRGReportID.in_(report_ids))
-        rows = (await self.db.execute(stmt)).all()
-        return {row[0]: row[1] for row in rows}
-    
-    async def get_pdf_metadata(self, report_id:int) -> Dict:
-        report_number = (await self.get_pdf_numbers_by_report_ids([report_id])).get(report_id, None)
-        if report_number is None:
+    async def get_pdf_numbers_by_report_id(self, report_id: int) -> int:
+        """
+        Returns the PDF report number for a given report ID.
+        """
+        report = await self.db.get(Report, report_id)
+        if not report:
             return None
-        # Check if metadata exists in database
+        if report.ReportNumber is None:
+            return -1   # report found, but ReportNumber is NULL
+        return report.ReportNumber
+    
+    async def assign_pdf_numbers_for_report_id(self, report_id: int) -> int:
+        """
+        Assigns a unique PDF report number to the given report if it does not already have one.
+        Returns the assigned or existing report number.
+        """
+        report = await self.db.get(Report, report_id)
+        if not report:
+            return None  # Report not found
+
+        if report.ReportNumber is not None:
+            return report.ReportNumber  # Already assigned
+
+        # Find the current max ReportNumber
+        stmt = select(Report.ReportNumber).order_by(Report.ReportNumber.desc())
+        max_number = (await self.db.execute(stmt)).scalars().first()
+        next_number = (max_number or 0) + 1
+
+        report.ReportNumber = next_number
+        await self.db.flush()  # Update the existing report in the session
+        await self.db.commit()
+        return next_number
+    
+    async def save_report_metadata(self, report_id : int, data : Any):
+        # Save to database
+        new_extraction = FulltextExtractions(
+            CRGReportID=report_id,
+            data=data
+        )
+        self.db.add(new_extraction)
+        await self.db.commit()
+
+    async def load_report_metadata(self, report_id : int):
         stmt = select(FulltextExtractions).where(FulltextExtractions.CRGReportID == report_id)
         existing = (await self.db.execute(stmt)).scalar_one_or_none()
         
         if existing:
             return existing.data
-        
-        # If not in DB, process PDF and save to database
-        if not report_number:
-            report_number = await self.get_pdf_number_by_report_id(report_id)
-
-        report_number_str = str(report_number).zfill(5)
-        file_name_pdf = os.path.join(PDF_PATH, report_number_str + ".pdf")
-        
-        if not os.path.exists(file_name_pdf):
-            raise None
-        
-        # Process PDF to extract metadata
-        metadata = await process_pdf(PDF_PATH, report_number_str)
-        
-        # Save to database
-        new_extraction = FulltextExtractions(
-            CRGReportID=report_id,
-            data=metadata
-        )
-        self.db.add(new_extraction)
-        await self.db.commit()
-        
-        return metadata
-    
-    async def get_report_trial_ids(self, report_id : int, include_fulltext: bool) -> List[str]:
-        """Internal function to get trial IDs from a report"""
-        report = await self.get_report_by_id(report_id)
-        if not report:
-            return None
-        
-        if include_fulltext:
-            try:
-                meta_data = await self.get_pdf_metadata(report_id)
-                return meta_data['trial_id']
-            except:
-                pass
-        authors = [item.strip() for item in report.Authors.split("//")]
-        all_ids = extract_trial_id(report.Title, report.Abstract, authors)
-        return all_ids
-    
-    async def get_pdf_path(self, report_id: int) -> str:
-        report_number = (await self.get_pdf_numbers_by_report_ids([report_id])).get(report_id, None)
-        if report_number is None:
-            return None
-        
-        pdf_name = str(report_number).zfill(5) + ".pdf"
-        file_name = os.path.join(PDF_PATH, pdf_name)
-
-        if not os.path.exists(file_name):
-            return None
-        
-        return file_name
-        
+        return None
