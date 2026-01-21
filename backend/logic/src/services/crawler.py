@@ -15,6 +15,40 @@ class CrawlerService:
     def __init__(self):
         pass
 
+    def html_to_lowest_level_markdown(self, html_content):
+        soup = BeautifulSoup(html_content, 'lxml')
+        markdown_output = []
+
+        for table in soup.find_all('table'):
+            # Process only "leaf" tables (no nested tables inside)
+            if not table.find('table'):
+                rows = []
+                max_cols = 0
+                
+                for tr in table.find_all('tr'):
+                    cells = [td.get_text(separator=" ", strip=True).replace('\xa0', ' ') 
+                            for td in tr.find_all(['td', 'th'])]
+                    if any(cells):
+                        rows.append(cells)
+                        max_cols = max(max_cols, len(cells))
+                
+                if rows:
+                    # Create Markdown table structure
+                    # 1. Empty Header Row
+                    header = "| " + " | ".join([" " for _ in range(max_cols)]) + " |"
+                    # 2. Separator Row
+                    separator = "| " + " | ".join(["---" for _ in range(max_cols)]) + " |"
+                    # 3. Data Rows
+                    body = []
+                    for row in rows:
+                        # Pad row if it has fewer columns than max_cols
+                        padded_row = row + [""] * (max_cols - len(row))
+                        body.append("| " + " | ".join(padded_row) + " |")
+                    
+                    markdown_output.append(f"{header}\n{separator}\n" + "\n".join(body))
+
+        return "\n\n".join(markdown_output)
+
     def extract_fourth_top_level_table(self, html: str) -> str:
         soup = BeautifulSoup(html, "lxml")
 
@@ -64,7 +98,10 @@ class CrawlerService:
             async with httpx.AsyncClient(headers=headers, timeout=30) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
-                return await asyncio.to_thread(self.extract_fourth_top_level_table, resp.text)
+                parsed_html = await asyncio.to_thread(self.extract_fourth_top_level_table, resp.text)
+                markdown = await asyncio.to_thread(self.html_to_lowest_level_markdown, parsed_html)
+                return markdown
+            
         except ReadTimeout:
             raise Exception("Upstream request timed out")
         
