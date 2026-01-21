@@ -15,14 +15,14 @@ MODEL_PORT = os.getenv("EMBEDDING_SERVICE_PORT")
 
 CHANNEL = grpc.aio.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
 
-#async def single_element_generator(element):
-#    yield element
-
 class EmbeddingService:
 
     def __init__(self):
         self.channel = CHANNEL
         self.sem = asyncio.Semaphore(1) #max number of concurrent requests
+
+    def get_channel(self):
+        return self.channel
 
     async def embed_report(self, report_id : int, text : str):
         async with self.sem:

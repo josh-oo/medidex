@@ -146,7 +146,10 @@ class DocumentService:
                 return True
         return False
     
-    async def get_fulltext(self) -> str:
+    async def get_fulltext(self, fast : bool) -> str:
+        if fast:
+            pages = await self.get_pages()
+            return " ".join(pages)
         # Use report_id as the filename, zero-padded to 5 digits
         txt_name = str(self.report_id).zfill(5) + ".txt"
         txt_path = os.path.join(FULLTEXT_PATH, txt_name)
@@ -166,8 +169,6 @@ class DocumentService:
             text = await self.crawler_service.get_html_for_trial_id(report.Authors)
         else:
             text = await self.docling_service.parse_pdf(await self.get_path())
-            print("------------------")
-            print("Docling Fulltext: ", text)
             #pages = await self.get_pages()
             #text = " ".join(pages)
 
@@ -208,7 +209,17 @@ class ReportService:
 
         self.report = None
 
-    async def get_trial_ids(self, include_fulltext: bool) -> List[str]:
+    async def get_trial_ids(self, include_fulltext: bool, use_cache : bool = True) -> List:
+        if use_cache:
+            data = await self.report_repo.load_report_metadata(self.report_id)
+            if data is not None and "trial_id" in data:
+                return data["trial_id"]
+        trial_ids = await self._get_trial_ids(include_fulltext)
+        if use_cache:
+            await self.report_repo.save_report_metadata_field(self.report_id, "trial_id", trial_ids)
+        return trial_ids
+
+    async def _get_trial_ids(self, include_fulltext: bool) -> List[str]:
         """Internal function to get trial IDs from a report"""
         report = await self.get_report()
         if not report:
@@ -216,7 +227,7 @@ class ReportService:
         
         if include_fulltext:
             try:
-                text = await self.document_service.get_fulltext()
+                text = await self.document_service.get_fulltext(fast=True)
                 return extract_trial_ids_from_text(text)
             except:
                 pass
@@ -239,7 +250,7 @@ class ReportService:
         
         if include_fulltext:
             try:
-                text = await self.document_service.get_fulltext()
+                text = await self.document_service.get_fulltext(fast=True)
                 return await _get_study_acronyms(text)
             except:
                 pass
@@ -265,8 +276,8 @@ class ReportService:
             report = await self.get_report()
             return await self.llm_service.extract_pico(report.Title, report.Abstract, fulltext)
 
-        trial_ids_task = self.get_trial_ids(include_fulltext=not is_abstract)
-        study_acronyms_task = self.get_study_acronyms(include_fulltext=not is_abstract)
+        trial_ids_task = self.get_trial_ids(include_fulltext=not is_abstract, use_cache=False)
+        study_acronyms_task = self.get_study_acronyms(include_fulltext=not is_abstract, use_cache=False)
         extract_pico_task = _extract_pico()
         trial_ids, study_acronyms, pico_values = await asyncio.gather(trial_ids_task, study_acronyms_task, extract_pico_task)
 

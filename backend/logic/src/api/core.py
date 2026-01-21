@@ -32,13 +32,15 @@ from ..database.models import Report, Batch
 from ..services import get_tag_similarity_service, TagSimilaritySearchService
 from ..services import get_related_tag_service, RelatedTagSearchService
 from ..services import get_tag_scoring_service, TagScoringService
-from ..services import get_study_similarity_service, StudySimilaritySearchService
+from ..services import get_study_similarity_service, get_study_similarity_service_batch, StudySimilaritySearchService
 
 from ..services import get_vectorstore_service, VectorstoreService
 
 from ..services import get_embedding_service, EmbeddingService
 
 from ..services import get_maintenance_service, MaintenanceService
+
+from ..services import batch_hash_id_to_report_id
 
 load_dotenv()
 
@@ -190,7 +192,7 @@ async def readyz(db_ready: str = Depends(db_ready), vectorstore : VectorstoreSer
     
     # Check gRPC embedding service connectivity
     try:
-        channel = embedding_service.get_grpc_channel()
+        channel = embedding_service.get_channel()
         # Simple connectivity check - channel state
         state = channel.get_state(try_to_connect=True)
         if state == grpc.ChannelConnectivity.READY:
@@ -419,14 +421,8 @@ async def stream_batch_updates(batch_hash : str,  request: Request, batch_repo: 
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-async def batch_hash_id_to_crg_report_id(batch_hash: str = batch_hash_path, report_index: int = report_index_path,  batch_repo: BatchRepository = Depends(get_batch_repo),):
-    report_id = await batch_repo.batch_item_to_report_id(batch_hash, report_index)
-    if not report_id:
-        raise HTTPException(status_code=404, detail="Report not found")
-    return report_id
-
 @router.get("/batches/{batch_hash}/{report_index}", dependencies=[Depends(is_verified_api_call)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
-async def get_batched_report(crg_report_id : int = Depends(batch_hash_id_to_crg_report_id), report_repo : ReportRepository = Depends(get_report_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+async def get_batched_report(crg_report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
 
     # Run DB/vectorstore calls in parallel
     vectors_task = vectorstore.get_vectors_by_crg_report_id(crg_report_id)
@@ -458,7 +454,7 @@ async def get_batched_report(crg_report_id : int = Depends(batch_hash_id_to_crg_
     return report
 
 @router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=200)
-async def assign_studies(batch_hash: str = batch_hash_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), crg_report_id : int = Depends(batch_hash_id_to_crg_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+async def assign_studies(batch_hash: str = batch_hash_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), crg_report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
     await asyncio.gather(
         report_repo.link_studies(crg_report_id, study_ids),
         vectorstore.link_report_to_study_ids(crg_report_id, study_ids, user_id)
@@ -472,29 +468,29 @@ async def assign_studies(batch_hash: str = batch_hash_path, study_ids: List[int]
     return await get_batched_report(crg_report_id, report_repo, vectorstore)
 
 @router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=200)
-async def delete_assigned_studies(batch_hash: str = batch_hash_path, crg_report_id : int = Depends(batch_hash_id_to_crg_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
     await asyncio.gather(
-        report_repo.unlink_studies(crg_report_id),
-        vectorstore.link_report_to_study_ids(crg_report_id, [], user_id)
+        report_repo.unlink_studies(report_id),
+        vectorstore.link_report_to_study_ids(report_id, [], user_id)
     )
 
     await publish_batch_update(batch_hash)
 
-    payload = {"user": user_id, "event_type": "study::links::changed", "report_id": crg_report_id, "original_timestamp": "-"}
+    payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
 
-    return await get_batched_report(crg_report_id, report_repo, vectorstore)
+    return await get_batched_report(report_id, report_repo, vectorstore)
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
-async def similar_tags(sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), k : int = k_query, crg_report_id : int = Depends(batch_hash_id_to_crg_report_id), tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[TagResponse]:
+async def similar_tags(sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), k : int = k_query, report_id : int = Depends(batch_hash_id_to_report_id), tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[TagResponse]:
     if aspect == TagCategories.default:
         raise HTTPException(status_code=400, detail="No tags for 'default' embedding.")
-    return await tag_similarity_service.get_similar_tags_by_id(crg_report_id, aspect, sources, k)
+    return await tag_similarity_service.get_similar_tags_by_id(report_id, aspect, sources, k)
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
-async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, crg_report_id : int = Depends(batch_hash_id_to_crg_report_id), user_id : str = Depends(get_user_id), study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service), return_details : bool = False):
-    result = await study_similarity_service.get_similar_studies_by_id(crg_report_id, aspect, cutoff,k, None, None, return_details=return_details)
-    payload = {"user": user_id, "event_type": f"similar::studies::k::{k}", "report_id": crg_report_id, "original_timestamp": "-"}
+async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, report_id : int = Depends(batch_hash_id_to_report_id), user_id : str = Depends(get_user_id), study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service_batch), return_details : bool = False):
+    result = await study_similarity_service.get_similar_studies_by_id(aspect, cutoff,k, None, None, return_details=return_details)
+    payload = {"user": user_id, "event_type": f"similar::studies::k::{k}", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
     return result
 

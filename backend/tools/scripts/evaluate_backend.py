@@ -34,36 +34,38 @@ async def wait_for_services(timeout=120):
     print(f"❌ Backend API not ready at {BACKEND_API}/readyz")
     raise TimeoutError(f"Backend service not ready after {timeout} seconds")
 
-async def calculate_rank_score(crg_report_id, cutoff, client, fixed_k=None):
+async def calculate_rank_score(crg_report_id, cutoff, client, semaphore, fixed_k=None):
 
-    ks = [1, 10,100,1_000,10_000]
-    if fixed_k:
-        ks = [fixed_k]
-    
-    dt = datetime.strptime(cutoff, "%Y-%m-%d %H:%M:%S")
-    exclusive_cutoff = dt - timedelta(days=1)
+    async with semaphore:
 
-    response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/studies", params={"date_to": exclusive_cutoff})
-    response.raise_for_status()
-    ground_truth = [item['CRGStudyID'] for item in response.json()]
+        ks = [1, 10,100,1_000,10_000]
+        if fixed_k:
+            ks = [fixed_k]
+        
+        dt = datetime.strptime(cutoff, "%Y-%m-%d %H:%M:%S")
+        exclusive_cutoff = dt - timedelta(days=1)
 
-    rank = 10_000
-    score = -1
-    
-    if len(ground_truth) == 1:
-        ground_truth = ground_truth[0]
-        for k in ks:
-            params = {"cutoff":cutoff, 'k': k}
-            response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params=params)
-            response.raise_for_status()
-            predicted_studies = response.json()['CRGStudyID']
+        response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/studies", params={"date_to": exclusive_cutoff})
+        response.raise_for_status()
+        ground_truth = [item['CRGStudyID'] for item in response.json()]
 
-            if ground_truth in predicted_studies:
-                index = predicted_studies.index(ground_truth)
-                score = response.json()['Relevance'][index]
-                rank = index + 1
-                break
-        return (rank, score, crg_report_id)
+        rank = 10_000
+        score = -1
+        
+        if len(ground_truth) == 1:
+            ground_truth = ground_truth[0]
+            for k in ks:
+                params = {"cutoff":cutoff, 'k': k}
+                response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params=params)
+                response.raise_for_status()
+                predicted_studies = response.json()['CRGStudyID']
+
+                if ground_truth in predicted_studies:
+                    index = predicted_studies.index(ground_truth)
+                    score = response.json()['Relevance'][index]
+                    rank = index + 1
+                    break
+            return (rank, score, crg_report_id)
     
 async def calculate_rank_score_negative_hints(crg_report_id, cutoff, client, fixed_k=None):
 
@@ -109,25 +111,25 @@ async def calculate_rank_score_negative_hints(crg_report_id, cutoff, client, fix
     else:
         pass
 
+# ...existing code...
+
 async def evaluate_with_cutoff_async(cutoff):
+    SEMAPHORE = asyncio.Semaphore(128)
 
     timeout = httpx.Timeout(
-        read=20.0,
+        read=120.0,
         connect=10.0,
         write=30.0,
         pool=30.0
     )
-
     limits = httpx.Limits(
         max_keepalive_connections=20,
         max_connections=50,
         keepalive_expiry=30.0
     )
-
     headers = {'X-API-Key': BACKEND_API_KEY}
 
     async with httpx.AsyncClient(headers=headers, timeout=timeout, limits=limits) as client:
-
         response =  await client.get(f"{BACKEND_API}/reports", params={"date_from": cutoff, "date_to": cutoff})
         response.raise_for_status()
         current_crg_report_ids = [item['CRGReportID'] for item in response.json()]
@@ -139,7 +141,7 @@ async def evaluate_with_cutoff_async(cutoff):
         recall_at_10 = []
 
         tasks = [
-            asyncio.create_task(calculate_rank_score(crg_report_id, cutoff, client, fixed_k=10))
+            asyncio.create_task(calculate_rank_score(crg_report_id, cutoff, client, SEMAPHORE, fixed_k=10))
             for crg_report_id in current_crg_report_ids
         ]
 
@@ -147,7 +149,6 @@ async def evaluate_with_cutoff_async(cutoff):
             result = await task
             if result:
                 rank = result[0]
-                #crg_report_id = result[2]
                 recall_at_1.append(int(rank == 1))
                 recall_at_3.append(int(rank <= 3))
                 recall_at_10.append(int(rank <= 10))

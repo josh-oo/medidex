@@ -70,7 +70,7 @@ class CrawlerService:
         
 class DoclingService:
     def __init__(self):
-        pass
+        self.sem = asyncio.Semaphore(1)
 
     async def parse_pdf(self, pdf_path : str) -> str:
         url = f"{DOCLING_URL}/v1/convert/file"
@@ -96,11 +96,12 @@ class DoclingService:
         file_size_mb = path.stat().st_size / (1024 * 1024)
         timeout = 30 + int(file_size_mb) * 30
 
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(url, files=files, data=payload)
-                resp.raise_for_status()
-        except ReadTimeout:
-            raise Exception("Upstream request timed out")
+        async with self.sem:
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.post(url, files=files, data=payload)
+                    resp.raise_for_status()
+            except ReadTimeout:
+                raise Exception("Upstream request timed out")
 
         return resp.json()['document']['md_content']

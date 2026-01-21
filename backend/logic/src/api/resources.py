@@ -20,7 +20,6 @@ from ..database.models import Report, Study
 from ..database.models import Condition, Intervention, Design, Outcome, Participant
 
 #from ..utils.pdf.processor import process_pdf
-from ..utils.postprocessing import normalize_author_names
 from ..utils.logger import setup_logging
 
 from ..database.repositories.study import StudyRepository
@@ -82,16 +81,6 @@ def load_trial_id_mapping():
         return {}
     with open(file_path, "r") as json_file:
         return json.load(json_file)
-    
-def load_author_frequencies():
-    file_path = os.path.join(DATABASE_VOLUME, "resources", "author_frequencies.json")
-    if not os.path.exists(file_path):
-        return {}
-    with open(file_path, "r") as json_file:
-        return json.load(json_file)
-    
-trial_id_mapping = load_trial_id_mapping()
-author_frequencies = load_author_frequencies()
 
 cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
 study_ids_query =  Query(None, description="List of CRGStudyIDs (used to filter your results)")
@@ -364,18 +353,6 @@ async def get_all_countries(prefix: Optional[str] = Query(None, description="Fil
 """
 Other Endpoints
 """
-
-def get_author_frequencies(authors: List[str]) -> Dict[str, int]:
-    normalized_author_names = normalize_author_names(authors=authors)
-    
-    result = {}
-    for author in normalized_author_names:
-        if author in author_frequencies:
-            result[author] = author_frequencies[author]
-        else:
-            result[author] = 1
-
-    return result
 
 @router.get("/trial/studies", include_in_schema=False)
 async def get_possible_trial_ids_by_report(study_repo: StudyRepository = Depends(get_study_repo)):

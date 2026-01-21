@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select, delete
+from sqlmodel import select, delete, func
 
 from ..models import Report, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions
 from typing import List, Dict, Any, Optional
@@ -275,6 +275,20 @@ class ReportRepository:
             data=data
         )
         self.db.add(new_extraction)
+        await self.db.commit()
+
+    async def save_report_metadata_field(self, report_id: int, field: str, value: Any):
+        stmt = select(FulltextExtractions).where(FulltextExtractions.CRGReportID == report_id)
+        extraction = (await self.db.execute(stmt)).scalar_one_or_none()
+        if not extraction:
+            # Optionally create a new record if not found
+            data = {}
+            extraction = FulltextExtractions(CRGReportID=report_id, data=data)
+            self.db.add(extraction)
+        else:
+            data = extraction.data or {}
+        data[field] = value
+        extraction.data = data
         await self.db.commit()
 
     async def load_report_metadata(self, report_id : int):

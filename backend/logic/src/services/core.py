@@ -19,7 +19,7 @@ class StudySimilaritySearchService:
         self.author_feature_service = author_feature_service
         self.report_service = report_service
 
-        self.add_noise = True #Studydesign
+        self.add_noise = False#True #Studydesign
         self.debug = False
 
         if not self.user_id:
@@ -97,7 +97,7 @@ class StudySimilaritySearchService:
 
         return reordered
 
-    async def get_similar_studies_by_id(self, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], return_details: bool):
+    async def get_similar_studies_by_id(self, report_id : int, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], return_details: bool):
 
         if not negative_studies:
             negative_studies = []

@@ -27,6 +27,8 @@ jobs:
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
       BACKEND_API_URL: http://logic:8002
       BACKEND_API_KEY: ${{ secrets.BACKEND_API_KEY }}
+      DOCLING_URL: ${{ vars.DOCLING_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       
       POSTGRES_USER: ${{ vars.POSTGRES_USER }}
       POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}

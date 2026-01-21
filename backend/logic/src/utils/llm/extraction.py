@@ -68,6 +68,9 @@ select_prompt = ChatPromptTemplate.from_messages([
 select_chain = select_prompt | model_with_selection_structure
 
 async def extract_pico(title : str, abstract : str, fulltext: str):
+    print(title)
+    print(abstract)
+    print(fulltext)
     result = await extract_chain.ainvoke({
         "title": title,
         "abstract":abstract,
