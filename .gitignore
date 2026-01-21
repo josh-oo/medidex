@@ -28,3 +28,5 @@
 **/htmlcov/
 **/.coverage
 **/.pytest_cache/
+
+**/author_features.json
