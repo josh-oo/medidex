@@ -258,7 +258,7 @@ async def get_pdf(report_id : int, document_service : DocumentService = Depends(
 @router.get("/reports/{report_id}/fulltext", summary="Get the parsed fulltext for a given report")
 async def get_fulltext(document_service : DocumentService = Depends(get_document_service)) -> str:
     try:
-        return await document_service.get_fulltext()
+        return await document_service.get_fulltext(fast=False)
     except Exception as e:
         if str(e) == "Upstream request timed out":
             raise HTTPException(status_code=504, detail="Upstream request timed out.")

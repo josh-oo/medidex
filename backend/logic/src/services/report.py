@@ -190,7 +190,7 @@ class DocumentService:
             content = await file.read()
             f.write(content)
 
-        self.get_fulltext()
+        self.get_fulltext(fast=False)
 
         return {
             "report_id": self.report_id,
@@ -270,7 +270,7 @@ class ReportService:
         if is_abstract:
             meta_data['report_type'] = 'abstract'       
         else:
-            fulltext = await self.document_service.get_fulltext() 
+            fulltext = await self.document_service.get_fulltext(fast=False) 
 
         async def _extract_pico():
             report = await self.get_report()
