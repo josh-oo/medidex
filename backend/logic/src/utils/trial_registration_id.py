@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from typing import Optional, List
 
 def br(pattern: str) -> str:
     #return pattern
@@ -43,7 +44,7 @@ ris = re.compile(br(r'RIS-[A-Z]{3}-\d+'), re.IGNORECASE)
 
 all_registration_id_patterns = [isrctn, chictr, chictr_trc, chictr_ior, actrn, ctri, nct, drks, nlomon,nl, irct, kct, tctr, rbr, ctis, jprn_umin, jprn_jrct, jprn_japic, euctr, itmctr, pactr, ntr, chictr_inr, chictr_ipr, ukcrnid, slctr, hkctr, m, mct, fid, ris]
 
-def extract_trial_ids_from_text(text):
+def extract_trial_ids_from_text(text : str):
     text = unicodedata.normalize("NFC", text)
 
     def extract(clean_text):
@@ -80,7 +81,7 @@ def extract_trial_ids_from_text(text):
             ordered_ids.append(trial_id)
     return ordered_ids
 
-def extract_trial_id(title, abstract, authors):
+def extract_trial_id(title : Optional[str], abstract : Optional[str], authors : Optional[List[str]]):
     all_ids = []
     if title:
         all_ids.extend(extract_trial_ids_from_text(title.replace("\n", "")))

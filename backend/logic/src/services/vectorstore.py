@@ -193,7 +193,11 @@ class VectorstoreService():
                 with_payload=["belongs_to_study", f"temporary.{self.user_id}.belongs_to_study", "title", "authors", "source_id"],
             )
     
-    async def get_similar_tags(self, embedding : List[float], sources: List[str], aspect: str, k: int):
+    async def get_similar_tags_by_string(self, text : str, sources: List[str], aspect: str, k: int):
+        embeddings = await self.embedding_service.embed_aspect(text)
+        return await self.get_similar_tags_by_embedding(embeddings['embedding'], sources, aspect, k)
+
+    async def get_similar_tags_by_embedding(self, embedding : List[float], sources: List[str], aspect: str, k: int):
     
         #TODO implement more sophisticated tree based search here
 
@@ -205,10 +209,7 @@ class VectorstoreService():
             filters.append(models.Filter(
                 must=[
                     models.FieldCondition(key="source", match=models.MatchValue(value="meerkat")),
-                    models.FieldCondition(
-                        key="tree_ids",
-                        match=models.MatchAny(any=[aspect]), #TODO check if it as the same as aspect name
-                    )
+                    models.FieldCondition(key="tree_ids",match=models.MatchAny(any=[aspect]))
                 ]
             ))
 
@@ -272,8 +273,6 @@ class VectorstoreService():
                 )
     
     async def search_similar_studies(self, query : Any, aspect : str, k : int, cutoff : str, excluded_studies : List[int], exclude_trial_related_studies : bool):
-
-
         filters = []
         if cutoff:
             filters.append(Filter(

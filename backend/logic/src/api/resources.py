@@ -215,6 +215,11 @@ async def get_report_studies_by_id(
 @router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
 async def get_pdf_metadata(report_service : ReportService = Depends(get_report_service)) -> Dict:
     return await report_service.get_metadata()
+    #try:
+    #    return await report_service.get_metadata()
+    #except Exception as e:
+    #    if str(e) == "Upstream request timed out":
+    #        raise HTTPException(status_code=504, detail="Upstream request timed out.")
 
 #@router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
 #async def get_pdf_number_by_report_id(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)) -> int:
@@ -243,7 +248,7 @@ async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to uplo
     # Extract report number from filename (e.g., "00123.pdf" -> 123)
     filename = file.filename
     if not filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="File must have .pdf extension")
+        raise HTTPException(status_code=400, detail="File must have .pdf extension.")
     
     #try:
     #    report_number = int(filename.replace(".pdf", "").lstrip("0") or "0")
@@ -269,8 +274,8 @@ async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to uplo
         #Extract and save metadata
         #process_pdf(file_path)
         return document_service.upload_pdf(file)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save PDF: {str(e)}")
+    except:
+        raise HTTPException(status_code=500, detail=f"Failed to save PDF.")
 
 @router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
 async def get_report_trial_ids(report_id : int, include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), report_repo : ReportRepository = Depends(get_report_repo)) -> List[str]:

@@ -5,10 +5,12 @@ from rapidfuzz import fuzz
 from typing import List, Dict
 
 from ..utils.trial_registration_id import extract_trial_ids_from_text, extract_trial_id
-from ..utils.llm.extraction import extract_pico
 
 from ..database import StudyRepository, ReportRepository
 from ..database.repositories.report import Report
+
+from .llm import LanguageModelService
+from .crawler import CrawlerService, DoclingService
 
 import os
 import asyncio
@@ -18,15 +20,18 @@ load_dotenv()
 
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
+FULLTEXT_PATH = os.path.join(DATABASE_VOLUME,"resources", "fulltexts")
 
 class DocumentService:
 
-    def __init__(self, report_id : int, report_repo : ReportRepository):
+    def __init__(self, report_id : int, report_repo : ReportRepository, crawler_service : CrawlerService, docling_service : DoclingService):
         self.report_id = report_id
 
         self.path = None
         self.pages = None
         self.report_repo = report_repo
+        self.crawler_service = crawler_service
+        self.docling_service = docling_service
 
     async def get_path(self, mkdirs=False):
         if not self.path:
@@ -63,7 +68,16 @@ class DocumentService:
             path = await self.get_path()
             self.pages = await asyncio.to_thread(_sync_extract, path)
         return self.pages
-
+    
+    async def is_trial_registration(self) -> bool:
+        report = await self.report_repo.get_report_by_id(self.report_id)
+        authors = report.Authors.split("//")
+        if len(authors) != 1:
+            return False
+        trial_ids = extract_trial_id(None, None,authors)
+        if trial_ids == authors:
+            return True
+        return False
 
     async def is_abstract_collection(self) -> bool:
         """
@@ -131,10 +145,42 @@ class DocumentService:
             if found_words.count(key) > (num_pages-1)/2.0:
                 return True
         return False
+    
+    async def get_fulltext(self) -> str:
+        # Use report_id as the filename, zero-padded to 5 digits
+        txt_name = str(self.report_id).zfill(5) + ".txt"
+        txt_path = os.path.join(FULLTEXT_PATH, txt_name)
 
-    async def get_fulltext(self):
-        text = await self.get_pages()
-        return " ".join(text)
+        # Try to read cached fulltext asynchronously
+        if os.path.exists(txt_path):
+            def _read_file(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    return f.read()
+            return await asyncio.to_thread(_read_file, txt_path)
+
+        # Otherwise, generate the fulltext
+        if await self.is_abstract_collection():
+            text = ""
+        elif await self.is_trial_registration():
+            report = await self.report_repo.get_report_by_id(self.report_id)
+            text = await self.crawler_service.get_html_for_trial_id(report.Authors)
+        else:
+            text = await self.docling_service.parse_pdf(await self.get_path())
+            print("------------------")
+            print("Docling Fulltext: ", text)
+            #pages = await self.get_pages()
+            #text = " ".join(pages)
+
+        # Ensure the directory exists
+        os.makedirs(FULLTEXT_PATH, exist_ok=True)
+
+        # Write the fulltext asynchronously
+        def _write_file(path, content):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+        await asyncio.to_thread(_write_file, txt_path, text)
+
+        return text
     
     async def upload_pdf(self, file):
         path = await self.get_path(mkdirs=True)
@@ -143,7 +189,7 @@ class DocumentService:
             content = await file.read()
             f.write(content)
 
-        await self.get_pdf_metadata()
+        self.get_fulltext()
 
         return {
             "report_id": self.report_id,
@@ -152,12 +198,13 @@ class DocumentService:
         }
         
 class ReportService:
-    def __init__(self, report_id : int, report_repo : ReportRepository, study_repo : StudyRepository, document_service : DocumentService):
+    def __init__(self, report_id : int, report_repo : ReportRepository, study_repo : StudyRepository, document_service : DocumentService, llm_service : LanguageModelService):
         self.report_id = report_id
         self.report_repo = report_repo
         self.study_repo = study_repo
 
         self.document_service = document_service
+        self.llm_service = llm_service
 
         self.report = None
 
@@ -212,25 +259,34 @@ class ReportService:
         if is_abstract:
             meta_data['report_type'] = 'abstract'       
         else:
-            fulltext = await self.document_service.get_fulltext()   
+            fulltext = await self.document_service.get_fulltext() 
 
-        meta_data['trial_id'] = await self.get_trial_ids(include_fulltext=not is_abstract)
-        meta_data['study_acronyms'] = await self.get_study_acronyms(include_fulltext=not is_abstract) 
+        async def _extract_pico():
+            report = await self.get_report()
+            return await self.llm_service.extract_pico(report.Title, report.Abstract, fulltext)
 
-        report = await self.get_report()
-        pico_values = await extract_pico(report.Title, report.Abstract, fulltext)
+        trial_ids_task = self.get_trial_ids(include_fulltext=not is_abstract)
+        study_acronyms_task = self.get_study_acronyms(include_fulltext=not is_abstract)
+        extract_pico_task = _extract_pico()
+        trial_ids, study_acronyms, pico_values = await asyncio.gather(trial_ids_task, study_acronyms_task, extract_pico_task)
 
-        meta_data['data_extraction'] = pico_values.dict()
+        meta_data['trial_id'] = trial_ids
+        meta_data['study_acronyms'] = study_acronyms
+
+
+        meta_data['data_extraction'] = pico_values
 
         return meta_data
     
     async def get_metadata(self) -> Dict:
-        data = await self.report_repo.load_report_metadata(self.report_id)
+        data = None
+        #data = await self.report_repo.load_report_metadata(self.report_id)
         
         if data is None:
             # Process PDF to extract metadata
             data = await self.extract_metadata()
-            await self.report_repo.save_report_metadata(self.report_id, data)
+            #print("Extracted;: ", data)
+            #await self.report_repo.save_report_metadata(self.report_id, data)
         
         return data
     

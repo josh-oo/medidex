@@ -1,6 +1,18 @@
 version: '3.8'
 
 services:
+  docling:
+    image: quay.io/docling-project/docling-serve-cpu:v1.10.0
+    container_name: docling
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "1"
+    expose:
+      - 5001
+    ports:
+      - "5001:5001"
+    networks:
+      - internal_net
+
   postgres:
     image: postgres:18-alpine
     container_name: postgres
@@ -86,6 +98,7 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DOCLING_URL=${DOCLING_URL}
       - DEBUG=${DEBUG}
 
   frontend:
