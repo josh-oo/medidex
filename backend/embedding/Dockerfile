@@ -15,10 +15,8 @@ ENV EMBEDDING_MODEL_TOKENIZER_REVISION=${EMBEDDING_MODEL_TOKENIZER_REVISION}
 ENV EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
 
 WORKDIR /model
-RUN pip3 install --no-cache-dir grpcio-tools==1.72.1
-RUN pip3 install --no-cache-dir transformers==4.52.4
-RUN pip3 install --no-cache-dir python-dotenv==1.1.0
-RUN pip3 install --no-cache-dir torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
+RUN pip3 install --no-cache-dir grpcio-tools==1.76.0 transformers==4.52.4 python-dotenv==1.1.0 onnxscript==0.5.7&& \
+    pip3 install --no-cache-dir torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
 
 COPY embedding/model_loader.py .
 RUN python model_loader.py
@@ -50,11 +48,12 @@ COPY embedding/model_server.py .
 COPY --from=model-builder /model/embedding_pb2.py .
 COPY --from=model-builder /model/embedding_pb2_grpc.py .
 COPY --from=model-builder /model/tokenizer/tokenizer.json .
-COPY --from=model-builder /model/traced_model.pt .
+COPY --from=model-builder /model/model.onnx .
+COPY --from=model-builder /model/model.onnx.data .
 
 EXPOSE 50051
 
 # Switch to the non-root user before running the application
 USER appuser
 
-ENTRYPOINT ["python3", "model_server.py"]
+ENTRYPOINT ["python3", "-u", "model_server.py"]

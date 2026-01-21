@@ -2,6 +2,7 @@ import os
 from transformers import AutoTokenizer, AutoModel
 from dotenv import load_dotenv
 import torch
+import torch.onnx
 
 import os
 
@@ -32,32 +33,33 @@ tokenizer.add_tokens([f"<{aspect}>" for aspect in ASPECTS])
 tokenizer.save_pretrained("tokenizer")
 
 model.eval()
-model = model.to(device)
+model = model.to(device).to(torch.float32)#ONNX can not be exported to bf16
 
 prefix = "".join(["<" + aspect + ">" for aspect in ASPECTS])
 dummy_text = prefix + "This is a title of a medical paper"
 dummy_input = tokenizer([dummy_text], return_tensors="pt")
 
-traced_model = torch.jit.trace(model, [dummy_input['input_ids'].to(device), dummy_input['attention_mask'].to(device)])
-torch.jit.save(traced_model, "traced_model.pt")
+# Prepare dummy inputs for ONNX export
+dummy_input_ids = dummy_input['input_ids'].to(device)
+dummy_attention_mask = dummy_input['attention_mask'].to(device)
+onnx_inputs = (dummy_input_ids, dummy_attention_mask)
 
-#export works but compilation doesn't (for mps device) since there is no kernel yet
-"""
-options = {
-    'pattern_matcher': False, #disable merging attentions into scaled_dot_product op
-           }
+dynamic_shapes = {
+    "input_ids": {0: "batch_size", 1: "sequence_length"},
+    "attention_mask": {0: "batch_size", 1: "sequence_length"},
+}
 
-with torch.no_grad():
-    model = model.to(device)
-    example_inputs=(dummy_input['input_ids'].to(device), dummy_input['attention_mask'].to(device),)
-    seq_dim = torch.export.Dim("sequence_length", min=1 + len(ASPECTS), max=model.config.max_position_embeddings-1)
-    exported = torch.export.export(model, example_inputs, dynamic_shapes={"input_ids": {1: seq_dim}, "attention_mask":{ 1: seq_dim}})
-    
-    output_path = torch._inductor.aoti_compile_and_package(
-            exported,
-            inductor_configs=options,
-            # [Optional] Specify the generated shared library path. If not specified,
-            # the generated artifact is stored in your system temp directory.
-            package_path="model.pt2",
-        )
-"""
+# Export the model to ONNX
+onnx_path = "model.onnx"
+torch.onnx.export(
+    model,
+    onnx_inputs,
+    onnx_path,
+    input_names=["input_ids", "attention_mask"],
+    output_names=["output"],
+    dynamic_shapes=dynamic_shapes,
+    opset_version=18,
+    do_constant_folding=True,
+    dynamo=True,
+)
+print(f"ONNX model saved to {onnx_path}")

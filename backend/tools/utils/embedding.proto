@@ -3,8 +3,8 @@ syntax = "proto3";
 package embed;
 
 service EmbedService {
-  rpc GetReportEmbedding (stream EmbedReportRequest) returns (stream EmbedResponseReport);
-  rpc GetAspectEmbeddings (stream EmbedAspectsRequest) returns (stream EmbedResponseAspects);
+  rpc GetReportEmbedding (EmbedReportRequest) returns (EmbedResponseReport);
+  rpc GetAspectEmbeddings (EmbedAspectsRequest) returns (EmbedResponseAspects);
 }
 
 message EmbedReportRequest {
@@ -31,5 +31,4 @@ message EmbedResponseReport {
   string id = 1;
   EmbeddingVector embedding = 2;
   repeated EmbeddingVector aspect_embeddings = 3;
-  EmbeddingVector author_embeddings = 4;
 }

@@ -221,7 +221,7 @@ class ReportRepository:
         
         return (await self.db.execute(stmt)).scalars().all()
     
-    async def get_all_reports(self, report_ids : Optional[List[int]], date_from : Optional[str], date_to: Optional[str]) -> List[Report]:
+    async def get_all_reports(self, report_ids : Optional[List[int]] = None, date_from : Optional[str] = None, date_to: Optional[str] = None) -> List[Report]:
         stmt = select(Report).where((Report.Title.isnot(None)) | (Report.Abstract.isnot(None)))
         if report_ids:
             stmt = stmt.where(Report.CRGReportID.in_(report_ids))
