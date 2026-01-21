@@ -212,32 +212,12 @@ async def get_report_studies_by_id(
 ) -> List[Study]:
     return await report_repo.get_linked_studies(report_id, date_from, date_to)
 
-@router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
-async def get_pdf_metadata(report_service : ReportService = Depends(get_report_service)) -> Dict:
-    return await report_service.get_metadata()
-    #try:
-    #    return await report_service.get_metadata()
-    #except Exception as e:
-    #    if str(e) == "Upstream request timed out":
-    #        raise HTTPException(status_code=504, detail="Upstream request timed out.")
-
 #@router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
 #async def get_pdf_number_by_report_id(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)) -> int:
 #    result = await report_repo.get_pdf_numbers_by_report_id(report_id)
 #    if not report_id:
 #        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 #    return result
-
-@router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
-async def get_pdf(report_id : int, document_service : DocumentService = Depends(get_document_service),user_id = Depends(get_user_id)) -> FileResponse:
-    try:
-        pdf_path = await document_service.get_path()
-        await post_report_event(-1, Event(event_type=f"report::{report_id}::downloaded", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
-        return FileResponse(pdf_path, media_type="application/pdf")
-    except:
-        raise HTTPException(status_code=404, detail="PDF file not found.")
-    
-    
 
 @router.put("/reports/{report_id}/pdf", summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
 async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
@@ -276,6 +256,32 @@ async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to uplo
         return document_service.upload_pdf(file)
     except:
         raise HTTPException(status_code=500, detail=f"Failed to save PDF.")
+    
+@router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
+async def get_pdf(report_id : int, document_service : DocumentService = Depends(get_document_service),user_id = Depends(get_user_id)) -> FileResponse:
+    try:
+        pdf_path = await document_service.get_path()
+        await post_report_event(-1, Event(event_type=f"report::{report_id}::downloaded", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
+        return FileResponse(pdf_path, media_type="application/pdf")
+    except:
+        raise HTTPException(status_code=404, detail="PDF file not found.")
+    
+@router.get("/reports/{report_id}/fulltext", summary="Get the parsed fulltext for a given report")
+async def get_fulltext(document_service : DocumentService = Depends(get_document_service)) -> str:
+    try:
+        return await document_service.get_fulltext()
+    except Exception as e:
+        if str(e) == "Upstream request timed out":
+            raise HTTPException(status_code=504, detail="Upstream request timed out.")
+    
+@router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
+async def get_pdf_metadata(report_service : ReportService = Depends(get_report_service)) -> Dict:
+    return await report_service.get_metadata()
+    try:
+        return await report_service.get_metadata()
+    except Exception as e:
+        if str(e) == "Upstream request timed out":
+            raise HTTPException(status_code=504, detail="Upstream request timed out.")
 
 @router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
 async def get_report_trial_ids(report_id : int, include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), report_repo : ReportRepository = Depends(get_report_repo)) -> List[str]:

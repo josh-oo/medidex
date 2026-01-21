@@ -13,7 +13,7 @@ class PicoDataExtraction(BaseModel):
     number_of_participants: int | None = Field(description="The total number of participants beeing part of the study")
     duration : int | None = Field(description="The duration of the intervention in seconds")
     countries : List[str] = Field(description="The countries where the study takes place")
-    interventions: List[str] = Field(description="Every arms (including control) intervention evaluated in the study (only one per arm, if there is one arm with multiple interventions use the word 'combined'), return as few words as possible ignore extra information about duration and dosage")
+    interventions: List[str] = Field(description="Every arms (including control group) intervention evaluated in the study (only one per arm, if there is one arm with multiple interventions use the word 'combined'), return as few words as possible ignore extra information about duration and dosage")
     conditions: List[str] = Field(description="The elegible particpants conditions (nouns and adjectives)")
     outcomes: List[str] = Field(description="The outcomes of this study")
     authors : List[str] = Field(description="The authors associated with this article (lastname + firstname initials for example: 'Nicolaas P A Zuithoff' -> 'Zuithoff NPA')")
@@ -24,9 +24,9 @@ extract_prompt = ChatPromptTemplate.from_messages([
     (
         "system",
         "You are a clinical research expert. "
-        "Extract PICO-style structured data strictly from the provided document. "
+        "Extract PICO-style structured data strictly from the provided inputs. "
         "First, extract information from the TITLE and ABSTRACT. "
-        "Then, use the FULL TEXT to confirm, validate, or correct the information from the TITLE and ABSTRACT. "
+        "Then, use the FULL TEXT to confirm, validate, correct, or complete the information from the TITLE and ABSTRACT. "
         "If a field is missing or unclear after checking the FULL TEXT, leave it empty or infer conservatively. "
         "Do not make up something, use the exact same phrases from the source. "
     ),
