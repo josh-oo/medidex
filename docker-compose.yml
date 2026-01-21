@@ -1,6 +1,18 @@
 version: '3.8'
 
 services:
+  docling:
+    image: quay.io/docling-project/docling-serve-cpu:v1.10.0
+    container_name: docling
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "1"
+    expose:
+      - 5001
+    ports:
+      - "5001:5001"
+    networks:
+      - internal_net
+
   postgres:
     image: postgres:18-alpine
     container_name: postgres
@@ -10,8 +22,9 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/_data/postgres-init:/docker-entrypoint-initdb.d
-    ports:
-      - "5432:5432"
+      - ${POSTGRES_BACKUPS}:/backups
+    expose:
+      - 5432
     networks:
       - internal_net
 
