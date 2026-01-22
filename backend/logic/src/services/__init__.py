@@ -1,4 +1,4 @@
-from fastapi import Depends
+from fastapi import Depends, Path
 
 from .vectorstore import VectorstoreService
 from .aspects import TagScoringService, TagSimilaritySearchService
@@ -19,7 +19,7 @@ from ..database.repositories.batch import BatchRepository
 
 from ..api.auth import get_user_id
 
-async def batch_hash_id_to_report_id(batch_hash: str, report_index: int,  batch_repo: BatchRepository = Depends(get_batch_repo)) -> int:
+async def batch_hash_id_to_report_id(batch_hash: str = Path(...), report_index: int = Path(...),  batch_repo: BatchRepository = Depends(get_batch_repo)) -> int:
     return await batch_repo.batch_item_to_report_id(batch_hash, report_index)
 
 def get_embedding_service():
@@ -43,10 +43,13 @@ async def get_document_service_batch(report_id : int = Depends(batch_hash_id_to_
 def get_document_service(report_id : int, report_repo : ReportRepository = Depends(get_report_repo)) -> DocumentService:
     return DocumentService(report_id=report_id, report_repo=report_repo, crawler_service=CrawlerService(), docling_service=DoclingService())
 
+def get_document_service_batch(report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo)) -> DocumentService:
+    return DocumentService(report_id=report_id, report_repo=report_repo, crawler_service=CrawlerService(), docling_service=DoclingService())
+
 def get_llm_service(tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> LanguageModelService:
     return LanguageModelService(tag_similarity_service=tag_similarity_service)
 
-async def get_report_service_batch(report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), study_repo : StudyRepository = Depends(get_study_repo),document_service : DocumentService = Depends(get_document_service), llm_service : LanguageModelService = Depends(get_llm_service)) -> ReportService:
+def get_report_service_batch(report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), study_repo : StudyRepository = Depends(get_study_repo),document_service : DocumentService = Depends(get_document_service_batch), llm_service : LanguageModelService = Depends(get_llm_service)) -> ReportService:
     return ReportService(report_id=report_id, report_repo=report_repo, study_repo=study_repo, document_service=document_service, llm_service=llm_service )
 
 def get_report_service(report_id : int, report_repo : ReportRepository = Depends(get_report_repo), study_repo : StudyRepository = Depends(get_study_repo),document_service : DocumentService = Depends(get_document_service), llm_service : LanguageModelService = Depends(get_llm_service)) -> ReportService:
