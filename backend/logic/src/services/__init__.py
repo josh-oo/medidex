@@ -1,4 +1,4 @@
-from fastapi import Depends, Path
+from fastapi import Depends, Path, HTTPException
 
 from .vectorstore import VectorstoreService
 from .aspects import TagScoringService, TagSimilaritySearchService
@@ -20,7 +20,10 @@ from ..database.repositories.batch import BatchRepository
 from ..api.auth import get_user_id
 
 async def batch_hash_id_to_report_id(batch_hash: str = Path(...), report_index: int = Path(...),  batch_repo: BatchRepository = Depends(get_batch_repo)) -> int:
-    return await batch_repo.batch_item_to_report_id(batch_hash, report_index)
+    result = await batch_repo.batch_item_to_report_id(batch_hash, report_index)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Batch item not found")
+    return result
 
 def get_embedding_service():
     return EmbeddingService()

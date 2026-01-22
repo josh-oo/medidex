@@ -98,6 +98,7 @@ class CrawlerService:
             async with httpx.AsyncClient(headers=headers, timeout=30) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
+                #TODO handle nginx 500 bad gateerror
                 parsed_html = await asyncio.to_thread(self.extract_fourth_top_level_table, resp.text)
                 markdown = await asyncio.to_thread(self.html_to_lowest_level_markdown, parsed_html)
                 return markdown
