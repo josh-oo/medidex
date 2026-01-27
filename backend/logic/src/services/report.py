@@ -2,7 +2,7 @@ import fitz
 import re
 from rapidfuzz import fuzz
 
-from typing import List, Dict
+from typing import List, Dict, Any
 
 from ..utils.trial_registration_id import extract_trial_ids_from_text, extract_trial_id
 
@@ -10,7 +10,7 @@ from ..database import StudyRepository, ReportRepository
 from ..database.repositories.report import Report
 
 from .llm import LanguageModelService
-from .crawler import CrawlerService, DoclingService
+from .crawler import CrawlerService, DoclingService, PdfRetrieverService, OpenAlexService
 
 import os
 import asyncio
@@ -23,14 +23,12 @@ PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
 FULLTEXT_PATH = os.path.join(DATABASE_VOLUME,"resources", "fulltexts")
 
 class DocumentService:
-
-    def __init__(self, report_id : int, report_repo : ReportRepository, crawler_service : CrawlerService, docling_service : DoclingService):
+    def __init__(self, report_id : int, report_repo : ReportRepository, docling_service : DoclingService):
         self.report_id = report_id
 
         self.path = None
         self.pages = None
         self.report_repo = report_repo
-        self.crawler_service = crawler_service
         self.docling_service = docling_service
 
     async def get_path(self, mkdirs=False):
@@ -68,16 +66,6 @@ class DocumentService:
             path = await self.get_path()
             self.pages = await asyncio.to_thread(_sync_extract, path)
         return self.pages
-    
-    async def is_trial_registration(self) -> bool:
-        report = await self.report_repo.get_report_by_id(self.report_id)
-        authors = report.Authors.split("//")
-        if len(authors) != 1:
-            return False
-        trial_ids = extract_trial_id(None, None,authors)
-        if trial_ids == authors:
-            return True
-        return False
 
     async def is_abstract_collection(self) -> bool:
         """
@@ -150,38 +138,12 @@ class DocumentService:
         if fast:
             pages = await self.get_pages()
             return " ".join(pages)
-        # Use report_id as the filename, zero-padded to 5 digits
-        txt_name = str(self.report_id).zfill(5) + ".txt"
-        txt_path = os.path.join(FULLTEXT_PATH, txt_name)
-
-        # Try to read cached fulltext asynchronously
-        if os.path.exists(txt_path):
-            def _read_file(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    return f.read()
-            return await asyncio.to_thread(_read_file, txt_path)
 
         # Otherwise, generate the fulltext
         if await self.is_abstract_collection():
-            text = ""
-        elif await self.is_trial_registration():
-            report = await self.report_repo.get_report_by_id(self.report_id)
-            text = await self.crawler_service.get_html_for_trial_id(report.Authors)
+            return None          
         else:
-            text = await self.docling_service.parse_pdf(await self.get_path())
-            #pages = await self.get_pages()
-            #text = " ".join(pages)
-
-        # Ensure the directory exists
-        os.makedirs(FULLTEXT_PATH, exist_ok=True)
-
-        # Write the fulltext asynchronously
-        def _write_file(path, content):
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
-        await asyncio.to_thread(_write_file, txt_path, text)
-
-        return text
+           return await self.docling_service.parse_pdf(await self.get_path())
     
     async def upload_pdf(self, file):
         path = await self.get_path(mkdirs=True)
@@ -199,15 +161,27 @@ class DocumentService:
         }
         
 class ReportService:
-    def __init__(self, report_id : int, report_repo : ReportRepository, study_repo : StudyRepository, document_service : DocumentService, llm_service : LanguageModelService):
+    def __init__(self, report_id : int, report_repo : ReportRepository, study_repo : StudyRepository, document_service : DocumentService, llm_service : LanguageModelService,  crawler_service : CrawlerService, open_alex_service : OpenAlexService):
         self.report_id = report_id
         self.report_repo = report_repo
         self.study_repo = study_repo
 
         self.document_service = document_service
         self.llm_service = llm_service
+        self.open_alex_service = open_alex_service
+        self.crawler_service = crawler_service
 
         self.report = None
+
+    async def is_trial_registration(self) -> bool:
+        report = await self.get_report()
+        authors = report.Authors.split("//")
+        if len(authors) != 1:
+            return False
+        trial_ids = extract_trial_id(None, None,authors)
+        if trial_ids == authors:
+            return True
+        return False
 
     async def get_trial_ids(self, include_fulltext: bool, use_cache : bool = True) -> List:
         if use_cache:
@@ -227,7 +201,7 @@ class ReportService:
         
         if include_fulltext:
             try:
-                text = await self.document_service.get_fulltext(fast=True)
+                text = await self.get_fulltext(fast=True)
                 return extract_trial_ids_from_text(text)
             except:
                 pass
@@ -250,7 +224,7 @@ class ReportService:
         
         if include_fulltext:
             try:
-                text = await self.document_service.get_fulltext(fast=True)
+                text = await self.get_fulltext(fast=True)
                 return await _get_study_acronyms(text)
             except:
                 pass
@@ -270,7 +244,7 @@ class ReportService:
         if is_abstract:
             meta_data['report_type'] = 'abstract'       
         else:
-            fulltext = await self.document_service.get_fulltext(fast=False) 
+            fulltext = await self.get_fulltext(fast=False) 
 
         async def _extract_pico():
             report = await self.get_report()
@@ -304,6 +278,63 @@ class ReportService:
     async def get_report(self) -> Report:
         if not self.report:
             self.report = await self.report_repo.get_report_by_id(self.report_id)
+            if self.report is None:
+                raise Exception("Report not found")
         return self.report
+    
+    async def get_fulltext(self, fast : bool) -> str:
+        if fast:
+            return await self.document_service.get_fulltext(fast=True)
+        
+        txt_name = str(self.report_id).zfill(5) + ".txt"
+        txt_path = os.path.join(FULLTEXT_PATH, txt_name)
+
+        # Try to read cached fulltext asynchronously
+        if os.path.exists(txt_path):
+            def _read_file(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    return f.read()
+            return await asyncio.to_thread(_read_file, txt_path)
+        
+        if await self.is_trial_registration():
+            report = await self.get_report()
+            text = await self.crawler_service.get_html_for_trial_id(report.Authors)
+        else:
+            text = await self.document_service.get_fulltext(fast)
+
+        if text is None:
+            return None
+
+        # Ensure the directory exists
+        os.makedirs(FULLTEXT_PATH, exist_ok=True)
+
+        # Write the fulltext asynchronously
+        def _write_file(path, content):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+        await asyncio.to_thread(_write_file, txt_path, text)
+
+        return text
+    
+    async def get_open_alex(self) -> Any:
+        report = await self.get_report()
+        return await self.open_alex_service.get_data_by_doi(report.DOI)
+    
+    async def get_sources(self) -> Any:
+        report = await self.get_report()
+        if await self.is_trial_registration():
+            trial_registration = await self.get_fulltext(fast=False)
+            if trial_registration is None:
+                return None
+            for line in trial_registration.split("\n"):
+                if line.startswith("| URL: |"):
+                    return [{"type": "trial_registry", "source": line.split("|")[2].strip()}]
+        else:
+            if report.DOI is None:
+                return []
+            result = await self.open_alex_service.get_pdf_links_by_doi(report.DOI)
+            if result is None:
+                return None
+            return result
 
     

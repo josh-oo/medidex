@@ -4,20 +4,89 @@ import os
 from httpx import ReadTimeout
 from bs4 import BeautifulSoup
 from pathlib import Path
+from typing import Any, List
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 DOCLING_URL = os.getenv("DOCLING_URL")
+OPEN_ALEX_API = "https://api.openalex.org/works/https://doi.org/{doi}"
+
+class OpenAlexService:
+    def __init__(self):
+        #OPEN Alex limited to 10 requests per second
+        self.sem = asyncio.Semaphore(8)
+
+    async def get_data_by_doi(self, doi : str) -> Any:
+        url = OPEN_ALEX_API.format(doi=doi)
+        async with self.sem:
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+            except ReadTimeout:
+                raise Exception("Upstream request timed out")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    return {}
+                else:
+                    raise
+            
+        return resp.json()
+    
+    async def resolve_redirect_async(self, url : str):
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
+            response = await client.get(url)
+            return response.url
+    
+    async def get_pdf_links_by_doi(self, doi : str) -> List[str]:
+        #record = await self.get_data_by_doi(doi)
+        #tasks =  [self.resolve_redirect_async(loc['landing_page_url']) for loc in record.get('locations', [])]
+        #resolved_urls = await asyncio.gather(*tasks)
+        #return [str(url) for url in resolved_urls]
+        record = await self.get_data_by_doi(doi)
+        urls = []
+        for loc in record.get('locations', []):
+            if loc.get('pdf_url'):
+                urls.append({"type": "pdf", "source": loc['pdf_url']})
+            elif loc.get('landing_page_url'):
+                urls.append({ "type": "link", "source": loc['landing_page_url']})
+        return urls
+    
+    async def get_pmc_link_by_doi(self, doi : str):
+        record = await self.get_data_by_doi(doi)
+                
+        pmc_info = {}
+    
+        # Iterate through all locations to find the one hosted on PubMed Central
+        for loc in record.get("locations", []):
+            source_name = loc.get("source", {}).get("display_name", "")
+            
+            if "PubMed Central" in source_name:
+                pmc_info["landing_page"] = loc.get("landing_page_url")
+                pmc_info["pdf_url"] = loc.get("pdf_url")
+                break # Exit once found
+                
+        return pmc_info
+
+
+class PdfRetrieverService:
+    def __init__(self):
+        self.open_alex_service = OpenAlexService()
+
+    async def get_pdf_by_doi(self, doi : str) -> Any:
+        pmc_info = await self.open_alex_service.get_pmc_link_by_doi(doi)
+        return pmc_info
 
 class CrawlerService:
     def __init__(self):
         pass
 
-    def html_to_lowest_level_markdown(self, html_content):
+    def html_to_lowest_level_markdown(self, html_content : str):
         soup = BeautifulSoup(html_content, 'lxml')
         markdown_output = []
+        found_content = False
 
         for table in soup.find_all('table'):
             # Process only "leaf" tables (no nested tables inside)
@@ -31,7 +100,8 @@ class CrawlerService:
                     if any(cells):
                         rows.append(cells)
                         max_cols = max(max_cols, len(cells))
-                
+                if len(rows) > 1:
+                    found_content = True
                 if rows:
                     # Create Markdown table structure
                     # 1. Empty Header Row
@@ -47,6 +117,8 @@ class CrawlerService:
                     
                     markdown_output.append(f"{header}\n{separator}\n" + "\n".join(body))
 
+        if found_content == False:
+            return None
         return "\n\n".join(markdown_output)
 
     def extract_fourth_top_level_table(self, html: str) -> str:
@@ -99,6 +171,7 @@ class CrawlerService:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 #TODO handle nginx 500 bad gateerror
+                #TODO handle not found
                 parsed_html = await asyncio.to_thread(self.extract_fourth_top_level_table, resp.text)
                 markdown = await asyncio.to_thread(self.html_to_lowest_level_markdown, parsed_html)
                 return markdown

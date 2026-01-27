@@ -1,6 +1,6 @@
 from fastapi import APIRouter, File, UploadFile
 from fastapi import Depends, HTTPException, Query, Path
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 import os
 import json
 import enum
@@ -208,6 +208,17 @@ async def get_report_studies_by_id(
 #        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 #    return result
 
+@router.get("/reports/{report_id}/sources", dependencies=[Depends(is_verified_api_call)], summary="")
+async def get_pdf_links(report_service : ReportService = Depends(get_report_service)) -> List[Dict[str,str]]:
+    result = await report_service.get_sources()
+    if result is None:
+        raise HTTPException(status_code=404, detail="Sources not found")
+    return result
+
+@router.get("/reports/{report_id}/openalex", dependencies=[Depends(is_verified_api_call)], summary="")
+async def get_open_alex_data(report_service : ReportService = Depends(get_report_service)):
+    return await report_service.get_open_alex()
+
 @router.put("/reports/{report_id}/pdf", summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
 async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
     # Validate file is a PDF
@@ -217,7 +228,7 @@ async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to uplo
     # Extract report number from filename (e.g., "00123.pdf" -> 123)
     filename = file.filename
     if not filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="File must have .pdf extension.")
+        raise HTTPException(status_code=400, detail="File must have .pdf extension")
     
     #try:
     #    report_number = int(filename.replace(".pdf", "").lstrip("0") or "0")
@@ -244,7 +255,7 @@ async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to uplo
         #process_pdf(file_path)
         return document_service.upload_pdf(file)
     except:
-        raise HTTPException(status_code=500, detail=f"Failed to save PDF.")
+        raise HTTPException(status_code=500, detail=f"Failed to save PDF")
     
 @router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
 async def get_pdf(report_id : int, document_service : DocumentService = Depends(get_document_service),user_id = Depends(get_user_id)) -> FileResponse:
@@ -253,15 +264,15 @@ async def get_pdf(report_id : int, document_service : DocumentService = Depends(
         await post_report_event(-1, Event(event_type=f"report::{report_id}::downloaded", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
         return FileResponse(pdf_path, media_type="application/pdf")
     except:
-        raise HTTPException(status_code=404, detail="PDF file not found.")
+        raise HTTPException(status_code=404, detail="PDF file not found")
     
 @router.get("/reports/{report_id}/fulltext", summary="Get the parsed fulltext for a given report")
-async def get_fulltext(document_service : DocumentService = Depends(get_document_service)) -> str:
+async def get_fulltext(report_service : ReportService = Depends(get_report_service)) -> PlainTextResponse:
     try:
-        return await document_service.get_fulltext(fast=False)
+        return await report_service.get_fulltext(fast=False)
     except Exception as e:
         if str(e) == "Upstream request timed out":
-            raise HTTPException(status_code=504, detail="Upstream request timed out.")
+            raise HTTPException(status_code=504, detail="Upstream request timed out")
     
 @router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
 async def get_pdf_metadata(report_service : ReportService = Depends(get_report_service)) -> Dict:
@@ -270,13 +281,13 @@ async def get_pdf_metadata(report_service : ReportService = Depends(get_report_s
         return await report_service.get_metadata()
     except Exception as e:
         if str(e) == "Upstream request timed out":
-            raise HTTPException(status_code=504, detail="Upstream request timed out.")
+            raise HTTPException(status_code=504, detail="Upstream request timed out")
 
 @router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
 async def get_report_trial_ids(report_id : int, include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), report_repo : ReportRepository = Depends(get_report_repo)) -> List[str]:
     result = await report_repo.get_report_trial_ids(report_id, include_fulltext)
     if result is None:
-        raise HTTPException(status_code=404, detail="Report not found.")
+        raise HTTPException(status_code=404, detail="Report not found")
     return result
 
 @router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
