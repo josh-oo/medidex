@@ -255,7 +255,7 @@ class VectorstoreService():
 
         return related_tags
     
-    async def recommendation_query_builder(self, report_id : int, negative_reports : Optional[List[int]]):
+    def recommendation_query_builder(self, report_id : int, negative_reports : Optional[List[int]]):
 
         if not negative_reports:
             negative_reports = []

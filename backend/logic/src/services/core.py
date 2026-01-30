@@ -25,6 +25,9 @@ class StudySimilaritySearchService:
         if not self.user_id:
             self.user_id = "user"
 
+        if self.user_id == "LkjFowryai9jDNJuvSeGblROAlN5hVjd": #TODO remove if user is alessandro
+            self.add_noise = True
+
     async def get_similar_study_by_query(self, query : Any, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], trial_ids: List[str], authors:List[str], return_details: bool):
     
         found_study_ids = {}
@@ -117,7 +120,7 @@ class StudySimilaritySearchService:
             query = add_noise_to_vector(vectors['default'], random_value, report.CRGReportID)
 
         else:
-            query = await self.vectorstore.recommendation_query_builder(report.CRGReportID, negative_reports)
+            query = self.vectorstore.recommendation_query_builder(report.CRGReportID, negative_reports)
         
         result = await self.get_similar_study_by_query(query,aspect,cutoff,k,negative_studies, trial_ids, authors, return_details=return_details)
 
