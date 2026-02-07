@@ -64,7 +64,7 @@ def get_random_value(user_id: str, report_id: int) -> float:
     
     #TODO remove those hardcoded features later
     user_id = "A6wfPAG7IuAsKgJowSnaLoD9IgWleEru" #johannas user id
-    if report_id in JOHANNA_PROCESSED_REPORTS:
+    if not report_id in JOHANNA_PROCESSED_REPORTS:
         return 0.0
     
     data = f"{user_id}|{report_id}".encode("utf-8")
