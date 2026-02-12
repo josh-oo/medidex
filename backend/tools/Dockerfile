@@ -1,5 +1,5 @@
 # Stage 1: Compile the .proto file
-FROM python:3.13-slim AS proto-builder
+FROM python:3.13.11-slim AS proto-builder
 
 WORKDIR /proto
 RUN pip3 install --no-cache-dir grpcio-tools==1.76.0
@@ -8,7 +8,7 @@ COPY utils/embedding.proto .
 RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding.proto
 
 # Stage 2: Main app
-FROM python:3.13-slim
+FROM python:3.13.11-slim
 
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 

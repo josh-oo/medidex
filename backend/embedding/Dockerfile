@@ -1,5 +1,5 @@
 # Stage 1: Compile the .proto file
-FROM python:3.13.12-slim AS model-builder
+FROM python:3.13.11-slim AS model-builder
 ARG EMBEDDING_MODEL_PATH
 ARG EMBEDDING_MODEL_REVISION
 ARG EMBEDDING_MODEL_DTYPE
@@ -15,8 +15,8 @@ ENV EMBEDDING_MODEL_TOKENIZER_REVISION=${EMBEDDING_MODEL_TOKENIZER_REVISION}
 ENV EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
 
 WORKDIR /model
-RUN pip3 install --no-cache-dir grpcio-tools==1.76.0 transformers==4.52.4 python-dotenv==1.1.0 onnxscript==0.5.7&& \
-    pip3 install --no-cache-dir torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
+RUN pip3 install --no-cache-dir grpcio-tools==1.76.0 transformers==4.52.4 python-dotenv==1.1.0 onnxscript==0.6.2&& \
+    pip3 install --no-cache-dir torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
 
 COPY embedding/model_loader.py .
 RUN python model_loader.py
@@ -25,7 +25,7 @@ COPY tools/utils/embedding.proto .
 RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding.proto
 
 # Stage 2: Main app
-FROM python:3.13.12-slim
+FROM python:3.13.11-slim
 
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
