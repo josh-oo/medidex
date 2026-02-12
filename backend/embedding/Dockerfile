@@ -1,5 +1,5 @@
 # Stage 1: Compile the .proto file
-FROM python:3.13-slim AS model-builder
+FROM python:3.13.12-slim AS model-builder
 ARG EMBEDDING_MODEL_PATH
 ARG EMBEDDING_MODEL_REVISION
 ARG EMBEDDING_MODEL_DTYPE
@@ -25,7 +25,7 @@ COPY tools/utils/embedding.proto .
 RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding.proto
 
 # Stage 2: Main app
-FROM python:3.13-slim
+FROM python:3.13.12-slim
 
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
