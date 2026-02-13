@@ -4,6 +4,7 @@ import os
 from httpx import ReadTimeout
 from bs4 import BeautifulSoup
 from pathlib import Path
+import fitz  # PyMuPDF
 
 from dotenv import load_dotenv
 
@@ -131,8 +132,11 @@ class DoclingService:
             "table_mode": "fast",
         }
 
-        file_size_mb = path.stat().st_size / (1024 * 1024)
-        timeout = 30 + int(file_size_mb) * 30
+        doc = fitz.open(path)
+        num_pages = doc.page_count
+        doc.close()
+
+        timeout = min(num_pages * 10, 120)
 
         async with self.sem:
             try:
