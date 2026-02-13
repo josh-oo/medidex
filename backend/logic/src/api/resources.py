@@ -251,7 +251,7 @@ async def get_pdf(report_id : int, document_service : DocumentService = Depends(
     try:
         pdf_path = await document_service.get_path()
         await post_report_event(-1, Event(event_type=f"report::{report_id}::downloaded", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
-        return FileResponse(pdf_path, media_type="application/pdf")
+        return FileResponse(pdf_path, media_type="application/pdf", filename=f"{report_id}.pdf")
     except:
         raise HTTPException(status_code=404, detail="PDF file not found.")
     
@@ -273,8 +273,8 @@ async def get_pdf_metadata(report_service : ReportService = Depends(get_report_s
             raise HTTPException(status_code=504, detail="Upstream request timed out.")
 
 @router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
-async def get_report_trial_ids(report_id : int, include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), report_repo : ReportRepository = Depends(get_report_repo)) -> List[str]:
-    result = await report_repo.get_report_trial_ids(report_id, include_fulltext)
+async def get_report_trial_ids(include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), report_service : ReportService = Depends(get_report_service)) -> List[str]:
+    result = await report_service.get_trial_ids(include_fulltext)
     if result is None:
         raise HTTPException(status_code=404, detail="Report not found.")
     return result

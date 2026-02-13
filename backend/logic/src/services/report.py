@@ -210,12 +210,12 @@ class ReportService:
         self.report = None
 
     async def get_trial_ids(self, include_fulltext: bool, use_cache : bool = True) -> List:
-        if use_cache:
+        if include_fulltext and use_cache:
             data = await self.report_repo.load_report_metadata(self.report_id)
             if data is not None and "trial_id" in data:
                 return data["trial_id"]
         trial_ids = await self._get_trial_ids(include_fulltext)
-        if use_cache:
+        if include_fulltext and use_cache:
             await self.report_repo.save_report_metadata_field(self.report_id, "trial_id", trial_ids)
         return trial_ids
 
