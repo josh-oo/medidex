@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from typing import Dict, List, Optional,  Any
 import os
@@ -27,7 +27,7 @@ from ..database import StudyRepository
 from ..database import ReportRepository
 from ..database import BatchRepository
 
-from ..database.models import Report, Batch
+from ..database.models import Report as DbReport, Batch as DbBatch
 
 from ..services import get_tag_similarity_service, TagSimilaritySearchService
 from ..services import get_related_tag_service, RelatedTagSearchService
@@ -42,13 +42,15 @@ from ..services import get_maintenance_service, MaintenanceService
 
 from ..services import batch_hash_id_to_report_id
 
+from .resources import Report
+
 load_dotenv()
 
 MODEL_HOST = os.getenv("EMBEDDING_SERVICE_HOST")
 MODEL_PORT = os.getenv("EMBEDDING_SERVICE_PORT")
 COLLECTION_NAME = os.getenv("VECTORSTORE_COLLECTION_NAME")
 
-DEBUG = os.getenv("DEBUG", "FALSE") == "TRUE"
+DEBUG = os.getenv("DEBUG", None) == "true"
 
 setup_logging("events.log")
 logger = logging.getLogger(__name__)
@@ -68,13 +70,17 @@ batch_subscribers_lock = asyncio.Lock()
 # Track background tasks to prevent resource leaks
 background_tasks: set = set()
 
-class BatchResponse(BaseModel):
+class Batch(BaseModel):
     batch_hash: str
     batch_description: Optional[str]
     number_reports: Optional[int]
     created_at: Optional[datetime]
     embedded: int = 0
     assigned: int = 0
+
+class BatchedReport(BaseModel):
+    report:Report
+    assignedStudies: List[int] = Field(default_factory=list)
 
 class TagResponse(BaseModel):
     id: str
@@ -111,7 +117,7 @@ async def publish_batch_update(batch_hash: str):
             # Use lambda to be explicit and handle potential exceptions in cleanup
             task.add_done_callback(lambda t: background_tasks.discard(t))
 
-async def process_report(reports : List[Report], batch_hash : str, batch_repo : BatchRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService):
+async def process_report(reports : List[DbReport], batch_hash : str, batch_repo : BatchRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService):
     async def process(report):
         batch = await batch_repo.get_batch_by_hash(batch_hash)
         if not batch:
@@ -130,7 +136,7 @@ async def finalize_batch_upload(batch_hash : str, batch_repo : BatchRepository, 
     Updates batch status and notifies subscribers when complete.
     """
     # Get all reports in the batch
-    crg_report_ids = await batch_repo.get_batch_associated_reports(batch_hash)
+    crg_report_ids = await batch_repo.get_batch_associated_report_ids(batch_hash)
     
     if not crg_report_ids:
         #Batch not available
@@ -276,7 +282,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
             print(f"UPLOAD FILE: Error replacing in abstract for entry: {entry}\nException: {e}")
             safe_abstract = str(abstract) if abstract is not None else ""
 
-        report = Report(
+        report = DbReport(
             Title=safe_title,
             Abstract=safe_abstract,
             Authors=authors_str,
@@ -324,10 +330,10 @@ async def get_batch_by_hash(batch_hash: str, batch_repo: BatchRepository = Depen
         raise HTTPException(status_code=404, detail="Batch not found")
     return batch
 
-async def get_batch_associated_reports(batch: Batch = Depends(get_batch_by_hash), batch_repo: BatchRepository = Depends(get_batch_repo)):
-    return await batch_repo.get_batch_associated_reports(batch.BatchHash)
+async def get_batch_associated_report_ids(batch: DbBatch = Depends(get_batch_by_hash), batch_repo: BatchRepository = Depends(get_batch_repo)):
+    return await batch_repo.get_batch_associated_report_ids(batch.BatchHash)
 
-async def get_batch_stats(batch: Batch = Depends(get_batch_by_hash), crg_report_ids : List[int] = Depends(get_batch_associated_reports), report_repo: ReportRepository = Depends(get_report_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> BatchResponse:
+async def get_batch_stats(batch: DbBatch = Depends(get_batch_by_hash), crg_report_ids : List[int] = Depends(get_batch_associated_report_ids), report_repo: ReportRepository = Depends(get_report_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> Batch:
 #async def get_batch_stats(batch_hash : str, batch_repo: BatchRepository = Depends(get_batch_repo), report_repo: ReportRepository = Depends(get_report_repo)) -> BatchResponse:
     # Fetch all report studies in parallel
     #batch = batch_repo.get_batch_by_hash(hash)
@@ -339,7 +345,7 @@ async def get_batch_stats(batch: Batch = Depends(get_batch_by_hash), crg_report_
     # Count reports with assigned studies
     assigned_count = sum(1 for studies in all_studies if len(studies) > 0)
 
-    return BatchResponse(
+    return Batch(
         batch_hash=batch.BatchHash,
         batch_description=batch.BatchDescription,
         created_at=batch.DateCreated,
@@ -349,25 +355,25 @@ async def get_batch_stats(batch: Batch = Depends(get_batch_by_hash), crg_report_
     )
 
 @router.get("/batches", dependencies=[Depends(is_verified_api_call)], summary="Get an overview of current report batches.", description="For each batch the current progress of embedding calculation and the number of already assigned reports is returned")
-async def get_available_batches(batch_repo: BatchRepository = Depends(get_batch_repo), report_repo: ReportRepository = Depends(get_report_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> List[BatchResponse]:
+async def get_available_batches(batch_repo: BatchRepository = Depends(get_batch_repo), report_repo: ReportRepository = Depends(get_report_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> List[Batch]:
     # Get all batches
     batches = await batch_repo.get_all_batches()
 
     # Process all batches in parallel
     tasks = []
     for batch in batches:
-        crg_report_ids = await batch_repo.get_batch_associated_reports(batch.BatchHash)
+        crg_report_ids = await batch_repo.get_batch_associated_report_ids(batch.BatchHash)
         tasks.append(get_batch_stats(batch, crg_report_ids, report_repo, vectorstore))
     batch_responses = await asyncio.gather(*tasks)
 
     return batch_responses
 
 @router.get("/batches/{batch_hash}", dependencies=[Depends(is_verified_api_call)], summary="Get a specific report batch by hash.",description="Returns details and progress information for a single report batch identified by batch_hash.")
-async def get_batch_stats_by_hash(batch_stats : BatchResponse = Depends(get_batch_stats)) -> BatchResponse:
+async def get_batch_stats_by_hash(batch_stats : Batch = Depends(get_batch_stats)) -> Batch:
     return batch_stats
 
 @router.delete("/batches/{batch_hash}", dependencies=[Depends(is_verified_api_call)], summary="Delete a report batch and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
-async def delete_batch(batch_hash : str, crg_report_ids : List[int] = Depends(get_batch_associated_reports), batch_repo: BatchRepository = Depends(get_batch_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+async def delete_batch(batch_hash : str, crg_report_ids : List[int] = Depends(get_batch_associated_report_ids), batch_repo: BatchRepository = Depends(get_batch_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
     
     #Deletes the batch and through cascade and triggers everythig related to it
     await batch_repo.delete_batch(batch_hash)
@@ -377,6 +383,33 @@ async def delete_batch(batch_hash : str, crg_report_ids : List[int] = Depends(ge
     await publish_batch_update(batch_hash)
     
     return Response(status_code=204)
+
+@router.get("/batches/{batch_hash}/reports", dependencies=[Depends(is_verified_api_call)], summary="Get a specific report batch by hash.",description="Returns details and progress information for a single report batch identified by batch_hash.")
+async def get_batch_stats_by_hash(report_ids: List[int] = Depends(get_batch_associated_report_ids), report_repo : ReportRepository = Depends(get_report_repo)) -> List[BatchedReport]:
+    reports = await report_repo.get_all_reports(report_ids)
+    all_linked_studies = await report_repo.get_linked_studies_for_reports(report_ids)
+
+    result = []
+    for report in reports:
+        authors = report.Authors.split("//") if report.Authors else []
+        linked_studies = []
+        if report.CRGReportID in all_linked_studies.keys():
+            linked_studies = [study.CRGStudyID for study in all_linked_studies[report.CRGReportID]]
+
+        result.append(
+            BatchedReport(
+                report=Report(
+                    reportId=report.CRGReportID,
+                    year=report.Year,
+                    title=report.Title,
+                    abstract=report.Abstract,
+                    authors=authors,
+                    trialId=report.TrialRegistrationID
+                ),
+                assignedStudies=linked_studies,
+            )
+        )
+    return result
 
 @router.get("/batches/{batch_hash}/subscribe",dependencies=[Depends(is_verified_api_call)], summary="Stream updated batch information.")
 async def stream_batch_updates(batch_hash : str,  request: Request, batch_repo: BatchRepository = Depends(get_batch_repo)) -> StreamingResponse:
@@ -454,18 +487,18 @@ async def get_batched_report(crg_report_id : int = Depends(batch_hash_id_to_repo
     return report
 
 @router.put("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=200)
-async def assign_studies(batch_hash: str = batch_hash_path, study_ids: List[int] = Query(..., description="The study ids (CRGReportIDs) you want to assign to the specified report."), crg_report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+async def assign_studies(batch_hash: str = batch_hash_path, study_ids: List[int] = Query(..., description="The study ids you want to assign to the specified report."), report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
     await asyncio.gather(
-        report_repo.link_studies(crg_report_id, study_ids),
-        vectorstore.link_report_to_study_ids(crg_report_id, study_ids, user_id)
+        report_repo.link_studies(report_id, study_ids),
+        vectorstore.link_report_to_study_ids(report_id, study_ids, user_id)
     )
 
     await publish_batch_update(batch_hash)
     
-    payload = {"user": user_id, "event_type": "study::links::changed", "report_id": crg_report_id, "original_timestamp": "-"}
+    payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
 
-    return await get_batched_report(crg_report_id, report_repo, vectorstore)
+    return await get_batched_report(report_id, report_repo, vectorstore)
 
 @router.delete("/batches/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=200)
 async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
@@ -635,3 +668,34 @@ async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagC
     if aspect not in [TagCategories.interventions, TagCategories.conditions, TagCategories.outcomes]:
          raise HTTPException(status_code=501, detail="Not implemented")
     return await related_tag_service.search_related_tags_by_report_id(report_id, aspect, k, cutoff)
+
+@router.put("/reports/{report_id}/studies/{study_id}", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=200)
+async def assign_studies(report_id : int, study_id: int, report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+    #TODO get corresponding batch and check access rights
+    await asyncio.gather(
+        report_repo.append_study_link(report_id, study_id),
+        vectorstore.link_report_to_study_id(report_id, study_id, user_id)
+    )
+
+    #await publish_batch_update(batch_hash)
+    
+    payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
+    logger.info("ReportInteraction", extra={"payload": payload})
+
+    return Response(content=None, status_code=200)
+
+@router.delete("/batches/{report_id}/studies/{study_id}", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=200)
+async def delete_assigned_studies(report_id : int, study_id: int, report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+    #TODO get corresponding batch and check access rights
+
+    await asyncio.gather(
+        report_repo.unlink_studies(report_id, study_id),
+        vectorstore.unlink_report_from_study_id(report_id, study_id, user_id)
+    )
+
+    #await publish_batch_update(batch_hash)
+
+    payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
+    logger.info("ReportInteraction", extra={"payload": payload})
+
+    return Response(content=None, status_code=200)

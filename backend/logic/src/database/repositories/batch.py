@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select, delete, insert
 
 from ..models import Report, Study, ReportAdded, Batch, BatchInnerScore, StudyReport, StudyReportAdded
-from typing import List, Dict, Any
+from typing import List
 
 class BatchRepository:
     def __init__(self, db : AsyncSession, user_id : str):
@@ -86,7 +86,7 @@ class BatchRepository:
         batch = await self.db.execute(select(Batch).where(Batch.BatchHash == batch_hash))
         return batch.scalar_one_or_none()
     
-    async def get_batch_associated_reports(self, batch_hash : str):
+    async def get_batch_associated_report_ids(self, batch_hash : str):
         result = await self.db.execute(
             select(ReportAdded.CRGReportID).where(ReportAdded.BatchHash == batch_hash)
         )

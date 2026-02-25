@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select, delete, func
+from sqlmodel import select, delete
 
 from ..models import Report, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions
 from typing import List, Dict, Any, Optional
@@ -143,10 +143,72 @@ class ReportRepository:
         except Exception as e:
             await self.db.rollback()
             raise Exception(f"Failed to update report-study links: {str(e)}")
-        
-    async def unlink_studies(self, report_id: int) -> Dict[str, Any]:
+    
+    async def append_study_link(self, report_id: int, study_id: int) -> Dict[str, Any]:
         """
-        Internal implementation to delete all links between a report and studies.
+        Append a single study link to a report without touching existing links.
+        """
+        try:
+            # Validate report exists
+            report = await self.db.get(Report, report_id)
+            if not report:
+                raise Exception("Report not found")
+
+            # Validate study exists
+            study = await self.db.get(Study, study_id)
+            if not study:
+                return {
+                    "report_id": report_id,
+                    "created_count": 0,
+                    "invalid_study_ids": [study_id],
+                    "created_links": [],
+                    "was_duplicate": False
+                }
+
+            # Avoid duplicate links
+            existing_stmt = (
+                select(StudyReport.StudyReportID)
+                .where(StudyReport.CRGReportID == report_id)
+                .where(StudyReport.CRGStudyID == study_id)
+            )
+            existing_link = (await self.db.execute(existing_stmt)).scalar_one_or_none()
+            if existing_link:
+                return {
+                    "report_id": report_id,
+                    "created_count": 0,
+                    "invalid_study_ids": [],
+                    "created_links": [],
+                    "was_duplicate": True
+                }
+
+            # Create new link and track creator
+            new_study_report = StudyReport(CRGReportID=report_id, CRGStudyID=study_id)
+            self.db.add(new_study_report)
+            await self.db.flush()
+
+            self.db.add(StudyReportAdded(
+                StudyReportID=new_study_report.StudyReportID,
+                CreatedBy=self.user_id
+            ))
+
+            await self.db.commit()
+
+            return {
+                "report_id": report_id,
+                "created_count": 1,
+                "invalid_study_ids": [],
+                "created_links": [{"CRGReportID": report_id, "CRGStudyID": study_id}],
+                "was_duplicate": False
+            }
+
+        except Exception as e:
+            await self.db.rollback()
+            raise Exception(f"Failed to append study link: {str(e)}")
+        
+    async def unlink_studies(self, report_id: int, study_id: int = None) -> Dict[str, Any]:
+        """
+        Internal implementation to delete links between a report and studies.
+        If study_id is provided, only that link is removed.
         Only deletes links created by the specified user or links with no creator.
         """
         try:
@@ -162,6 +224,9 @@ class ReportRepository:
                 .where(StudyReport.CRGReportID == report_id)
             )
             
+            if study_id is not None:
+                stmt = stmt.where(StudyReport.CRGStudyID == study_id)
+
             # If user is provided, filter by CreatedBy
             if self.user_id:
                 stmt = stmt.where(StudyReportAdded.CreatedBy == self.user_id)
@@ -220,6 +285,52 @@ class ReportRepository:
             stmt = stmt.where(Study.DateEntered <= date_to)
         
         return (await self.db.execute(stmt)).scalars().all()
+    
+    async def get_linked_studies_for_reports(
+        self,
+        report_ids: List[int],
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None
+    ) -> Dict[int, List[Study]]:
+        """Return linked studies for multiple reports keyed by report ID."""
+        report_ids = report_ids or []
+        if not report_ids:
+            return {}
+
+        # Filter out non-existent reports to keep results consistent with get_linked_studies()
+        existing_stmt = select(Report.CRGReportID).where(Report.CRGReportID.in_(report_ids))
+        existing_ids = set((await self.db.execute(existing_stmt)).scalars().all())
+        if not existing_ids:
+            return {}
+
+        stmt = (
+            select(StudyReport.CRGReportID, Study)
+            .join(Study, Study.CRGStudyID == StudyReport.CRGStudyID)
+            .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+            .where(StudyReport.CRGReportID.in_(existing_ids))
+        )
+
+        if self.user_id:
+            stmt = stmt.where((StudyReportAdded.CreatedBy == self.user_id) | (StudyReportAdded.CreatedBy.is_(None)))
+
+        if date_from:
+            stmt = stmt.where(Study.DateEntered >= date_from)
+        if date_to:
+            stmt = stmt.where(Study.DateEntered <= date_to)
+
+        rows = (await self.db.execute(stmt)).all()
+
+        studies_by_report: Dict[int, List[Study]] = {rid: [] for rid in existing_ids}
+        for rid, study in rows:
+            studies_by_report.setdefault(rid, []).append(study)
+
+        # Preserve the input ordering for convenience and drop non-existent report IDs
+        ordered_result: Dict[int, List[Study]] = {}
+        for rid in report_ids:
+            if rid in studies_by_report:
+                ordered_result[rid] = studies_by_report[rid]
+
+        return ordered_result
     
     async def get_all_reports(self, report_ids : Optional[List[int]] = None, date_from : Optional[str] = None, date_to: Optional[str] = None) -> List[Report]:
         stmt = select(Report).where((Report.Title.isnot(None)) | (Report.Abstract.isnot(None)))

@@ -28,7 +28,7 @@ class StudySimilaritySearchService:
         if self.user_id == "LkjFowryai9jDNJuvSeGblROAlN5hVjd": #TODO remove if user is alessandro
             self.add_noise = True
 
-        self.add_noise = True
+        #self.add_noise = True
 
     async def get_similar_study_by_query(self, query : Any, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], trial_ids: List[str], authors:List[str], return_details: bool):
     

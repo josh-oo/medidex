@@ -20,11 +20,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./backend/_data/postgres-init:/docker-entrypoint-initdb.d
       - ${POSTGRES_BACKUPS}:/backups
     expose:
       - 5432
+    ports:
+      - "5432:5432"
     networks:
       - internal_net
 
@@ -101,10 +103,24 @@ services:
       - DOCLING_URL=${DOCLING_URL}
       - DEBUG=${DEBUG}
 
+  gen_ai:
+    container_name: gen_ai
+    build:
+      context: ./medidex/backend
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MEERKAT_API_URL=${BACKEND_API_URL}
+      - MEERKAT_API_KEY=${BACKEND_API_KEY}
+    networks:
+      - internal_net
+
   frontend:
     container_name: frontend
     build:
-      context: ./frontend
+      context: ./medidex
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
@@ -114,6 +130,8 @@ services:
       - STAGE=${STAGE}
       - MEERKAT_API_URL=${BACKEND_API_URL}
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/medidex?schema=public
+      - GENAI_API_URL=http://gen_ai:8001
+      - INACTIVITY_DIALOG=${INACTIVITY_DIALOG}
     networks:
       - internal_net
       - public_net

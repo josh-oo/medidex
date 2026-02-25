@@ -45,7 +45,7 @@ class StudyRepository:
                 raise ValueError(f"Invalid field(s): {', '.join(invalid_fields)}")
         return tuple(getattr(Report, f) for f in fields), fields
 
-    async def add_study(self, short_name : str, study_status: str, countries : List[str], duration : str, central_submission_status : str, number_of_participants : int, comparison : str) -> Study:
+    async def add_study(self, short_name : str, study_status: str, countries : List[str], duration : str, number_of_participants : int, comparison : str) -> Study:
         #TODO add more sophisticated checks
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         
@@ -53,7 +53,6 @@ class StudyRepository:
             ShortName=short_name,
             StatusofStudy=study_status,
             Countries="//".join(countries),
-            CENTRALSubmissionStatus=central_submission_status,
             Duration=duration,
             NumberParticipants=str(number_of_participants),
             Comparison=comparison,
