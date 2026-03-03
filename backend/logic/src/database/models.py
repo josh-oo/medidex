@@ -12,6 +12,16 @@ Resources
 
 metadata_resources = MetaData()
 
+
+def _current_utc_timestamp() -> str:
+    """Return a UTC timestamp string that matches existing DB formatting."""
+    return datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _current_utc_datetime() -> datetime.datetime:
+    """Return timezone-naive UTC datetime for timestamp columns."""
+    return datetime.datetime.utcnow()
+
 class Report(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblReport"
 
@@ -32,8 +42,8 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
     CENTRALSubmissionStatus : Optional[int]
     CopyStatus: Optional[str]
     DatetoCENTRAL: Optional[str]
-    Dateentered: str
-    DateEdited: Optional[str]
+    Dateentered: str = Field(default_factory=_current_utc_timestamp)
+    DateEdited: Optional[str] = Field(default_factory=_current_utc_timestamp)
     Editors: Optional[str]
     Publisher: Optional[str]
     City: Optional[str]
@@ -99,6 +109,7 @@ class StudyReport(SQLModel, table=True, metadata=metadata_resources):
     __table_args__ = (
         Index('idx_studyreport_report', 'CRGReportID'),  # For report->studies lookups
         Index('idx_studyreport_study', 'CRGStudyID'),  # For study->reports lookups
+        Index('uq_studyreport_report_study', 'CRGReportID', 'CRGStudyID', unique=True),  # Prevent duplicate links
     )
 
 class Participant(SQLModel, table=True, metadata=metadata_resources):
@@ -213,14 +224,14 @@ class StudyAdded(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyAdded"
 
     CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
-    DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    DateCreated: datetime.datetime = Field(default_factory=_current_utc_datetime)
     CreatedBy: Optional[str]
 
 class StudyReportAdded(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblStudyReportAdded"
 
     StudyReportID: int = Field(primary_key=True, foreign_key="tblStudyReport.StudyReportID", ondelete="CASCADE")
-    DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    DateCreated: datetime.datetime = Field(default_factory=_current_utc_datetime)
     CreatedBy: Optional[str]
 
     __table_args__ = (

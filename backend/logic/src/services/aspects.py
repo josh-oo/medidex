@@ -26,8 +26,8 @@ class TagSimilaritySearchService:
         data = await self.vectorstore.get_similar_tags_by_embedding(embedding, sources, aspect, k)
 
         result = [
-            {"id": i, "keyword": k, "relevance": r}
-            for i, k, r in zip(data["ID"], data["Keyword"], data["Relevance"])
+            {"id": i, "name": n, "score": s}
+            for i, n, s in zip(data["ID"], data["Keyword"], data["Relevance"])
         ]
         return result  
     

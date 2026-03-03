@@ -46,6 +46,29 @@ class Report(BaseModel):
     abstract: Optional[str]
     trialId: Optional[str]
     authors: List[str]
+    createdAt: Optional[str]
+    updatedAt: Optional[str]
+
+class Study(BaseModel):
+    studyId: int
+    shortName: str
+    status: str
+    countries: List[str]
+    numberParticipants: Optional[str]
+    duration: Optional[str]
+    comparison: Optional[str]
+    trialId: Optional[str]
+    createdAt: Optional[str]
+    updatedAt: Optional[str]
+
+class StudyCreate(BaseModel):
+    shortName: str
+    status: str
+    countries: List[str]
+    numberParticipants: Optional[str]
+    duration: Optional[str]
+    comparison: Optional[str]
+    trialId: Optional[str] = None
 
 class StudyStatus(str, enum.Enum):
     closed = "Closed"
@@ -59,13 +82,13 @@ class CENTRALSubmissionStatus(str, enum.Enum):
     rejected = "Rejected"
     not_cochrane = "Not Cochrane"
 
-class StudyParams(BaseModel):
-    short_name: str
-    status_of_study: StudyStatus
-    countries: List[str]
-    duration: str
-    number_of_participants : int
-    comparison : str
+#class StudyParams(BaseModel):
+#    short_name: str
+#    status_of_study: StudyStatus
+#    countries: List[str]
+#    duration: str
+#    number_of_participants : int
+#    comparison : str
 
 class Event(BaseModel):
     timestamp: str
@@ -96,17 +119,34 @@ report_id_path = Path(..., description="ReportID")
 Study Endpoints
 """
 
-@router.put("/studies", summary="Add new study to meerkat.")
-async def add_study(study_params: StudyParams, user_id = Depends(get_user_id), study_repo : StudyRepository = Depends(get_study_repo)) -> DbStudy:
-    result = await study_repo.add_study(short_name=study_params.short_name, study_status=study_params.status_of_study, countries=study_params.countries, duration =study_params.duration, number_of_participants = study_params.number_of_participants, comparison = study_params.comparison) #_add_study(study_params, user_id, session)
-    await post_report_event(-1, Event(event_type=f"study::{result.CRGStudyID}::created", timestamp=datetime.now(timezone.utc).isoformat()),user_id)
+def transform_to_output_studies(studies):
+    result = []
+    for study in studies:
+        output_study = Study(
+            studyId=study.CRGStudyID,
+            shortName=study.ShortName,
+            numberParticipants=study.NumberParticipants,
+            duration=study.Duration,
+            comparison=study.Comparison,
+            countries=study.Countries.split("//"),
+            createdAt=study.DateEntered,
+            updatedAt=study.DateEdited,
+            status=study.StatusofStudy,
+            trialId=study.ISRCTN,
+        )
+        result.append(output_study)
     return result
 
+@router.put("/studies", summary="Add new study to meerkat.")
+async def add_study(study_params: StudyCreate, user_id = Depends(get_user_id), study_repo : StudyRepository = Depends(get_study_repo)) -> Study:
+    result = await study_repo.add_study(short_name=study_params.shortName, study_status=study_params.status, countries=study_params.countries, duration =study_params.duration, number_of_participants = study_params.numberParticipants, comparison = study_params.comparison)
+    return transform_to_output_studies([result])[0]
+
 @router.get("/studies", summary="Get study details for all studies specified in the query.")
-async def get_studies(study_ids: List[int] = study_ids_query, user_id = Depends(get_user_id), study_repo : StudyRepository = Depends(get_study_repo)) -> List[DbStudy]:
+async def get_studies(study_ids: List[int] = study_ids_query, user_id = Depends(get_user_id), study_repo : StudyRepository = Depends(get_study_repo)) -> List[Study]:
     result = await study_repo.get_studies(study_ids)# _get_studies(study_ids, session)
     await asyncio.gather(*[post_report_event(-1, Event(event_type=f"study::{study_id}::visited", timestamp=datetime.now(timezone.utc).isoformat()), user_id) for study_id in study_ids])
-    return result
+    return transform_to_output_studies(result)
 
 @router.get("/studies/reports", include_in_schema=False)
 async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, fields: Optional[List[str]] = Query(None), study_repo : StudyRepository = Depends(get_study_repo)) -> Dict[int, List[DbReport]]:
@@ -134,8 +174,9 @@ async def get_study_reports_by_id(study_id : int = study_id_path, study_repo : S
             title=db_report['Title'],
             abstract=db_report['Abstract'],
             trialId=db_report['TrialRegistrationID'],
-            authors=db_report['Authors'].split("//")
-
+            authors=db_report['Authors'].split("//"),
+            createdAt=db_report['Dateentered'],
+            updatedAt=db_report['DateEdited'],
         ))
     return result
 
@@ -178,12 +219,10 @@ async def get_study_design_single(study_id : int = study_id_path, study_repo : S
 async def get_study_persons_single(study_id : int = study_id_path, cutoff: str = cutoff_query, normalize_names = Query(False), study_repo : StudyRepository = Depends(get_study_repo)) -> List[str]:
     return await study_repo.get_study_persons_single(study_id=study_id, cutoff=cutoff, normalize_names=normalize_names)
 
-#LEGACY
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
-async def get_study_by_id_legacy(study: DbStudy = Depends(get_study_by_id), user_id = Depends(get_user_id)) -> List[DbStudy]:
-    #TODO remove this
+async def get_study_by_id_legacy(study: DbStudy = Depends(get_study_by_id), user_id = Depends(get_user_id)) -> Study:
     await post_report_event(-1, Event(event_type=f"study::{study.CRGStudyID}::visted", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
-    return [study]
+    return transform_to_output_studies([study])[0]
 
 
 """
@@ -216,8 +255,9 @@ async def get_report_studies_by_id(
     date_from: Optional[str] = Query(None, description="Filter studies with DateEntered >= this ISO datetime (e.g. '2025-01-13 00:00:00')"),
     date_to: Optional[str] = Query(None, description="Filter studies with DateEntered <= this ISO datetime (e.g. '2025-01-31 23:59:59')"),
     report_repo : ReportRepository = Depends(get_report_repo)
-) -> List[DbStudy]:
-    return await report_repo.get_linked_studies(report_id, date_from, date_to)
+) -> List[Study]:
+    result = await report_repo.get_linked_studies(report_id, date_from, date_to)
+    return transform_to_output_studies(result)
 
 #@router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
 #async def get_pdf_number_by_report_id(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)) -> int:

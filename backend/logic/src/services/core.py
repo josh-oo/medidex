@@ -90,7 +90,7 @@ class StudySimilaritySearchService:
             for key, value in study.items(): 
                 result.setdefault(key, []).append(value)
 
-        order = ['CRGStudyID', 'Relevance', 'ShortName', 'NumberParticipants', 'Duration', 'Comparison', 'Countries', 'DateEntered', 'DateEdited', 'StatusofStudy']
+        order = ['CRGStudyID', 'Relevance', 'ShortName', 'NumberParticipants', 'Duration', 'Comparison', 'Countries', 'DateEntered', 'DateEdited', 'StatusofStudy', 'ISRCTN']
         reordered = {key: result[key] for key in order}
 
         if return_details:
@@ -124,6 +124,7 @@ class StudySimilaritySearchService:
         else:
             query = self.vectorstore.recommendation_query_builder(report.CRGReportID, negative_reports)
         
+
         result = await self.get_similar_study_by_query(query,aspect,cutoff,k,negative_studies, trial_ids, authors, return_details=return_details)
 
         if self.add_noise:

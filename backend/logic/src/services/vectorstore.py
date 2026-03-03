@@ -304,7 +304,7 @@ class VectorstoreService():
         for result in search_results.points:
             results['ID'].append(result.payload['source_id'])
             results['Keyword'].append(result.payload['display_name'])
-            results['Relevance'].append(str(round(result.score * 100)) + "%")
+            results['Relevance'].append(result.score)
 
         return results
     

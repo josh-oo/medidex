@@ -42,7 +42,7 @@ from ..services import get_maintenance_service, MaintenanceService
 
 from ..services import batch_hash_id_to_report_id
 
-from .resources import Report
+from .resources import Report, Study, StudyCreate, transform_to_output_studies
 
 load_dotenv()
 
@@ -78,9 +78,14 @@ class Batch(BaseModel):
     embedded: int = 0
     assigned: int = 0
 
+
 class BatchedReport(BaseModel):
     report:Report
-    assignedStudies: List[int] = Field(default_factory=list)
+    assignedStudies: List[Study] = Field(default_factory=list)
+
+class SimilarStudy(BaseModel):
+    relevance: float
+    study: Study
 
 class TagResponse(BaseModel):
     id: str
@@ -98,6 +103,24 @@ class TagCategories(str, enum.Enum):
     conditions = 'conditions'
     outcomes = 'outcomes'
     participants = 'participants'
+
+def transform_raw_similar_studies(studies):
+    results = []
+    for i in range(0, len(studies['Relevance'])):
+        study = Study(
+            studyId=studies['CRGStudyID'][i],
+            shortName=studies['ShortName'][i],
+            numberParticipants=studies['NumberParticipants'][i],
+            duration=studies['Duration'][i],
+            comparison=studies['Comparison'][i],
+            countries=studies['Countries'][i].split("//"),
+            createdAt=studies['DateEntered'][i],
+            updatedAt=studies['DateEdited'][i],
+            status=studies['StatusofStudy'][i],
+            trialId=studies['ISRCTN'][i],
+        )
+        results.append(SimilarStudy(relevance=studies['Relevance'][i], study=study))
+    return results
 
 async def publish_batch_update(batch_hash: str):
     """Publish an update for a specific batch to all subscribers.
@@ -243,7 +266,7 @@ async def readyz(db_ready: str = Depends(db_ready), vectorstore : VectorstoreSer
     return response
 
 @router.post("/batches", dependencies=[Depends(is_verified_api_call)], summary="Upload a batch of new reports that need to be assigned to studies (usually in the .ris file format)", description="Uploading a new batch triggers the embedding process. Batches are mainly used to do these compute heavy calculations in the background and only once. All needed data and the calculated embedding vectors are stored temporarily.", status_code=201) 
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), batch_repo : BatchRepository = Depends(get_batch_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)):
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), batch_repo : BatchRepository = Depends(get_batch_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service), maintenance_service: MaintenanceService = Depends(get_maintenance_service)):
 
     entries = await parse_file(file)
 
@@ -314,7 +337,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     # schedule background tasks
     #for report in reports:
     #    print("Report provcess appended")
-    background_tasks.add_task(process_report, reports, batch_hash, batch_repo, vectorstore)
+    background_tasks.add_task(process_report, reports, batch_hash, batch_repo, vectorstore, maintenance_service)
 
     await publish_batch_update(batch_hash)
 
@@ -391,10 +414,11 @@ async def get_batch_stats_by_hash(report_ids: List[int] = Depends(get_batch_asso
 
     result = []
     for report in reports:
+        print(report)
         authors = report.Authors.split("//") if report.Authors else []
         linked_studies = []
         if report.CRGReportID in all_linked_studies.keys():
-            linked_studies = [study.CRGStudyID for study in all_linked_studies[report.CRGReportID]]
+            linked_studies = transform_to_output_studies(all_linked_studies[report.CRGReportID])
 
         result.append(
             BatchedReport(
@@ -404,7 +428,9 @@ async def get_batch_stats_by_hash(report_ids: List[int] = Depends(get_batch_asso
                     title=report.Title,
                     abstract=report.Abstract,
                     authors=authors,
-                    trialId=report.TrialRegistrationID
+                    trialId=report.TrialRegistrationID,
+                    createdAt=report.Dateentered,
+                    updatedAt=report.DateEdited
                 ),
                 assignedStudies=linked_studies,
             )
@@ -521,11 +547,11 @@ async def similar_tags(sources: List[str] = Query(..., description="Which source
     return await tag_similarity_service.get_similar_tags_by_id(report_id, aspect, sources, k)
 
 @router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
-async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, report_id : int = Depends(batch_hash_id_to_report_id), user_id : str = Depends(get_user_id), study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service_batch), return_details : bool = False):
+async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, report_id : int = Depends(batch_hash_id_to_report_id), user_id : str = Depends(get_user_id), study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service_batch), return_details : bool = False) -> List[SimilarStudy]:
     result = await study_similarity_service.get_similar_studies_by_id(report_id,aspect, cutoff,k, None, None, return_details=return_details)
     payload = {"user": user_id, "event_type": f"similar::studies::k::{k}", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
-    return result
+    return transform_raw_similar_studies(result)
 
 
 #@router.get("/features/authors", dependencies=[Depends(is_verified_api_call)], include_in_schema=False)
@@ -660,8 +686,9 @@ class AspectEmbedding(BaseModel):
     embedding: List[float]
 
 @router.get("/reports/{report_id}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="")
-async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),  cutoff: str = Query(None), k : int = Query(10), negative_studies : List[int]=Query(None),negative_reports : List[int]=Query(None), return_details : bool = False, study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service)):
-    return await study_similarity_service.get_similar_studies_by_id(report_id, aspect, cutoff, k, negative_studies, negative_reports,return_details)
+async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),  cutoff: str = Query(None), k : int = Query(10), negative_studies : List[int]=Query(None),negative_reports : List[int]=Query(None), return_details : bool = False, study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service)) -> List[SimilarStudy]:
+    result = await study_similarity_service.get_similar_studies_by_id(report_id, aspect, cutoff, k, negative_studies, negative_reports,return_details)
+    return transform_raw_similar_studies(result)
 
 @router.get("/reports/{report_id}/similar_studies/tags", dependencies=[Depends(is_verified_api_call)], summary="")
 async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(..., description="The number of related studies considered for retrieving relevant tags."), related_tag_service : RelatedTagSearchService = Depends(get_related_tag_service)):
@@ -699,3 +726,27 @@ async def delete_assigned_studies(report_id : int, study_id: int, report_repo : 
     logger.info("ReportInteraction", extra={"payload": payload})
 
     return Response(content=None, status_code=200)
+
+@router.post("/reports/{report_id}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=200)
+async def link_to_new_study(report_id : int, study: StudyCreate, report_repo : ReportRepository = Depends(get_report_repo), study_repo : StudyRepository = Depends(get_study_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+    #TODO get corresponding batch and check access rights
+    new_study = await study_repo.add_study(short_name=study.shortName, study_status=study.status, countries=study.countries, duration =study.duration, number_of_participants = study.numberParticipants, comparison = study.comparison)
+    study_id = new_study.CRGStudyID
+
+    #TODO if already dailed stop here
+
+    await asyncio.gather(
+        report_repo.append_study_link(report_id, study_id),
+        vectorstore.link_report_to_study_id(report_id, study_id, user_id)
+    )
+
+    #TODO orphan removal -> return error if needed
+
+    #await publish_batch_update(batch_hash)
+    
+    payload = {"user": user_id, "event_type": "study::links::changed::new", "report_id": report_id, "original_timestamp": "-"}
+    logger.info("ReportInteraction", extra={"payload": payload})
+
+    output_study = transform_to_output_studies([new_study])[0]
+
+    return output_study

@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, delete
 
 from ..models import Report, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions
@@ -184,7 +185,17 @@ class ReportRepository:
             # Create new link and track creator
             new_study_report = StudyReport(CRGReportID=report_id, CRGStudyID=study_id)
             self.db.add(new_study_report)
-            await self.db.flush()
+            try:
+                await self.db.flush()
+            except IntegrityError:
+                await self.db.rollback()
+                return {
+                    "report_id": report_id,
+                    "created_count": 0,
+                    "invalid_study_ids": [],
+                    "created_links": [],
+                    "was_duplicate": True
+                }
 
             self.db.add(StudyReportAdded(
                 StudyReportID=new_study_report.StudyReportID,
