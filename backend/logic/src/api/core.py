@@ -87,6 +87,10 @@ class SimilarStudy(BaseModel):
     relevance: float
     study: Study
 
+class SearchResponse():
+    studies: List[SimilarStudy]
+    batchHash: str
+
 class TagResponse(BaseModel):
     id: str
     keyword: str
@@ -414,7 +418,6 @@ async def get_batch_stats_by_hash(report_ids: List[int] = Depends(get_batch_asso
 
     result = []
     for report in reports:
-        print(report)
         authors = report.Authors.split("//") if report.Authors else []
         linked_studies = []
         if report.CRGReportID in all_linked_studies.keys():
@@ -540,13 +543,13 @@ async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_id :
 
     return await get_batched_report(report_id, report_repo, vectorstore)
 
-@router.get("/batches/{batch_hash}/{report_index}/similar_tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
+@router.get("/batches/{batch_hash}/{report_index}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
 async def similar_tags(sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), k : int = k_query, report_id : int = Depends(batch_hash_id_to_report_id), tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[TagResponse]:
     if aspect == TagCategories.default:
         raise HTTPException(status_code=400, detail="No tags for 'default' embedding.")
     return await tag_similarity_service.get_similar_tags_by_id(report_id, aspect, sources, k)
 
-@router.get("/batches/{batch_hash}/{report_index}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
+@router.get("/batches/{batch_hash}/{report_index}/similar-studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
 async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, report_id : int = Depends(batch_hash_id_to_report_id), user_id : str = Depends(get_user_id), study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service_batch), return_details : bool = False) -> List[SimilarStudy]:
     result = await study_similarity_service.get_similar_studies_by_id(report_id,aspect, cutoff,k, None, None, return_details=return_details)
     payload = {"user": user_id, "event_type": f"similar::studies::k::{k}", "report_id": report_id, "original_timestamp": "-"}
@@ -576,7 +579,7 @@ async def get_aspect_related_studies(tag_category: TagCategories = Path(..., des
 
     return await study_similarity_service.get_similar_study_by_query(embeddings['embedding'],aspect, None, k, [], [], [], return_details=False)
 
-@router.get("/{tag_category}/{tag_value}/similar_tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
+@router.get("/{tag_category}/{tag_value}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
 async def similar_tags(tag_category: TagCategories =Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value : str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), k : int = k_query, tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[TagResponse]:
     if tag_category == TagCategories.default:
         raise HTTPException(status_code=400, detail="No tags for 'default' embedding.")
@@ -685,12 +688,36 @@ class AspectEmbedding(BaseModel):
     model_id: str
     embedding: List[float]
 
-@router.get("/reports/{report_id}/similar_studies", dependencies=[Depends(is_verified_api_call)], summary="")
-async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),  cutoff: str = Query(None), k : int = Query(10), negative_studies : List[int]=Query(None),negative_reports : List[int]=Query(None), return_details : bool = False, study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service)) -> List[SimilarStudy]:
-    result = await study_similarity_service.get_similar_studies_by_id(report_id, aspect, cutoff, k, negative_studies, negative_reports,return_details)
-    return transform_raw_similar_studies(result)
+@router.get("/reports/{report_id}/similar-studies", dependencies=[Depends(is_verified_api_call)], summary="")
+async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),  cutoff: str = Query(None), k : int = Query(10), source : str = Query(None), negative_studies : List[int]=Query(None),negative_reports : List[int]=Query(None), return_details : bool = False, study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service), batch_repo : BatchRepository = Depends(get_batch_repo)) ->List[SimilarStudy]:
+    if source is None:
+        result = await study_similarity_service.get_similar_studies_by_id(
+            report_id,
+            aspect,
+            cutoff,
+            k,
+            negative_studies,
+            negative_reports,
+            return_details,
+        )
+    else:
+        batch_hash = await batch_repo.get_batch_hash_by_report_id(report_id)
+        if batch_hash != source:
+            raise HTTPException(status_code=404, detail="Report not found in batch")
 
-@router.get("/reports/{report_id}/similar_studies/tags", dependencies=[Depends(is_verified_api_call)], summary="")
+        result = await study_similarity_service.get_similar_studies_by_id(
+            report_id,
+            aspect,
+            cutoff,
+            k,
+            negative_studies,
+            negative_reports,
+            return_details,
+        )
+    studies = transform_raw_similar_studies(result)
+    return studies
+
+@router.get("/reports/{report_id}/similar-studies/tags", dependencies=[Depends(is_verified_api_call)], summary="")
 async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(..., description="The number of related studies considered for retrieving relevant tags."), related_tag_service : RelatedTagSearchService = Depends(get_related_tag_service)):
     if aspect not in [TagCategories.interventions, TagCategories.conditions, TagCategories.outcomes]:
          raise HTTPException(status_code=501, detail="Not implemented")
