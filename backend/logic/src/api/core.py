@@ -3,7 +3,7 @@ from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, Backg
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Set
 import os
 import logging
 
@@ -381,21 +381,35 @@ async def calculate_processing_progress(
     if not crg_report_ids:
         return 0, 0
 
-    vectorized_report_ids_raw, report_numbers = await asyncio.gather(
-        vectorstore.crg_reports_exist(crg_report_ids),
-        report_repo.get_report_numbers(crg_report_ids),
+    vectorized_report_ids, ready_report_ids = await get_vectorized_and_ready_report_ids(
+        crg_report_ids, report_repo, vectorstore
     )
-    vectorized_report_ids = set(vectorized_report_ids_raw)
 
     generated_embeddings = len(vectorized_report_ids)
+    ready_for_processing_count = len(ready_report_ids)
+
+    return generated_embeddings, ready_for_processing_count
+
+async def get_vectorized_and_ready_report_ids(
+    report_ids: List[int],
+    report_repo: ReportRepository,
+    vectorstore: VectorstoreService,
+) -> Tuple[Set[int], Set[int]]:
+    if not report_ids:
+        return set(), set()
+
+    vectorized_report_ids_raw, report_numbers = await asyncio.gather(
+        vectorstore.crg_reports_exist(report_ids),
+        report_repo.get_report_numbers(report_ids),
+    )
+    vectorized_report_ids = set(vectorized_report_ids_raw)
     pdf_ready_reports = {
         report_id
         for report_id, report_number in report_numbers.items()
         if report_number is not None and report_number > 0
     }
-    ready_for_processing_count = len(vectorized_report_ids & pdf_ready_reports)
-
-    return generated_embeddings, ready_for_processing_count
+    ready_report_ids = vectorized_report_ids & pdf_ready_reports
+    return vectorized_report_ids, ready_report_ids
 
 async def get_project_stats(
     batch: DbBatch = Depends(get_batch_by_hash),
@@ -577,12 +591,25 @@ async def remove_user_from_project(
     return Response(status_code=204)
 
 @router.get("/projects/{batch_hash}/reports", dependencies=[Depends(is_verified_api_call)], summary="Get a specific report batch by hash.",description="Returns details and progress information for a single report batch identified by batch_hash.")
-async def get_batch_stats_by_hash(report_ids: List[int] = Depends(get_batch_associated_report_ids), report_repo : ReportRepository = Depends(get_report_repo)) -> List[BatchedReport]:
+async def get_batch_stats_by_hash(
+    ready_only: bool = Query(False, description="Only include reports that have generated embeddings and a linked PDF."),
+    report_ids: List[int] = Depends(get_batch_associated_report_ids),
+    report_repo: ReportRepository = Depends(get_report_repo),
+    vectorstore: VectorstoreService = Depends(get_vectorstore_service),
+) -> List[BatchedReport]:
+    ready_report_ids: Optional[Set[int]] = None
+    if ready_only:
+        _, ready_report_ids = await get_vectorized_and_ready_report_ids(
+            report_ids, report_repo, vectorstore
+        )
+
     reports = await report_repo.get_all_reports(report_ids)
     all_linked_studies = await report_repo.get_linked_studies_for_reports(report_ids)
 
     result = []
     for report in reports:
+        if ready_report_ids is not None and report.CRGReportID not in ready_report_ids:
+            continue
         authors = report.Authors.split("//") if report.Authors else []
         linked_studies = []
         if report.CRGReportID in all_linked_studies.keys():
@@ -868,7 +895,26 @@ class AspectEmbedding(BaseModel):
     embedding: List[float]
 
 @router.get("/reports/{report_id}/similar-studies", dependencies=[Depends(is_verified_api_call)], summary="")
-async def similarity_search_studies_by_id(report_id: int, aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),  cutoff: str = Query(None), k : int = Query(10), source : str = Query(None), negative_studies : List[int]=Query(None),negative_reports : List[int]=Query(None), return_details : bool = False, study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service), batch_repo : BatchRepository = Depends(get_batch_repo)) ->List[SimilarStudy]:
+async def similarity_search_studies_by_id(
+    report_id: int,
+    aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),
+    cutoff: str = Query(None),
+    k: int = Query(10),
+    source: str = Query(None),
+    negative_studies: List[int] = Query(None),
+    negative_reports: List[int] = Query(None),
+    return_details: bool = False,
+    study_similarity_service: StudySimilaritySearchService = Depends(get_study_similarity_service),
+    batch_repo: BatchRepository = Depends(get_batch_repo),
+    report_repo: ReportRepository = Depends(get_report_repo),
+    vectorstore: VectorstoreService = Depends(get_vectorstore_service),
+) -> List[SimilarStudy]:
+    _, ready_report_ids = await get_vectorized_and_ready_report_ids(
+        [report_id], report_repo, vectorstore
+    )
+    if report_id not in ready_report_ids:
+        raise HTTPException(status_code=409, detail="Report is not ready for processing")
+
     if source is None:
         result = await study_similarity_service.get_similar_studies_by_id(
             report_id,

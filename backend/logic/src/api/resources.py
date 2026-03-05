@@ -28,6 +28,7 @@ from ..database.repositories.report import ReportRepository
 from ..database import get_study_repo, get_aspect_repo, get_report_repo
 
 from ..services import get_document_service, get_report_service, DocumentService, ReportService
+from ..services.crawler import OpenAlexService
 
 load_dotenv()
 
@@ -320,6 +321,19 @@ async def get_fulltext(document_service : DocumentService = Depends(get_document
     except Exception as e:
         if str(e) == "Upstream request timed out":
             raise HTTPException(status_code=504, detail="Upstream request timed out.")
+        
+@router.get("/reports/{report_id}/links", summary="Get fulltext links for a report via OpenAlex (by DOI)")
+async def get_report_fulltext_links(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)) -> List[str]:
+    # Get the report from the database
+    report = await report_repo.get_report_by_id(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+    doi = report.DOI
+    if not doi:
+        return []
+    service = OpenAlexService()
+    links = await service.get_pdf_links_by_doi(doi)
+    return list(links)
     
 @router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
 async def get_pdf_metadata(report_service : ReportService = Depends(get_report_service)) -> Dict:

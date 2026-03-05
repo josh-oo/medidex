@@ -6,6 +6,8 @@ from bs4 import BeautifulSoup
 from pathlib import Path
 import fitz  # PyMuPDF
 
+from typing import Any, List
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -147,3 +149,37 @@ class DoclingService:
                 raise Exception("Upstream request timed out")
 
         return resp.json()['document']['md_content']
+    
+class OpenAlexService:
+    OPEN_ALEX_API = "https://api.openalex.org/works/https://doi.org/{doi}"
+    def __init__(self):
+        # OPEN Alex is limited to 10 requests per second
+        self.sem = asyncio.Semaphore(8)
+
+    async def get_data_by_doi(self, doi : str) -> Any:
+        url = OpenAlexService.OPEN_ALEX_API.format(doi=doi)
+        async with self.sem:
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+            except ReadTimeout:
+                raise Exception("Upstream request timed out")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    return {}
+                else:
+                    raise
+            
+        return resp.json()
+    
+    async def get_pdf_links_by_doi(self, doi : str) -> List[str]:
+        record = await self.get_data_by_doi(doi)
+        urls = []
+        try:
+            for loc in record.get('locations', []):
+                if loc.get('pdf_url'):
+                    urls.append(loc['pdf_url'])
+        except:
+            pass
+        return set(urls)
