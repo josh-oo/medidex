@@ -178,7 +178,11 @@ class VectorstoreService():
         )
         return result[0].vector
 
-    async def crg_reports_exist(self, report_ids : int):
+    async def crg_reports_exist(self, report_ids: List[int]) -> List[int]:
+        report_ids = report_ids or []
+        if not report_ids:
+            return []
+
         point_ids = [transform_to_uuid(report_id) for report_id in report_ids]
         result = await self.client.retrieve(
             collection_name=COLLECTION_NAME,
@@ -186,9 +190,18 @@ class VectorstoreService():
             with_vectors=False,
             with_payload=False,
         )
+
         if not result:
-            return 0
-        return len(result)
+            return []
+
+        existing_ids: List[int] = []
+        for point in result:
+            point_id = getattr(point, "id", None)
+            if not point_id:
+                continue
+            existing_ids.append(transform_to_crg_report_id(str(point_id)))
+
+        return existing_ids
 
     async def calculate_score_pairs(self, report_ids : List[int]):
         # Fetch all vectors

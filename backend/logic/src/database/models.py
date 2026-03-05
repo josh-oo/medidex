@@ -180,6 +180,20 @@ class Batch(SQLModel, table=True, metadata=metadata_resources):
     DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
     UploadedBy: Optional[str]
 
+class BatchAssignees(SQLModel, table=True, metadata=metadata_resources):
+    __tablename__ = "tblBatchAssignees"
+
+    BatchHash: str = Field(
+        primary_key=True,
+        foreign_key="tblBatch.BatchHash",
+        ondelete="CASCADE",
+    )
+    Assignee: str = Field(primary_key=True)  # user_id
+
+    __table_args__ = (
+        Index("idx_batchassignees_assignee", "Assignee"),
+    )
+
 class FulltextExtractions(SQLModel, table=True):
     __tablename__ = "tblFulltextExtractions"
 

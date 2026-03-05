@@ -356,6 +356,19 @@ class ReportRepository:
     
     async def get_report_by_id(self, report_id: int) -> Report:
         return await self.db.get(Report, report_id)
+
+    async def get_report_numbers(self, report_ids: List[int]) -> Dict[int, Optional[int]]:
+        report_ids = report_ids or []
+        if not report_ids:
+            return {}
+
+        stmt = (
+            select(Report.CRGReportID, Report.ReportNumber)
+            .where(Report.CRGReportID.in_(report_ids))
+        )
+
+        rows = await self.db.execute(stmt)
+        return {crg_report_id: report_number for crg_report_id, report_number in rows.all()}
     
     async def get_pdf_numbers_by_report_id(self, report_id: int) -> int:
         """
