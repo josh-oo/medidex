@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request
-from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks, Body
+from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks, Body, Form
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -19,7 +19,7 @@ import asyncio
 import enum
 import grpc
 
-from .auth import is_verified_api_call, get_user_id
+from .auth import is_verified_api_call, get_user_id, get_roles
 
 from ..database import get_study_repo, get_batch_repo, get_report_repo, db_ready
 
@@ -92,7 +92,8 @@ class ProjectTask(BaseModel):
     numberReportsProcessed: int
 
 class BatchedReport(BaseModel):
-    report:Report
+    report: Report
+    hasPdf: Optional[bool]
     assignedStudies: List[Study] = Field(default_factory=list)
 
 class SimilarStudy(BaseModel):
@@ -282,7 +283,7 @@ async def readyz(db_ready: str = Depends(db_ready), vectorstore : VectorstoreSer
     return response
 
 @router.post("/projects", dependencies=[Depends(is_verified_api_call)], summary="Upload a batch of new reports that need to be assigned to studies (usually in the .ris file format)", description="Uploading a new batch triggers the embedding process. Batches are mainly used to do these compute heavy calculations in the background and only once. All needed data and the calculated embedding vectors are stored temporarily.", status_code=201) 
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), batch_repo : BatchRepository = Depends(get_batch_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service), maintenance_service: MaintenanceService = Depends(get_maintenance_service)):
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), batch_repo : BatchRepository = Depends(get_batch_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service), maintenance_service: MaintenanceService = Depends(get_maintenance_service)):
 
     entries = await parse_file(file)
 
@@ -295,7 +296,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
         authors = entry.get('authors', None)
         abstract = entry.get('abstract', None)
-        report_number = int(entry.get('research_notes', 0))
+        report_number = int(entry.get('research_notes', -1))
 
         trial_ids = extract_trial_id(title=title, abstract=abstract, authors=authors)
         if len(trial_ids) == 1:
@@ -349,7 +350,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
     batch_hash = hashlib.sha256(fingerprint_string.encode()).hexdigest()
 
-    reports = await batch_repo.add_new_batch(batch_hash,file.filename,reports)
+    reports = await batch_repo.add_new_batch(batch_hash,projectName,reports)
     # schedule background tasks
     #for report in reports:
     #    print("Report provcess appended")
@@ -381,7 +382,7 @@ async def calculate_processing_progress(
     if not crg_report_ids:
         return 0, 0
 
-    vectorized_report_ids, ready_report_ids = await get_vectorized_and_ready_report_ids(
+    vectorized_report_ids, _, ready_report_ids = await get_vectorized_and_ready_report_ids(
         crg_report_ids, report_repo, vectorstore
     )
 
@@ -402,14 +403,14 @@ async def get_vectorized_and_ready_report_ids(
         vectorstore.crg_reports_exist(report_ids),
         report_repo.get_report_numbers(report_ids),
     )
-    vectorized_report_ids = set(vectorized_report_ids_raw)
+    embedded_report_ids = set(vectorized_report_ids_raw)
     pdf_ready_reports = {
         report_id
         for report_id, report_number in report_numbers.items()
-        if report_number is not None and report_number > 0
+        if report_number is not None and report_number >= 0
     }
-    ready_report_ids = vectorized_report_ids & pdf_ready_reports
-    return vectorized_report_ids, ready_report_ids
+    ready_report_ids = embedded_report_ids & pdf_ready_reports
+    return embedded_report_ids, pdf_ready_reports, ready_report_ids
 
 async def get_project_stats(
     batch: DbBatch = Depends(get_batch_by_hash),
@@ -596,12 +597,14 @@ async def get_batch_stats_by_hash(
     report_ids: List[int] = Depends(get_batch_associated_report_ids),
     report_repo: ReportRepository = Depends(get_report_repo),
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
+    roles: List[str] = Depends(get_roles)
 ) -> List[BatchedReport]:
     ready_report_ids: Optional[Set[int]] = None
-    if ready_only:
-        _, ready_report_ids = await get_vectorized_and_ready_report_ids(
-            report_ids, report_repo, vectorstore
-        )
+    _, reports_with_pdf, ready_report_ids = await get_vectorized_and_ready_report_ids(
+        report_ids, report_repo, vectorstore
+    )
+    if not ready_only and "ADMIN" in roles:
+        ready_report_ids = None
 
     reports = await report_repo.get_all_reports(report_ids)
     all_linked_studies = await report_repo.get_linked_studies_for_reports(report_ids)
@@ -627,6 +630,7 @@ async def get_batch_stats_by_hash(
                     createdAt=report.Dateentered,
                     updatedAt=report.DateEdited
                 ),
+                hasPdf=report.CRGReportID in reports_with_pdf,
                 assignedStudies=linked_studies,
             )
         )
@@ -909,7 +913,7 @@ async def similarity_search_studies_by_id(
     report_repo: ReportRepository = Depends(get_report_repo),
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
 ) -> List[SimilarStudy]:
-    _, ready_report_ids = await get_vectorized_and_ready_report_ids(
+    _,_, ready_report_ids = await get_vectorized_and_ready_report_ids(
         [report_id], report_repo, vectorstore
     )
     if report_id not in ready_report_ids:

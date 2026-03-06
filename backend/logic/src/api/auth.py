@@ -65,7 +65,7 @@ class User(SQLModel, table=True, metadata=metadata_user_data):
 
     id: int = Field(default=None, primary_key=True)
     email: EmailStr = Field(index=True, unique=True)
-    role: str = Field(default="user")
+    role: str = Field(default="USER")
     verified: bool = Field(default=False)
     password: str
 
@@ -191,7 +191,7 @@ async def verify_token(token):
 
 def generate_token(user):
     expire = datetime.now(tz=timezone.utc) + timedelta(hours=8)
-    return jwt.encode({'sub': user.email, 'role': user.role, 'id': user.id, 'verified': user.verified, 'exp': expire}, JWT_SECRET, algorithm='HS256')
+    return jwt.encode({'sub': user.email, 'roles': [user.role], 'id': user.id, 'isApproved': user.verified, 'exp': expire}, JWT_SECRET, algorithm='HS256')
 
 def generate_api_key_pair():
     key_id = secrets.token_urlsafe(8)  # short prefix
@@ -205,9 +205,13 @@ def generate_api_key_pair():
 Authentication
 """
 
+async def get_roles(token: str = Security(oauth2_scheme)):
+    decoded = await verify_token(token)
+    return decoded['roles']
+
 async def is_admin(token: str = Security(oauth2_scheme)):
     decoded = await verify_token(token)
-    if decoded['role'] != "admin":
+    if not "ADMIN" in decoded['roles']:
         raise HTTPException(status_code=401, detail="Not allowed")
     return token
 
@@ -230,7 +234,7 @@ async def is_verified(token: Optional[str] = Security(oauth2_scheme)):
     decoded = await verify_token(token)
     if not decoded:
         return None
-    if decoded.get('verified', 0) != 1 and decoded.get('iss', None) == None: #TODO remove that later
+    if not decoded.get('isApproved', False):
         raise HTTPException(status_code=401, detail="Not allowed")
     
     return token
@@ -321,7 +325,7 @@ async def update_user(user_id: int, verified: bool, session: AsyncSession = Depe
     return UserDataResponse.from_orm(old_user)
 
 @router.put("/users/{user_id}/role", dependencies=[Depends(is_admin)], summary="Update user role (admin only).")
-async def update_user(user_id: int, role: Literal["user", "admin"], session: AsyncSession = Depends(get_session)) -> UserDataResponse:
+async def update_user(user_id: int, role: Literal["USER", "ADMIN"], session: AsyncSession = Depends(get_session)) -> UserDataResponse:
     
     old_user = await session.get(User, user_id)
     if old_user is None:

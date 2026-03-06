@@ -390,7 +390,7 @@ class ReportRepository:
         if not report:
             return None  # Report not found
 
-        if report.ReportNumber is not None:
+        if report.ReportNumber is not None and report.ReportNumber > 0:
             return report.ReportNumber  # Already assigned
 
         # Find the current max ReportNumber

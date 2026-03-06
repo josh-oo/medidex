@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
 
-from .auth import is_verified_api_call, get_user_id
+from .auth import is_verified_api_call, get_user_id, is_admin
 
 from ..database.models import Report as DbReport, Study as DbStudy
 from ..database.models import Condition as DbCondition, Intervention as DbIntervention, Design as DbDesign, Outcome as DbOutcome, Participant as DbParticipant
@@ -39,6 +39,10 @@ setup_logging("events.log")
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified_api_call)])
+
+class ReportSources(BaseModel):
+    doi: str
+    links: List[str]
 
 class Report(BaseModel):
     reportId: int
@@ -267,7 +271,7 @@ async def get_report_studies_by_id(
 #        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 #    return result
 
-@router.put("/reports/{report_id}/pdf", summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
+@router.put("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
 async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
     # Validate file is a PDF
     if not file.content_type == "application/pdf":
@@ -301,7 +305,7 @@ async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to uplo
         #    f.write(content)
         #Extract and save metadata
         #process_pdf(file_path)
-        return document_service.upload_pdf(file)
+        return await document_service.upload_pdf(file)
     except:
         raise HTTPException(status_code=500, detail=f"Failed to save PDF.")
     
@@ -321,9 +325,9 @@ async def get_fulltext(document_service : DocumentService = Depends(get_document
     except Exception as e:
         if str(e) == "Upstream request timed out":
             raise HTTPException(status_code=504, detail="Upstream request timed out.")
-        
-@router.get("/reports/{report_id}/links", summary="Get fulltext links for a report via OpenAlex (by DOI)")
-async def get_report_fulltext_links(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)) -> List[str]:
+
+@router.get("/reports/{report_id}/sources", summary="Get fulltext links for a report via OpenAlex (by DOI)")
+async def get_report_fulltext_links(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)) -> ReportSources:
     # Get the report from the database
     report = await report_repo.get_report_by_id(report_id)
     if report is None:
@@ -333,7 +337,7 @@ async def get_report_fulltext_links(report_id: int = report_id_path, report_repo
         return []
     service = OpenAlexService()
     links = await service.get_pdf_links_by_doi(doi)
-    return list(links)
+    return ReportSources(doi=doi,links=links)
     
 @router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
 async def get_pdf_metadata(report_service : ReportService = Depends(get_report_service)) -> Dict:

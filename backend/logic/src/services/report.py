@@ -34,6 +34,7 @@ class DocumentService:
         self.docling_service = docling_service
 
     async def get_path(self, mkdirs=False):
+        print("enter get path")
         if not self.path:
             report_number = await self.report_repo.get_pdf_numbers_by_report_id(self.report_id)
             if report_number is None:
@@ -183,6 +184,12 @@ class DocumentService:
 
         return text
     
+    def delete_fulltext(self):
+        txt_name = str(self.report_id).zfill(5) + ".txt"
+        txt_path = os.path.join(FULLTEXT_PATH, txt_name)
+        if os.path.exists(txt_path):
+            os.remove(txt_path)
+    
     async def upload_pdf(self, file):
         path = await self.get_path(mkdirs=True)
 
@@ -190,7 +197,8 @@ class DocumentService:
             content = await file.read()
             f.write(content)
 
-        self.get_fulltext(fast=False)
+        await asyncio.to_thread(self.delete_fulltext)
+        await self.get_fulltext(fast=False)
 
         return {
             "report_id": self.report_id,
