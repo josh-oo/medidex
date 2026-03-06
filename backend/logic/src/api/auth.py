@@ -191,7 +191,7 @@ async def verify_token(token):
 
 def generate_token(user):
     expire = datetime.now(tz=timezone.utc) + timedelta(hours=8)
-    return jwt.encode({'sub': user.email, 'roles': [user.role], 'id': user.id, 'isApproved': user.verified, 'exp': expire}, JWT_SECRET, algorithm='HS256')
+    return jwt.encode({'sub': user.email, 'roles': [user.role.upper()], 'id': user.id, 'isApproved': user.verified, 'exp': expire}, JWT_SECRET, algorithm='HS256')
 
 def generate_api_key_pair():
     key_id = secrets.token_urlsafe(8)  # short prefix

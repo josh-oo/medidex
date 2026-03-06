@@ -272,39 +272,15 @@ async def get_report_studies_by_id(
 #    return result
 
 @router.put("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
-async def uploaed_pdf(file: UploadFile = File(..., description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
+async def uploaed_pdf(file: UploadFile = File(None, description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
     # Validate file is a PDF
-    if not file.content_type == "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-    
-    # Extract report number from filename (e.g., "00123.pdf" -> 123)
-    filename = file.filename
-    if not filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="File must have .pdf extension.")
-    
-    #try:
-    #    report_number = int(filename.replace(".pdf", "").lstrip("0") or "0")
-    #except ValueError:
-    #    raise HTTPException(status_code=400, detail=f"Filename '{filename}' does not contain a valid report number")
-    
-    # Check if report number exists in database
-    #report = await report_repo.get_report_by_id()
-    
-    #if report is None:
-    #    raise HTTPException(status_code=404, detail=f"Report number {report_number} not found in database")
-    
-    # Ensure PDF directory exists
-    #os.makedirs(PDF_PATH, exist_ok=True)
-    
-    # Use the original filename from the upload
-    #file_path = os.path.join(PDF_PATH, filename)
+    if file:
+        if not file.content_type == "application/pdf":
+            raise HTTPException(status_code=400, detail="File must be a PDF")
+        if not file.filename.endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="File must have .pdf extension.")
     
     try:
-        #with open(file_path, "wb") as f:
-        #    content = await file.read()
-        #    f.write(content)
-        #Extract and save metadata
-        #process_pdf(file_path)
         return await document_service.upload_pdf(file)
     except:
         raise HTTPException(status_code=500, detail=f"Failed to save PDF.")

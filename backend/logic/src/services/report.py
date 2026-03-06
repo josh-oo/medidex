@@ -34,16 +34,14 @@ class DocumentService:
         self.docling_service = docling_service
 
     async def get_path(self, mkdirs=False):
-        print("enter get path")
         if not self.path:
             report_number = await self.report_repo.get_pdf_numbers_by_report_id(self.report_id)
             if report_number is None:
                 raise Exception("Report not found")
-            if report_number == -1:
-                if not mkdirs:
-                    raise Exception("Report number not found")
-                else:
-                    report_number = await self.report_repo.assign_pdf_numbers_for_report_id(self.report_id)
+            if not mkdirs and report_number == -1:
+                raise Exception("Report number not found")   
+            if report_number <= 0 and mkdirs:
+                report_number = await self.report_repo.assign_pdf_numbers_for_report_id(self.report_id)         
             
             pdf_name = str(report_number).zfill(5) + ".pdf"
             file_name = os.path.join(PDF_PATH, pdf_name)
@@ -191,6 +189,15 @@ class DocumentService:
             os.remove(txt_path)
     
     async def upload_pdf(self, file):
+        if file is None:
+            # Set ReportNumber to 0 and stop
+            report = await self.report_repo.get_report_by_id(self.report_id)
+            if report:
+                report.ReportNumber = 0
+                await self.report_repo.db.flush()
+                await self.report_repo.db.commit()
+            return {"report_id": self.report_id, "file_path": None, "size_bytes": 0}
+
         path = await self.get_path(mkdirs=True)
 
         with open(path, "wb") as f:
