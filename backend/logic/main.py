@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api import auth, resources, core
 from src.api import maintenance
+from src_agent import agent
 
 # Initialize FastAPI
 app = FastAPI(root_path="/backend/api")
@@ -19,3 +20,4 @@ app.include_router(auth.router)
 app.include_router(core.router)
 app.include_router(resources.router)
 app.include_router(maintenance.router)
+app.include_router(agent.router)

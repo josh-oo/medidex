@@ -21,6 +21,7 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY logic/main.py .
 COPY logic/src/ ./src/
+COPY logic/src_agent/ ./src_agent/
 
 # 👇 Copy compiled proto files from the builder stage
 COPY --from=proto-builder /proto/embedding_pb2.py .

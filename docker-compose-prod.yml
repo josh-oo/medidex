@@ -103,20 +103,6 @@ services:
       - DOCLING_URL=${DOCLING_URL}
       - DEBUG=${DEBUG}
 
-  gen_ai:
-    container_name: gen_ai
-    build:
-      context: ./medidex/backend
-      dockerfile: Dockerfile
-    ports:
-      - "8001:8001"
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - MEERKAT_API_URL=${BACKEND_API_URL}
-      - MEERKAT_API_KEY=${BACKEND_API_KEY}
-    networks:
-      - internal_net
-
   frontend:
     container_name: frontend
     build:
