@@ -36,12 +36,14 @@ class DocumentService:
     async def get_path(self, mkdirs=False):
         if not self.path:
             report_number = await self.report_repo.get_pdf_numbers_by_report_id(self.report_id)
+            print("RN: ", report_number)
             if report_number is None:
                 raise Exception("Report not found")
             if not mkdirs and report_number == -1:
                 raise Exception("Report number not found")   
             if report_number <= 0 and mkdirs:
-                report_number = await self.report_repo.assign_pdf_numbers_for_report_id(self.report_id)         
+                report_number = await self.report_repo.assign_pdf_numbers_for_report_id(self.report_id)
+                print("Assigned RN: ", report_number)     
             
             pdf_name = str(report_number).zfill(5) + ".pdf"
             file_name = os.path.join(PDF_PATH, pdf_name)
@@ -189,6 +191,15 @@ class DocumentService:
             os.remove(txt_path)
     
     async def upload_pdf(self, file):
+        async def _clear_report_number():
+            report = await self.report_repo.get_report_by_id(self.report_id)
+            if report:
+                report.ReportNumber = -1
+                await self.report_repo.db.flush()
+                await self.report_repo.db.commit()
+            self.path = None
+            self.pages = None
+
         if file is None:
             # Set ReportNumber to 0 and stop
             report = await self.report_repo.get_report_by_id(self.report_id)
@@ -198,20 +209,28 @@ class DocumentService:
                 await self.report_repo.db.commit()
             return {"report_id": self.report_id, "file_path": None, "size_bytes": 0}
 
-        path = await self.get_path(mkdirs=True)
+        path = None
+        try:
+            path = await self.get_path(mkdirs=True)
+            print("Path: ", path)
 
-        with open(path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+            with open(path, "wb") as f:
+                content = await file.read()
+                f.write(content)
 
-        await asyncio.to_thread(self.delete_fulltext)
-        await self.get_fulltext(fast=False)
+            await asyncio.to_thread(self.delete_fulltext)
+            await self.get_fulltext(fast=False)
 
-        return {
-            "report_id": self.report_id,
-            "file_path": path,
-            "size_bytes": len(content)
-        }
+            return {
+                "report_id": self.report_id,
+                "file_path": path,
+                "size_bytes": len(content)
+            }
+        except Exception:
+            await _clear_report_number()
+            if path and os.path.exists(path):
+                os.remove(path)
+            raise
         
 class ReportService:
     def __init__(self, report_id : int, report_repo : ReportRepository, study_repo : StudyRepository, document_service : DocumentService, llm_service : LanguageModelService):

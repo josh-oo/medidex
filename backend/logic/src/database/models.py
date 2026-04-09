@@ -194,7 +194,7 @@ class BatchAssignees(SQLModel, table=True, metadata=metadata_resources):
         Index("idx_batchassignees_assignee", "Assignee"),
     )
 
-class FulltextExtractions(SQLModel, table=True):
+class FulltextExtractions(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblFulltextExtractions"
 
     CRGReportID: int = Field(primary_key=True, foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
@@ -212,7 +212,7 @@ class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
         Index('idx_reportadded_batch_report', 'BatchHash', 'CRGReportID'),
     )
 
-class BatchInnerScore(SQLModel, table=True):
+class BatchInnerScore(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblBatchInnerScore"
 
     CRGReportID: int = Field(primary_key=True, foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
