@@ -20,11 +20,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./backend/_data/postgres-init:/docker-entrypoint-initdb.d
       - ${POSTGRES_BACKUPS}:/backups
     expose:
       - 5432
+    ports:
+      - "5432:5432"
     networks:
       - internal_net
 
@@ -61,8 +63,8 @@ services:
     networks:
       - internal_net
     environment:
-      - EMBEDDING_MODEL_MODEL_PATH=${EMBEDDING_MODEL_PATH}
-      - EMBEDDING_MODEL_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
+      - EMBEDDING_MODEL_PATH=${EMBEDDING_MODEL_PATH}
+      - EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
       - EMBEDDING_MODEL_DIM=${EMBEDDING_MODEL_DIM}
       - EMBEDDING_MODEL_MAX_INPUT_LENGTH=${EMBEDDING_MODEL_MAX_INPUT_LENGTH}
       - EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
@@ -90,7 +92,7 @@ services:
       - VECTORSTORE_SERVICE_PORT=${VECTORSTORE_SERVICE_PORT}
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME}
       - JWT_SECRET=${JWT_SECRET}
-      - JWKS_URL=${JWKS_URL}
+      - JWKS_URL=http://frontend:3000/api/auth/jwks
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES}
@@ -101,29 +103,23 @@ services:
       - DOCLING_URL=${DOCLING_URL}
       - DEBUG=${DEBUG}
 
-  prototype:
-   container_name: prototype
-   build:
-     context: ./prototype
-     dockerfile: Dockerfile
-   ports:
-     - "8501:8501"
-   expose:
-     - 8501
-   read_only: true
-   networks:
-     - public_net
-     - internal_net
-   user: appuser
-   volumes:
-     - /home/appuser/.streamlit
-   cap_drop:
-     - ALL
-   security_opt:
-     - no-new-privileges:true
-   environment:
-     - BACKEND_API_URL=${BACKEND_API_URL}
-     - BACKEND_API_KEY=${BACKEND_API_KEY}
+  frontend:
+    container_name: frontend
+    build:
+      context: ./medidex
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL}
+      - STAGE=${STAGE}
+      - MEERKAT_API_URL=${BACKEND_API_URL}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/medidex?schema=public
+      - INACTIVITY_DIALOG=${INACTIVITY_DIALOG}
+    networks:
+      - internal_net
+      - public_net
 
 networks:
   internal_net:

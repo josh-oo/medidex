@@ -310,10 +310,10 @@ async def get_report_fulltext_links(report_id: int = report_id_path, report_repo
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
     doi = report.DOI
     if not doi:
-        return []
+        return ReportSources(doi="", links=[])
     service = OpenAlexService()
     links = await service.get_pdf_links_by_doi(doi)
-    return ReportSources(doi=doi,links=links)
+    return ReportSources(doi=doi, links=links)
     
 @router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
 async def get_pdf_metadata(report_service : ReportService = Depends(get_report_service)) -> Dict:
