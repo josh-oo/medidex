@@ -38,7 +38,7 @@ This services manages the incoming requests from the frontend and calls the appr
 `VECTORSTORE_SERVICE_PORT=6334`  
 `DATABASE_VOLUME="../_data/backend"`  
 `JWT_SECRET=DEBUG_SECRET_KEY`  
-`DEBUG=TRUE`   
+`DEBUG=true`   
 ## embedding
 This service is used to transform plain text into vector embeddings using a fine-tuned embedding model. Currently this service runs on a CPU machine. Depending on the workload it might make sense to move this service to a GPU machine later. The model is publicly available on huggingface (https://huggingface.co/josh-oo/aspect-based-embeddings-v3).
 ### Env Vars (development):

@@ -6,7 +6,7 @@ from qdrant_client.models import Filter, FieldCondition, DatetimeRange
 from dotenv import load_dotenv
 import os
 import numpy as np
-from typing import List, Any, Optional
+from typing import List, Any, Optional, Dict
 
 from datetime import datetime, timezone
 
@@ -79,7 +79,7 @@ class VectorstoreService():
         
         return vectorstore_source_ids
 
-    async def link_report_to_study_ids(self, crg_report_id : int, study_ids : List[int], user : str):
+    async def link_report_to_study_ids(self, report_id : int, study_ids : List[int], user : str):
         field = "belongs_to_study"
         if user:
             field = "temporary"
@@ -87,11 +87,89 @@ class VectorstoreService():
         await self.client.set_payload(
             collection_name=COLLECTION_NAME,
             payload={field: study_ids},
-            points=[transform_to_uuid(crg_report_id)],
+            points=[transform_to_uuid(report_id)],
         )
 
-    async def get_vectors_by_crg_report_id(self, crg_report_id : int):
-        point_id = transform_to_uuid(crg_report_id)
+    async def link_report_to_study_id(self, report_id : int, study_id : int, user : str):
+        point_id = transform_to_uuid(report_id)
+        result = await self.client.retrieve(
+            collection_name=COLLECTION_NAME,
+            ids=[point_id],
+            with_vectors=False,
+            with_payload=True,
+        )
+
+        payload = result[0].payload if result else {}
+        update_payload: Dict[str, Any] = {}
+
+        if user:
+            temporary_payload = dict(payload.get("temporary") or {})
+            user_payload = dict(temporary_payload.get(user) or {})
+            study_list = list(user_payload.get("belongs_to_study") or [])
+            if study_id not in study_list:
+                study_list.append(study_id)
+            user_payload["belongs_to_study"] = study_list
+            temporary_payload[user] = user_payload
+            update_payload["temporary"] = temporary_payload
+        else:
+            study_list = list(payload.get("belongs_to_study") or [])
+            if study_id not in study_list:
+                study_list.append(study_id)
+            update_payload["belongs_to_study"] = study_list
+
+        if update_payload:
+            await self.client.set_payload(
+                collection_name=COLLECTION_NAME,
+                payload=update_payload,
+                points=[point_id],
+            )
+
+    async def unlink_report_from_study_id(self, report_id : int, study_id : int, user : str):
+        point_id = transform_to_uuid(report_id)
+        result = await self.client.retrieve(
+            collection_name=COLLECTION_NAME,
+            ids=[point_id],
+            with_vectors=False,
+            with_payload=True,
+        )
+
+        if not result:
+            return
+
+        payload = result[0].payload or {}
+        update_payload: Dict[str, Any] = {}
+
+        if user:
+            temporary_payload = dict(payload.get("temporary") or {})
+            user_payload = dict(temporary_payload.get(user) or {})
+            study_list = list(user_payload.get("belongs_to_study") or [])
+            if study_id in study_list:
+                study_list = [sid for sid in study_list if sid != study_id]
+                if study_list:
+                    user_payload["belongs_to_study"] = study_list
+                    temporary_payload[user] = user_payload
+                else:
+                    user_payload.pop("belongs_to_study", None)
+                    if user_payload:
+                        temporary_payload[user] = user_payload
+                    else:
+                        temporary_payload.pop(user, None)
+                update_payload["temporary"] = temporary_payload
+        else:
+            study_list = list(payload.get("belongs_to_study") or [])
+            if study_id in study_list:
+                study_list = [sid for sid in study_list if sid != study_id]
+                update_payload["belongs_to_study"] = study_list
+
+        if update_payload:
+            await self.client.set_payload(
+                collection_name=COLLECTION_NAME,
+                payload=update_payload,
+                points=[point_id],
+            )
+
+    async def get_vectors_by_crg_report_id(self, report_id : int):
+        point_id = transform_to_uuid(report_id)
         result = await self.client.retrieve(
             collection_name=COLLECTION_NAME ,
             ids=[point_id],
@@ -100,21 +178,34 @@ class VectorstoreService():
         )
         return result[0].vector
 
-    async def crg_reports_exist(self, crg_report_ids : int):
-        point_ids = [transform_to_uuid(crg_report_id) for crg_report_id in crg_report_ids]
+    async def crg_reports_exist(self, report_ids: List[int]) -> List[int]:
+        report_ids = report_ids or []
+        if not report_ids:
+            return []
+
+        point_ids = [transform_to_uuid(report_id) for report_id in report_ids]
         result = await self.client.retrieve(
             collection_name=COLLECTION_NAME,
             ids=point_ids,
             with_vectors=False,
             with_payload=False,
         )
-        if not result:
-            return 0
-        return len(result)
 
-    async def calculate_score_pairs(self, crg_report_ids : List[int]):
+        if not result:
+            return []
+
+        existing_ids: List[int] = []
+        for point in result:
+            point_id = getattr(point, "id", None)
+            if not point_id:
+                continue
+            existing_ids.append(transform_to_crg_report_id(str(point_id)))
+
+        return existing_ids
+
+    async def calculate_score_pairs(self, report_ids : List[int]):
         # Fetch all vectors
-        point_ids = [transform_to_uuid(crg_report_id) for crg_report_id in crg_report_ids]
+        point_ids = [transform_to_uuid(report_id) for report_id in report_ids]
         results = await self.client.retrieve(
             collection_name=COLLECTION_NAME,
             ids=point_ids,
@@ -128,17 +219,17 @@ class VectorstoreService():
         similarity_matrix = np.dot(normalized, normalized.T)
         # Return as list of (i, j, score) tuples
         pairs = []
-        n = len(crg_report_ids)
+        n = len(report_ids)
         for i in range(n):
             for j in range(n):
                 if i == j:
                     continue
-                pairs.append((crg_report_ids[i], crg_report_ids[j], float(similarity_matrix[i, j])))
+                pairs.append((report_ids[i], report_ids[j], float(similarity_matrix[i, j])))
         return pairs
 
 
-    async def delete_vectors_by_crg_report_ids(self, crg_report_ids : List[int]):
-        ids = [transform_to_uuid(crg_report_id) for crg_report_id in crg_report_ids]
+    async def delete_vectors_by_crg_report_ids(self, report_ids : List[int]):
+        ids = [transform_to_uuid(report_id) for report_id in report_ids]
         await self.client.delete(
             collection_name=COLLECTION_NAME ,
             points_selector=models.PointIdsList(
@@ -226,7 +317,7 @@ class VectorstoreService():
         for result in search_results.points:
             results['ID'].append(result.payload['source_id'])
             results['Keyword'].append(result.payload['display_name'])
-            results['Relevance'].append(str(round(result.score * 100)) + "%")
+            results['Relevance'].append(result.score)
 
         return results
     
