@@ -1,7 +1,9 @@
+import json
 from dataclasses import dataclass
-from typing import Any, List, Union, Dict
+from typing import Any, AsyncGenerator, List, Union, Dict, Optional, Tuple
 
 from pydantic import BaseModel, Field
+from fastapi.encoders import jsonable_encoder
 
 from langchain.tools import tool, ToolRuntime
 
@@ -10,8 +12,8 @@ from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
 
 from ..database import ReportRepository, StudyRepository
-from . import StudySimilaritySearchService
-from . import  DocumentService
+from .core import StudySimilaritySearchService
+from .report import DocumentService
 
 SYSTEM_MESSAGE_TEXT = """
 You are a clinical research assistant tasked with determining whether a new report belongs to an existing candidate study. 
@@ -81,34 +83,50 @@ class AgentService:
             report_id = runtime.context.current_report
             visited_candidate_studies = runtime.context.visited_candidate_studies
             
-            result = await study_similarity_service.get_similar_studies_by_id(
+            response = await study_similarity_service.get_similar_studies_by_id(
                 report_id,
                 aspect='default',
                 cutoff=None,
                 negative_reports=None,
                 negative_studies=None,
-                k=visited_candidate_studies,
+                k=visited_candidate_studies + 1,
                 return_details=False
             )
 
+            study_id = response['CRGStudyID'][visited_candidate_studies]
+
+            response = await study_repo.get_study_by_id(study_id=study_id)
+
+            print("Response: ", response)
+
+            result = {
+                "studyId": response.CRGStudyID,
+                "shortName": response.ShortName,
+                "trialId": response.TrialistContactDetails,
+                "numberParticipants": response.NumberParticipants,
+                "countries": response.Countries,
+                "duration": response.Duration,
+                "comparison": response.Comparison,
+            }
+
             runtime.context.visited_candidate_studies += 1
-            if runtime.context.debug:
-                print(f"Candidate study ({visited_candidate_studies})", result)
+            #if runtime.context.debug:
+            #    print(f"Candidate study ({visited_candidate_studies})", result)
             return result
         
         @tool
         async def fetch_current_fulltext(runtime: ToolRuntime[AgentContext]) -> str:  
             """Fetch the corresponding fulltext for the current report"""
-            return await document_service.get_fulltext()
+            return await document_service.get_fulltext(fast=False)
         
-        @tool
-        async def fetch_report_fulltext(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
-            """Fetch the corresponding fulltext for a given report
-
-             Args:
-                report_id: The id of the report you want the fulltext for
-            """
-            #TODO 
+        #@tool
+        #async def fetch_report_fulltext(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
+        #    """Fetch the corresponding fulltext for a given report
+        #
+        #     Args:
+        #        report_id: The id of the report you want the fulltext for
+        #    """
+        #    #TODO 
         
         @tool
         async def fetch_report_abstract(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
@@ -130,7 +148,7 @@ class AgentService:
             result = []
             response = await study_repo.get_study_reports_by_study_id(study_id)
             for item in response:
-                result.append({'reportId': item.CRGReportID, 'title': item.Title})
+                result.append({'reportId': item['CRGReportID'], 'title': item['Title']})
             return result
 
         @tool
@@ -166,7 +184,7 @@ class AgentService:
 
         self.agent = create_agent(
             model=self.model,
-            tools=[fetch_next_candidate_study, fetch_current_fulltext, fetch_report_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract],
+            tools=[fetch_next_candidate_study, fetch_current_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract], #fetch_report_fulltext #TODO
             context_schema=AgentContext,
             system_prompt=system_message,
             response_format=ToolStrategy(Output),
@@ -207,4 +225,87 @@ class AgentService:
             ),
         )
         return result
+
+    async def astream(self) -> AsyncGenerator[str, None]:
+        """Stream agent execution events as server-sent events.
+        
+        Yields:
+            Server-sent event formatted strings with agent execution updates
+        """
+        if not self.report_string:
+            await self._load_report_context()
+
+        final_structured_output = None
+
+        async for event in self.agent.astream(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Please find a matching study id or propose a new study creation "
+                            f"for the following report\n{self.report_string}"
+                        ),
+                    }
+                ]
+            },
+            context=AgentContext(
+                current_report=self.report_id,
+                visited_candidate_studies=0,
+                debug=self.debug,
+            ),
+            version="v1",
+            stream_mode="updates",
+        ):
+            final_payload = {}
+            payload, structured_output = self.parse_event(event)
+            if structured_output is not None:
+                final_payload['event'] = "final"
+                final_payload['payload'] = structured_output
+                yield f"data: {json.dumps(final_payload, ensure_ascii=True)}\n\n"
+
+            else:
+                for item in payload:
+                    final_payload = {'event': "info", 'payload': payload}
+                    yield f"data: {json.dumps(final_payload, ensure_ascii=True)}\n\n"
+
+        #yield 'data: {"event":"complete"}\n\n'
+
+    def parse_event(self, event) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        payload: List[Dict[str, Any]] = []
+        structured_output: Optional[Dict[str, Any]] = None
+
+        if "model" in event.keys():
+            for tool_call in event['model']['messages'][0].tool_calls:
+                if tool_call['name'] == "fetch_study_interventions":
+                    payload.append({'studyId': tool_call["args"]["study_id"], 'message': f"Checking study interventions."})
+                elif tool_call['name'] == "fetch_study_reports":
+                    payload.append({'studyId': tool_call["args"]["study_id"], 'message': f"Checking study reports."})
+                elif tool_call['name'] == "fetch_current_fulltext":
+                    payload.append({'studyId': None, 'message': f"Reading report fulltext."})
+                elif tool_call['name'] == "ExistingStudy":
+                    structured_output = tool_call.get("args")
+                    structured_output['type'] = "existing"
+                elif tool_call['name'] == "NewStudy":
+                    structured_output = tool_call.get("args")
+                    structured_output['type'] = "new"
+        elif "tools" in event.keys():
+            for item in event['tools']['messages']:
+                if item.name == "fetch_next_candidate_study":
+                    content = json.loads(item.content) if isinstance(item.content, str) else item.content
+                    payload.append({'studyId': content["studyId"], 'message': f"Start checking study {content['shortName']}."})
+                elif item.name == "ExistingStudy":
+                    if isinstance(item.content, str):
+                        structured_output = json.loads(item.content)
+                    elif isinstance(item.content, dict):
+                        structured_output = item.content
+                    structured_output['type'] = "existing"
+                elif item.name == "NewStudy":
+                    if isinstance(item.content, str):
+                        structured_output = json.loads(item.content)
+                    elif isinstance(item.content, dict):
+                        structured_output = item.content
+                    structured_output['type'] = "new"
+
+        return payload, structured_output
 

@@ -88,7 +88,7 @@ class StudyRepository:
         #await asyncio.gather(*[log_event(-1, Event(event_type=f"study::{study_id}::visited", timestamp=datetime.now(timezone.utc).isoformat()), self.user_id) for study_id in study_ids])
         return result
     
-    async def get_study_by_id(self, study_id: int) -> List[Study]:
+    async def get_study_by_id(self, study_id: int) -> Study:
         return await self.db.get(Study, study_id)
     
     async def get_study_reports_by_study_ids(self, study_ids: Optional[List[int]], cutoff: Optional[str] = None, fields: Optional[List[str]] = None) -> Dict[int, List[Report]]:

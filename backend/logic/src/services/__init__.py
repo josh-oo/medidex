@@ -74,12 +74,14 @@ def get_agent_service(
     model: str = Query("gpt-5-nano", description="LLM model name to use for study prediction"),
     report_repo : ReportRepository = Depends(get_report_repo),
     study_repo : StudyRepository = Depends(get_study_repo),
+    document_service : DocumentService = Depends(get_document_service),
     study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service),
 ) -> AgentService:
     return AgentService(
         report_id=report_id,
         report_repo=report_repo,
         study_repo=study_repo,
+        document_service=document_service,
         study_similarity_service=study_similarity_service,
         model=model,
     )
