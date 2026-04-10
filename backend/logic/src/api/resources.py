@@ -158,7 +158,7 @@ async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query,
     return await study_repo.get_study_reports_by_study_ids(study_ids, cutoff, fields)
 
 @router.get("/studies/persons", include_in_schema=False)
-async def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, normalize_names = Query(False), study_repo : StudyRepository = Depends(get_study_repo)) -> Dict[int, List[str]]:
+async def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, normalize_names : bool = Query(False), study_repo : StudyRepository = Depends(get_study_repo)) -> Dict[int, List[str]]:
     return await study_repo.get_study_persons(study_ids, cutoff, normalize_names)
 
 async def get_study_by_id(study_id: int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> DbStudy:
@@ -221,7 +221,7 @@ async def get_study_design_single(study_id : int = study_id_path, study_repo : S
     return await study_repo.get_study_design_single(study_id)
 
 @router.get("/studies/{study_id}/persons", summary="Get all persons (usually only authors) associated with a specific study")
-async def get_study_persons_single(study_id : int = study_id_path, cutoff: str = cutoff_query, normalize_names = Query(False), study_repo : StudyRepository = Depends(get_study_repo)) -> List[str]:
+async def get_study_persons_single(study_id : int = study_id_path, cutoff: str = cutoff_query, normalize_names : bool = Query(False), study_repo : StudyRepository = Depends(get_study_repo)) -> List[str]:
     return await study_repo.get_study_persons_single(study_id=study_id, cutoff=cutoff, normalize_names=normalize_names)
 
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")

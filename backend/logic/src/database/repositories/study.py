@@ -143,7 +143,8 @@ class StudyRepository:
             if normalize_names:
                 authors = normalize_author_names(authors=authors)
 
-            final_result[key] = authors
+            current_authors = final_result.get(key, [])
+            final_result[key] = current_authors + authors
 
         return final_result
     

@@ -172,7 +172,7 @@ class StudyOutcome(SQLModel, table=True, metadata=metadata_resources):
     CRGStudyID: int = Field(primary_key=True, foreign_key="tblStudy.CRGStudyID", ondelete="CASCADE")
     OutcomeID: int = Field(primary_key=True, foreign_key="tblOutcome.OutcomeID", ondelete="CASCADE")
 
-class Batch(SQLModel, table=True, metadata=metadata_resources):
+class Project(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblBatch"
 
     BatchHash: str = Field(primary_key=True)
@@ -180,7 +180,7 @@ class Batch(SQLModel, table=True, metadata=metadata_resources):
     DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
     UploadedBy: Optional[str]
 
-class BatchAssignees(SQLModel, table=True, metadata=metadata_resources):
+class ProjectAssignees(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblBatchAssignees"
 
     BatchHash: str = Field(
@@ -212,7 +212,7 @@ class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
         Index('idx_reportadded_batch_report', 'BatchHash', 'CRGReportID'),
     )
 
-class BatchInnerScore(SQLModel, table=True, metadata=metadata_resources):
+class ProjectInnerScore(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblBatchInnerScore"
 
     CRGReportID: int = Field(primary_key=True, foreign_key="tblReport.CRGReportID", ondelete="CASCADE")

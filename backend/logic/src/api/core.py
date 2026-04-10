@@ -27,7 +27,7 @@ from ..database import StudyRepository
 from ..database import ReportRepository
 from ..database import ProjectRepository
 
-from ..database.models import Report as DbReport, Batch as DbProject
+from ..database.models import Report as DbReport, Project as DbProject
 
 from ..services import get_tag_similarity_service, TagSimilaritySearchService
 from ..services import get_related_tag_service, RelatedTagSearchService

@@ -8,11 +8,11 @@ from ..models import (
     Report,
     Study,
     ReportAdded,
-    Batch,
-    BatchInnerScore,
+    Project,
+    ProjectInnerScore,
     StudyReport,
     StudyReportAdded,
-    BatchAssignees,
+    ProjectAssignees,
 )
 from typing import Any, Dict, List, Set, Tuple, Optional
 
@@ -27,12 +27,12 @@ class ProjectRepository:
         self.user_id = str(user_id)
 
     async def add_new_project(self, project_id : str, batch_description : str, reports : List[Report]):
-        new_batch = Batch(
+        new_project = Project(
             BatchHash=project_id,
             BatchDescription=batch_description,
             UploadedBy=self.user_id
         )
-        self.db.add(new_batch)
+        self.db.add(new_project)
 
         # Add all reports at once
         self.db.add_all(reports)
@@ -71,16 +71,16 @@ class ProjectRepository:
             return []
         
         # Query to get studies from similar reports
-        # Note: We select BatchInnerScore.Score to make it available for ORDER BY
+        # Note: We select ProjectInnerScore.Score to make it available for ORDER BY
         stmt = (
-            select(Study, BatchInnerScore.Score)
+            select(Study, ProjectInnerScore.Score)
             .distinct()
             .join(StudyReport, StudyReport.CRGStudyID == Study.CRGStudyID)
             .join(
-                BatchInnerScore,
-                (BatchInnerScore.OtherID == StudyReport.CRGReportID) &
-                (BatchInnerScore.CRGReportID == report_id) &
-                (BatchInnerScore.Score >= min_score)
+                ProjectInnerScore,
+                (ProjectInnerScore.OtherID == StudyReport.CRGReportID) &
+                (ProjectInnerScore.CRGReportID == report_id) &
+                (ProjectInnerScore.Score >= min_score)
             )
             .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
         )
@@ -93,7 +93,7 @@ class ProjectRepository:
             )
         
         # Order by similarity score (descending)
-        stmt = stmt.order_by(BatchInnerScore.Score.desc())
+        stmt = stmt.order_by(ProjectInnerScore.Score.desc())
         
         result = await self.db.execute(stmt)
         
@@ -103,18 +103,18 @@ class ProjectRepository:
         if not self.user_id:
             raise ValueError("User ID is required to retrieve projects.")
         
-        stmt = select(Batch).where(Batch.BatchHash == project_id)
-        stmt = stmt.where(Batch.UploadedBy == self.user_id)
+        stmt = select(Project).where(Project.BatchHash == project_id)
+        stmt = stmt.where(Project.UploadedBy == self.user_id)
 
-        batch = await self.db.execute(stmt)
-        return batch.scalar_one_or_none()
+        project = await self.db.execute(stmt)
+        return project.scalar_one_or_none()
     
     async def get_all_projects(self):
         if not self.user_id:
             raise ValueError("User ID is required to retrieve projects.")
         
-        stmt = select(Batch)
-        stmt = stmt.where(Batch.UploadedBy == self.user_id)
+        stmt = select(Project)
+        stmt = stmt.where(Project.UploadedBy == self.user_id)
 
         result = await self.db.execute(stmt)
         return result.scalars().all()
@@ -125,15 +125,15 @@ class ProjectRepository:
         )
         return result.scalars().all()
 
-    async def get_assigned_projects(self) -> List[Batch]:
+    async def get_assigned_projects(self) -> List[Project]:
         if not self.user_id:
             return []
 
         stmt = (
-            select(Batch)
-            .join(BatchAssignees, BatchAssignees.BatchHash == Batch.BatchHash)
-            .where(BatchAssignees.Assignee == self.user_id)
-            .order_by(Batch.DateCreated.desc())
+            select(Project)
+            .join(ProjectAssignees, ProjectAssignees.BatchHash == Project.BatchHash)
+            .where(ProjectAssignees.Assignee == self.user_id)
+            .order_by(Project.DateCreated.desc())
         )
 
         result = await self.db.execute(stmt)
@@ -157,7 +157,7 @@ class ProjectRepository:
             raise ValueError("User ID is required to retrieve project information.")
 
         stmt = (
-            select(ReportAdded.BatchHash, func.count(StudyReportAdded.StudyReportID))
+            select(ReportAdded.BatchHash, func.count(func.distinct(StudyReport.CRGReportID)))
             .select_from(StudyReportAdded)
             .join(StudyReport, StudyReportAdded.StudyReportID == StudyReport.StudyReportID)
             .join(ReportAdded, ReportAdded.CRGReportID == StudyReport.CRGReportID)
@@ -172,8 +172,8 @@ class ProjectRepository:
         if not self.user_id:
             raise ValueError("User ID is required to delete a project")
 
-        stmt = delete(Batch).where(Batch.BatchHash == project_id)
-        stmt = stmt.where(Batch.UploadedBy == self.user_id)
+        stmt = delete(Project).where(Project.BatchHash == project_id)
+        stmt = stmt.where(Project.UploadedBy == self.user_id)
 
         await self.db.execute(stmt)
         await self.db.commit()
@@ -193,13 +193,13 @@ class ProjectRepository:
         return result.scalar_one_or_none()
     
     async def insert_project_scores(self, score_pairs):
-        stmt = insert(BatchInnerScore)
+        stmt = insert(ProjectInnerScore)
         self.db.execute(stmt, score_pairs)
         await self.db.commit()
 
     async def get_project_assignees(self, project_id: str) -> List[Tuple[str, int]]:
         result = await self.db.execute(
-            select(BatchAssignees.Assignee).where(BatchAssignees.BatchHash == project_id)
+            select(ProjectAssignees.Assignee).where(ProjectAssignees.BatchHash == project_id)
         )
         assignees = result.scalars().all()
 
@@ -290,9 +290,9 @@ class ProjectRepository:
             raise ValueError("User ID is required to modify project assignees.")
 
         ownership_stmt = (
-            select(Batch.BatchHash)
-            .where(Batch.BatchHash == project_id)
-            .where(Batch.UploadedBy == self.user_id)
+            select(Project.BatchHash)
+            .where(Project.BatchHash == project_id)
+            .where(Project.UploadedBy == self.user_id)
             .limit(1)
         )
         ownership_result = await self.db.execute(ownership_stmt)
@@ -300,7 +300,7 @@ class ProjectRepository:
             raise PermissionError("You can only modify assignees for your own project.")
 
         stmt = (
-            pg_insert(BatchAssignees)
+            pg_insert(ProjectAssignees)
             .values(BatchHash=project_id, Assignee=assignee)
             .on_conflict_do_nothing(index_elements=["BatchHash", "Assignee"])
         )
@@ -313,9 +313,9 @@ class ProjectRepository:
             raise ValueError("User ID is required to modify project assignees.")
 
         ownership_stmt = (
-            select(Batch.BatchHash)
-            .where(Batch.BatchHash == project_id)
-            .where(Batch.UploadedBy == self.user_id)
+            select(Project.BatchHash)
+            .where(Project.BatchHash == project_id)
+            .where(Project.UploadedBy == self.user_id)
             .limit(1)
         )
         ownership_result = await self.db.execute(ownership_stmt)
@@ -323,8 +323,8 @@ class ProjectRepository:
             raise PermissionError("You can only modify assignees for your own project.")
 
         result = await self.db.execute(
-            delete(BatchAssignees).where(
-                (BatchAssignees.BatchHash == project_id) & (BatchAssignees.Assignee == assignee)
+            delete(ProjectAssignees).where(
+                (ProjectAssignees.BatchHash == project_id) & (ProjectAssignees.Assignee == assignee)
             )
         )
         await self.db.commit()
