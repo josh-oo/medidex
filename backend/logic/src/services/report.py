@@ -189,6 +189,41 @@ class DocumentService:
         txt_path = os.path.join(FULLTEXT_PATH, txt_name)
         if os.path.exists(txt_path):
             os.remove(txt_path)
+
+    async def delete_pdf(self) -> Dict[str, object]:
+        report = await self.report_repo.get_report_by_id(self.report_id)
+        if not report:
+            raise Exception("Report not found")
+
+        deleted_pdf = False
+        deleted_fulltext = False
+        previous_report_number = report.ReportNumber
+        if previous_report_number is not None and previous_report_number > 0:
+            pdf_name = str(previous_report_number).zfill(5) + ".pdf"
+            pdf_path = os.path.join(PDF_PATH, pdf_name)
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
+                deleted_pdf = True
+
+        txt_name = str(self.report_id).zfill(5) + ".txt"
+        txt_path = os.path.join(FULLTEXT_PATH, txt_name)
+        deleted_fulltext = os.path.exists(txt_path)
+
+        # Clear derived artifacts and reset report number so future uploads are re-assigned cleanly.
+        await asyncio.to_thread(self.delete_fulltext)
+        report.ReportNumber = -1
+        await self.report_repo.db.flush()
+        await self.report_repo.db.commit()
+
+        self.path = None
+        self.pages = None
+
+        return {
+            "report_id": self.report_id,
+            "deleted_pdf": deleted_pdf,
+            "deleted_fulltext": deleted_fulltext,
+            "previous_report_number": previous_report_number,
+        }
     
     async def upload_pdf(self, file):
         async def _clear_report_number():

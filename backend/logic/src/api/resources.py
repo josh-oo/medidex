@@ -264,13 +264,6 @@ async def get_report_studies_by_id(
     result = await report_repo.get_linked_studies(report_id, date_from, date_to)
     return transform_to_output_studies(result)
 
-#@router.get("/reports/{report_id}/pdf_number", summary="Get the associated pdf number (which is not tze CRGReportID) for a certain report.")
-#async def get_pdf_number_by_report_id(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)) -> int:
-#    result = await report_repo.get_pdf_numbers_by_report_id(report_id)
-#    if not report_id:
-#        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
-#    return result
-
 @router.put("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
 async def uploaed_pdf(file: UploadFile = File(None, description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
     # Validate file is a PDF
@@ -293,6 +286,15 @@ async def get_pdf(report_id : int, document_service : DocumentService = Depends(
         return FileResponse(pdf_path, media_type="application/pdf", filename=f"{report_id}.pdf")
     except:
         raise HTTPException(status_code=404, detail="PDF file not found.")
+
+@router.delete("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Delete the fulltext pdf for a given report")
+async def delete_pdf(report_id : int, document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
+    try:
+        return await document_service.delete_pdf()
+    except Exception as e:
+        if str(e) == "Report not found":
+            raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+        raise HTTPException(status_code=500, detail="Failed to delete PDF.")
     
 @router.get("/reports/{report_id}/fulltext", summary="Get the parsed fulltext for a given report")
 async def get_fulltext(document_service : DocumentService = Depends(get_document_service)) -> str:
