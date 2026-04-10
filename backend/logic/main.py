@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api import auth, resources, core
+from src.api import auth, resources, core, agents
 from src.api import maintenance
 from src_agent import agent
 
@@ -20,4 +20,5 @@ app.include_router(auth.router)
 app.include_router(core.router)
 app.include_router(resources.router)
 app.include_router(maintenance.router)
-app.include_router(agent.router)
+app.include_router(agent.router) #TODO remove this later
+app.include_router(agents.router)

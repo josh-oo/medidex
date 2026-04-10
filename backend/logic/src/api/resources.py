@@ -19,7 +19,6 @@ from .auth import is_verified_api_call, get_user_id, is_admin
 from ..database.models import Report as DbReport, Study as DbStudy
 from ..database.models import Condition as DbCondition, Intervention as DbIntervention, Design as DbDesign, Outcome as DbOutcome, Participant as DbParticipant
 
-#from ..utils.pdf.processor import process_pdf
 from ..utils.logger import setup_logging
 
 from ..database.repositories.study import StudyRepository
@@ -174,14 +173,14 @@ async def get_study_reports_by_id(study_id : int = study_id_path, study_repo : S
     result = []
     for db_report in db_reports:
         result.append(Report(
-            reportId=db_report['CRGReportID'],
-            year=db_report['Year'],
-            title=db_report['Title'],
-            abstract=db_report['Abstract'],
-            trialId=db_report['TrialRegistrationID'],
-            authors=db_report['Authors'].split("//"),
-            createdAt=db_report['Dateentered'],
-            updatedAt=db_report['DateEdited'],
+            reportId=db_report.CRGReportID,
+            year=db_report.Year,
+            title=db_report.Title,
+            abstract=db_report.Abstract,
+            trialId=db_report.TrialRegistrationID,
+            authors=db_report.Authors.split("//"),
+            createdAt=db_report.Dateentered,
+            updatedAt=db_report.DateEdited,
         ))
     return result
 

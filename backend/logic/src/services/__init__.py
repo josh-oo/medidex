@@ -1,10 +1,12 @@
-from fastapi import Depends, Path, HTTPException
+from fastapi import Depends, Path, HTTPException, Query
+from langchain_openai import ChatOpenAI
 
 from .vectorstore import VectorstoreService
 from .aspects import TagScoringService, TagSimilaritySearchService
 from .core import RelatedTagSearchService, StudySimilaritySearchService
 from .authors import AuthorFeatureService
 from .embedding import EmbeddingService
+from .agent import AgentContext, AgentService
 from .report import DocumentService, ReportService
 from .llm import LanguageModelService
 from .crawler import CrawlerService, DoclingService
@@ -40,9 +42,6 @@ def get_tag_similarity_service(vectorstore : VectorstoreService = Depends(get_ve
 def get_tag_scoring_service(aspect_repo : AspectRepository = Depends(get_aspect_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> TagScoringService:
     return TagScoringService(vectorstore=vectorstore, aspect_repo=aspect_repo)
 
-#async def get_document_service_batch(report_id : int = Depends(project_path_to_report_id), report_repo : ReportRepository = Depends(get_report_repo)) -> DocumentService:
-#    return DocumentService(report_id=report_id, report_repo=report_repo, crawler_service=CrawlerService(), docling_service=DoclingService())
-
 def get_document_service(report_id : int, report_repo : ReportRepository = Depends(get_report_repo)) -> DocumentService:
     return DocumentService(report_id=report_id, report_repo=report_repo, crawler_service=CrawlerService(), docling_service=DoclingService())
 
@@ -69,3 +68,18 @@ def get_related_tag_service(tag_scoring_service : TagScoringService = Depends(ge
 
 def get_maintenance_service(report_repo : ReportRepository = Depends(get_report_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> RelatedTagSearchService:
     return MaintenanceService(report_repo=report_repo, vectorstore=vectorstore)
+
+def get_agent_service(
+    report_id : int,
+    model: str = Query("gpt-5-nano", description="LLM model name to use for study prediction"),
+    report_repo : ReportRepository = Depends(get_report_repo),
+    study_repo : StudyRepository = Depends(get_study_repo),
+    study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service),
+) -> AgentService:
+    return AgentService(
+        report_id=report_id,
+        report_repo=report_repo,
+        study_repo=study_repo,
+        study_similarity_service=study_similarity_service,
+        model=model,
+    )
