@@ -357,6 +357,31 @@ class ReportRepository:
     async def get_report_by_id(self, report_id: int) -> Report:
         return await self.db.get(Report, report_id)
 
+    async def set_study_report_confirmation(self, report_id: int, study_id: int, confirmed: bool) -> bool:
+        """
+        Set confirmation state for a report-study link tracked in StudyReportAdded.
+        The StudyReportAdded row is resolved through tblStudyReport by report/study ids.
+        """
+        try:
+            stmt = (
+                select(StudyReportAdded)
+                .join(StudyReport, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+                .where(StudyReport.CRGReportID == report_id)
+                .where(StudyReport.CRGStudyID == study_id)
+            )
+            study_report_added = (await self.db.execute(stmt)).scalar_one_or_none()
+
+            if not study_report_added:
+                return False
+
+            study_report_added.Confirmed = confirmed
+            await self.db.commit()
+            return True
+
+        except Exception:
+            await self.db.rollback()
+            raise
+
     async def get_report_numbers(self, report_ids: List[int]) -> Dict[int, Optional[int]]:
         report_ids = report_ids or []
         if not report_ids:

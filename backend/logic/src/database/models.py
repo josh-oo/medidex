@@ -247,6 +247,7 @@ class StudyReportAdded(SQLModel, table=True, metadata=metadata_resources):
     StudyReportID: int = Field(primary_key=True, foreign_key="tblStudyReport.StudyReportID", ondelete="CASCADE")
     DateCreated: datetime.datetime = Field(default_factory=_current_utc_datetime)
     CreatedBy: Optional[str]
+    Confirmed: bool = Field(default=False, nullable=False)
 
     __table_args__ = (
         Index('idx_studyreportadded_created_by', 'CreatedBy'),  # For user filtering

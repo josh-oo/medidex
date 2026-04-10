@@ -1030,3 +1030,41 @@ async def link_to_new_study(report_id : int, study: StudyCreate, report_repo : R
     output_study = transform_to_output_studies([new_study])[0]
 
     return output_study
+
+@router.put("/reports/{report_id}/studies/{study_id}/confirmation", dependencies=[Depends(is_admin)], summary="After reviewing the annotations the admin uses this endpoint to confirm that the report belongs to the study.", status_code=200)
+async def confirm_report_study_link(report_id : int, study_id: int, report_repo : ReportRepository = Depends(get_report_repo), project_repo: ProjectRepository = Depends(get_project_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+    project_id = await project_repo.get_project_id_by_report_id(report_id)
+    if not project_id:
+        raise HTTPException(status_code=404, detail="Report not found in project")
+
+    project = await project_repo.get_project_by_id(project_id)
+    if not project:
+        raise HTTPException(status_code=403, detail="You can only confirm links for reports in your own projects")
+
+    updated = await report_repo.set_study_report_confirmation(report_id, study_id, True)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Tracked report-study link not found")
+
+    payload = {"user": user_id, "event_type": "study::links::confirmed", "report_id": report_id, "original_timestamp": "-"}
+    logger.info("ReportInteraction", extra={"payload": payload})
+
+    return Response(content=None, status_code=200)
+
+@router.delete("/reports/{report_id}/studies/{study_id}/confirmation", dependencies=[Depends(is_admin)], summary="After reviewing the annotations the admin uses this endpoint to confirm that the report belongs to the study.", status_code=200)
+async def unconfirm_report_study_link(report_id : int, study_id: int, report_repo : ReportRepository = Depends(get_report_repo), project_repo: ProjectRepository = Depends(get_project_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+    project_id = await project_repo.get_project_id_by_report_id(report_id)
+    if not project_id:
+        raise HTTPException(status_code=404, detail="Report not found in project")
+
+    project = await project_repo.get_project_by_id(project_id)
+    if not project:
+        raise HTTPException(status_code=403, detail="You can only confirm links for reports in your own projects")
+
+    updated = await report_repo.set_study_report_confirmation(report_id, study_id, False)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Tracked report-study link not found")
+
+    payload = {"user": user_id, "event_type": "study::links::unconfirmed", "report_id": report_id, "original_timestamp": "-"}
+    logger.info("ReportInteraction", extra={"payload": payload})
+
+    return Response(content=None, status_code=200)

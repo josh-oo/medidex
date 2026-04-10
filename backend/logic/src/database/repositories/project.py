@@ -257,6 +257,7 @@ class ProjectRepository:
                 StudyReportAdded.CreatedBy,
                 Study.CRGStudyID,
                 Study.ShortName,
+                StudyReportAdded.Confirmed,
             )
             .select_from(StudyReport)
             .join(StudyReportAdded, StudyReportAdded.StudyReportID == StudyReport.StudyReportID)
@@ -274,12 +275,13 @@ class ProjectRepository:
         rows = result.all()
 
         annotations: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
-        for report_id, created_by, study_id, study_name in rows:
+        for report_id, created_by, study_id, study_name, confirmed in rows:
             annotations[report_id].append(
                 {
                     "user": created_by,
                     "studyId": study_id,
                     "studyShortName": study_name,
+                    "confirmed": bool(confirmed),
                 }
             )
 
