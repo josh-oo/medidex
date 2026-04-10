@@ -34,7 +34,7 @@ async def wait_for_services(timeout=120):
     print(f"❌ Backend API not ready at {BACKEND_API}/readyz")
     raise TimeoutError(f"Backend service not ready after {timeout} seconds")
 
-async def calculate_rank_score(crg_report_id, cutoff, client, semaphore, fixed_k=None):
+async def calculate_rank_score(report_id, cutoff, client, semaphore, fixed_k=None):
 
     async with semaphore:
 
@@ -45,7 +45,7 @@ async def calculate_rank_score(crg_report_id, cutoff, client, semaphore, fixed_k
         dt = datetime.strptime(cutoff, "%Y-%m-%d %H:%M:%S")
         exclusive_cutoff = dt - timedelta(days=1)
 
-        response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/studies", params={"date_to": exclusive_cutoff})
+        response = await client.get(BACKEND_API + f"/reports/{report_id}/studies", params={"date_to": exclusive_cutoff})
         response.raise_for_status()
         ground_truth = [item['CRGStudyID'] for item in response.json()]
 
@@ -56,7 +56,7 @@ async def calculate_rank_score(crg_report_id, cutoff, client, semaphore, fixed_k
             ground_truth = ground_truth[0]
             for k in ks:
                 params = {"cutoff":cutoff, 'k': k}
-                response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params=params)
+                response = await client.get(BACKEND_API + f"/reports/{report_id}/similar_studies",params=params)
                 response.raise_for_status()
                 predicted_studies = response.json()['CRGStudyID']
 
@@ -65,9 +65,9 @@ async def calculate_rank_score(crg_report_id, cutoff, client, semaphore, fixed_k
                     score = response.json()['Relevance'][index]
                     rank = index + 1
                     break
-            return (rank, score, crg_report_id)
+            return (rank, score, report_id)
     
-async def calculate_rank_score_negative_hints(crg_report_id, cutoff, client, fixed_k=None):
+async def calculate_rank_score_negative_hints(report_id, cutoff, client, fixed_k=None):
 
     ks = [1, 10,100,1_000,10_000]
     if fixed_k:
@@ -76,7 +76,7 @@ async def calculate_rank_score_negative_hints(crg_report_id, cutoff, client, fix
     dt = datetime.strptime(cutoff, "%Y-%m-%d %H:%M:%S")
     exclusive_cutoff = dt - timedelta(days=1)
 
-    response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/studies", params={"date_to": exclusive_cutoff})
+    response = await client.get(BACKEND_API + f"/reports/{report_id}/studies", params={"date_to": exclusive_cutoff})
     ground_truth = [item['CRGStudyID'] for item in response.json()]
 
     rank = 10_000
@@ -90,7 +90,7 @@ async def calculate_rank_score_negative_hints(crg_report_id, cutoff, client, fix
         for k in ks:
             #params = {"cutoff":cutoff, 'k': k, 'negative_studies': negative_studies, 'negative_reports': negative_reports}
             params = {"cutoff":cutoff, 'k': k, 'negative_reports': negative_reports}
-            response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params=params)
+            response = await client.get(BACKEND_API + f"/reports/{report_id}/similar_studies",params=params)
             response.raise_for_status()
             result = response.json()
             predicted_studies = result['CRGStudyID']
@@ -107,7 +107,7 @@ async def calculate_rank_score_negative_hints(crg_report_id, cutoff, client, fix
                     negative_reports.append(item[0]['source_id'])
 
             
-        return (rank, score, crg_report_id)
+        return (rank, score, report_id)
     else:
         pass
 
@@ -132,17 +132,17 @@ async def evaluate_with_cutoff_async(cutoff):
     async with httpx.AsyncClient(headers=headers, timeout=timeout, limits=limits) as client:
         response =  await client.get(f"{BACKEND_API}/reports", params={"date_from": cutoff, "date_to": cutoff})
         response.raise_for_status()
-        current_crg_report_ids = [item['CRGReportID'] for item in response.json()]
+        current_report_ids = [item['CRGReportID'] for item in response.json()]
 
-        pbar = tqdm(total=len(current_crg_report_ids))
+        pbar = tqdm(total=len(current_report_ids))
 
         recall_at_1 = []
         recall_at_3 = []
         recall_at_10 = []
 
         tasks = [
-            asyncio.create_task(calculate_rank_score(crg_report_id, cutoff, client, SEMAPHORE, fixed_k=10))
-            for crg_report_id in current_crg_report_ids
+            asyncio.create_task(calculate_rank_score(report_id, cutoff, client, SEMAPHORE, fixed_k=10))
+            for report_id in current_report_ids
         ]
 
         for task in asyncio.as_completed(tasks):
@@ -191,22 +191,22 @@ async def evaluate_with_cutoff_async_(cutoff):
     async with httpx.AsyncClient(headers=headers, timeout=timeout, limits=limits) as client:
 
         response =  await client.get(f"{BACKEND_API}/reports", params={"date_from": cutoff, "date_to": cutoff})
-        current_crg_report_ids = [item['CRGReportID'] for item in response.json()]
+        current_report_ids = [item['CRGReportID'] for item in response.json()]
 
         ranks = []
         scores = []
-        crg_report_ids = []
+        report_ids = []
 
 
-        pbar = tqdm(total=len(current_crg_report_ids))
+        pbar = tqdm(total=len(current_report_ids))
 
         for item in [44161, 44779]:
-            if item in current_crg_report_ids:
-                current_crg_report_ids.remove(item)
+            if item in current_report_ids:
+                current_report_ids.remove(item)
 
         tasks = [
-            asyncio.create_task(calculate_rank_score_negative_hints(crg_report_id, cutoff, client))
-            for crg_report_id in current_crg_report_ids
+            asyncio.create_task(calculate_rank_score_negative_hints(report_id, cutoff, client))
+            for report_id in current_report_ids
         ]
 
         for task in asyncio.as_completed(tasks):
@@ -214,12 +214,12 @@ async def evaluate_with_cutoff_async_(cutoff):
             if result:
                 ranks.append(result[0])
                 scores.append(result[1])
-                crg_report_ids.append(result[2])
+                report_ids.append(result[2])
             pbar.update(1)
 
     print()
     index_of_most_difficult = ranks.index(max(ranks))
-    print(f"Most difficult to process: {crg_report_ids[index_of_most_difficult]}")
+    print(f"Most difficult to process: {report_ids[index_of_most_difficult]}")
     print(f"Total studies visited {sum(ranks)}")
     print(f"Lowest rank for positive study {max(ranks)}")
     print(f"Lowest score for positive study {min(scores)}")

@@ -368,7 +368,7 @@ class ReportRepository:
         )
 
         rows = await self.db.execute(stmt)
-        return {crg_report_id: report_number for crg_report_id, report_number in rows.all()}
+        return {report_id: report_number for report_id, report_number in rows.all()}
     
     async def get_pdf_numbers_by_report_id(self, report_id: int) -> int:
         """

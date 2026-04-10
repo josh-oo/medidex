@@ -1,5 +1,5 @@
 from ..database.repositories.study import StudyRepository
-from ..database.repositories.batch import BatchRepository
+from ..database.repositories.project import ProjectRepository
 from .authors import AuthorFeatureService
 from .vectorstore import VectorstoreService
 from .report import ReportService
@@ -11,11 +11,11 @@ from ..utils.random import get_random_value, add_noise_to_vector
 
     
 class StudySimilaritySearchService:
-    def __init__(self, user_id : str, vectorstore : VectorstoreService, study_repo : StudyRepository, batch_repo : BatchRepository, author_feature_service : AuthorFeatureService, report_service : ReportService):
+    def __init__(self, user_id : str, vectorstore : VectorstoreService, study_repo : StudyRepository, project_repo : ProjectRepository, author_feature_service : AuthorFeatureService, report_service : ReportService):
         self.user_id = user_id
         self.vectorstore = vectorstore
         self.study_repo = study_repo
-        self.batch_repo = batch_repo
+        self.project_repo = project_repo
         self.author_feature_service = author_feature_service
         self.report_service = report_service
 
@@ -118,7 +118,7 @@ class StudySimilaritySearchService:
                 trial_ids = []
                 authors = []
 
-            vectors = await self.vectorstore.get_vectors_by_crg_report_id(report.CRGReportID)
+            vectors = await self.vectorstore.get_vectors_by_report_id(report.CRGReportID)
             query = add_noise_to_vector(vectors['default'], random_value, report.CRGReportID)
 
         else:
@@ -132,10 +132,10 @@ class StudySimilaritySearchService:
             for i in range(0, len(result['Relevance'])):
                 result['Relevance'][i] = min(result['Relevance'][i] / (1.01-random_value), 1.0)
 
-        # Check if there are any similar items in the same batch which are more similar than already retrieved existing studies
+        # Check if there are any similar items in the same project which are more similar than already retrieved existing studies
         if result.get('Relevance'):
             min_score = min(result['Relevance'])
-            batch_studies = await self.batch_repo.get_similar_report_studies(report.CRGReportID, min_score)
+            project_studies = await self.project_repo.get_similar_report_studies(report.CRGReportID, min_score)
             
             # Create a map of existing study IDs to their positions and scores
             existing_study_map = {}
@@ -145,7 +145,7 @@ class StudySimilaritySearchService:
                     'score': result['Relevance'][idx]
                 }
             
-            for study, score in batch_studies:
+            for study, score in project_studies:
                 study_dict = study.dict()
                 study_id = study_dict.get('CRGStudyID')
                 
@@ -216,6 +216,6 @@ class RelatedTagSearchService:
         similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, TagCategories.default, cutoff, k, None, None, False)
         predicted_studies = similar_studies['CRGStudyID']
 
-        vectors = await self.vectorstore.get_vectors_by_crg_report_id(report_id)
+        vectors = await self.vectorstore.get_vectors_by_report_id(report_id)
         
         return await self.search_related_tags_by_study_ids(predicted_studies, aspect, vectors)

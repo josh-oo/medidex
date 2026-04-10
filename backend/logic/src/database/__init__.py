@@ -1,7 +1,7 @@
 from fastapi import Depends
 
 from .repositories.study import StudyRepository
-from .repositories.batch import BatchRepository
+from .repositories.project import ProjectRepository
 from .repositories.report import ReportRepository
 from .repositories.aspects import AspectRepository
 
@@ -19,8 +19,8 @@ async def db_ready(db: AsyncSession = Depends(get_session)):
 def get_study_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)):
     return StudyRepository(db=db, user_id=user_id)
 
-def get_batch_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)):
-    return BatchRepository(db=db, user_id=user_id)
+def get_project_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)):
+    return ProjectRepository(db=db, user_id=user_id)
 
 def get_report_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)):
     return ReportRepository(db=db, user_id=user_id)

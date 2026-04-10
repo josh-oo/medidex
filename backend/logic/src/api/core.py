@@ -21,18 +21,18 @@ import grpc
 
 from .auth import is_verified_api_call, get_user_id, get_roles
 
-from ..database import get_study_repo, get_batch_repo, get_report_repo, db_ready
+from ..database import get_study_repo, get_project_repo, get_report_repo, db_ready
 
 from ..database import StudyRepository
 from ..database import ReportRepository
-from ..database import BatchRepository
+from ..database import ProjectRepository
 
-from ..database.models import Report as DbReport, Batch as DbBatch
+from ..database.models import Report as DbReport, Batch as DbProject
 
 from ..services import get_tag_similarity_service, TagSimilaritySearchService
 from ..services import get_related_tag_service, RelatedTagSearchService
 from ..services import get_tag_scoring_service, TagScoringService
-from ..services import get_study_similarity_service, get_study_similarity_service_batch, StudySimilaritySearchService
+from ..services import get_study_similarity_service, get_study_similarity_service_project, StudySimilaritySearchService
 
 from ..services import get_vectorstore_service, VectorstoreService
 
@@ -40,7 +40,7 @@ from ..services import get_embedding_service, EmbeddingService
 
 from ..services import get_maintenance_service, MaintenanceService
 
-from ..services import batch_hash_id_to_report_id
+from ..services import project_path_to_report_id
 
 from .resources import Report, Study, StudyCreate, transform_to_output_studies
 
@@ -58,14 +58,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["logic"])
 
 cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
-report_index_path = Path(..., description="The target report's index within the batch (starting with 0)")
-batch_hash_path = Path(..., description="The batch's hash/id")
+report_index_path = Path(..., description="The target report's index within the project (starting with 0)")
+project_id_path = Path(..., description="The projects's id")
 
 k_query = Query(10, description="Maximum number of returned results.")
 
-# Simple in-process pub/sub to allow multiple subscribers per batch
-batch_subscribers: Dict[str, List[asyncio.Queue]] = {}
-batch_subscribers_lock = asyncio.Lock()
+# Simple in-process pub/sub to allow multiple subscribers per project
+project_subscribers: Dict[str, List[asyncio.Queue]] = {}
+project_subscribers_lock = asyncio.Lock()
 
 # Track background tasks to prevent resource leaks
 background_tasks: set = set()
@@ -99,10 +99,6 @@ class BatchedReport(BaseModel):
 class SimilarStudy(BaseModel):
     relevance: float
     study: Study
-
-class SearchResponse():
-    studies: List[SimilarStudy]
-    batchHash: str
 
 class TagResponse(BaseModel):
     id: str
@@ -139,72 +135,72 @@ def transform_raw_similar_studies(studies):
         results.append(SimilarStudy(relevance=studies['Relevance'][i], study=study))
     return results
 
-async def publish_batch_update(batch_hash: str):
-    """Publish an update for a specific batch to all subscribers.
-    The published value is the batch_hash (keeps compatibility with existing handlers).
+async def publish_project_update(project_id: str):
+    """Publish an update for a specific project to all subscribers.
+    The published value is the project_id (keeps compatibility with existing handlers).
     """
-    async with batch_subscribers_lock:
-        queues = list(batch_subscribers.get(batch_hash, []))
+    async with project_subscribers_lock:
+        queues = list(project_subscribers.get(project_id, []))
 
     for q in queues:
         try:
-            q.put_nowait(batch_hash)
+            q.put_nowait(project_id)
         except Exception:
             # If put_nowait fails for whatever reason, schedule an async put.
-            task = asyncio.create_task(q.put(batch_hash))
+            task = asyncio.create_task(q.put(project_id))
             # Track the task to prevent resource leaks and add cleanup callback
             background_tasks.add(task)
             # Use lambda to be explicit and handle potential exceptions in cleanup
             task.add_done_callback(lambda t: background_tasks.discard(t))
 
-async def process_report(reports : List[DbReport], batch_hash : str, batch_repo : BatchRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService):
+async def process_report(reports : List[DbReport], project_id : str, project_repo : ProjectRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService):
     async def process(report):
-        batch = await batch_repo.get_batch_by_hash(batch_hash)
-        if not batch:
-            return  # Skip processing if batch was deleted
+        project = await project_repo.get_project_by_id(project_id)
+        if not project:
+            return  # Skip processing if project was deleted
         await vectorstore.add_report_to_vectorstore(report)
-        await publish_batch_update(batch_hash)
+        await publish_project_update(project_id)
     
     all_tasks = [process(report) for report in reports]
     await asyncio.gather(*all_tasks)
 
-    await finalize_batch_upload(batch_hash, batch_repo, vectorstore, maintenance_service)
+    await finalize_project_upload(project_id, project_repo, vectorstore, maintenance_service)
 
-async def finalize_batch_upload(batch_hash : str, batch_repo : BatchRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService):
+async def finalize_project_upload(project_id : str, project_repo : ProjectRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService):
     """
-    Finalize a batch upload by checking if all reports have been processed.
-    Updates batch status and notifies subscribers when complete.
+    Finalize a project upload by checking if all reports have been processed.
+    Updates project status and notifies subscribers when complete.
     """
-    # Get all reports in the batch
-    crg_report_ids = await batch_repo.get_batch_associated_report_ids(batch_hash)
+    # Get all reports in the project
+    report_ids = await project_repo.get_project_associated_report_ids(project_id)
     
-    if not crg_report_ids:
-        #Batch not available
+    if not report_ids:
+        #Project not available
         await maintenance_service.vectorstore_clean_up()
         return
     
-    score_pairs = await vectorstore.calculate_score_pairs(crg_report_ids)
-    await batch_repo.insert_batch_scores(score_pairs)
+    score_pairs = await vectorstore.calculate_score_pairs(report_ids)
+    await project_repo.insert_project_scores(score_pairs)
 
-    print("Batch finalized")
-    # Notify all subscribers that batch is complete
-    await publish_batch_update(batch_hash)
+    #print("Project finalized")
+    # Notify all subscribers that project is complete
+    await publish_project_update(project_id)
 
-async def subscribe_to_batch(batch_hash: str) -> asyncio.Queue:
+async def subscribe_to_project(project_id: str) -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue()
-    async with batch_subscribers_lock:
-        batch_subscribers.setdefault(batch_hash, []).append(q)
+    async with project_subscribers_lock:
+        project_subscribers.setdefault(project_id, []).append(q)
     return q
 
-async def unsubscribe_from_batch(batch_hash: str, q: asyncio.Queue):
-    async with batch_subscribers_lock:
-        lst = batch_subscribers.get(batch_hash)
+async def unsubscribe_from_project(project_id: str, q: asyncio.Queue):
+    async with project_subscribers_lock:
+        lst = project_subscribers.get(project_id)
         if not lst:
             return
         if q in lst:
             lst.remove(q)
         if not lst:
-            batch_subscribers.pop(batch_hash, None)
+            project_subscribers.pop(project_id, None)
 
 @router.get("/readyz", summary="Health check endpoint for readiness probe", tags=["health"])
 async def readyz(db_ready: str = Depends(db_ready), vectorstore : VectorstoreService = Depends(get_vectorstore_service), embedding_service : EmbeddingService = Depends(get_embedding_service)) -> Dict[str, Any]:
@@ -260,14 +256,14 @@ async def readyz(db_ready: str = Depends(db_ready), vectorstore : VectorstoreSer
         "message": f"{len(background_tasks)} active background tasks"
     }
     
-    # Check batch subscribers
-    async with batch_subscribers_lock:
-        total_subscribers = sum(len(queues) for queues in batch_subscribers.values())
-        checks["batch_subscribers"] = {
+    # Check project subscribers
+    async with project_subscribers_lock:
+        total_subscribers = sum(len(queues) for queues in project_subscribers.values())
+        checks["project_subscribers"] = {
             "status": "healthy",
-            "active_batches": len(batch_subscribers),
+            "active_projects": len(project_subscribers),
             "total_subscribers": total_subscribers,
-            "message": f"{len(batch_subscribers)} batches with {total_subscribers} subscribers"
+            "message": f"{len(project_subscribers)} projects with {total_subscribers} subscribers"
         }
     
     response = {
@@ -282,8 +278,8 @@ async def readyz(db_ready: str = Depends(db_ready), vectorstore : VectorstoreSer
     
     return response
 
-@router.post("/projects", dependencies=[Depends(is_verified_api_call)], summary="Upload a batch of new reports that need to be assigned to studies (usually in the .ris file format)", description="Uploading a new batch triggers the embedding process. Batches are mainly used to do these compute heavy calculations in the background and only once. All needed data and the calculated embedding vectors are stored temporarily.", status_code=201) 
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), batch_repo : BatchRepository = Depends(get_batch_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service), maintenance_service: MaintenanceService = Depends(get_maintenance_service)):
+@router.post("/projects", dependencies=[Depends(is_verified_api_call)], summary="Upload a project (batch of new reports that need to be assigned to studies) (usually in the .ris file format)", status_code=201) 
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), project_repo : ProjectRepository = Depends(get_project_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service), maintenance_service: MaintenanceService = Depends(get_maintenance_service)):
 
     entries = await parse_file(file)
 
@@ -348,42 +344,42 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
         reports.append(report)
 
-    batch_hash = hashlib.sha256(fingerprint_string.encode()).hexdigest()
+    project_id = hashlib.sha256(fingerprint_string.encode()).hexdigest()
 
-    reports = await batch_repo.add_new_batch(batch_hash,projectName,reports)
+    reports = await project_repo.add_new_project(project_id,projectName,reports)
     # schedule background tasks
     #for report in reports:
     #    print("Report provcess appended")
-    background_tasks.add_task(process_report, reports, batch_hash, batch_repo, vectorstore, maintenance_service)
+    background_tasks.add_task(process_report, reports, project_id, project_repo, vectorstore, maintenance_service)
 
-    await publish_batch_update(batch_hash)
+    await publish_project_update(project_id)
 
     #TODO disabled for legacy reasons
     #reports_dict = [report.dict() for report in reports]
-    #JSONResponse(content={"batch_hash": batch_hash, "batch_description": file.filename, "reports": reports_dict}, status_code=201)
+    #JSONResponse(content={"project_id": project_id, "project_description": file.filename, "reports": reports_dict}, status_code=201)
 
     return Response(status_code=201)
 
-async def get_batch_by_hash(batch_hash: str, batch_repo: BatchRepository = Depends(get_batch_repo)) -> DbBatch:
-    batch = await batch_repo.get_batch_by_hash(batch_hash)
-    if not batch:
-        raise HTTPException(status_code=404, detail="Batch not found")
-    return batch
+async def get_project_by_id(project_id: str, project_repo: ProjectRepository = Depends(get_project_repo)) -> DbProject:
+    project = await project_repo.get_project_by_id(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
 
-async def get_batch_associated_report_ids(batch: DbBatch = Depends(get_batch_by_hash), batch_repo: BatchRepository = Depends(get_batch_repo)):
-    return await batch_repo.get_batch_associated_report_ids(batch.BatchHash)
+async def get_project_associated_report_ids(project: DbProject = Depends(get_project_by_id), project_repo: ProjectRepository = Depends(get_project_repo)):
+    return await project_repo.get_project_associated_report_ids(project.BatchHash)
 
 async def calculate_processing_progress(
-    crg_report_ids: List[int],
+    report_ids: List[int],
     report_repo: ReportRepository,
     vectorstore: VectorstoreService,
 ) -> Tuple[int, int]:
-    crg_report_ids = crg_report_ids or []
-    if not crg_report_ids:
+    report_ids = report_ids or []
+    if not report_ids:
         return 0, 0
 
     vectorized_report_ids, _, ready_report_ids = await get_vectorized_and_ready_report_ids(
-        crg_report_ids, report_repo, vectorstore
+        report_ids, report_repo, vectorstore
     )
 
     generated_embeddings = len(vectorized_report_ids)
@@ -400,7 +396,7 @@ async def get_vectorized_and_ready_report_ids(
         return set(), set()
 
     vectorized_report_ids_raw, report_numbers = await asyncio.gather(
-        vectorstore.crg_reports_exist(report_ids),
+        vectorstore.reports_exist(report_ids),
         report_repo.get_report_numbers(report_ids),
     )
     embedded_report_ids = set(vectorized_report_ids_raw)
@@ -413,30 +409,26 @@ async def get_vectorized_and_ready_report_ids(
     return embedded_report_ids, pdf_ready_reports, ready_report_ids
 
 async def get_project_stats(
-    batch: DbBatch = Depends(get_batch_by_hash),
-    crg_report_ids: List[int] = Depends(get_batch_associated_report_ids),
+    project: DbProject = Depends(get_project_by_id),
+    report_ids: List[int] = Depends(get_project_associated_report_ids),
     report_repo: ReportRepository = Depends(get_report_repo),
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
-    batch_repo: BatchRepository = Depends(get_batch_repo),
+    project_repo: ProjectRepository = Depends(get_project_repo),
 ) -> ProjectDetails:
-    #async def get_batch_stats(batch_hash : str, batch_repo: BatchRepository = Depends(get_batch_repo), report_repo: ReportRepository = Depends(get_report_repo)) -> BatchResponse:
-    # Fetch all report studies in parallel
-    #batch = batch_repo.get_batch_by_hash(hash)
-    #crg_report_ids = batch_repo.get_batch_associated_reports(batch_hash)
 
     generated_embeddings, ready_for_processing_count = await calculate_processing_progress(
-        crg_report_ids, report_repo, vectorstore
+        report_ids, report_repo, vectorstore
     )
 
-    assignees = await batch_repo.get_batch_assignees(batch.BatchHash)
+    assignees = await project_repo.get_project_assignees(project.BatchHash)
     assignee_ids = [user_id for user_id, _ in assignees if user_id]
 
     ready_for_review_count = 0
     if assignee_ids:
-        completion_map = await batch_repo.get_report_completion_by_users(batch.BatchHash)
+        completion_map = await project_repo.get_report_completion_by_users(project.BatchHash)
         assignee_set = set(assignee_ids)
         ready_for_review_count = sum(
-            1 for report_id in crg_report_ids
+            1 for report_id in report_ids
             if assignee_set.issubset(completion_map.get(report_id, set()))
         )
 
@@ -446,14 +438,14 @@ async def get_project_stats(
     ]
 
     return ProjectDetails(
-        projectId=batch.BatchHash,
-        name=batch.BatchDescription,
-        createdAt=batch.DateCreated,
-        numberReportsTotal=len(crg_report_ids),
+        projectId=project.BatchHash,
+        name=project.BatchDescription,
+        createdAt=project.DateCreated,
+        numberReportsTotal=len(report_ids),
         numberReportsPreProcessed=generated_embeddings,
         numberReportsReadyForProcessing=ready_for_processing_count,
         numberReportsReadyForReview=ready_for_review_count,
-        owner=batch.UploadedBy,
+        owner=project.UploadedBy,
         assignees=assignee_payload,
     )
 
@@ -464,137 +456,137 @@ async def get_project_stats(
     description="Returns all projects the user is assigned to along with their personal study-link counts.",
 )
 async def get_user_tasks(
-    batch_repo: BatchRepository = Depends(get_batch_repo),
+    project_repo: ProjectRepository = Depends(get_project_repo),
     report_repo: ReportRepository = Depends(get_report_repo),
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
 ) -> List[ProjectTask]:
-    user_id = getattr(batch_repo, "user_id", None)
+    user_id = getattr(project_repo, "user_id", None)
     if not user_id:
         return []
 
-    batches = await batch_repo.get_assigned_batches()
-    if not batches:
+    projects = await project_repo.get_assigned_projects()
+    if not projects:
         return []
 
-    user_link_counts = await batch_repo.get_user_link_counts_by_batch()
+    user_link_counts = await project_repo.get_user_link_counts_by_project()
 
     report_id_tasks = [
-        batch_repo.get_batch_associated_report_ids(batch.BatchHash) for batch in batches
+        project_repo.get_project_associated_report_ids(project.BatchHash) for project in projects
     ]
-    batch_report_ids = await asyncio.gather(*report_id_tasks)
+    project_report_ids = await asyncio.gather(*report_id_tasks)
 
     progress_tasks = [
         calculate_processing_progress(report_ids, report_repo, vectorstore)
-        for report_ids in batch_report_ids
+        for report_ids in project_report_ids
     ]
     progress_results = await asyncio.gather(*progress_tasks)
 
     tasks: List[ProjectTask] = []
-    for batch, (_, ready_for_processing_count) in zip(batches, progress_results):
+    for project, (_, ready_for_processing_count) in zip(projects, progress_results):
         project_payload = Project(
-            projectId=batch.BatchHash,
-            name=batch.BatchDescription,
-            owner=batch.UploadedBy or "",
-            createdAt=batch.DateCreated,
+            projectId=project.BatchHash,
+            name=project.BatchDescription,
+            owner=project.UploadedBy or "",
+            createdAt=project.DateCreated,
             numberReportsReadyForProcessing=ready_for_processing_count,
         )
         tasks.append(
             ProjectTask(
                 project=project_payload,
-                numberReportsProcessed=user_link_counts.get(batch.BatchHash, 0),
+                numberReportsProcessed=user_link_counts.get(project.BatchHash, 0),
             )
         )
 
     return tasks
 
-@router.get("/projects", dependencies=[Depends(is_verified_api_call)], summary="Get an overview of current report batches.", description="For each batch the current progress of embedding calculation and the number of already assigned reports is returned")
-async def get_available_projects(batch_repo: BatchRepository = Depends(get_batch_repo), report_repo: ReportRepository = Depends(get_report_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> List[ProjectDetails]:
-    # Get all batches
-    batches = await batch_repo.get_all_batches()
+@router.get("/projects", dependencies=[Depends(is_verified_api_call)], summary="Get an overview of all current projects.", description="For each project the current progress of embedding calculation and the number of already assigned reports is returned")
+async def get_available_projects(project_repo: ProjectRepository = Depends(get_project_repo), report_repo: ReportRepository = Depends(get_report_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> List[ProjectDetails]:
+    # Get all projects
+    projects = await project_repo.get_all_projects()
 
-    # Process all batches in parallel
+    # Process all projects in parallel
     tasks = []
-    for batch in batches:
-        crg_report_ids = await batch_repo.get_batch_associated_report_ids(batch.BatchHash)
+    for project in projects:
+        report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
         tasks.append(
             get_project_stats(
-                batch=batch,
-                crg_report_ids=crg_report_ids,
+                project=project,
+                report_ids=report_ids,
                 report_repo=report_repo,
                 vectorstore=vectorstore,
-                batch_repo=batch_repo,
+                project_repo=project_repo,
             )
         )
     project_responses = await asyncio.gather(*tasks)
 
     return project_responses
 
-@router.get("/projects/{batch_hash}", dependencies=[Depends(is_verified_api_call)], summary="Get a specific report batch by hash.",description="Returns details and progress information for a single report batch identified by batch_hash.")
-async def get_batch_stats_by_hash(batch_stats : Project = Depends(get_project_stats)) -> Project:
-    return batch_stats
+@router.get("/projects/{project_id}", dependencies=[Depends(is_verified_api_call)], summary="Get a specific project by id.",description="Returns details and progress information for a single project identified by project id.")
+async def get_project_stats_by_id(project_stats : Project = Depends(get_project_stats)) -> Project:
+    return project_stats
 
-@router.delete("/projects/{batch_hash}", dependencies=[Depends(is_verified_api_call)], summary="Delete a report batch and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
-async def delete_batch(batch_hash : str, crg_report_ids : List[int] = Depends(get_batch_associated_report_ids), batch_repo: BatchRepository = Depends(get_batch_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+@router.delete("/projects/{project_id}", dependencies=[Depends(is_verified_api_call)], summary="Delete a project and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
+async def delete_project(project_id : str, report_ids : List[int] = Depends(get_project_associated_report_ids), project_repo: ProjectRepository = Depends(get_project_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
     
-    #Deletes the batch and through cascade and triggers everythig related to it
-    await batch_repo.delete_batch(batch_hash)
+    #Deletes the project and through cascade and triggers everythig related to it
+    await project_repo.delete_project(project_id)
 
-    await vectorstore.delete_vectors_by_crg_report_ids(crg_report_ids)
+    await vectorstore.delete_vectors_by_report_ids(report_ids)
 
-    await publish_batch_update(batch_hash)
+    await publish_project_update(project_id)
     
     return Response(status_code=204)
 
 @router.post(
-    "/projects/{batch_hash}/assignees",
+    "/projects/{project_id}/assignees",
     dependencies=[Depends(is_verified_api_call)],
     summary="Assign a user to a project",
     status_code=201,
 )
 async def assign_user_to_project(
     user_id: str = Body(..., embed=False, description="User ID to assign"),
-    batch_hash: str = batch_hash_path,
-    batch_repo: BatchRepository = Depends(get_batch_repo),
+    project_id: str = project_id_path,
+    project_repo: ProjectRepository = Depends(get_project_repo),
 ):
-    batch = await batch_repo.get_batch_by_hash(batch_hash)
-    if not batch:
+    project = await project_repo.get_project_by_id(project_id)
+    if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    created = await batch_repo.add_batch_assignee(batch_hash, user_id)
+    created = await project_repo.add_project_assignee(project_id, user_id)
     if not created:
         raise HTTPException(status_code=409, detail="User already assigned to project")
 
-    await publish_batch_update(batch_hash)
+    await publish_project_update(project_id)
 
     return ProjectAssignee(userId=user_id, numberReportsLinked=0)
 
 @router.delete(
-    "/projects/{batch_hash}/assignees/{user_id}",
+    "/projects/{project_id}/assignees/{user_id}",
     dependencies=[Depends(is_verified_api_call)],
     summary="Remove a user assignment from a project",
     status_code=204,
 )
 async def remove_user_from_project(
-    batch_hash: str = batch_hash_path,
+    project_id: str = project_id_path,
     user_id: str = Path(..., description="The user ID to remove from the project"),
-    batch_repo: BatchRepository = Depends(get_batch_repo),
+    project_repo: ProjectRepository = Depends(get_project_repo),
 ):
-    batch = await batch_repo.get_batch_by_hash(batch_hash)
-    if not batch:
+    project = await project_repo.get_project_by_id(project_id)
+    if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    removed = await batch_repo.remove_batch_assignee(batch_hash, user_id)
+    removed = await project_repo.remove_project_assignee(project_id, user_id)
     if not removed:
         raise HTTPException(status_code=404, detail="User is not assigned to this project")
 
-    await publish_batch_update(batch_hash)
+    await publish_project_update(project_id)
 
     return Response(status_code=204)
 
-@router.get("/projects/{batch_hash}/reports", dependencies=[Depends(is_verified_api_call)], summary="Get a specific report batch by hash.",description="Returns details and progress information for a single report batch identified by batch_hash.")
-async def get_batch_stats_by_hash(
+@router.get("/projects/{project_id}/reports", dependencies=[Depends(is_verified_api_call)], summary="Get all reports in a project by project id.")
+async def get_project_reports(
     ready_only: bool = Query(False, description="Only include reports that have generated embeddings and a linked PDF."),
-    report_ids: List[int] = Depends(get_batch_associated_report_ids),
+    report_ids: List[int] = Depends(get_project_associated_report_ids),
     report_repo: ReportRepository = Depends(get_report_repo),
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
     roles: List[str] = Depends(get_roles)
@@ -636,52 +628,52 @@ async def get_batch_stats_by_hash(
         )
     return result
 
-@router.get("/projects/{batch_hash}/subscribe",dependencies=[Depends(is_verified_api_call)], summary="Stream updated batch information.")
-async def stream_batch_updates(
-    batch_hash: str,
+@router.get("/projects/{project_id}/subscribe",dependencies=[Depends(is_verified_api_call)], summary="Stream updated batch information.")
+async def stream_project_updates(
+    project_id: str,
     request: Request,
-    batch_repo: BatchRepository = Depends(get_batch_repo),
+    project_repo: ProjectRepository = Depends(get_project_repo),
     report_repo: ReportRepository = Depends(get_report_repo),
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
 ) -> StreamingResponse:
     async def event_stream():
         HEARTBEAT_INTERVAL = 10  # seconds
 
-        # subscribe this client to the batch
-        q = await subscribe_to_batch(batch_hash)
+        # subscribe this client to the project
+        q = await subscribe_to_project(project_id)
         try:
             while True:
                 # Check for client disconnect
                 if await request.is_disconnected():
                     break
 
-                # Check if batch still exists
-                batch_obj = None
+                # Check if project still exists
+                project_obj = None
                 try:
-                    batch_obj = await get_batch_by_hash(batch_hash, batch_repo)
+                    project_obj = await get_project_by_id(project_id, project_repo)
                 except HTTPException as e:
                     if e.status_code == 404:
-                        yield f"event: batch_deleted\ndata: Batch deleted\n\n"
+                        yield f"event: project_deleted\ndata: Project deleted\n\n"
                         break
                     else:
                         raise
 
                 try:
                     data = await asyncio.wait_for(q.get(), timeout=HEARTBEAT_INTERVAL)
-                    if data == batch_hash:
+                    if data == project_id:
                         try:
-                            crg_report_ids = await batch_repo.get_batch_associated_report_ids(batch_hash)
+                            report_ids = await project_repo.get_project_associated_report_ids(project_id)
                             project = await get_project_stats(
-                                batch=batch_obj,
-                                crg_report_ids=crg_report_ids,
+                                project=project_obj,
+                                report_ids=report_ids,
                                 report_repo=report_repo,
                                 vectorstore=vectorstore,
-                                batch_repo=batch_repo,
+                                project_repo=project_repo,
                             )
                             yield f"data: {project.json()}\n\n"
                         except HTTPException as e:
                             if e.status_code == 404:
-                                yield f"event: batch_deleted\ndata: Batch deleted\n\n"
+                                yield f"event: project_deleted\ndata: Project deleted\n\n"
                                 break
                             else:
                                 raise
@@ -689,17 +681,17 @@ async def stream_batch_updates(
                     # Send heartbeat
                     yield f": heartbeat\n\n"
         finally:
-            await unsubscribe_from_batch(batch_hash, q)
+            await unsubscribe_from_project(project_id, q)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-@router.get("/projects/{batch_hash}/{report_index}", dependencies=[Depends(is_verified_api_call)], summary="Get the data and embedding vectors for a specific report in a batch.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its batch hash and index (starting with 0) within the batch.")
-async def get_batched_report(crg_report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+@router.get("/projects/{project_id}/{report_index}", dependencies=[Depends(is_verified_api_call)], summary="Get the data and embedding vectors for a specific report in a project.", description="Retrieve the title, abstract, authors, trial ID, embedding vectors, and assigned studies for a specific report identified by its project id and index (starting with 0) within the project.")
+async def get_project_report(report_id : int = Depends(project_path_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
 
     # Run DB/vectorstore calls in parallel
-    vectors_task = vectorstore.get_vectors_by_crg_report_id(crg_report_id)
-    report_task =  report_repo.get_report_by_id(crg_report_id)
-    assigned_studies_task = report_repo.get_linked_studies(crg_report_id)
+    vectors_task = vectorstore.get_vectors_by_report_id(report_id)
+    report_task =  report_repo.get_report_by_id(report_id)
+    assigned_studies_task = report_repo.get_linked_studies(report_id)
 
     report_obj, vectors, assigned_studies = await asyncio.gather(
         report_task, vectors_task, assigned_studies_task
@@ -725,57 +717,46 @@ async def get_batched_report(crg_report_id : int = Depends(batch_hash_id_to_repo
 
     return report
 
-@router.put("/projects/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=200)
-async def assign_studies(batch_hash: str = batch_hash_path, study_ids: List[int] = Query(..., description="The study ids you want to assign to the specified report."), report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+@router.put("/projects/{project_id}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a project.", status_code=200)
+async def assign_studies(project_id: str = project_id_path, study_ids: List[int] = Query(..., description="The study ids you want to assign to the specified report."), report_id : int = Depends(project_path_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
     await asyncio.gather(
         report_repo.link_studies(report_id, study_ids),
         vectorstore.link_report_to_study_ids(report_id, study_ids, user_id)
     )
 
-    await publish_batch_update(batch_hash)
+    await publish_project_update(project_id)
     
     payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
 
-    return await get_batched_report(report_id, report_repo, vectorstore)
+    return await get_project_report(report_id, report_repo, vectorstore)
 
-@router.delete("/projects/{batch_hash}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=200)
-async def delete_assigned_studies(batch_hash: str = batch_hash_path, report_id : int = Depends(batch_hash_id_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+@router.delete("/projects/{project_id}/{report_index}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a project.", status_code=200)
+async def delete_assigned_studies(project_id: str = project_id_path, report_id : int = Depends(project_path_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
     await asyncio.gather(
         report_repo.unlink_studies(report_id),
         vectorstore.link_report_to_study_ids(report_id, [], user_id)
     )
 
-    await publish_batch_update(batch_hash)
+    await publish_project_update(project_id)
 
     payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
 
-    return await get_batched_report(report_id, report_repo, vectorstore)
+    return await get_project_report(report_id, report_repo, vectorstore)
 
-@router.get("/projects/{batch_hash}/{report_index}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
-async def similar_tags(sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), k : int = k_query, report_id : int = Depends(batch_hash_id_to_report_id), tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[TagResponse]:
+@router.get("/projects/{project_id}/{report_index}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a project based on its embedding vectors.")
+async def similar_tags(sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), k : int = k_query, report_id : int = Depends(project_path_to_report_id), tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[TagResponse]:
     if aspect == TagCategories.default:
         raise HTTPException(status_code=400, detail="No tags for 'default' embedding.")
     return await tag_similarity_service.get_similar_tags_by_id(report_id, aspect, sources, k)
 
-@router.get("/projects/{batch_hash}/{report_index}/similar-studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a batch based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its batch hash and index (starting with 0) within the batch. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
-async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, report_id : int = Depends(batch_hash_id_to_report_id), user_id : str = Depends(get_user_id), study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service_batch), return_details : bool = False) -> List[SimilarStudy]:
+@router.get("/projects/{project_id}/{report_index}/similar-studies", dependencies=[Depends(is_verified_api_call)], summary="Get related studies for a specific report in a project based on its embedding vectors.", description="Retrieve studies that are similar to a specific report identified by its project id and index (starting with 0) within the project. Similarity is determined based on the embedding vectors of the report. The similarity search is done at runtime. You can optionally search for similarity based on a specific aspect (e.g., interventions, outcomes) or apply a cutoff date to only consider studies entered before a certain date.")
+async def similar_studies(aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."), cutoff: str = cutoff_query, k : int = k_query, report_id : int = Depends(project_path_to_report_id), user_id : str = Depends(get_user_id), study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service_project), return_details : bool = False) -> List[SimilarStudy]:
     result = await study_similarity_service.get_similar_studies_by_id(report_id,aspect, cutoff,k, None, None, return_details=return_details)
     payload = {"user": user_id, "event_type": f"similar::studies::k::{k}", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
     return transform_raw_similar_studies(result)
-
-
-#@router.get("/features/authors", dependencies=[Depends(is_verified_api_call)], include_in_schema=False)
-#async def get_author_features(authors : List[str] = Query(...), study_ids : List[int] = Query(...), cutoff : str = Query(None), study_repo : StudyRepository = Depends(get_study_repo)):
-#    data = {}
-#    study_persons = await study_repo.get_study_persons(study_ids, cutoff, normalize_names=True)
-#    current_person_freq = get_author_frequencies(authors)
-#    for study_id, study_authors in study_persons.items():
-#        features = build_features( study_authors, current_person_freq)
-#        data[study_id] = features
-#    return data
 
 
 @router.get("/{tag_category}/{tag_value}/related_studies", dependencies=[Depends(is_verified_api_call)], summary="Get studies related to a specific tag (intervention, outcome, ...) currently only vector-similarity search is available.", description="Retrieve studies that are related to a specific tag value (e.g., 'Placebo' for interventions) using vector similarity search based on the embedding of the tag value. The similarity search is done at runtime.")
@@ -789,7 +770,7 @@ async def get_aspect_related_studies(tag_category: TagCategories = Path(..., des
 
     return await study_similarity_service.get_similar_study_by_query(embeddings['embedding'],aspect, None, k, [], [], [], return_details=False)
 
-@router.get("/{tag_category}/{tag_value}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a batch based on its embedding vectors.")
+@router.get("/{tag_category}/{tag_value}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a project based on its embedding vectors.")
 async def similar_tags(tag_category: TagCategories =Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value : str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), k : int = k_query, tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[TagResponse]:
     if tag_category == TagCategories.default:
         raise HTTPException(status_code=400, detail="No tags for 'default' embedding.")
@@ -909,7 +890,7 @@ async def similarity_search_studies_by_id(
     negative_reports: List[int] = Query(None),
     return_details: bool = False,
     study_similarity_service: StudySimilaritySearchService = Depends(get_study_similarity_service),
-    batch_repo: BatchRepository = Depends(get_batch_repo),
+    project_repo: ProjectRepository = Depends(get_project_repo),
     report_repo: ReportRepository = Depends(get_report_repo),
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
 ) -> List[SimilarStudy]:
@@ -930,9 +911,9 @@ async def similarity_search_studies_by_id(
             return_details,
         )
     else:
-        batch_hash = await batch_repo.get_batch_hash_by_report_id(report_id)
-        if batch_hash != source:
-            raise HTTPException(status_code=404, detail="Report not found in batch")
+        project_id = await project_repo.get_project_id_by_report_id(report_id)
+        if project_id != source:
+            raise HTTPException(status_code=404, detail="Report not found in project")
 
         result = await study_similarity_service.get_similar_studies_by_id(
             report_id,
@@ -952,40 +933,40 @@ async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagC
          raise HTTPException(status_code=501, detail="Not implemented")
     return await related_tag_service.search_related_tags_by_report_id(report_id, aspect, k, cutoff)
 
-@router.put("/reports/{report_id}/studies/{study_id}", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a batch.", status_code=200)
+@router.put("/reports/{report_id}/studies/{study_id}", dependencies=[Depends(is_verified_api_call)], summary="Assign studies to a specific report in a project.", status_code=200)
 async def assign_studies(report_id : int, study_id: int, report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
-    #TODO get corresponding batch and check access rights
+    #TODO get corresponding project and check access rights
     await asyncio.gather(
         report_repo.append_study_link(report_id, study_id),
         vectorstore.link_report_to_study_id(report_id, study_id, user_id)
     )
 
-    #await publish_batch_update(batch_hash)
+    #await publish_project_update(project_id)
     
     payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
 
     return Response(content=None, status_code=200)
 
-@router.delete("/reports/{report_id}/studies/{study_id}", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=200)
+@router.delete("/reports/{report_id}/studies/{study_id}", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report.", status_code=200)
 async def delete_assigned_studies(report_id : int, study_id: int, report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
-    #TODO get corresponding batch and check access rights
+    #TODO get corresponding project and check access rights
 
     await asyncio.gather(
         report_repo.unlink_studies(report_id, study_id),
         vectorstore.unlink_report_from_study_id(report_id, study_id, user_id)
     )
 
-    #await publish_batch_update(batch_hash)
+    #await publish_project_update(project_id)
 
     payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
 
     return Response(content=None, status_code=200)
 
-@router.post("/reports/{report_id}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report in a batch.", status_code=200)
+@router.post("/reports/{report_id}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report.", status_code=200)
 async def link_to_new_study(report_id : int, study: StudyCreate, report_repo : ReportRepository = Depends(get_report_repo), study_repo : StudyRepository = Depends(get_study_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
-    #TODO get corresponding batch and check access rights
+    #TODO get corresponding project and check access rights
     new_study = await study_repo.add_study(short_name=study.shortName, study_status=study.status, countries=study.countries, duration =study.duration, number_of_participants = study.numberParticipants, comparison = study.comparison)
     study_id = new_study.CRGStudyID
 
@@ -998,7 +979,7 @@ async def link_to_new_study(report_id : int, study: StudyCreate, report_repo : R
 
     #TODO orphan removal -> return error if needed
 
-    #await publish_batch_update(batch_hash)
+    #await publish_project_update(project_id)
     
     payload = {"user": user_id, "event_type": "study::links::changed::new", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})

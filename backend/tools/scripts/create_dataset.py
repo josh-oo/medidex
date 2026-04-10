@@ -139,18 +139,18 @@ def create_test_set(path, cutoff, model_id, only_single_report_studies=False):
             if scroll_offset is None:
                 break
 
-async def create_author_features(crg_report_id, authors, cutoff, client):
+async def create_author_features(report_id, authors, cutoff, client):
 
     author_list = [a.strip() for a in authors.split("//") if a.strip()]
     
-    response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/studies", params={"date_to": cutoff})
+    response = await client.get(BACKEND_API + f"/reports/{report_id}/studies", params={"date_to": cutoff})
     ground_truth = [item['CRGStudyID'] for item in response.json()]
 
     samples = []
     
     if len(ground_truth) == 1:
         ground_truth = ground_truth[0]
-        response = await client.get(BACKEND_API + f"/reports/{crg_report_id}/similar_studies",params= {"cutoff":cutoff, 'k': 10})
+        response = await client.get(BACKEND_API + f"/reports/{report_id}/similar_studies",params= {"cutoff":cutoff, 'k': 10})
         predicted_studies = response.json()['CRGStudyID'] #List[int]
         relevance = response.json()['Relevance']# List[float]
 
@@ -163,7 +163,7 @@ async def create_author_features(crg_report_id, authors, cutoff, client):
             positive_sample = result.pop(str(ground_truth))
             positive_sample['label'] = 1
             positive_sample['study'] = ground_truth
-            positive_sample['report'] = crg_report_id
+            positive_sample['report'] = report_id
             ground_truth_index = predicted_studies.index(ground_truth)
             positive_sample['relevance'] = relevance[ground_truth_index]
             samples.append(positive_sample)
@@ -171,7 +171,7 @@ async def create_author_features(crg_report_id, authors, cutoff, client):
                 negative_sample = result.pop(key)
                 negative_sample['label'] = 0
                 negative_sample['study'] = int(key)
-                negative_sample['report'] = crg_report_id
+                negative_sample['report'] = report_id
                 study_id = int(key)
                 study_index = predicted_studies.index(study_id)
                 negative_sample['relevance'] = relevance[study_index]
@@ -196,20 +196,20 @@ async def create_author_reranking(cutoff):
     features = []
     semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent tasks
     
-    async def bounded_task(crg_report_id, authors, cutoff, client):
+    async def bounded_task(report_id, authors, cutoff, client):
         async with semaphore:
-            return await create_author_features(crg_report_id, authors, cutoff, client)
+            return await create_author_features(report_id, authors, cutoff, client)
     
     async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=timeout, limits=limits) as client:
 
         response = await client.get(f"{BACKEND_API}/reports", params={"date_to": cutoff})
-        current_crg_report_ids = [(item['CRGReportID'], item['Authors']) for item in response.json()]
+        current_report_ids = [(item['CRGReportID'], item['Authors']) for item in response.json()]
 
-        pbar = tqdm(total=len(current_crg_report_ids))
+        pbar = tqdm(total=len(current_report_ids))
 
         tasks = [
-            asyncio.create_task(bounded_task(crg_report_id, authors, cutoff, client))
-            for crg_report_id, authors in current_crg_report_ids
+            asyncio.create_task(bounded_task(report_id, authors, cutoff, client))
+            for report_id, authors in current_report_ids
         ]
 
         for task in asyncio.as_completed(tasks):

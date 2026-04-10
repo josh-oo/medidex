@@ -13,16 +13,21 @@ from ..models import (
     StudyReportAdded,
     BatchAssignees,
 )
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Set, Tuple, Optional
 
-class BatchRepository:
+
+"""
+IMPORTANT: The external interfaces follow the "project" naming scheme while the internal database implementation uses "batch" as a name
+"""
+
+class ProjectRepository:
     def __init__(self, db : AsyncSession, user_id : str):
         self.db = db
         self.user_id = str(user_id)
 
-    async def add_new_batch(self, batch_hash : str, batch_description : str, reports : List[Report]):
+    async def add_new_project(self, project_id : str, batch_description : str, reports : List[Report]):
         new_batch = Batch(
-            BatchHash=batch_hash,
+            BatchHash=project_id,
             BatchDescription=batch_description,
             UploadedBy=self.user_id
         )
@@ -34,7 +39,7 @@ class BatchRepository:
         
         # Create all ReportAdded entries
         report_added_entries = [
-            ReportAdded(CRGReportID=report.CRGReportID, BatchHash=batch_hash)
+            ReportAdded(CRGReportID=report.CRGReportID, BatchHash=project_id)
             for report in reports
         ]
         self.db.add_all(report_added_entries)
@@ -93,26 +98,26 @@ class BatchRepository:
         
         return result.all()
     
-    async def get_batch_by_hash(self, batch_hash: str):
-        batch = await self.db.execute(select(Batch).where(Batch.BatchHash == batch_hash))
+    async def get_project_by_id(self, project_id: str):
+        batch = await self.db.execute(select(Batch).where(Batch.BatchHash == project_id))
         return batch.scalar_one_or_none()
     
-    async def get_batch_associated_report_ids(self, batch_hash : str):
+    async def get_project_associated_report_ids(self, project_id : str):
         result = await self.db.execute(
-            select(ReportAdded.CRGReportID).where(ReportAdded.BatchHash == batch_hash)
+            select(ReportAdded.CRGReportID).where(ReportAdded.BatchHash == project_id)
         )
         return result.scalars().all()
     
-    async def get_all_batches(self, only_own_batches=False):
+    async def get_all_projects(self, only_own_projects=False):
         stmt = select(Batch)
 
-        if only_own_batches and self.user_id:
+        if only_own_projects and self.user_id:
             stmt = stmt.where(Batch.UploadedBy == self.user_id)
 
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
-    async def get_assigned_batches(self) -> List[Batch]:
+    async def get_assigned_projects(self) -> List[Batch]:
         if not self.user_id:
             return []
 
@@ -126,20 +131,20 @@ class BatchRepository:
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
-    async def get_report_counts_for_batches(self, batch_hashes: List[str]) -> Dict[str, int]:
-        if not batch_hashes:
+    async def get_report_counts_for_projects(self, project_ids: List[str]) -> Dict[str, int]:
+        if not project_ids:
             return {}
 
         stmt = (
             select(ReportAdded.BatchHash, func.count(ReportAdded.CRGReportID))
-            .where(ReportAdded.BatchHash.in_(batch_hashes))
+            .where(ReportAdded.BatchHash.in_(project_ids))
             .group_by(ReportAdded.BatchHash)
         )
 
         result = await self.db.execute(stmt)
         return {batch_hash: count for batch_hash, count in result.all()}
 
-    async def get_user_link_counts_by_batch(self) -> Dict[str, int]:
+    async def get_user_link_counts_by_project(self) -> Dict[str, int]:
         if not self.user_id:
             return {}
 
@@ -155,15 +160,15 @@ class BatchRepository:
         result = await self.db.execute(stmt)
         return {batch_hash: count for batch_hash, count in result.all()}
     
-    async def delete_batch(self, batch_hash : str):
-        await self.db.execute(delete(Batch).where(Batch.BatchHash == batch_hash))
+    async def delete_project(self, project_id : str):
+        await self.db.execute(delete(Batch).where(Batch.BatchHash == project_id))
         await self.db.commit()
 
-    async def batch_item_to_report_id(self, batch_hash: str, report_index: int):
+    async def project_item_to_report_id(self, project_id: str, report_index: int):
         stmt = (
             select(ReportAdded.CRGReportID)
             .where(
-                ReportAdded.BatchHash == batch_hash,
+                ReportAdded.BatchHash == project_id,
             )
             .order_by(ReportAdded.CRGReportID)
             .offset(report_index)
@@ -173,24 +178,14 @@ class BatchRepository:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
     
-    async def insert_batch_scores(self, score_pairs):
+    async def insert_project_scores(self, score_pairs):
         stmt = insert(BatchInnerScore)
         self.db.execute(stmt, score_pairs)
         await self.db.commit()
 
-    async def get_batch_hash_by_report_id(self, report_id: int) -> Optional[str]:
-        stmt = (
-            select(ReportAdded.BatchHash)
-            .where(ReportAdded.CRGReportID == report_id)
-            .limit(1)
-        )
-
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
-
-    async def get_batch_assignees(self, batch_hash: str) -> List[Tuple[str, int]]:
+    async def get_project_assignees(self, project_id: str) -> List[Tuple[str, int]]:
         result = await self.db.execute(
-            select(BatchAssignees.Assignee).where(BatchAssignees.BatchHash == batch_hash)
+            select(BatchAssignees.Assignee).where(BatchAssignees.BatchHash == project_id)
         )
         assignees = result.scalars().all()
 
@@ -203,7 +198,7 @@ class BatchRepository:
             .join(StudyReport, StudyReportAdded.StudyReportID == StudyReport.StudyReportID)
             .join(ReportAdded, ReportAdded.CRGReportID == StudyReport.CRGReportID)
             .where(
-                (ReportAdded.BatchHash == batch_hash)
+                (ReportAdded.BatchHash == project_id)
                 & (StudyReportAdded.CreatedBy.in_(assignees))
             )
             .group_by(StudyReportAdded.CreatedBy)
@@ -214,13 +209,13 @@ class BatchRepository:
 
         return [(user_id, counts.get(user_id, 0)) for user_id in assignees]
 
-    async def get_report_completion_by_users(self, batch_hash: str) -> Dict[int, Set[str]]:
+    async def get_report_completion_by_users(self, project_id: str) -> Dict[int, Set[str]]:
         stmt = (
             select(StudyReport.CRGReportID, StudyReportAdded.CreatedBy)
             .select_from(StudyReportAdded)
             .join(StudyReport, StudyReportAdded.StudyReportID == StudyReport.StudyReportID)
             .join(ReportAdded, ReportAdded.CRGReportID == StudyReport.CRGReportID)
-            .where(ReportAdded.BatchHash == batch_hash)
+            .where(ReportAdded.BatchHash == project_id)
             .where(StudyReportAdded.CreatedBy.isnot(None))
         )
 
@@ -233,21 +228,31 @@ class BatchRepository:
 
         return completion
 
-    async def add_batch_assignee(self, batch_hash: str, assignee: str) -> bool:
+    async def add_project_assignee(self, project_id: str, assignee: str) -> bool:
         stmt = (
             pg_insert(BatchAssignees)
-            .values(BatchHash=batch_hash, Assignee=assignee)
+            .values(BatchHash=project_id, Assignee=assignee)
             .on_conflict_do_nothing(index_elements=["BatchHash", "Assignee"])
         )
         result = await self.db.execute(stmt)
         await self.db.commit()
         return bool(result.rowcount)
 
-    async def remove_batch_assignee(self, batch_hash: str, assignee: str) -> bool:
+    async def remove_project_assignee(self, project_id: str, assignee: str) -> bool:
         result = await self.db.execute(
             delete(BatchAssignees).where(
-                (BatchAssignees.BatchHash == batch_hash) & (BatchAssignees.Assignee == assignee)
+                (BatchAssignees.BatchHash == project_id) & (BatchAssignees.Assignee == assignee)
             )
         )
         await self.db.commit()
         return bool(result.rowcount)
+
+    async def get_project_id_by_report_id(self, report_id: int) -> Optional[str]:
+        stmt = (
+            select(ReportAdded.BatchHash)
+            .where(ReportAdded.CRGReportID == report_id)
+            .limit(1)
+        )
+
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()

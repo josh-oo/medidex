@@ -30,7 +30,7 @@ def transform_to_uuid(id, tag="0000"):
     id = "0"*missing_zeros + id
     return f"00000000-{tag}-4000-a000-{id}"
 
-def transform_to_crg_report_id(uuid):
+def transform_to_report_id(uuid):
     return int(uuid.split("-")[-1])
 
 class VectorstoreService():
@@ -43,7 +43,7 @@ class VectorstoreService():
     async def get_collections(self):
         return await self.client.get_collections()
 
-    async def get_all_saved_crg_report_ids(self):
+    async def get_all_saved_report_ids(self):
         """
         Remove orphan nodes from vectorstore - delete points whose source_id 
         doesn't exist in the Meerkat database anymore.
@@ -168,7 +168,7 @@ class VectorstoreService():
                 points=[point_id],
             )
 
-    async def get_vectors_by_crg_report_id(self, report_id : int):
+    async def get_vectors_by_report_id(self, report_id : int):
         point_id = transform_to_uuid(report_id)
         result = await self.client.retrieve(
             collection_name=COLLECTION_NAME ,
@@ -178,7 +178,7 @@ class VectorstoreService():
         )
         return result[0].vector
 
-    async def crg_reports_exist(self, report_ids: List[int]) -> List[int]:
+    async def reports_exist(self, report_ids: List[int]) -> List[int]:
         report_ids = report_ids or []
         if not report_ids:
             return []
@@ -199,7 +199,7 @@ class VectorstoreService():
             point_id = getattr(point, "id", None)
             if not point_id:
                 continue
-            existing_ids.append(transform_to_crg_report_id(str(point_id)))
+            existing_ids.append(transform_to_report_id(str(point_id)))
 
         return existing_ids
 
@@ -228,7 +228,7 @@ class VectorstoreService():
         return pairs
 
 
-    async def delete_vectors_by_crg_report_ids(self, report_ids : List[int]):
+    async def delete_vectors_by_report_ids(self, report_ids : List[int]):
         ids = [transform_to_uuid(report_id) for report_id in report_ids]
         await self.client.delete(
             collection_name=COLLECTION_NAME ,

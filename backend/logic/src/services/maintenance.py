@@ -11,7 +11,7 @@ class MaintenanceService:
 
     async def vectorstore_clean_up(self):
         all_report_ids_vectorstore, all_report_ids_db = await asyncio.gather(
-            self.vectorstore.get_all_saved_crg_report_ids(),
+            self.vectorstore.get_all_saved_report_ids(),
             self.report_repo.get_all_reports()
         )
 
@@ -23,7 +23,7 @@ class MaintenanceService:
         
         # Delete orphan vectors
         if orphan_ids:
-            await self.vectorstore.delete_vectors_by_crg_report_ids(list(orphan_ids))
+            await self.vectorstore.delete_vectors_by_report_ids(list(orphan_ids))
         
         return {
             "unique_vectorstore_points": len(all_report_ids_vectorstore),

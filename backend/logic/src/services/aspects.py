@@ -17,7 +17,7 @@ class TagSimilaritySearchService:
 
     async def get_similar_tags_by_id(self, report_id : int, aspect : TagCategories, sources : List[str], k : int):
         
-        vectors = await self.vectorstore.get_vectors_by_crg_report_id(report_id)
+        vectors = await self.vectorstore.get_vectors_by_report_id(report_id)
 
         vector_names = {TagCategories.interventions: 'intervention', TagCategories.conditions: 'condition', TagCategories.outcomes: 'outcome'}
 
