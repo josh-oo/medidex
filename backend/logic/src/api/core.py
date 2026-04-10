@@ -19,7 +19,7 @@ import asyncio
 import enum
 import grpc
 
-from .auth import is_verified_api_call, get_user_id, get_roles
+from .auth import is_verified_api_call, is_admin, get_user_id, get_roles
 
 from ..database import get_study_repo, get_project_repo, get_report_repo, db_ready
 
@@ -499,7 +499,7 @@ async def get_user_tasks(
 
     return tasks
 
-@router.get("/projects", dependencies=[Depends(is_verified_api_call)], summary="Get an overview of all current projects.", description="For each project the current progress of embedding calculation and the number of already assigned reports is returned")
+@router.get("/projects", dependencies=[Depends(is_admin)], summary="Get an overview of all current projects.", description="For each project the current progress of embedding calculation and the number of already assigned reports is returned")
 async def get_available_projects(project_repo: ProjectRepository = Depends(get_project_repo), report_repo: ReportRepository = Depends(get_report_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> List[ProjectDetails]:
     # Get all projects
     projects = await project_repo.get_all_projects()
@@ -521,13 +521,12 @@ async def get_available_projects(project_repo: ProjectRepository = Depends(get_p
 
     return project_responses
 
-@router.get("/projects/{project_id}", dependencies=[Depends(is_verified_api_call)], summary="Get a specific project by id.",description="Returns details and progress information for a single project identified by project id.")
+@router.get("/projects/{project_id}", dependencies=[Depends(is_admin)], summary="Get a specific project by id.",description="Returns details and progress information for a single project identified by project id.")
 async def get_project_stats_by_id(project_stats : Project = Depends(get_project_stats)) -> Project:
     return project_stats
 
-@router.delete("/projects/{project_id}", dependencies=[Depends(is_verified_api_call)], summary="Delete a project and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
+@router.delete("/projects/{project_id}", dependencies=[Depends(is_admin)], summary="Delete a project and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
 async def delete_project(project_id : str, report_ids : List[int] = Depends(get_project_associated_report_ids), project_repo: ProjectRepository = Depends(get_project_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
-    
     #Deletes the project and through cascade and triggers everythig related to it
     await project_repo.delete_project(project_id)
 
@@ -537,22 +536,27 @@ async def delete_project(project_id : str, report_ids : List[int] = Depends(get_
     
     return Response(status_code=204)
 
-@router.post(
-    "/projects/{project_id}/assignees",
-    dependencies=[Depends(is_verified_api_call)],
-    summary="Assign a user to a project",
-    status_code=201,
-)
+@router.post("/projects/{project_id}/assignees", dependencies=[Depends(is_admin)],summary="Assign a user to a project",status_code=201,)
 async def assign_user_to_project(
     user_id: str = Body(..., embed=False, description="User ID to assign"),
     project_id: str = project_id_path,
     project_repo: ProjectRepository = Depends(get_project_repo),
 ):
-    project = await project_repo.get_project_by_id(project_id)
+    try:
+        project = await project_repo.get_project_by_id(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    created = await project_repo.add_project_assignee(project_id, user_id)
+    try:
+        created = await project_repo.add_project_assignee(project_id, user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
     if not created:
         raise HTTPException(status_code=409, detail="User already assigned to project")
 
@@ -560,22 +564,27 @@ async def assign_user_to_project(
 
     return ProjectAssignee(userId=user_id, numberReportsLinked=0)
 
-@router.delete(
-    "/projects/{project_id}/assignees/{user_id}",
-    dependencies=[Depends(is_verified_api_call)],
-    summary="Remove a user assignment from a project",
-    status_code=204,
-)
+@router.delete("/projects/{project_id}/assignees/{user_id}", dependencies=[Depends(is_admin)],summary="Remove a user assignment from a project",status_code=204,)
 async def remove_user_from_project(
     project_id: str = project_id_path,
     user_id: str = Path(..., description="The user ID to remove from the project"),
     project_repo: ProjectRepository = Depends(get_project_repo),
 ):
-    project = await project_repo.get_project_by_id(project_id)
+    try:
+        project = await project_repo.get_project_by_id(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    removed = await project_repo.remove_project_assignee(project_id, user_id)
+    try:
+        removed = await project_repo.remove_project_assignee(project_id, user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
     if not removed:
         raise HTTPException(status_code=404, detail="User is not assigned to this project")
 
@@ -627,6 +636,40 @@ async def get_project_reports(
             )
         )
     return result
+
+@router.get(
+    "/projects/{project_id}/annotations",
+    dependencies=[Depends(is_verified_api_call)],
+    summary="Get reports annotated by all assigned users in a project.",
+)
+async def get_project_annotations(
+    project: DbProject = Depends(get_project_by_id),
+    report_ids: List[int] = Depends(get_project_associated_report_ids),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+) -> Dict[int, List[Dict[str, Any]]]:
+    if not report_ids:
+        return {}
+
+    assignees = await project_repo.get_project_assignees(project.BatchHash)
+    assignee_ids = {user_id for user_id, _ in assignees if user_id}
+    if not assignee_ids:
+        return {}
+
+    completion_map = await project_repo.get_report_completion_by_users(project.BatchHash)
+    annotated_report_ids = [
+        report_id
+        for report_id in report_ids
+        if assignee_ids.issubset(completion_map.get(report_id, set()))
+    ]
+
+    if not annotated_report_ids:
+        return {}
+
+    return await project_repo.get_project_annotations_by_assignees(
+        project.BatchHash,
+        assignee_ids,
+        annotated_report_ids,
+    )
 
 @router.get("/projects/{project_id}/subscribe",dependencies=[Depends(is_verified_api_call)], summary="Stream updated batch information.")
 async def stream_project_updates(

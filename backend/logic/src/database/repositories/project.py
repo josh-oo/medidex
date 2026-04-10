@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import func
 from sqlmodel import select, delete, insert
+from collections import defaultdict
 
 from ..models import (
     Report,
@@ -13,7 +14,7 @@ from ..models import (
     StudyReportAdded,
     BatchAssignees,
 )
-from typing import Dict, List, Set, Tuple, Optional
+from typing import Any, Dict, List, Set, Tuple, Optional
 
 
 """
@@ -99,22 +100,29 @@ class ProjectRepository:
         return result.all()
     
     async def get_project_by_id(self, project_id: str):
-        batch = await self.db.execute(select(Batch).where(Batch.BatchHash == project_id))
+        if not self.user_id:
+            raise ValueError("User ID is required to retrieve projects.")
+        
+        stmt = select(Batch).where(Batch.BatchHash == project_id)
+        stmt = stmt.where(Batch.UploadedBy == self.user_id)
+
+        batch = await self.db.execute(stmt)
         return batch.scalar_one_or_none()
+    
+    async def get_all_projects(self):
+        if not self.user_id:
+            raise ValueError("User ID is required to retrieve projects.")
+        
+        stmt = select(Batch)
+        stmt = stmt.where(Batch.UploadedBy == self.user_id)
+
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
     
     async def get_project_associated_report_ids(self, project_id : str):
         result = await self.db.execute(
             select(ReportAdded.CRGReportID).where(ReportAdded.BatchHash == project_id)
         )
-        return result.scalars().all()
-    
-    async def get_all_projects(self, only_own_projects=False):
-        stmt = select(Batch)
-
-        if only_own_projects and self.user_id:
-            stmt = stmt.where(Batch.UploadedBy == self.user_id)
-
-        result = await self.db.execute(stmt)
         return result.scalars().all()
 
     async def get_assigned_projects(self) -> List[Batch]:
@@ -146,7 +154,7 @@ class ProjectRepository:
 
     async def get_user_link_counts_by_project(self) -> Dict[str, int]:
         if not self.user_id:
-            return {}
+            raise ValueError("User ID is required to retrieve project information.")
 
         stmt = (
             select(ReportAdded.BatchHash, func.count(StudyReportAdded.StudyReportID))
@@ -161,7 +169,13 @@ class ProjectRepository:
         return {batch_hash: count for batch_hash, count in result.all()}
     
     async def delete_project(self, project_id : str):
-        await self.db.execute(delete(Batch).where(Batch.BatchHash == project_id))
+        if not self.user_id:
+            raise ValueError("User ID is required to delete a project")
+
+        stmt = delete(Batch).where(Batch.BatchHash == project_id)
+        stmt = stmt.where(Batch.UploadedBy == self.user_id)
+
+        await self.db.execute(stmt)
         await self.db.commit()
 
     async def project_item_to_report_id(self, project_id: str, report_index: int):
@@ -228,7 +242,63 @@ class ProjectRepository:
 
         return completion
 
+    async def get_project_annotations_by_assignees(
+        self,
+        project_id: str,
+        assignees: Set[str],
+        report_ids: Optional[List[int]] = None,
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        if not assignees:
+            return {}
+
+        stmt = (
+            select(
+                StudyReport.CRGReportID,
+                StudyReportAdded.CreatedBy,
+                Study.CRGStudyID,
+                Study.ShortName,
+            )
+            .select_from(StudyReport)
+            .join(StudyReportAdded, StudyReportAdded.StudyReportID == StudyReport.StudyReportID)
+            .join(ReportAdded, ReportAdded.CRGReportID == StudyReport.CRGReportID)
+            .join(Study, Study.CRGStudyID == StudyReport.CRGStudyID)
+            .where(ReportAdded.BatchHash == project_id)
+            .where(StudyReportAdded.CreatedBy.in_(assignees))
+            .order_by(StudyReport.CRGReportID, StudyReportAdded.CreatedBy, Study.CRGStudyID)
+        )
+
+        if report_ids:
+            stmt = stmt.where(StudyReport.CRGReportID.in_(report_ids))
+
+        result = await self.db.execute(stmt)
+        rows = result.all()
+
+        annotations: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+        for report_id, created_by, study_id, study_name in rows:
+            annotations[report_id].append(
+                {
+                    "user": created_by,
+                    "studyId": study_id,
+                    "studyShortName": study_name,
+                }
+            )
+
+        return dict(annotations)
+
     async def add_project_assignee(self, project_id: str, assignee: str) -> bool:
+        if not self.user_id:
+            raise ValueError("User ID is required to modify project assignees.")
+
+        ownership_stmt = (
+            select(Batch.BatchHash)
+            .where(Batch.BatchHash == project_id)
+            .where(Batch.UploadedBy == self.user_id)
+            .limit(1)
+        )
+        ownership_result = await self.db.execute(ownership_stmt)
+        if not ownership_result.scalar_one_or_none():
+            raise PermissionError("You can only modify assignees for your own project.")
+
         stmt = (
             pg_insert(BatchAssignees)
             .values(BatchHash=project_id, Assignee=assignee)
@@ -239,6 +309,19 @@ class ProjectRepository:
         return bool(result.rowcount)
 
     async def remove_project_assignee(self, project_id: str, assignee: str) -> bool:
+        if not self.user_id:
+            raise ValueError("User ID is required to modify project assignees.")
+
+        ownership_stmt = (
+            select(Batch.BatchHash)
+            .where(Batch.BatchHash == project_id)
+            .where(Batch.UploadedBy == self.user_id)
+            .limit(1)
+        )
+        ownership_result = await self.db.execute(ownership_stmt)
+        if not ownership_result.scalar_one_or_none():
+            raise PermissionError("You can only modify assignees for your own project.")
+
         result = await self.db.execute(
             delete(BatchAssignees).where(
                 (BatchAssignees.BatchHash == project_id) & (BatchAssignees.Assignee == assignee)
