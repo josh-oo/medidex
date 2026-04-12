@@ -13,17 +13,17 @@ async def get_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         yield session
         
-async def db_ready(db: AsyncSession = Depends(get_session)):
+async def db_ready(db: AsyncSession = Depends(get_session)) -> str:
     return await test_db(db)
     
-def get_study_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)):
+def get_study_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)) -> StudyRepository:
     return StudyRepository(db=db, user_id=user_id)
 
-def get_project_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)):
+def get_project_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)) -> ProjectRepository:
     return ProjectRepository(db=db, user_id=user_id)
 
-def get_report_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)):
+def get_report_repo(db: AsyncSession = Depends(get_session), user_id = Depends(get_user_id)) -> ReportRepository:
     return ReportRepository(db=db, user_id=user_id)
 
-def get_aspect_repo(db: AsyncSession = Depends(get_session)):
+def get_aspect_repo(db: AsyncSession = Depends(get_session)) -> AspectRepository:
     return AspectRepository(db=db)

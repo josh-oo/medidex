@@ -400,3 +400,14 @@ class VectorstoreService():
         search_results = await self.search_report(query,aspect,k,filter)
 
         return search_results.groups
+    
+    async def readyz(self):
+        # Check vector store connectivity
+        try:
+            collections = await self.get_collections()
+            return {
+                "status": "healthy",
+                "message": f"Vector store accessible, {len(collections.collections)} collections found"
+            }
+        except Exception as e:
+            return {"status": "unhealthy", "message": f"Vector store error: {str(e)}"}

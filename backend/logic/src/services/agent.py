@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import Any, AsyncGenerator, List, Union, Dict, Optional, Tuple
 
 from pydantic import BaseModel, Field
-from fastapi.encoders import jsonable_encoder
 
 from langchain.tools import tool, ToolRuntime
 
@@ -39,7 +38,10 @@ The workflow should look like:
 class AgentContext:
     current_report: int
     visited_candidate_studies: int
-    debug: bool
+    study_repo : StudyRepository
+    report_repo : ReportRepository
+    study_similarity_service : StudySimilaritySearchService
+    document_service :  DocumentService
 
 class ExistingStudy(BaseModel):
     study_id: int = Field(description="The id of the matching candidate study")
@@ -53,125 +55,129 @@ class NewStudy(BaseModel):
 
 Output = Union[ExistingStudy, NewStudy]
 
+@tool
+async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentContext]) -> Dict[str,str]:  
+    """
+    Fetch the next (most relevant) candidate study for the current report based on its title / abstract
+
+    Args:
+        reason: The reason why you need to visit the next study
+    """
+    report_id = runtime.context.current_report
+    visited_candidate_studies = runtime.context.visited_candidate_studies
+    
+    response = await runtime.context.study_similarity_service.get_similar_studies_by_id(
+        report_id,
+        aspect='default',
+        cutoff=None,
+        negative_reports=None,
+        negative_studies=None,
+        k=visited_candidate_studies + 1,
+        return_details=False
+    )
+
+    study_id = response['CRGStudyID'][visited_candidate_studies]
+
+    response = await runtime.context.study_repo.get_study_by_id(study_id=study_id)
+
+    print("Response: ", response)
+
+    result = {
+        "studyId": response.CRGStudyID,
+        "shortName": response.ShortName,
+        "trialId": response.TrialistContactDetails,
+        "numberParticipants": response.NumberParticipants,
+        "countries": response.Countries,
+        "duration": response.Duration,
+        "comparison": response.Comparison,
+    }
+
+    runtime.context.visited_candidate_studies += 1
+    return result
+
+@tool
+async def fetch_report_fulltext(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
+    """Fetch the corresponding fulltext for a given report
+
+     Args:
+        report_id: The id of the report you want the fulltext for
+    """
+    pass #TODO 
+
+@tool
+async def fetch_current_fulltext(runtime: ToolRuntime[AgentContext]) -> str:  
+    """Fetch the corresponding fulltext for the current report"""
+    return await runtime.context.document_service.get_fulltext(fast=False)
+
+@tool
+async def fetch_report_abstract(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
+    """Fetch the corresponding abstract for a given report
+    
+    Args:
+        report_id: The id of the report you want the abstract for
+    """
+    response = await runtime.context.report_repo.get_report_by_id(report_id)
+    return response.Abstract
+
+@tool
+async def fetch_report_abstract(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
+    """Fetch the corresponding abstract for a given report
+    
+    Args:
+        report_id: The id of the report you want the abstract for
+    """
+    response = await runtime.context.report_repo.get_report_by_id(report_id)
+    return response.Abstract
+
+@tool
+async def fetch_study_reports(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[Dict[str,str]]:  
+    """Get all the reports already assigned to the corresponding study
+
+    Args:
+        study_id: The id of the study 
+    """
+    result = []
+    response = await runtime.context.study_repo.get_study_reports_by_study_id(study_id)
+    for item in response:
+        result.append({'reportId': item['CRGReportID'], 'title': item['Title']})
+    return result
+
+@tool
+async def fetch_study_interventions(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[str]:  
+    """Get all the interventions already assigned to the corresponding study
+
+    Args:
+        study_id: The id of the study 
+    """
+    response = await runtime.context.study_repo.get_study_interventions_single(study_id)
+    results = []
+    for item in response:
+        results.append(item['Description'])
+    return results
+
+@tool
+async def fetch_study_persons(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[str]:
+    """Get all persons associated with this study
+
+    Args:
+        study_id: The id of the study 
+    """
+    return await runtime.context.study_repo.get_study_persons_single(study_id)
+
 class AgentService:
     def __init__(
         self,
-        report_id: int,
         report_repo: ReportRepository,
         study_repo : StudyRepository,
         document_service :  DocumentService,
         study_similarity_service: StudySimilaritySearchService,
         model: Any,
-        debug: bool = True,
     ):
-        self.report_id = report_id
         self.report_repo = report_repo
         self.study_repo = study_repo
         self.study_similarity_service = study_similarity_service
+        self.document_service = document_service
         self.model = model
-        self.debug = debug
-        self.report_string = ""
-
-        @tool
-        async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentContext]) -> Dict[str,str]:  
-            """
-            Fetch the next (most relevant) candidate study for the current report based on its title / abstract
-
-            Args:
-                reason: The reason why you need to visit the next study
-            """
-            report_id = runtime.context.current_report
-            visited_candidate_studies = runtime.context.visited_candidate_studies
-            
-            response = await study_similarity_service.get_similar_studies_by_id(
-                report_id,
-                aspect='default',
-                cutoff=None,
-                negative_reports=None,
-                negative_studies=None,
-                k=visited_candidate_studies + 1,
-                return_details=False
-            )
-
-            study_id = response['CRGStudyID'][visited_candidate_studies]
-
-            response = await study_repo.get_study_by_id(study_id=study_id)
-
-            print("Response: ", response)
-
-            result = {
-                "studyId": response.CRGStudyID,
-                "shortName": response.ShortName,
-                "trialId": response.TrialistContactDetails,
-                "numberParticipants": response.NumberParticipants,
-                "countries": response.Countries,
-                "duration": response.Duration,
-                "comparison": response.Comparison,
-            }
-
-            runtime.context.visited_candidate_studies += 1
-            #if runtime.context.debug:
-            #    print(f"Candidate study ({visited_candidate_studies})", result)
-            return result
-        
-        @tool
-        async def fetch_current_fulltext(runtime: ToolRuntime[AgentContext]) -> str:  
-            """Fetch the corresponding fulltext for the current report"""
-            return await document_service.get_fulltext(fast=False)
-        
-        #@tool
-        #async def fetch_report_fulltext(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
-        #    """Fetch the corresponding fulltext for a given report
-        #
-        #     Args:
-        #        report_id: The id of the report you want the fulltext for
-        #    """
-        #    #TODO 
-        
-        @tool
-        async def fetch_report_abstract(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
-            """Fetch the corresponding abstract for a given report
-            
-            Args:
-                report_id: The id of the report you want the abstract for
-            """
-            response = await report_repo.get_report_by_id(report_id)
-            return response.Abstract
-        
-        @tool
-        async def fetch_study_reports(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[Dict[str,str]]:  
-            """Get all the reports already assigned to the corresponding study
-
-            Args:
-                study_id: The id of the study 
-            """
-            result = []
-            response = await study_repo.get_study_reports_by_study_id(study_id)
-            for item in response:
-                result.append({'reportId': item['CRGReportID'], 'title': item['Title']})
-            return result
-
-        @tool
-        async def fetch_study_interventions(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[str]:  
-            """Get all the interventions already assigned to the corresponding study
-
-            Args:
-                study_id: The id of the study 
-            """
-            response = await study_repo.get_study_interventions_single(study_id)
-            results = []
-            for item in response:
-                results.append(item['Description'])
-            return results
-
-        @tool
-        async def fetch_study_persons(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[str]:
-            """Get all persons associated with this study
-
-            Args:
-                study_id: The id of the study 
-            """
-            return await study_repo.get_study_persons_single(study_id)
 
         system_message = SystemMessage(
             content=[
@@ -190,21 +196,20 @@ class AgentService:
             response_format=ToolStrategy(Output),
         )
 
-    async def _load_report_context(self) -> None:
-        report = await self.report_repo.get_report_by_id(self.report_id)
+    async def _load_report_context(self, report_id : int) -> str:
+        report = await self.report_repo.get_report_by_id(report_id)
         if report is None:
             raise ValueError(f"Report {self.report_id} not found")
 
         authors = [author.strip() for author in (report.Authors or "").split("//") if author.strip()]
-        self.report_string = (
+        return (
             f"Title: {report.Title or ''}\n"
             f"Abstract: {report.Abstract or ''}\n"
             f"Authors: {', '.join(authors)}"
         )
 
-    async def ainvoke(self) -> ExistingStudy | NewStudy:
-        if not self.report_string:
-            await self._load_report_context()
+    async def ainvoke(self, report_id : int) -> ExistingStudy | NewStudy:
+        report_string = await self._load_report_context(report_id)
 
         result = await self.agent.ainvoke(
             {
@@ -213,29 +218,29 @@ class AgentService:
                         "role": "user",
                         "content": (
                             "Please find a matching study id or propose a new study creation "
-                            f"for the following report\n{self.report_string}"
+                            f"for the following report\n{report_string}"
                         ),
                     }
                 ]
             },
             context=AgentContext(
-                current_report=self.report_id,
+                current_report=report_id,
                 visited_candidate_studies=0,
-                debug=self.debug,
+                study_repo=self.study_repo,
+                report_repo=self.report_repo,
+                study_similarity_service=self.study_similarity_service,
+                document_service=self.document_service,
             ),
         )
-        return result
+        return result['structured_response']
 
-    async def astream(self) -> AsyncGenerator[str, None]:
+    async def astream(self, report_id : int) -> AsyncGenerator[str, None]:
         """Stream agent execution events as server-sent events.
         
         Yields:
             Server-sent event formatted strings with agent execution updates
         """
-        if not self.report_string:
-            await self._load_report_context()
-
-        final_structured_output = None
+        report_string = await self._load_report_context(report_id)
 
         async for event in self.agent.astream(
             {
@@ -244,15 +249,18 @@ class AgentService:
                         "role": "user",
                         "content": (
                             "Please find a matching study id or propose a new study creation "
-                            f"for the following report\n{self.report_string}"
+                            f"for the following report\n{report_string}"
                         ),
                     }
                 ]
             },
             context=AgentContext(
-                current_report=self.report_id,
+                current_report=report_id,
                 visited_candidate_studies=0,
-                debug=self.debug,
+                study_repo=self.study_repo,
+                report_repo=self.report_repo,
+                study_similarity_service=self.study_similarity_service,
+                document_service=self.document_service,
             ),
             version="v1",
             stream_mode="updates",
@@ -265,11 +273,10 @@ class AgentService:
                 yield f"data: {json.dumps(final_payload, ensure_ascii=True)}\n\n"
 
             else:
-                for item in payload:
-                    final_payload = {'event': "info", 'payload': payload}
-                    yield f"data: {json.dumps(final_payload, ensure_ascii=True)}\n\n"
+                final_payload = {'event': "info", 'payload': payload}
+                yield f"data: {json.dumps(final_payload, ensure_ascii=True)}\n\n"
 
-        #yield 'data: {"event":"complete"}\n\n'
+        yield 'data: {"event":"complete"}\n\n'
 
     def parse_event(self, event) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         payload: List[Dict[str, Any]] = []

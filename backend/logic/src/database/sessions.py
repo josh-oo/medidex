@@ -26,7 +26,7 @@ AsyncSessionLocal = sessionmaker(
     expire_on_commit=False  # keep objects available after commit
 )
 
-async def test_db(db : AsyncSession):
+async def test_db(db : AsyncSession) -> str:
     try:
         await db.execute(select(1))
         return "ready"

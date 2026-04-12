@@ -60,3 +60,19 @@ class EmbeddingService:
             initial_md = await call.initial_metadata()
             metadata = dict(initial_md)
             return metadata
+        
+    def readyz(self):
+        # Check gRPC embedding service connectivity
+        try:
+            channel = self.get_channel()
+            # Simple connectivity check - channel state
+            state = channel.get_state(try_to_connect=True)
+            if state == grpc.ChannelConnectivity.READY:
+                return {"status": "healthy", "message": "gRPC channel ready"}
+            else:
+                return {
+                    "status": "degraded",
+                    "message": f"gRPC channel state: {state.name}"
+                }
+        except Exception as e:
+            return {"status": "unhealthy", "message": f"gRPC error: {str(e)}"}

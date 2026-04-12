@@ -6,13 +6,13 @@ from .aspects import TagScoringService, TagSimilaritySearchService
 from .core import RelatedTagSearchService, StudySimilaritySearchService
 from .authors import AuthorFeatureService
 from .embedding import EmbeddingService
-from .agent import AgentContext, AgentService
+from .agent import AgentService
 from .report import DocumentService, ReportService
 from .llm import LanguageModelService
 from .crawler import CrawlerService, DoclingService
-from .maintenance import MaintenanceService
+from .maintenance import MaintenanceService, ReadinessService
 
-from ..database import get_aspect_repo, get_report_repo, get_study_repo, get_project_repo
+from ..database import get_aspect_repo, get_report_repo, get_study_repo, get_project_repo, db_ready
 
 from ..database.repositories.study import StudyRepository
 from ..database.repositories.aspects import AspectRepository
@@ -66,11 +66,13 @@ def get_study_similarity_service_project(user_id : str = Depends(get_user_id), s
 def get_related_tag_service(tag_scoring_service : TagScoringService = Depends(get_tag_scoring_service), study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service), study_repo : StudyRepository = Depends(get_study_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> RelatedTagSearchService:
     return RelatedTagSearchService(vectorstore=vectorstore, tag_scoring_service=tag_scoring_service, study_similarity_service=study_similarity_service, study_repo=study_repo)
 
-def get_maintenance_service(report_repo : ReportRepository = Depends(get_report_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> RelatedTagSearchService:
+def get_maintenance_service(report_repo : ReportRepository = Depends(get_report_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> MaintenanceService:
     return MaintenanceService(report_repo=report_repo, vectorstore=vectorstore)
 
+def get_readiness_service(db_ready : str = Depends(db_ready), vectorstore : VectorstoreService = Depends(get_vectorstore_service), embedding_service : EmbeddingService = Depends(get_embedding_service)) -> ReadinessService:
+    return ReadinessService(db_ready=db_ready, vectorstore=vectorstore, embedding_service=embedding_service)
+
 def get_agent_service(
-    report_id : int,
     model: str = Query("gpt-5-nano", description="LLM model name to use for study prediction"),
     report_repo : ReportRepository = Depends(get_report_repo),
     study_repo : StudyRepository = Depends(get_study_repo),
@@ -78,7 +80,6 @@ def get_agent_service(
     study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service),
 ) -> AgentService:
     return AgentService(
-        report_id=report_id,
         report_repo=report_repo,
         study_repo=study_repo,
         document_service=document_service,
