@@ -48,107 +48,8 @@ class ReportRepository:
         )
         
         return orphan_list
-
-    async def link_studies(self, report_id: int, study_ids: List[int], user_id : str = None) -> Dict[str, Any]:
-        """
-        Internal implementation to link a report to multiple studies.
-
-        Returns:
-            {
-            "report_id": int,
-            "created_count": int,
-            "invalid_study_ids": List[int],
-            "created_links": List[Dict[str, int]]
-            }
-        """
-        if user_id is None:
-            user_id = self.user_id
-
-        study_ids = study_ids or []
-        if not study_ids:
-            return {
-                "report_id": report_id,
-                "created_count": 0,
-                "invalid_study_ids": [],
-                "created_links": []
-            }
-
-        try:
-            # Validate report exists
-            report = await self.db.get(Report, report_id)
-            if not report:
-                raise Exception("Report not found")
-
-            # Validate studies exist
-            valid_id_rows = await self.db.execute(
-                select(Study.CRGStudyID).where(Study.CRGStudyID.in_(study_ids))
-            )
-            valid_ids = set(valid_id_rows.scalars().all())
-            invalid_ids = [sid for sid in study_ids if sid not in valid_ids]
-
-            # Get existing links before deletion to check for orphans later
-            existing_stmt = (
-                select(StudyReport.CRGStudyID)
-                .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
-                .where(StudyReport.CRGReportID == report_id)
-            )
-            if user_id:
-                existing_stmt = existing_stmt.where(StudyReportAdded.CreatedBy == user_id)
-            
-            affected_studies = set((await self.db.execute(existing_stmt)).scalars().all())
-
-            # Only delete existing links created by this user (or with no creator)
-            if user_id:
-                # Delete StudyReport links that were created by this user
-                await self.db.execute(
-                    delete(StudyReport)
-                    .where(StudyReport.CRGReportID == report_id)
-                    .where(StudyReport.StudyReportID.in_(
-                        select(StudyReportAdded.StudyReportID)
-                        .where(StudyReportAdded.CreatedBy == user_id)
-                    ))
-                )
-            else:
-                # If no user specified, delete all existing links for this report
-                await self.db.execute(delete(StudyReport).where(StudyReport.CRGReportID == report_id))
-
-            await self.db.flush()
-
-            # Check for orphaned newly-added studies
-            deleted_orphans = await self._remove_orphaned_studies(affected_studies)
-            if deleted_orphans:
-                await self.db.flush()
-
-            # Create new links and track them in StudyReportAdded
-            created_links: List[Dict[str, int]] = []
-            for sid in valid_ids:
-                new_study_report = StudyReport(CRGReportID=report_id, CRGStudyID=sid)
-                self.db.add(new_study_report)
-                await self.db.flush()  # Flush to get the StudyReportID
-                
-                # Track who created this link
-                self.db.add(StudyReportAdded(
-                    StudyReportID=new_study_report.StudyReportID,
-                    CreatedBy=user_id
-                ))
-                
-                created_links.append({"CRGReportID": report_id, "CRGStudyID": sid})
-
-            await self.db.commit()
-
-            return {
-                "report_id": report_id,
-                "created_count": len(valid_ids),
-                "invalid_study_ids": invalid_ids,
-                "created_links": created_links,
-                "deleted_orphans": deleted_orphans
-            }
-        
-        except Exception as e:
-            await self.db.rollback()
-            raise Exception(f"Failed to update report-study links: {str(e)}")
     
-    async def append_study_link(self, report_id: int, study_id: int, user_id : str = None) -> Dict[str, Any]:
+    async def link_study(self, report_id: int, study_id: int, user_id : str = None) -> Dict[str, Any]:
         """
         Append a single study link to a report without touching existing links.
         """
@@ -164,47 +65,28 @@ class ReportRepository:
             # Validate study exists
             study = await self.db.get(Study, study_id)
             if not study:
-                return {
-                    "report_id": report_id,
-                    "created_count": 0,
-                    "invalid_study_ids": [study_id],
-                    "created_links": [],
-                    "was_duplicate": False
-                }
+                raise Exception("Study not found")
 
             # Avoid duplicate links
             existing_stmt = (
-                select(StudyReport.StudyReportID)
+                select(StudyReport)
                 .where(StudyReport.CRGReportID == report_id)
                 .where(StudyReport.CRGStudyID == study_id)
             )
-            existing_link = (await self.db.execute(existing_stmt)).scalar_one_or_none()
-            if existing_link:
-                return {
-                    "report_id": report_id,
-                    "created_count": 0,
-                    "invalid_study_ids": [],
-                    "created_links": [],
-                    "was_duplicate": True
-                }
+            link = (await self.db.execute(existing_stmt)).scalar_one_or_none()
 
-            # Create new link and track creator
-            new_study_report = StudyReport(CRGReportID=report_id, CRGStudyID=study_id)
-            self.db.add(new_study_report)
-            try:
-                await self.db.flush()
-            except IntegrityError:
-                await self.db.rollback()
-                return {
-                    "report_id": report_id,
-                    "created_count": 0,
-                    "invalid_study_ids": [],
-                    "created_links": [],
-                    "was_duplicate": True
-                }
+            if not link:
+                # Create new link and track creator
+                link = StudyReport(CRGReportID=report_id, CRGStudyID=study_id)
+                self.db.add(link)
+                try:
+                    await self.db.flush()
+                except IntegrityError:
+                    await self.db.rollback()
+                    raise
 
             self.db.add(StudyReportAdded(
-                StudyReportID=new_study_report.StudyReportID,
+                StudyReportID=link.StudyReportID,
                 CreatedBy=user_id
             ))
 
@@ -222,7 +104,7 @@ class ReportRepository:
             await self.db.rollback()
             raise Exception(f"Failed to append study link: {str(e)}")
         
-    async def unlink_studies(self, report_id: int, study_id: int = None, user_id : str = None) -> Dict[str, Any]:
+    async def unlink_study(self, report_id: int, study_id: int = None, user_id : str = None) -> Dict[str, Any]:
         """
         Internal implementation to delete links between a report and studies.
         If study_id is provided, only that link is removed.

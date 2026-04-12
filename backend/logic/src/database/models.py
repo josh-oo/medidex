@@ -246,7 +246,7 @@ class StudyReportAdded(SQLModel, table=True, metadata=metadata_resources):
 
     StudyReportID: int = Field(primary_key=True, foreign_key="tblStudyReport.StudyReportID", ondelete="CASCADE")
     DateCreated: datetime.datetime = Field(default_factory=_current_utc_datetime)
-    CreatedBy: Optional[str]
+    CreatedBy: str = Field(primary_key=True)
     Confirmed: bool = Field(default=False, nullable=False)
 
     __table_args__ = (

@@ -22,7 +22,7 @@ class LinkageService:
         study_id: int,
         user_id: Optional[str],
     ) -> None:
-        await self.report_repo.append_study_link(report_id, study_id, user_id=user_id)
+        await self.report_repo.link_study(report_id, study_id, user_id=user_id)
         await self.vectorstore.link_report_to_study_id(report_id, study_id, user_id)
 
     async def unlink_study_from_report(
@@ -31,7 +31,7 @@ class LinkageService:
         study_id: int,
         user_id: Optional[str],
     ) -> None:
-        await self.report_repo.unlink_studies(report_id, study_id, user_id=user_id)
+        await self.report_repo.unlink_study(report_id, study_id, user_id=user_id)
         await self.vectorstore.unlink_report_from_study_id(report_id, study_id, user_id)
 
     async def create_study_and_link_to_report(

@@ -591,6 +591,7 @@ async def get_project_reports(
 
     reports = await report_repo.get_all_reports(report_ids)
     all_linked_studies = await report_repo.get_linked_studies_for_reports(report_ids)
+    print("all_linked_studies: ", all_linked_studies)
 
     result = []
     for report in reports:
