@@ -11,7 +11,11 @@ from .sessions import AsyncSessionLocal, AsyncSession, test_db
 
 async def get_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+        finally:
+            # Ensure session is properly closed
+            await session.close()
         
 async def db_ready(db: AsyncSession = Depends(get_session)) -> str:
     return await test_db(db)

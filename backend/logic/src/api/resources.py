@@ -26,7 +26,7 @@ from ..database.repositories.aspects import AspectRepository
 from ..database.repositories.report import ReportRepository
 from ..database import get_study_repo, get_aspect_repo, get_report_repo
 
-from ..services import get_document_service, get_report_service, DocumentService, ReportService
+from ..services import get_document_service, get_report_service, get_project_pubsub_service, DocumentService, ReportService, ProjectPubSubService
 from ..services.crawler import OpenAlexService
 
 load_dotenv()
@@ -85,14 +85,6 @@ class CENTRALSubmissionStatus(str, enum.Enum):
     pending = "Pending"
     rejected = "Rejected"
     not_cochrane = "Not Cochrane"
-
-#class StudyParams(BaseModel):
-#    short_name: str
-#    status_of_study: StudyStatus
-#    countries: List[str]
-#    duration: str
-#    number_of_participants : int
-#    comparison : str
 
 class Event(BaseModel):
     timestamp: str
@@ -242,10 +234,6 @@ async def get_all_reports(
 ) -> List[DbReport]:
     return await report_repo.get_all_reports(report_ids, date_from, date_to)
 
-@router.get("/reports/pdf_number", include_in_schema=False)
-async def get_pdf_numbers_by_report_ids(report_ids: List[int] = report_ids_query, report_repo: ReportRepository = Depends(get_report_repo)) -> Dict[int, int]:
-    return await report_repo.get_pdf_numbers_by_report_ids(report_ids)
-
 @router.get("/reports/{report_id}", summary="Get details for a specific report.")
 async def get_report_by_id(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)) -> DbReport:
     result = await report_repo.get_report_by_id(report_id)
@@ -264,7 +252,7 @@ async def get_report_studies_by_id(
     return transform_to_output_studies(result)
 
 @router.put("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
-async def uploaed_pdf(report_id: int = report_id_path, file: UploadFile = File(None, description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
+async def uploaed_pdf(report_id: int = report_id_path, file: UploadFile = File(None, description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service), pubsub_service : ProjectPubSubService = Depends(get_project_pubsub_service)) -> Dict[str, Any]:
     # Validate file is a PDF
     if file:
         if not file.content_type == "application/pdf":
@@ -273,7 +261,9 @@ async def uploaed_pdf(report_id: int = report_id_path, file: UploadFile = File(N
             raise HTTPException(status_code=400, detail="File must have .pdf extension.")
     
     try:
-        return await document_service.upload_pdf(report_id, file)
+        result = await document_service.upload_pdf(report_id, file)
+        await pubsub_service.publish_report_update(report_id)
+        return result
     except:
         raise HTTPException(status_code=500, detail=f"Failed to save PDF.")
     

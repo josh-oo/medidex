@@ -1,5 +1,4 @@
 from fastapi import Depends, Path, HTTPException, Query
-from langchain_openai import ChatOpenAI
 
 from .vectorstore import VectorstoreService
 from .linkage import LinkageService
@@ -12,6 +11,7 @@ from .report import DocumentService, ReportService
 from .llm import LanguageModelService
 from .crawler import CrawlerService, DoclingService
 from .maintenance import MaintenanceService, ReadinessService
+from .pubsub import ProjectPubSubService
 
 from ..database import get_aspect_repo, get_report_repo, get_study_repo, get_project_repo, db_ready
 
@@ -98,3 +98,6 @@ def get_agent_service(
         study_similarity_service=study_similarity_service,
         model=model,
     )
+
+def get_project_pubsub_service(project_repo : ProjectRepository = Depends(get_project_repo)) -> ProjectPubSubService:
+    return ProjectPubSubService(project_repo=project_repo)

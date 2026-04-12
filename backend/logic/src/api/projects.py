@@ -18,11 +18,10 @@ import asyncio
 
 from .auth import is_verified_api_call, is_admin, get_roles
 
-from ..database import get_project_repo, get_report_repo, get_study_repo
+from ..database import get_project_repo, get_report_repo
 
 from ..database import ReportRepository
 from ..database import ProjectRepository
-from ..database import StudyRepository
 
 from ..database.models import Report as DbReport, Project as DbProject
 
@@ -30,6 +29,7 @@ from ..services import get_vectorstore_service, VectorstoreService
 from ..services import get_maintenance_service, MaintenanceService
 from ..services import get_agent_service, AgentService
 from ..services import get_linkage_service,LinkageService
+from ..services import get_project_pubsub_service, ProjectPubSubService
 
 from .resources import Report, Study, StudyCreate, transform_to_output_studies
 
@@ -37,13 +37,6 @@ router = APIRouter(tags=["projects"])
 
 setup_logging("events.log")
 logger = logging.getLogger(__name__)
-
-# Simple in-process pub/sub to allow multiple subscribers per project
-project_subscribers: Dict[str, List[asyncio.Queue]] = {}
-project_subscribers_lock = asyncio.Lock()
-
-# Track background tasks to prevent resource leaks
-background_tasks: set = set()
 
 # Limit concurrent bot processing across reports
 agent_process_semaphore = asyncio.Semaphore(10)
@@ -76,36 +69,22 @@ class BatchedReport(BaseModel):
     hasPdf: Optional[bool]
     assignedStudies: List[Study] = Field(default_factory=list)
 
-async def publish_project_update(project_id: str):
-    """Publish a lightweight ping update to all subscribers of a project."""
-    async with project_subscribers_lock:
-        queues = list(project_subscribers.get(project_id, []))
-
-    for q in queues:
-        try:
-            q.put_nowait("ping")
-        except Exception:
-            # If put_nowait fails for whatever reason, schedule an async put.
-            task = asyncio.create_task(q.put("ping"))
-            # Track the task to prevent resource leaks and add cleanup callback
-            background_tasks.add(task)
-            # Use lambda to be explicit and handle potential exceptions in cleanup
-            task.add_done_callback(lambda t: background_tasks.discard(t))
-
-async def process_report(reports : List[DbReport], project_id : str, project_repo : ProjectRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService):
+async def process_report(reports : List[DbReport], project_id : str, project_repo : ProjectRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService, pubsub_service: ProjectPubSubService):
+    # Check if project exists before launching concurrent operations
+    project = await project_repo.get_project_by_id(project_id)
+    if not project:
+        return  # Skip processing if project was deleted
+    
     async def process(report):
-        project = await project_repo.get_project_by_id(project_id)
-        if not project:
-            return  # Skip processing if project was deleted
         await vectorstore.add_report_to_vectorstore(report)
-        await publish_project_update(project_id)
+        await pubsub_service.publish_project_update(project_id)
     
     all_tasks = [process(report) for report in reports]
     await asyncio.gather(*all_tasks)
 
-    await finalize_project_upload(project_id, project_repo, vectorstore, maintenance_service)
+    await finalize_project_upload(project_id, project_repo, vectorstore, maintenance_service, pubsub_service)
 
-async def finalize_project_upload(project_id : str, project_repo : ProjectRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService):
+async def finalize_project_upload(project_id : str, project_repo : ProjectRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService, pubsub_service: ProjectPubSubService):
     """
     Finalize a project upload by checking if all reports have been processed.
     Updates project status and notifies subscribers when complete.
@@ -123,23 +102,7 @@ async def finalize_project_upload(project_id : str, project_repo : ProjectReposi
 
     #print("Project finalized")
     # Notify all subscribers that project is complete
-    await publish_project_update(project_id)
-
-async def subscribe_to_project(project_id: str) -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
-    async with project_subscribers_lock:
-        project_subscribers.setdefault(project_id, []).append(q)
-    return q
-
-async def unsubscribe_from_project(project_id: str, q: asyncio.Queue):
-    async with project_subscribers_lock:
-        lst = project_subscribers.get(project_id)
-        if not lst:
-            return
-        if q in lst:
-            lst.remove(q)
-        if not lst:
-            project_subscribers.pop(project_id, None)
+    await pubsub_service.publish_project_update(project_id)
 
 
 async def get_project_by_id(project_id: str, project_repo: ProjectRepository = Depends(get_project_repo)) -> DbProject:
@@ -154,10 +117,10 @@ async def get_vectorized_and_ready_report_ids(project_id, project_repo : Project
     if not report_ids:
         return set(), set(), set()
 
-    vectorized_report_ids_raw, report_numbers = await asyncio.gather(
-        vectorstore.reports_exist(report_ids),
-        report_repo.get_report_numbers(report_ids),
-    )
+    # Run database query first, then vectorstore query to avoid concurrent session usage
+    report_numbers = await report_repo.get_report_numbers(report_ids)
+    vectorized_report_ids_raw = await vectorstore.reports_exist(report_ids)
+    
     embedded_reports = set(vectorized_report_ids_raw)
     pdf_ready_reports = {
         report_id
@@ -198,9 +161,10 @@ async def agent_process_report(
     report_id: int,
     linkage_service: LinkageService,
     agent_service: AgentService,
+    pubsub_service: ProjectPubSubService,
 ) -> None:
     async with agent_process_semaphore:
-        prediction = await agent_service.ainvoke(report_id)
+        prediction = await agent_service.report_matching(report_id)
 
         if hasattr(prediction, "model_dump"):
             prediction_data = prediction.model_dump()
@@ -246,7 +210,7 @@ async def agent_process_report(
             )
             await linkage_service.create_study_and_link_to_report(report_id, study_payload, "bot")
 
-        await publish_project_update(project_id)
+        await pubsub_service.publish_project_update(project_id)
         logger.info("Agent processing completed for report %s in project %s", report_id, project_id)
 
 async def get_project_stats(
@@ -296,51 +260,73 @@ async def start_automation(
     vectorstore: VectorstoreService,
     linkage_service: LinkageService,
     agent_service: AgentService,
+    pubsub_service: ProjectPubSubService,
 ) -> None:
+    pubsub = await pubsub_service.subscribe_to_project(project_id)
+    try:
+        while True:
+            report_ids = await project_repo.get_project_associated_report_ids(project_id)
+            if not report_ids:
+                return
 
-    while True:
-        report_ids = await project_repo.get_project_associated_report_ids(project_id)
-        if not report_ids:
-            return
+            report_status = await get_project_report_status(project_id, project_repo, report_repo, vectorstore)
+            completion_map = await project_repo.get_report_completion_by_users(project_id)
+            bot_processed_report_ids = {
+                report_id
+                for report_id, completed_by_users in completion_map.items()
+                if "bot" in completed_by_users
+            }
 
-        report_status = await get_project_report_status(project_id, project_repo, report_repo, vectorstore)
-        completion_map = await project_repo.get_report_completion_by_users(project_id)
-        bot_processed_report_ids = {
-            report_id
-            for report_id, completed_by_users in completion_map.items()
-            if "bot" in completed_by_users
-        }
+            if len(bot_processed_report_ids.intersection(set(report_ids))) >= len(report_ids):
+                logger.info("Automation completed for project %s", project_id)
+                return
 
-        ready_report_ids = [
-            report_id
-            for report_id in report_ids
-            if report_status.get(report_id, {}).get("embedded", False)
-            and report_status.get(report_id, {}).get("pdf", False)
-            and report_id not in bot_processed_report_ids
-        ]
+            ready_report_ids = [
+                report_id
+                for report_id in report_ids
+                if report_status.get(report_id, {}).get("embedded", False)
+                and report_status.get(report_id, {}).get("pdf", False)
+                and report_id not in bot_processed_report_ids
+            ]
 
-        if not ready_report_ids:
-            return
+            if not ready_report_ids:
+                await pubsub_service.get_next_project_update(pubsub)
+                continue
 
-        assignees = await project_repo.get_project_assignees(project_id)
-        assignee_ids = {user_id for user_id, _ in assignees if user_id}
-        if "bot" not in assignee_ids:
-            logger.info(
-                "Stopping automation for project %s because bot is no longer assigned",
-                project_id,
-            )
-            return
+            processing_tasks = [
+                agent_process_report(
+                    project_id,
+                    report_id,
+                    linkage_service,
+                    agent_service,
+                    pubsub_service,
+                )
+                for report_id in ready_report_ids
+            ]
+            await asyncio.gather(*processing_tasks)
+    finally:
+        await pubsub_service.unsubscribe_from_project(project_id, pubsub)
 
-        processing_tasks = [
-            agent_process_report(
-                project_id,
-                report_id,
-                linkage_service,
-                agent_service,
-            )
-            for report_id in ready_report_ids
-        ]
-        await asyncio.gather(*processing_tasks)
+async def _get_report_progress(report_ids: Set[int], report_repo: ReportRepository, vectorstore: VectorstoreService) -> Tuple[Set[int], Set[int], Set[int]]:
+    """
+    Helper function to get report progress without fetching report IDs from database.
+    Avoids concurrent database session access when called from asyncio.gather.
+    """
+    if not report_ids:
+        return set(), set(), set()
+
+    # Run database query first, then vectorstore query to avoid concurrent session usage
+    report_numbers = await report_repo.get_report_numbers(report_ids)
+    vectorized_report_ids_raw = await vectorstore.reports_exist(report_ids)
+    
+    embedded_reports = set(vectorized_report_ids_raw)
+    pdf_ready_reports = {
+        report_id
+        for report_id, report_number in report_numbers.items()
+        if report_number is not None and report_number >= 0
+    }
+    ready_reports = embedded_reports & pdf_ready_reports
+    return embedded_reports, pdf_ready_reports, ready_reports
 
 @router.get("/tasks",dependencies=[Depends(is_verified_api_call)], summary="Get pending review tasks for the authenticated user.", description="Returns all projects the user is assigned to along with their personal study-link counts.")
 async def get_user_tasks(project_repo: ProjectRepository = Depends(get_project_repo), report_repo: ReportRepository = Depends(get_report_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service),) -> List[ProjectTask]:
@@ -354,8 +340,15 @@ async def get_user_tasks(project_repo: ProjectRepository = Depends(get_project_r
 
     user_link_counts = await project_repo.get_user_link_counts_by_project()
 
+    # Pre-fetch all report IDs sequentially to avoid concurrent database access
+    project_report_ids = {}
+    for project in projects:
+        report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
+        project_report_ids[project.BatchHash] = report_ids or set()
+
+    # Now run vectorstore queries concurrently (no database session conflicts)
     progress_tasks = [
-        get_vectorized_and_ready_report_ids(project.BatchHash, project_repo, report_repo, vectorstore)
+        _get_report_progress(project_report_ids[project.BatchHash], report_repo, vectorstore)
         for project in projects
     ]
     progress_results = await asyncio.gather(*progress_tasks)
@@ -379,7 +372,7 @@ async def get_user_tasks(project_repo: ProjectRepository = Depends(get_project_r
     return tasks
 
 @router.post("/projects", dependencies=[Depends(is_admin)], summary="Upload a project (batch of new reports that need to be assigned to studies) (usually in the .ris file format)", status_code=201) 
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), project_repo : ProjectRepository = Depends(get_project_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service), maintenance_service: MaintenanceService = Depends(get_maintenance_service)):
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), project_repo : ProjectRepository = Depends(get_project_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service), maintenance_service: MaintenanceService = Depends(get_maintenance_service), pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service)):
 
     entries = await parse_file(file)
 
@@ -456,9 +449,9 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     # schedule background tasks
     #for report in reports:
     #    print("Report provcess appended")
-    background_tasks.add_task(process_report, reports, project_id, project_repo, vectorstore, maintenance_service)
+    background_tasks.add_task(process_report, reports, project_id, project_repo, vectorstore, maintenance_service, pubsub_service)
 
-    await publish_project_update(project_id)
+    await pubsub_service.publish_project_update(project_id)
 
     #TODO disabled for legacy reasons
     #reports_dict = [report.dict() for report in reports]
@@ -490,7 +483,7 @@ async def get_project_stats_by_id(project_stats : Project = Depends(get_project_
     return project_stats
 
 @router.delete("/projects/{project_id}", dependencies=[Depends(is_admin)], summary="Delete a project and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
-async def delete_project(project_id : str, project_repo: ProjectRepository = Depends(get_project_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+async def delete_project(project_id : str, project_repo: ProjectRepository = Depends(get_project_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service), pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service)):
     #Deletes the project and through cascade and triggers everythig related to it
     project = await project_repo.get_project_by_id(project_id)
     if not project:
@@ -502,7 +495,7 @@ async def delete_project(project_id : str, project_repo: ProjectRepository = Dep
     
     await vectorstore.delete_vectors_by_report_ids(report_ids)
 
-    await publish_project_update(project_id)
+    await pubsub_service.publish_project_update(project_id)
     
     return Response(status_code=204)
 
@@ -516,6 +509,7 @@ async def assign_user_to_project(
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
     linkage_service : LinkageService = Depends(get_linkage_service),
     agent_service: AgentService = Depends(get_agent_service),
+    pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
 ):
     try:
         project = await project_repo.get_project_by_id(project_id)
@@ -535,10 +529,10 @@ async def assign_user_to_project(
     if not created:
         raise HTTPException(status_code=409, detail="User already assigned to project")
 
-    await publish_project_update(project_id)
+    await pubsub_service.publish_project_update(project_id)
 
     if user_id == "bot":
-        background_tasks.add_task(start_automation, project_id, project_repo, report_repo, vectorstore, linkage_service, agent_service)
+        background_tasks.add_task(start_automation, project_id, project_repo, report_repo, vectorstore, linkage_service, agent_service, pubsub_service)
 
     return ProjectAssignee(userId=user_id, numberReportsLinked=0)
 
@@ -547,6 +541,7 @@ async def remove_user_from_project(
     project_id: str = project_id_path,
     user_id: str = Path(..., description="The user ID to remove from the project"),
     project_repo: ProjectRepository = Depends(get_project_repo),
+    pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
 ):
     try:
         project = await project_repo.get_project_by_id(project_id)
@@ -566,7 +561,7 @@ async def remove_user_from_project(
     if not removed:
         raise HTTPException(status_code=404, detail="User is not assigned to this project")
 
-    await publish_project_update(project_id)
+    await pubsub_service.publish_project_update(project_id)
 
     return Response(status_code=204)
 
@@ -591,7 +586,6 @@ async def get_project_reports(
 
     reports = await report_repo.get_all_reports(report_ids)
     all_linked_studies = await report_repo.get_linked_studies_for_reports(report_ids)
-    print("all_linked_studies: ", all_linked_studies)
 
     result = []
     for report in reports:
@@ -653,26 +647,18 @@ async def get_project_annotations(project: DbProject = Depends(get_project_by_id
 async def stream_project_updates(
     project_id: str,
     request: Request,
+    pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
 ) -> StreamingResponse:
     async def event_stream():
-        POLL_TIMEOUT = 10  # seconds
-
-        # subscribe this client to the project
-        q = await subscribe_to_project(project_id)
+        pubsub = await pubsub_service.subscribe_to_project(project_id)
         try:
             while True:
-                # Check for client disconnect
                 if await request.is_disconnected():
                     break
 
-                try:
-                    data = await asyncio.wait_for(q.get(), timeout=POLL_TIMEOUT)
-                except asyncio.TimeoutError:
-                    continue
-
-                if data == "ping":
-                    yield "data: ping\n\n"
+                data = await pubsub_service.get_next_project_update(pubsub)
+                yield f"data: {data}\n\n"
         finally:
-            await unsubscribe_from_project(project_id, q)
+            await pubsub_service.unsubscribe_from_project(project_id, pubsub)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

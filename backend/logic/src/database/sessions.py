@@ -2,6 +2,7 @@ import os
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool, QueuePool
 from sqlmodel import select
 
 from dotenv import load_dotenv
@@ -18,7 +19,14 @@ POSTGRES_PORT = os.getenv("POSTGRES_PORT")
 DATABASE_URL = f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB_RESOURCES}"
 PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+engine = create_async_engine(
+    DATABASE_URL, 
+    echo=False,
+    pool_size=20,  # Number of connections to maintain in pool
+    max_overflow=10,  # Additional connections beyond pool_size
+    pool_recycle=3600,  # Recycle connections after 1 hour
+    pool_pre_ping=True,  # Verify connections are alive before using them
+)
 
 AsyncSessionLocal = sessionmaker(
     bind=engine,

@@ -215,7 +215,8 @@ class AgentService:
             f"Authors: {', '.join(authors)}"
         )
 
-    async def ainvoke(self, report_id : int) -> ExistingStudy | NewStudy:
+    async def report_matching(self, report_id : int) -> ExistingStudy | NewStudy:
+        print("Start report matching: ", report_id)
         report_string = await self._load_report_context(report_id)
 
         result = await self.agent.ainvoke(
@@ -241,7 +242,7 @@ class AgentService:
         )
         return result['structured_response']
 
-    async def astream(self, report_id : int) -> AsyncGenerator[str, None]:
+    async def report_matching_stream(self, report_id : int) -> AsyncGenerator[str, None]:
         """Stream agent execution events as server-sent events.
         
         Yields:

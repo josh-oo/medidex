@@ -24,14 +24,13 @@ from ..services import get_tag_similarity_service, TagSimilaritySearchService
 from ..services import get_related_tag_service, RelatedTagSearchService
 from ..services import get_study_similarity_service, StudySimilaritySearchService
 from ..services import get_linkage_service, LinkageService
+from ..services import get_project_pubsub_service, ProjectPubSubService
 
 from ..services import get_vectorstore_service, VectorstoreService
 
 from ..services import get_embedding_service, EmbeddingService
 
 from .resources import Study, StudyCreate, transform_to_output_studies
-
-from .project_management import publish_project_update
 
 load_dotenv()
 
@@ -209,13 +208,14 @@ async def assign_studies(
     linkage_service: LinkageService = Depends(get_linkage_service),
     user_id: Optional[str] = Depends(get_user_id),
     project_id: str = Depends(check_report_access),
+    pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
 ):
     await linkage_service.link_existing_study_to_report(report_id, study_id, user_id)
     
     payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
 
-    await publish_project_update(project_id)
+    await pubsub_service.publish_project_update(project_id)
 
     return Response(content=None, status_code=200)
 
@@ -226,6 +226,7 @@ async def delete_assigned_studies(
     linkage_service: LinkageService = Depends(get_linkage_service),
     user_id: Optional[str] = Depends(get_user_id),
     project_id: str = Depends(check_report_access),
+    pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
 ):
 
     await linkage_service.unlink_study_from_report(report_id, study_id, user_id)
@@ -233,7 +234,7 @@ async def delete_assigned_studies(
     payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
 
-    await publish_project_update(project_id)
+    await pubsub_service.publish_project_update(project_id)
 
     return Response(content=None, status_code=200)
 
@@ -244,6 +245,7 @@ async def link_to_new_study(
     linkage_service: LinkageService = Depends(get_linkage_service),
     user_id: Optional[str] = Depends(get_user_id),
     project_id: str = Depends(check_report_access),
+    pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
 ):
 
     new_study = await linkage_service.create_study_and_link_to_report(report_id, study, user_id)
@@ -253,7 +255,7 @@ async def link_to_new_study(
 
     output_study = transform_to_output_studies([new_study])[0]
 
-    await publish_project_update(project_id)
+    await pubsub_service.publish_project_update(project_id)
 
     return output_study
 
