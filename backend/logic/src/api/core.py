@@ -23,12 +23,15 @@ from ..database import ProjectRepository
 from ..services import get_tag_similarity_service, TagSimilaritySearchService
 from ..services import get_related_tag_service, RelatedTagSearchService
 from ..services import get_study_similarity_service, StudySimilaritySearchService
+from ..services import get_linkage_service, LinkageService
 
 from ..services import get_vectorstore_service, VectorstoreService
 
 from ..services import get_embedding_service, EmbeddingService
 
 from .resources import Study, StudyCreate, transform_to_output_studies
+
+from .project_management import publish_project_update
 
 load_dotenv()
 
@@ -200,57 +203,57 @@ async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagC
     return await related_tag_service.search_related_tags_by_report_id(report_id, aspect, k, cutoff)
 
 @router.put("/reports/{report_id}/studies/{study_id}", dependencies=[Depends(is_verified_api_call), Depends(check_report_access)], summary="Assign studies to a specific report in a project.", status_code=200)
-async def assign_studies(report_id : int, study_id: int, report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
-    await asyncio.gather(
-        report_repo.append_study_link(report_id, study_id, user_id=user_id),
-        vectorstore.link_report_to_study_id(report_id, study_id, user_id)
-    )
-
-    #await publish_project_update(project_id)
+async def assign_studies(
+    report_id: int,
+    study_id: int,
+    linkage_service: LinkageService = Depends(get_linkage_service),
+    user_id: Optional[str] = Depends(get_user_id),
+    project_id: str = Depends(check_report_access),
+):
+    await linkage_service.link_existing_study_to_report(report_id, study_id, user_id)
     
     payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
+
+    await publish_project_update(project_id)
 
     return Response(content=None, status_code=200)
 
 @router.delete("/reports/{report_id}/studies/{study_id}", dependencies=[Depends(is_verified_api_call), Depends(check_report_access)], summary="Remove assigned studies from a specific report.", status_code=200)
-async def delete_assigned_studies(report_id : int, study_id: int, report_repo : ReportRepository = Depends(get_report_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+async def delete_assigned_studies(
+    report_id: int,
+    study_id: int,
+    linkage_service: LinkageService = Depends(get_linkage_service),
+    user_id: Optional[str] = Depends(get_user_id),
+    project_id: str = Depends(check_report_access),
+):
 
-    await asyncio.gather(
-        report_repo.unlink_studies(report_id, study_id, user_id=user_id),
-        vectorstore.unlink_report_from_study_id(report_id, study_id, user_id)
-    )
-
-    #await publish_project_update(project_id)
+    await linkage_service.unlink_study_from_report(report_id, study_id, user_id)
 
     payload = {"user": user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
 
+    await publish_project_update(project_id)
+
     return Response(content=None, status_code=200)
 
-@router.post("/reports/{report_id}/studies", dependencies=[Depends(is_verified_api_call), Depends(check_report_access)], summary="Remove assigned studies from a specific report.", status_code=200)
-async def link_to_new_study(report_id : int, study: StudyCreate, report_repo : ReportRepository = Depends(get_report_repo), study_repo : StudyRepository = Depends(get_study_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
-    
-    new_study = await study_repo.add_study(short_name=study.shortName, study_status=study.status, countries=study.countries, duration =study.duration, number_of_participants = study.numberParticipants, comparison = study.comparison)
-    study_id = new_study.CRGStudyID
+@router.post("/reports/{report_id}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report.", status_code=200)
+async def link_to_new_study(
+    report_id: int,
+    study: StudyCreate,
+    linkage_service: LinkageService = Depends(get_linkage_service),
+    user_id: Optional[str] = Depends(get_user_id),
+    project_id: str = Depends(check_report_access),
+):
 
-    #TODO check that the new shortname is not already taken
+    new_study = await linkage_service.create_study_and_link_to_report(report_id, study, user_id)
 
-    #TODO if already dailed stop here
-
-    await asyncio.gather(
-        report_repo.append_study_link(report_id, study_id, user_id=user_id),
-        vectorstore.link_report_to_study_id(report_id, study_id, user_id)
-    )
-
-    #TODO orphan removal -> return error if needed
-
-    #await publish_project_update(project_id)
-    
     payload = {"user": user_id, "event_type": "study::links::changed::new", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
 
     output_study = transform_to_output_studies([new_study])[0]
+
+    await publish_project_update(project_id)
 
     return output_study
 

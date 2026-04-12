@@ -2,6 +2,7 @@ from fastapi import Depends, Path, HTTPException, Query
 from langchain_openai import ChatOpenAI
 
 from .vectorstore import VectorstoreService
+from .linkage import LinkageService
 from .aspects import TagScoringService, TagSimilaritySearchService
 from .core import RelatedTagSearchService, StudySimilaritySearchService
 from .authors import AuthorFeatureService
@@ -32,6 +33,17 @@ def get_embedding_service():
 
 def get_vectorstore_service(user_id : str = Depends(get_user_id), embedding_service : EmbeddingService = Depends(get_embedding_service)):
     return VectorstoreService(user_id=user_id, embedding_service=embedding_service)
+
+def get_linkage_service(
+    report_repo: ReportRepository = Depends(get_report_repo),
+    study_repo: StudyRepository = Depends(get_study_repo),
+    vectorstore: VectorstoreService = Depends(get_vectorstore_service),
+) -> LinkageService:
+    return LinkageService(
+        report_repo=report_repo,
+        study_repo=study_repo,
+        vectorstore=vectorstore,
+    )
 
 def get_author_feature_service(study_repo : StudyRepository = Depends(get_study_repo)) -> AuthorFeatureService:
     return AuthorFeatureService(study_repo=study_repo)

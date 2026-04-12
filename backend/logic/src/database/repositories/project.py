@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, delete, insert
 from collections import defaultdict
 
@@ -27,30 +28,42 @@ class ProjectRepository:
         self.user_id = str(user_id)
 
     async def add_new_project(self, project_id : str, batch_description : str, reports : List[Report]):
-        new_project = Project(
-            BatchHash=project_id,
-            BatchDescription=batch_description,
-            UploadedBy=self.user_id
-        )
-        self.db.add(new_project)
+        try:
+            new_project = Project(
+                BatchHash=project_id,
+                BatchDescription=batch_description,
+                UploadedBy=self.user_id
+            )
+            self.db.add(new_project)
 
-        # Add all reports at once
-        self.db.add_all(reports)
-        await self.db.flush()  # Flush once to get all IDs
-        
-        # Create all ReportAdded entries
-        report_added_entries = [
-            ReportAdded(CRGReportID=report.CRGReportID, BatchHash=project_id)
-            for report in reports
-        ]
-        self.db.add_all(report_added_entries)
-        
-        await self.db.commit()
+            # Add all reports at once
+            self.db.add_all(reports)
+            await self.db.flush()  # Flush once to get all IDs
+            
+            # Create all ReportAdded entries
+            report_added_entries = [
+                ReportAdded(CRGReportID=report.CRGReportID, BatchHash=project_id)
+                for report in reports
+            ]
+            self.db.add_all(report_added_entries)
+            
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            existing_project = await self.get_project_by_hash(project_id)
+            if existing_project is not None:
+                return None
+            raise
 
         for report in reports:
             await self.db.refresh(report)
 
         return reports
+
+    async def get_project_by_hash(self, project_id: str) -> Optional[Project]:
+        stmt = select(Project).where(Project.BatchHash == project_id)
+        project = await self.db.execute(stmt)
+        return project.scalar_one_or_none()
     
     async def get_similar_report_studies(self, report_id: int, min_score: float) -> List[Study]:
         """
@@ -193,8 +206,23 @@ class ProjectRepository:
         return result.scalar_one_or_none()
     
     async def insert_project_scores(self, score_pairs):
+        if not score_pairs:
+            return
+
+        if isinstance(score_pairs[0], dict):
+            mappings = score_pairs
+        else:
+            mappings = [
+                {
+                    "CRGReportID": report_id,
+                    "OtherID": other_id,
+                    "Score": score,
+                }
+                for report_id, other_id, score in score_pairs
+            ]
+
         stmt = insert(ProjectInnerScore)
-        self.db.execute(stmt, score_pairs)
+        await self.db.execute(stmt, mappings)
         await self.db.commit()
 
     async def get_project_assignees(self, project_id: str) -> List[Tuple[str, int]]:

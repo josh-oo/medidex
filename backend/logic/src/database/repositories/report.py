@@ -435,7 +435,6 @@ class ReportRepository:
         )
         max_number = (await self.db.execute(stmt)).scalars().first()
         next_number = (max_number or 0) + 1
-        print("Max number: ", max_number)
 
         report.ReportNumber = next_number
         await self.db.flush()  # Update the existing report in the session

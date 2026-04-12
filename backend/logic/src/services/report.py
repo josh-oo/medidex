@@ -34,14 +34,12 @@ class DocumentService:
     async def get_path(self, report_id: int, mkdirs=False):
         if report_id not in self.path_cache:
             report_number = await self.report_repo.get_pdf_numbers_by_report_id(report_id)
-            print("RN: ", report_number)
             if report_number is None:
                 raise Exception("Report not found")
             if not mkdirs and report_number == -1:
                 raise Exception("Report number not found")   
             if report_number <= 0 and mkdirs:
                 report_number = await self.report_repo.assign_pdf_numbers_for_report_id(report_id)
-                print("Assigned RN: ", report_number)     
             
             pdf_name = str(report_number).zfill(5) + ".pdf"
             file_name = os.path.join(PDF_PATH, pdf_name)
@@ -245,7 +243,6 @@ class DocumentService:
         path = None
         try:
             path = await self.get_path(report_id, mkdirs=True)
-            print("Path: ", path)
 
             with open(path, "wb") as f:
                 content = await file.read()

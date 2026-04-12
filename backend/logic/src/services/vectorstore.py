@@ -229,6 +229,8 @@ class VectorstoreService():
 
 
     async def delete_vectors_by_report_ids(self, report_ids : List[int]):
+        if not report_ids:
+            return
         ids = [transform_to_uuid(report_id) for report_id in report_ids]
         await self.client.delete(
             collection_name=COLLECTION_NAME ,

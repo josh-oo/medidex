@@ -118,7 +118,7 @@ class StudyRepository:
         result = await self.get_study_reports_by_study_ids(study_ids=[study_id], fields=None, cutoff=None)
         if study_id in result:
             return result[study_id]
-        raise []
+        return []
     
     async def get_study_persons(self, study_ids: Optional[List[int]] = None, cutoff: Optional[str] = None, normalize_names: bool = True) -> Dict[int, List[str]]:
         stmt = (
