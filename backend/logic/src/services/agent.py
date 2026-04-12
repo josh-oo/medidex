@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, List, Union, Dict, Optional, Tuple
+from typing import Any, AsyncGenerator, List, Union, Dict, Optional, Tuple, Literal
 
 from pydantic import BaseModel, Field
 
@@ -44,14 +44,26 @@ class AgentContext:
     document_service :  DocumentService
 
 class ExistingStudy(BaseModel):
-    study_id: int = Field(description="The id of the matching candidate study")
     reason: str = Field(description="The reason why this study is a match for the input report")
+    studyId: int = Field(description="The id of the matching candidate study")
+
+class Comparison(BaseModel):
+    intervention: list[str] = Field(description="The list of interventions used in this study. If possible use the database terminology.")
+    control: list[str] = Field(description="The list of control methods used in this study. If possible use the database terminology.")
+
+class NewStudySuggestion(BaseModel):
+    shortName: str = Field(description="The shortname of the study (use the trial registration id if provided otherwise use first author + year e.g. 'Stanfield 2025').")
+    status: Literal[None, "Closed", "Stopped early", "Open/Ongoing", "Planned"] = Field(description="The status of the study if any hints found in the given material.")
+    countries: list[str] = Field(description="The countries where the study took place (if available)")
+    durationUnit: Literal["hours", "days", "weeks", "months", "years"] = Field(description="The unit of the study duration mentioned. ")
+    durationValue: int = Field(description="The value of the study duration mentioned.")
+    numberParticipants: int = Field(description="The number of participants in this study.")
+    comparison: list[Comparison] = Field(description="The comparison used in this study.")
+    trialId: Optional[str] = Field(description="The trial id linked to this study (if mentioned).")
 
 class NewStudy(BaseModel):
-    short_name: str = Field(description="The shortname of the study (use the trial registration id if provided otherwise use first author + year e.g. 'Stanfield 2025')")
-    number_of_participants: str | None = Field(description="The number of study participants (if available)")
-    countries: List[str] = Field(description="The countries where the study took place (if available)")
     reason: str = Field(description="The reason why you couldn't find an existing study for the input report")
+    newStudySuggestion : NewStudySuggestion = Field(description="The attributes for the new study to be entered in the database")
 
 Output = Union[ExistingStudy, NewStudy]
 
@@ -80,8 +92,6 @@ async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentCont
 
     response = await runtime.context.study_repo.get_study_by_id(study_id=study_id)
 
-    print("Response: ", response)
-
     result = {
         "studyId": response.CRGStudyID,
         "shortName": response.ShortName,
@@ -96,18 +106,15 @@ async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentCont
     return result
 
 @tool
-async def fetch_report_fulltext(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
+async def fetch_report_fulltext(report_id: Optional[int], runtime: ToolRuntime[AgentContext]) -> str:  
     """Fetch the corresponding fulltext for a given report
 
      Args:
-        report_id: The id of the report you want the fulltext for
+        report_id: The id of the report you want the fulltext for leave it empty (None) to retrieve the current reports fulltext
     """
-    pass #TODO 
-
-@tool
-async def fetch_current_fulltext(runtime: ToolRuntime[AgentContext]) -> str:  
-    """Fetch the corresponding fulltext for the current report"""
-    return await runtime.context.document_service.get_fulltext(fast=False)
+    if report_id is None:
+        return await runtime.context.document_service.get_fulltext(runtime.context.current_report, fast=False)
+    return await runtime.context.document_service.get_fulltext(report_id, fast=False)
 
 @tool
 async def fetch_report_abstract(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
@@ -190,7 +197,7 @@ class AgentService:
 
         self.agent = create_agent(
             model=self.model,
-            tools=[fetch_next_candidate_study, fetch_current_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract], #fetch_report_fulltext #TODO
+            tools=[fetch_next_candidate_study, fetch_report_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract],
             context_schema=AgentContext,
             system_prompt=system_message,
             response_format=ToolStrategy(Output),
@@ -199,7 +206,7 @@ class AgentService:
     async def _load_report_context(self, report_id : int) -> str:
         report = await self.report_repo.get_report_by_id(report_id)
         if report is None:
-            raise ValueError(f"Report {self.report_id} not found")
+            raise ValueError(f"Report {report_id} not found")
 
         authors = [author.strip() for author in (report.Authors or "").split("//") if author.strip()]
         return (

@@ -115,7 +115,7 @@ class StudyRepository:
         return grouped
 
     async def get_study_reports_by_study_id(self, study_id: int) -> List[Report]:
-        result = (await self.get_study_reports_by_study_ids(study_ids=[study_id], fields=None, cutoff=None))
+        result = await self.get_study_reports_by_study_ids(study_ids=[study_id], fields=None, cutoff=None)
         if study_id in result:
             return result[study_id]
         raise []

@@ -4,7 +4,7 @@ from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, Backg
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any, Tuple, Set
-import os
+import json
 import logging
 
 from datetime import datetime
@@ -18,18 +18,20 @@ import asyncio
 
 from .auth import is_verified_api_call, is_admin, get_roles
 
-from ..database import get_project_repo, get_report_repo
+from ..database import get_project_repo, get_report_repo, get_study_repo
 
 from ..database import ReportRepository
 from ..database import ProjectRepository
+from ..database import StudyRepository
 
 from ..database.models import Report as DbReport, Project as DbProject
 
 from ..services import get_vectorstore_service, VectorstoreService
-
 from ..services import get_maintenance_service, MaintenanceService
+from ..services import get_agent_service, AgentService
 
-from .resources import Report, Study, transform_to_output_studies
+from .resources import Report, Study, StudyCreate, transform_to_output_studies
+from .core import assign_studies, link_to_new_study
 
 router = APIRouter(tags=["projects"])
 
@@ -42,6 +44,9 @@ project_subscribers_lock = asyncio.Lock()
 
 # Track background tasks to prevent resource leaks
 background_tasks: set = set()
+
+# Limit concurrent bot processing across reports
+agent_process_semaphore = asyncio.Semaphore(10)
 
 project_id_path = Path(..., description="The projects's id")
 
@@ -145,55 +150,131 @@ async def get_project_by_id(project_id: str, project_repo: ProjectRepository = D
         raise HTTPException(status_code=404, detail="Project not found")
     return project
 
-async def get_project_associated_report_ids(project: DbProject = Depends(get_project_by_id), project_repo: ProjectRepository = Depends(get_project_repo)):
-    return await project_repo.get_project_associated_report_ids(project.BatchHash)
-
-async def calculate_processing_progress(report_ids: List[int],report_repo: ReportRepository, vectorstore: VectorstoreService) -> Tuple[int, int]:
-    report_ids = report_ids or []
+async def get_vectorized_and_ready_report_ids(project_id, project_repo : ProjectRepository, report_repo: ReportRepository, vectorstore: VectorstoreService) -> Tuple[Set[int], Set[int], Set[int]]:
+    
+    report_ids = await project_repo.get_project_associated_report_ids(project_id)
     if not report_ids:
-        return 0, 0
-
-    vectorized_report_ids, _, ready_report_ids = await get_vectorized_and_ready_report_ids(
-        report_ids, report_repo, vectorstore
-    )
-
-    generated_embeddings = len(vectorized_report_ids)
-    ready_for_processing_count = len(ready_report_ids)
-
-    return generated_embeddings, ready_for_processing_count
-
-async def get_vectorized_and_ready_report_ids(
-    report_ids: List[int],
-    report_repo: ReportRepository,
-    vectorstore: VectorstoreService,
-) -> Tuple[Set[int], Set[int]]:
-    if not report_ids:
-        return set(), set()
+        return set(), set(), set()
 
     vectorized_report_ids_raw, report_numbers = await asyncio.gather(
         vectorstore.reports_exist(report_ids),
         report_repo.get_report_numbers(report_ids),
     )
-    embedded_report_ids = set(vectorized_report_ids_raw)
+    embedded_reports = set(vectorized_report_ids_raw)
     pdf_ready_reports = {
         report_id
         for report_id, report_number in report_numbers.items()
         if report_number is not None and report_number >= 0
     }
-    ready_report_ids = embedded_report_ids & pdf_ready_reports
-    return embedded_report_ids, pdf_ready_reports, ready_report_ids
+    ready_reports = embedded_reports & pdf_ready_reports
+    return embedded_reports, pdf_ready_reports, ready_reports
+
+async def get_project_report_status(
+    project_id,
+    project_repo: ProjectRepository,
+    report_repo: ReportRepository,
+    vectorstore: VectorstoreService,
+) -> Dict[int, Dict[str, bool]]:
+
+    report_ids = await project_repo.get_project_associated_report_ids(project_id)
+    if not report_ids:
+        return {}
+
+    embedded_reports, pdf_ready_reports, _ = await get_vectorized_and_ready_report_ids(
+        project_id,
+        project_repo,
+        report_repo,
+        vectorstore,
+    )
+
+    return {
+        report_id: {
+            "embedded": report_id in embedded_reports,
+            "pdf": report_id in pdf_ready_reports,
+        }
+        for report_id in report_ids
+    }
+
+async def agent_process_report(
+    project_id: str,
+    report_id: int,
+    report_repo: ReportRepository,
+    study_repo: StudyRepository,
+    vectorstore: VectorstoreService,
+    agent_service: AgentService,
+) -> None:
+    async with agent_process_semaphore:
+        prediction = await agent_service.ainvoke(report_id)
+
+        if hasattr(prediction, "model_dump"):
+            prediction_data = prediction.model_dump()
+        elif isinstance(prediction, dict):
+            prediction_data = prediction
+        else:
+            prediction_data = {}
+
+        predicted_study_id = prediction_data.get("studyId")
+
+        if predicted_study_id is not None:
+            await assign_studies(
+                report_id=report_id,
+                study_id=int(predicted_study_id),
+                report_repo=report_repo,
+                user_id="bot",
+                vectorstore=vectorstore,
+            )
+        else:
+            suggested_study = prediction_data.get("newStudySuggestion", prediction_data)
+
+            countries = suggested_study.get("countries")
+            if not isinstance(countries, list):
+                countries = []
+
+            short_name = suggested_study.get("shortName")
+            status = suggested_study.get("status") or "Planned"
+            number_participants = suggested_study.get("numberParticipants")
+
+            duration = suggested_study.get("duration")
+            if not duration:
+                duration_value = suggested_study.get("durationValue")
+                duration_unit = suggested_study.get("durationUnit")
+                if duration_value is not None and duration_unit:
+                    duration = f"{duration_value} {duration_unit}"
+
+            comparison = suggested_study.get("comparison")
+            if isinstance(comparison, list):
+                comparison = json.dumps(comparison)
+
+            study_payload = StudyCreate(
+                shortName=short_name or f"bot-{report_id}",
+                status=status,
+                countries=countries,
+                numberParticipants=number_participants,
+                duration=duration,
+                comparison=comparison,
+                trialId=suggested_study.get("trialId"),
+            )
+            await link_to_new_study(
+                report_id=report_id,
+                study=study_payload,
+                report_repo=report_repo,
+                study_repo=study_repo,
+                user_id="bot",
+                vectorstore=vectorstore,
+            )
+
+        logger.info("Agent processing completed for report %s in project %s", report_id, project_id)
 
 async def get_project_stats(
     project: DbProject = Depends(get_project_by_id),
-    report_ids: List[int] = Depends(get_project_associated_report_ids),
     report_repo: ReportRepository = Depends(get_report_repo),
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
     project_repo: ProjectRepository = Depends(get_project_repo),
 ) -> ProjectDetails:
+    
+    report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
 
-    generated_embeddings, ready_for_processing_count = await calculate_processing_progress(
-        report_ids, report_repo, vectorstore
-    )
+    embedded_reports, _, ready_reports = await get_vectorized_and_ready_report_ids(project.BatchHash, project_repo, report_repo, vectorstore)
 
     assignees = await project_repo.get_project_assignees(project.BatchHash)
     assignee_ids = [user_id for user_id, _ in assignees if user_id]
@@ -217,12 +298,67 @@ async def get_project_stats(
         name=project.BatchDescription,
         createdAt=project.DateCreated,
         numberReportsTotal=len(report_ids),
-        numberReportsPreProcessed=generated_embeddings,
-        numberReportsReadyForProcessing=ready_for_processing_count,
+        numberReportsPreProcessed=len(embedded_reports),
+        numberReportsReadyForProcessing=len(ready_reports),
         numberReportsReadyForReview=ready_for_review_count,
         owner=project.UploadedBy,
         assignees=assignee_payload,
     )
+
+async def start_automation(
+    project_id: str,
+    project_repo: ProjectRepository,
+    report_repo: ReportRepository,
+    study_repo: StudyRepository,
+    vectorstore: VectorstoreService,
+    agent_service: AgentService,
+) -> None:
+
+    while True:
+        report_ids = await project_repo.get_project_associated_report_ids(project_id)
+        if not report_ids:
+            return
+
+        report_status = await get_project_report_status(project_id, project_repo, report_repo, vectorstore)
+        completion_map = await project_repo.get_report_completion_by_users(project_id)
+        bot_processed_report_ids = {
+            report_id
+            for report_id, completed_by_users in completion_map.items()
+            if "bot" in completed_by_users
+        }
+
+        ready_report_ids = [
+            report_id
+            for report_id in report_ids
+            if report_status.get(report_id, {}).get("embedded", False)
+            and report_status.get(report_id, {}).get("pdf", False)
+            and report_id not in bot_processed_report_ids
+        ]
+
+        if not ready_report_ids:
+            return
+
+        assignees = await project_repo.get_project_assignees(project_id)
+        assignee_ids = {user_id for user_id, _ in assignees if user_id}
+        if "bot" not in assignee_ids:
+            logger.info(
+                "Stopping automation for project %s because bot is no longer assigned",
+                project_id,
+            )
+            return
+
+        processing_tasks = [
+            agent_process_report(
+                project_id,
+                report_id,
+                report_repo,
+                study_repo,
+                vectorstore,
+                agent_service,
+            )
+            for report_id in ready_report_ids
+        ]
+        await asyncio.gather(*processing_tasks)
 
 @router.get("/tasks",dependencies=[Depends(is_verified_api_call)], summary="Get pending review tasks for the authenticated user.", description="Returns all projects the user is assigned to along with their personal study-link counts.")
 async def get_user_tasks(project_repo: ProjectRepository = Depends(get_project_repo), report_repo: ReportRepository = Depends(get_report_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service),) -> List[ProjectTask]:
@@ -236,25 +372,20 @@ async def get_user_tasks(project_repo: ProjectRepository = Depends(get_project_r
 
     user_link_counts = await project_repo.get_user_link_counts_by_project()
 
-    report_id_tasks = [
-        project_repo.get_project_associated_report_ids(project.BatchHash) for project in projects
-    ]
-    project_report_ids = await asyncio.gather(*report_id_tasks)
-
     progress_tasks = [
-        calculate_processing_progress(report_ids, report_repo, vectorstore)
-        for report_ids in project_report_ids
+        get_vectorized_and_ready_report_ids(project.BatchHash, project_repo, report_repo, vectorstore)
+        for project in projects
     ]
     progress_results = await asyncio.gather(*progress_tasks)
 
     tasks: List[ProjectTask] = []
-    for project, (_, ready_for_processing_count) in zip(projects, progress_results):
+    for project, (_,_, ready_for_processing) in zip(projects, progress_results):
         project_payload = Project(
             projectId=project.BatchHash,
             name=project.BatchDescription,
             owner=project.UploadedBy or "",
             createdAt=project.DateCreated,
-            numberReportsReadyForProcessing=ready_for_processing_count,
+            numberReportsReadyForProcessing=len(ready_for_processing),
         )
         tasks.append(
             ProjectTask(
@@ -353,18 +484,15 @@ async def get_available_projects(project_repo: ProjectRepository = Depends(get_p
     projects = await project_repo.get_all_projects()
 
     # Process all projects in parallel
-    tasks = []
-    for project in projects:
-        report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
-        tasks.append(
-            get_project_stats(
-                project=project,
-                report_ids=report_ids,
-                report_repo=report_repo,
-                vectorstore=vectorstore,
-                project_repo=project_repo,
-            )
+    tasks = [
+        get_project_stats(
+            project=project,
+            report_repo=report_repo,
+            vectorstore=vectorstore,
+            project_repo=project_repo,
         )
+        for project in projects
+    ]
     project_responses = await asyncio.gather(*tasks)
 
     return project_responses
@@ -374,10 +502,12 @@ async def get_project_stats_by_id(project_stats : Project = Depends(get_project_
     return project_stats
 
 @router.delete("/projects/{project_id}", dependencies=[Depends(is_admin)], summary="Delete a project and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
-async def delete_project(project_id : str, report_ids : List[int] = Depends(get_project_associated_report_ids), project_repo: ProjectRepository = Depends(get_project_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
+async def delete_project(project_id : str, project_repo: ProjectRepository = Depends(get_project_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):
     #Deletes the project and through cascade and triggers everythig related to it
     await project_repo.delete_project(project_id)
 
+    report_ids = await project_repo.get_project_associated_report_ids(project_id)
+    
     await vectorstore.delete_vectors_by_report_ids(report_ids)
 
     await publish_project_update(project_id)
@@ -386,9 +516,14 @@ async def delete_project(project_id : str, report_ids : List[int] = Depends(get_
 
 @router.post("/projects/{project_id}/assignees", dependencies=[Depends(is_admin)],summary="Assign a user to a project",status_code=201,)
 async def assign_user_to_project(
-    user_id: str = Body(..., embed=False, description="User ID to assign"),
+    background_tasks: BackgroundTasks,
     project_id: str = project_id_path,
+    user_id: str = Body(..., embed=False, description="User ID to assign"),
     project_repo: ProjectRepository = Depends(get_project_repo),
+    report_repo: ReportRepository = Depends(get_report_repo),
+    study_repo: StudyRepository = Depends(get_study_repo),
+    vectorstore: VectorstoreService = Depends(get_vectorstore_service),
+    agent_service: AgentService = Depends(get_agent_service),
 ):
     try:
         project = await project_repo.get_project_by_id(project_id)
@@ -409,6 +544,9 @@ async def assign_user_to_project(
         raise HTTPException(status_code=409, detail="User already assigned to project")
 
     await publish_project_update(project_id)
+
+    if user_id == "bot":
+        background_tasks.add_task(start_automation, project_id, project_repo, report_repo, study_repo, vectorstore, agent_service)
 
     return ProjectAssignee(userId=user_id, numberReportsLinked=0)
 
@@ -442,15 +580,19 @@ async def remove_user_from_project(
 
 @router.get("/projects/{project_id}/reports", dependencies=[Depends(is_verified_api_call)], summary="Get all reports in a project by project id.")
 async def get_project_reports(
+    project_id : str,
     ready_only: bool = Query(False, description="Only include reports that have generated embeddings and a linked PDF."),
-    report_ids: List[int] = Depends(get_project_associated_report_ids),
+    project_repo: ProjectRepository = Depends(get_project_repo),
     report_repo: ReportRepository = Depends(get_report_repo),
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
     roles: List[str] = Depends(get_roles)
 ) -> List[BatchedReport]:
+    
+    report_ids = await project_repo.get_project_associated_report_ids(project_id)
+    
     ready_report_ids: Optional[Set[int]] = None
     _, reports_with_pdf, ready_report_ids = await get_vectorized_and_ready_report_ids(
-        report_ids, report_repo, vectorstore
+        project_id, project_repo, report_repo, vectorstore
     )
     if not ready_only and "ADMIN" in roles:
         ready_report_ids = None
@@ -486,11 +628,10 @@ async def get_project_reports(
     return result
 
 @router.get( "/projects/{project_id}/annotations",dependencies=[Depends(is_admin)],summary="Get reports annotated by all assigned users in a project.")
-async def get_project_annotations(
-    project: DbProject = Depends(get_project_by_id),
-    report_ids: List[int] = Depends(get_project_associated_report_ids),
-    project_repo: ProjectRepository = Depends(get_project_repo),
-) -> Dict[int, List[Dict[str, Any]]]:
+async def get_project_annotations(project: DbProject = Depends(get_project_by_id), project_repo: ProjectRepository = Depends(get_project_repo)) -> Dict[int, List[Dict[str, Any]]]:
+    
+    report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
+    
     if not report_ids:
         return {}
 
@@ -549,10 +690,10 @@ async def stream_project_updates(
                     data = await asyncio.wait_for(q.get(), timeout=HEARTBEAT_INTERVAL)
                     if data == project_id:
                         try:
-                            report_ids = await project_repo.get_project_associated_report_ids(project_id)
+                            #report_ids = await project_repo.get_project_associated_report_ids(project_id)
                             project = await get_project_stats(
                                 project=project_obj,
-                                report_ids=report_ids,
+                                #report_ids=report_ids,
                                 report_repo=report_repo,
                                 vectorstore=vectorstore,
                                 project_repo=project_repo,

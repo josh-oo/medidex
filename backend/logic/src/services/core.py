@@ -7,8 +7,6 @@ from .aspects import TagScoringService, TagCategories
 
 from typing import List, Any
 
-from ..utils.random import get_random_value, add_noise_to_vector
-
     
 class StudySimilaritySearchService:
     def __init__(self, user_id : str, vectorstore : VectorstoreService, study_repo : StudyRepository, project_repo : ProjectRepository, author_feature_service : AuthorFeatureService, report_service : ReportService):
@@ -19,16 +17,10 @@ class StudySimilaritySearchService:
         self.author_feature_service = author_feature_service
         self.report_service = report_service
 
-        self.add_noise = False#True #Studydesign
         self.debug = False
 
         if not self.user_id:
             self.user_id = "user"
-
-        if self.user_id == "LkjFowryai9jDNJuvSeGblROAlN5hVjd": #TODO remove if user is alessandro
-            self.add_noise = True
-
-        #self.add_noise = True
 
     async def get_similar_study_by_query(self, query : Any, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], trial_ids: List[str], authors:List[str], return_details: bool):
     
@@ -107,30 +99,15 @@ class StudySimilaritySearchService:
         if not negative_studies:
             negative_studies = []
 
-        report = await self.report_service.get_report()
+        report = await self.report_service.get_report(report_id)
 
         authors = [item.strip() for item in report.Authors.split("//")]
-        trial_ids = await self.report_service.get_trial_ids(include_fulltext=True)
+        trial_ids = await self.report_service.get_trial_ids(report_id, include_fulltext=True)
 
-        if self.add_noise:
-            random_value = get_random_value(self.user_id, report.CRGReportID)
-            if random_value > 0.0:
-                trial_ids = []
-                authors = []
-
-            vectors = await self.vectorstore.get_vectors_by_report_id(report.CRGReportID)
-            query = add_noise_to_vector(vectors['default'], random_value, report.CRGReportID)
-
-        else:
-            query = self.vectorstore.recommendation_query_builder(report.CRGReportID, negative_reports)
+        query = self.vectorstore.recommendation_query_builder(report.CRGReportID, negative_reports)
         
 
         result = await self.get_similar_study_by_query(query,aspect,cutoff,k,negative_studies, trial_ids, authors, return_details=return_details)
-
-        if self.add_noise:
-            #To avoid biases add the deducted scores again 
-            for i in range(0, len(result['Relevance'])):
-                result['Relevance'][i] = min(result['Relevance'][i] / (1.01-random_value), 1.0)
 
         # Check if there are any similar items in the same project which are more similar than already retrieved existing studies
         if result.get('Relevance'):

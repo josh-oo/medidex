@@ -42,20 +42,20 @@ def get_tag_similarity_service(vectorstore : VectorstoreService = Depends(get_ve
 def get_tag_scoring_service(aspect_repo : AspectRepository = Depends(get_aspect_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> TagScoringService:
     return TagScoringService(vectorstore=vectorstore, aspect_repo=aspect_repo)
 
-def get_document_service(report_id : int, report_repo : ReportRepository = Depends(get_report_repo)) -> DocumentService:
-    return DocumentService(report_id=report_id, report_repo=report_repo, crawler_service=CrawlerService(), docling_service=DoclingService())
+def get_document_service(report_repo : ReportRepository = Depends(get_report_repo)) -> DocumentService:
+    return DocumentService(report_repo=report_repo, crawler_service=CrawlerService(), docling_service=DoclingService())
 
-def get_document_service_project(report_id : int = Depends(project_path_to_report_id), report_repo : ReportRepository = Depends(get_report_repo)) -> DocumentService:
-    return DocumentService(report_id=report_id, report_repo=report_repo, crawler_service=CrawlerService(), docling_service=DoclingService())
+def get_document_service_project(report_repo : ReportRepository = Depends(get_report_repo)) -> DocumentService:
+    return DocumentService(report_repo=report_repo, crawler_service=CrawlerService(), docling_service=DoclingService())
 
 def get_llm_service(tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> LanguageModelService:
     return LanguageModelService(tag_similarity_service=tag_similarity_service)
 
-def get_report_service_project(report_id : int = Depends(project_path_to_report_id), report_repo : ReportRepository = Depends(get_report_repo), study_repo : StudyRepository = Depends(get_study_repo),document_service : DocumentService = Depends(get_document_service_project), llm_service : LanguageModelService = Depends(get_llm_service)) -> ReportService:
-    return ReportService(report_id=report_id, report_repo=report_repo, study_repo=study_repo, document_service=document_service, llm_service=llm_service )
+def get_report_service_project(report_repo : ReportRepository = Depends(get_report_repo), study_repo : StudyRepository = Depends(get_study_repo),document_service : DocumentService = Depends(get_document_service_project), llm_service : LanguageModelService = Depends(get_llm_service)) -> ReportService:
+    return ReportService(report_repo=report_repo, study_repo=study_repo, document_service=document_service, llm_service=llm_service )
 
-def get_report_service(report_id : int, report_repo : ReportRepository = Depends(get_report_repo), study_repo : StudyRepository = Depends(get_study_repo),document_service : DocumentService = Depends(get_document_service), llm_service : LanguageModelService = Depends(get_llm_service)) -> ReportService:
-    return ReportService(report_id=report_id, report_repo=report_repo, study_repo=study_repo, document_service=document_service, llm_service=llm_service )
+def get_report_service(report_repo : ReportRepository = Depends(get_report_repo), study_repo : StudyRepository = Depends(get_study_repo),document_service : DocumentService = Depends(get_document_service), llm_service : LanguageModelService = Depends(get_llm_service)) -> ReportService:
+    return ReportService(report_repo=report_repo, study_repo=study_repo, document_service=document_service, llm_service=llm_service )
 
 def get_study_similarity_service(user_id : str = Depends(get_user_id), study_repo : StudyRepository = Depends(get_study_repo), project_repo : ProjectRepository = Depends(get_project_repo), author_feature_service : AuthorFeatureService = Depends(get_author_feature_service), vectorstore : VectorstoreService = Depends(get_vectorstore_service), report_service : ReportService = Depends(get_report_service)) -> StudySimilaritySearchService:
     return StudySimilaritySearchService(user_id=user_id, vectorstore=vectorstore, study_repo=study_repo, project_repo=project_repo, author_feature_service=author_feature_service, report_service=report_service)

@@ -59,7 +59,7 @@ SUGGEST_NEW_STUDY_PROMPT = (
     "\"status_of_study\":\"Planned\","
     "\"countries\":[\"Unclear\"],"
     "\"duration_value\":3,"
-    "\"duration_unit\": \"months\,"
+    "\"duration_unit\": \"months\","
     "\"number_of_participants\":600,"
     "\"comparison\":[{\"intervention\": [\"Cognitive behavioural therapy\", \"Apriprozol\"], \"control\":[\"Treatment as usual\"]}]"
     "}"

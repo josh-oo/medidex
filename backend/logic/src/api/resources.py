@@ -173,14 +173,14 @@ async def get_study_reports_by_id(study_id : int = study_id_path, study_repo : S
     result = []
     for db_report in db_reports:
         result.append(Report(
-            reportId=db_report.CRGReportID,
-            year=db_report.Year,
-            title=db_report.Title,
-            abstract=db_report.Abstract,
-            trialId=db_report.TrialRegistrationID,
-            authors=db_report.Authors.split("//"),
-            createdAt=db_report.Dateentered,
-            updatedAt=db_report.DateEdited,
+            reportId=db_report['CRGReportID'],
+            year=db_report['Year'],
+            title=db_report['Title'],
+            abstract=db_report['Abstract'],
+            trialId=db_report['TrialRegistrationID'],
+            authors=db_report['Authors'].split("//"),
+            createdAt=db_report['Dateentered'],
+            updatedAt=db_report['DateEdited'],
         ))
     return result
 
@@ -264,7 +264,7 @@ async def get_report_studies_by_id(
     return transform_to_output_studies(result)
 
 @router.put("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
-async def uploaed_pdf(file: UploadFile = File(None, description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
+async def uploaed_pdf(report_id: int = report_id_path, file: UploadFile = File(None, description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
     # Validate file is a PDF
     if file:
         if not file.content_type == "application/pdf":
@@ -273,14 +273,14 @@ async def uploaed_pdf(file: UploadFile = File(None, description="PDF file to upl
             raise HTTPException(status_code=400, detail="File must have .pdf extension.")
     
     try:
-        return await document_service.upload_pdf(file)
+        return await document_service.upload_pdf(report_id, file)
     except:
         raise HTTPException(status_code=500, detail=f"Failed to save PDF.")
     
 @router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
 async def get_pdf(report_id : int, document_service : DocumentService = Depends(get_document_service),user_id = Depends(get_user_id)) -> FileResponse:
     try:
-        pdf_path = await document_service.get_path()
+        pdf_path = await document_service.get_path(report_id)
         await post_report_event(-1, Event(event_type=f"report::{report_id}::downloaded", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
         return FileResponse(pdf_path, media_type="application/pdf", filename=f"{report_id}.pdf")
     except:
@@ -289,16 +289,16 @@ async def get_pdf(report_id : int, document_service : DocumentService = Depends(
 @router.delete("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Delete the fulltext pdf for a given report")
 async def delete_pdf(report_id : int, document_service : DocumentService = Depends(get_document_service)) -> Dict[str, Any]:
     try:
-        return await document_service.delete_pdf()
+        return await document_service.delete_pdf(report_id)
     except Exception as e:
         if str(e) == "Report not found":
             raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
         raise HTTPException(status_code=500, detail="Failed to delete PDF.")
     
 @router.get("/reports/{report_id}/fulltext", summary="Get the parsed fulltext for a given report")
-async def get_fulltext(document_service : DocumentService = Depends(get_document_service)) -> str:
+async def get_fulltext(report_id: int = report_id_path, document_service : DocumentService = Depends(get_document_service)) -> str:
     try:
-        return await document_service.get_fulltext(fast=False)
+        return await document_service.get_fulltext(report_id, fast=False)
     except Exception as e:
         if str(e) == "Upstream request timed out":
             raise HTTPException(status_code=504, detail="Upstream request timed out.")
@@ -317,17 +317,17 @@ async def get_report_fulltext_links(report_id: int = report_id_path, report_repo
     return ReportSources(doi=doi, links=links)
     
 @router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
-async def get_pdf_metadata(report_service : ReportService = Depends(get_report_service)) -> Dict:
-    return await report_service.get_metadata()
+async def get_pdf_metadata(report_id: int = report_id_path, report_service : ReportService = Depends(get_report_service)) -> Dict:
+    return await report_service.get_metadata(report_id)
     try:
-        return await report_service.get_metadata()
+        return await report_service.get_metadata(report_id)
     except Exception as e:
         if str(e) == "Upstream request timed out":
             raise HTTPException(status_code=504, detail="Upstream request timed out.")
 
 @router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
-async def get_report_trial_ids(include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), report_service : ReportService = Depends(get_report_service)) -> List[str]:
-    result = await report_service.get_trial_ids(include_fulltext)
+async def get_report_trial_ids(report_id: int = report_id_path, include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), report_service : ReportService = Depends(get_report_service)) -> List[str]:
+    result = await report_service.get_trial_ids(report_id, include_fulltext)
     if result is None:
         raise HTTPException(status_code=404, detail="Report not found.")
     return result
