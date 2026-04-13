@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SYSTEM_MESSAGE_TEXT = """
+SYSTEM_MESSAGE_AUTOBOT = """
 You are a clinical research assistant tasked with determining whether a new report belongs to an existing candidate study. 
 This is necessary since one study sometimes produces multiple scientific reports or articles which then need to be mapped back to the study they belong to.
 Please look at common signals such as trial registration ID, number of participants, interventions and the countries mentioned.
@@ -36,6 +36,13 @@ The workflow should look like:
     then proceed with step 1. loading the next likely candidate study.
     -> if you already processed a reasonable number of studies without finding a matching candidate:
     then break the loop by recommending that the user add a new study to their database IMPORTANT: before suggesting a new study make sure that you used all available resources (fulltexts, report lists, ...)
+"""
+
+SYSTEM_MESSAGE_QUESTION_ANSWERING = """
+You are a clinical research assistant tasked with answering follow-up questions about report-to-study matching.
+Use the available tools to inspect candidate studies, report metadata, and report full text when needed.
+Ground your answers in the retrieved evidence and avoid unsupported assumptions.
+If information is missing, say so clearly and explain what additional context would help.
 """
 
 @dataclass
@@ -131,16 +138,6 @@ async def fetch_report_abstract(report_id: int, runtime: ToolRuntime[AgentContex
     return response.Abstract
 
 @tool
-async def fetch_report_abstract(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
-    """Fetch the corresponding abstract for a given report
-    
-    Args:
-        report_id: The id of the report you want the abstract for
-    """
-    response = await runtime.context.report_repo.get_report_by_id(report_id)
-    return response.Abstract
-
-@tool
 async def fetch_study_reports(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[Dict[str,str]]:  
     """Get all the reports already assigned to the corresponding study
 
@@ -175,38 +172,57 @@ async def fetch_study_persons(study_id : int, runtime: ToolRuntime[AgentContext]
     """
     return await runtime.context.study_repo.get_study_persons_single(study_id)
 
-class AgentService:
+class BaseAgentService:
     def __init__(
         self,
+        user_id: str,
         report_repo: ReportRepository,
         study_repo : StudyRepository,
         document_service :  DocumentService,
         study_similarity_service: StudySimilaritySearchService,
         checkpointer: Any,
         model: Any,
+        system_prompt: str,
+        thread_prefix: str,
     ):
         self.report_repo = report_repo
         self.study_repo = study_repo
         self.study_similarity_service = study_similarity_service
         self.document_service = document_service
+        self.checkpointer = checkpointer
         self.model = model
+        self.thread_prefix = thread_prefix
+        self.user_id = user_id
 
         system_message = SystemMessage(
             content=[
                 {
                     "type": "text",
-                    "text": SYSTEM_MESSAGE_TEXT,
+                    "text": system_prompt,
                 }
             ]
         )
 
-        self.agent = create_agent(
-            model=self.model,
-            tools=[fetch_next_candidate_study, fetch_report_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract],
-            context_schema=AgentContext,
-            system_prompt=system_message,
-            checkpointer=checkpointer,
-            response_format=ToolStrategy(Output),
+        agent_config: Dict[str, Any] = {
+            "model": self.model,
+            "tools": [fetch_next_candidate_study, fetch_report_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract],
+            "context_schema": AgentContext,
+            "system_prompt": system_message,
+            "checkpointer": checkpointer,
+        }
+        self.agent = create_agent(**agent_config)
+
+    def _thread_id(self, report_id: int) -> str:
+        return f"{self.thread_prefix}-{self.user_id}-{report_id}"
+
+    def _agent_context(self, report_id: int, visited_candidate_studies: int) -> AgentContext:
+        return AgentContext(
+            current_report=report_id,
+            visited_candidate_studies=visited_candidate_studies,
+            study_repo=self.study_repo,
+            report_repo=self.report_repo,
+            study_similarity_service=self.study_similarity_service,
+            document_service=self.document_service,
         )
 
     async def _load_report_context(self, report_id : int) -> str:
@@ -221,11 +237,99 @@ class AgentService:
             f"Authors: {', '.join(authors)}"
         )
 
+    async def get_history(self, report_id : int) -> Any:
+        config = {"configurable": {"thread_id": self._thread_id(report_id)}}
+        return await self.agent.aget_state(config)
+    
+    async def ask_me(self, report_id : int, question : str) -> Any:
+        history = await self.get_history(report_id)
+        messages = getattr(history, "values", {}).get("messages", []) if history is not None else []
+        visited_candidate_studies = 0
+
+        for message in messages:
+            message_name = message.get("name") if isinstance(message, dict) else getattr(message, "name", None)
+            if message_name == "fetch_next_candidate_study":
+                visited_candidate_studies += 1
+
+        input_messages: List[Dict[str, str]] = []
+        if not messages:
+            report_string = await self._load_report_context(report_id)
+            input_messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Use the following report context for this conversation:\n"
+                        f"{report_string}"
+                    ),
+                }
+            )
+        
+        input_messages.append(
+            {
+                "role": "user",
+                "content": question,
+            }
+        )
+
+        result = await self.agent.ainvoke(
+            {
+                "messages": input_messages
+            },
+            {"configurable": {"thread_id": self._thread_id(report_id)}},
+            context=self._agent_context(report_id=report_id, visited_candidate_studies=visited_candidate_studies),
+        )
+        return result
+
+    async def delete_chat(self, report_id: int) -> None:
+        thread_id = self._thread_id(report_id)
+        await self.checkpointer.adelete_thread(thread_id)
+
+class AutomationService(BaseAgentService):
+    def __init__(
+        self,
+        user_id: str,
+        report_repo: ReportRepository,
+        study_repo : StudyRepository,
+        document_service :  DocumentService,
+        study_similarity_service: StudySimilaritySearchService,
+        checkpointer: Any,
+        model: Any,
+    ):
+        super().__init__(
+            user_id="",#TODO make this chat user specific
+            report_repo=report_repo,
+            study_repo=study_repo,
+            document_service=document_service,
+            study_similarity_service=study_similarity_service,
+            checkpointer=checkpointer,
+            model=model,
+            system_prompt=SYSTEM_MESSAGE_AUTOBOT,
+            thread_prefix="prediction",
+        )
+
+        structured_system_message = SystemMessage(
+            content=[
+                {
+                    "type": "text",
+                    "text": SYSTEM_MESSAGE_AUTOBOT,
+                }
+            ]
+        )
+        structured_agent_config: Dict[str, Any] = {
+            "model": self.model,
+            "tools": [fetch_next_candidate_study, fetch_report_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract],
+            "context_schema": AgentContext,
+            "system_prompt": structured_system_message,
+            "checkpointer": checkpointer,
+            "response_format": ToolStrategy(Output),
+        }
+        self.structured_agent = create_agent(**structured_agent_config)
+
     async def report_matching(self, report_id : int) -> ExistingStudy | NewStudy:
         print("Start report matching: ", report_id)
         report_string = await self._load_report_context(report_id)
 
-        result = await self.agent.ainvoke(
+        result = await self.structured_agent.ainvoke(
             {
                 "messages": [
                     {
@@ -237,15 +341,8 @@ class AgentService:
                     }
                 ]
             },
-            {"configurable": {"thread_id": "prediction-" + str(report_id)}},
-            context=AgentContext(
-                current_report=report_id,
-                visited_candidate_studies=0,
-                study_repo=self.study_repo,
-                report_repo=self.report_repo,
-                study_similarity_service=self.study_similarity_service,
-                document_service=self.document_service,
-            ),
+            {"configurable": {"thread_id": self._thread_id(report_id)}},
+            context=self._agent_context(report_id=report_id, visited_candidate_studies=0),
         )
         return result['structured_response']
 
@@ -257,7 +354,7 @@ class AgentService:
         """
         report_string = await self._load_report_context(report_id)
 
-        async for event in self.agent.astream(
+        async for event in self.structured_agent.astream(
             {
                 "messages": [
                     {
@@ -269,15 +366,8 @@ class AgentService:
                     }
                 ]
             },
-            {"configurable": {"thread_id": "prediction-" + str(report_id)}},
-            context=AgentContext(
-                current_report=report_id,
-                visited_candidate_studies=0,
-                study_repo=self.study_repo,
-                report_repo=self.report_repo,
-                study_similarity_service=self.study_similarity_service,
-                document_service=self.document_service,
-            ),
+            {"configurable": {"thread_id": self._thread_id(report_id)}},
+            context=self._agent_context(report_id=report_id, visited_candidate_studies=0),
             version="v1",
             stream_mode="updates",
         ):
@@ -301,11 +391,11 @@ class AgentService:
         if "model" in event.keys():
             for tool_call in event['model']['messages'][0].tool_calls:
                 if tool_call['name'] == "fetch_study_interventions":
-                    payload.append({'studyId': tool_call["args"]["study_id"], 'message': f"Checking study interventions."})
+                    payload.append({'studyId': tool_call["args"]["study_id"], 'message': "Checking study interventions."})
                 elif tool_call['name'] == "fetch_study_reports":
-                    payload.append({'studyId': tool_call["args"]["study_id"], 'message': f"Checking study reports."})
+                    payload.append({'studyId': tool_call["args"]["study_id"], 'message': "Checking study reports."})
                 elif tool_call['name'] == "fetch_current_fulltext":
-                    payload.append({'studyId': None, 'message': f"Reading report fulltext."})
+                    payload.append({'studyId': None, 'message': "Reading report fulltext."})
                 elif tool_call['name'] == "ExistingStudy":
                     structured_output = tool_call.get("args")
                     structured_output['type'] = "existing"
@@ -331,4 +421,26 @@ class AgentService:
                     structured_output['type'] = "new"
 
         return payload, structured_output
-
+    
+class QuestionAnsweringService(BaseAgentService):
+    def __init__(
+        self,
+        user_id: str,
+        report_repo: ReportRepository,
+        study_repo : StudyRepository,
+        document_service :  DocumentService,
+        study_similarity_service: StudySimilaritySearchService,
+        checkpointer: Any,
+        model: Any,
+    ):
+        super().__init__(
+            user_id=user_id,
+            report_repo=report_repo,
+            study_repo=study_repo,
+            document_service=document_service,
+            study_similarity_service=study_similarity_service,
+            checkpointer=checkpointer,
+            model=model,
+            system_prompt=SYSTEM_MESSAGE_QUESTION_ANSWERING,
+            thread_prefix="question-answering",
+        )

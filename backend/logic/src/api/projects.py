@@ -27,7 +27,7 @@ from ..database.models import Report as DbReport, Project as DbProject
 
 from ..services import get_vectorstore_service, VectorstoreService
 from ..services import get_maintenance_service, MaintenanceService
-from ..services import get_agent_service, AgentService
+from ..services import get_agent_service, AutomationService
 from ..services import get_linkage_service,LinkageService
 from ..services import get_project_pubsub_service, ProjectPubSubService
 
@@ -160,7 +160,7 @@ async def agent_process_report(
     project_id: str,
     report_id: int,
     linkage_service: LinkageService,
-    agent_service: AgentService,
+    agent_service: AutomationService,
     pubsub_service: ProjectPubSubService,
 ) -> None:
     async with agent_process_semaphore:
@@ -259,7 +259,7 @@ async def start_automation(
     report_repo: ReportRepository,
     vectorstore: VectorstoreService,
     linkage_service: LinkageService,
-    agent_service: AgentService,
+    agent_service: AutomationService,
     pubsub_service: ProjectPubSubService,
 ) -> None:
     pubsub = await pubsub_service.subscribe_to_project(project_id)
@@ -508,7 +508,7 @@ async def assign_user_to_project(
     report_repo: ReportRepository = Depends(get_report_repo),
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
     linkage_service : LinkageService = Depends(get_linkage_service),
-    agent_service: AgentService = Depends(get_agent_service),
+    agent_service: AutomationService = Depends(get_agent_service),
     pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
 ):
     try:

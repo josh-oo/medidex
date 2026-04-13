@@ -7,7 +7,7 @@ from .aspects import TagScoringService, TagSimilaritySearchService
 from .core import RelatedTagSearchService, StudySimilaritySearchService
 from .authors import AuthorFeatureService
 from .embedding import EmbeddingService
-from .agent import AgentService
+from .agent import AutomationService, QuestionAnsweringService
 from .report import DocumentService, ReportService
 from .llm import LanguageModelService
 from .crawler import CrawlerService, DoclingService
@@ -87,15 +87,37 @@ def get_readiness_service(db_ready : str = Depends(db_ready), vectorstore : Vect
     return ReadinessService(db_ready=db_ready, vectorstore=vectorstore, embedding_service=embedding_service)
 
 async def get_agent_service(
+    user_id : str = Depends(get_user_id),
     model: str = Query("gpt-5-nano", description="LLM model name to use for study prediction"),
     report_repo : ReportRepository = Depends(get_report_repo),
     study_repo : StudyRepository = Depends(get_study_repo),
     document_service : DocumentService = Depends(get_document_service),
     study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service),
     checkpointer: Any = Depends(get_checkpointer),
-) -> AgentService:
+) -> AutomationService:
     await checkpointer.setup()
-    return AgentService(
+    return AutomationService(
+        user_id=user_id,
+        report_repo=report_repo,
+        study_repo=study_repo,
+        document_service=document_service,
+        study_similarity_service=study_similarity_service,
+        checkpointer=checkpointer,
+        model=model,
+    )
+
+async def get_question_answering_service(
+    user_id : str = Depends(get_user_id),
+    model: str = Query("gpt-5-nano", description="LLM model name to use for report question answering"),
+    report_repo : ReportRepository = Depends(get_report_repo),
+    study_repo : StudyRepository = Depends(get_study_repo),
+    document_service : DocumentService = Depends(get_document_service),
+    study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service),
+    checkpointer: Any = Depends(get_checkpointer),
+) -> QuestionAnsweringService:
+    await checkpointer.setup()
+    return QuestionAnsweringService(
+        user_id=user_id,
         report_repo=report_repo,
         study_repo=study_repo,
         document_service=document_service,
