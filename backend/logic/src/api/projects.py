@@ -16,7 +16,7 @@ from ..utils.logger import setup_logging
 import hashlib
 import asyncio
 
-from .auth import is_verified_api_call, is_admin, get_roles
+from .auth import is_verified_api_call, is_admin, get_roles, get_user_id
 
 from ..database import get_project_repo, get_report_repo
 
@@ -26,10 +26,12 @@ from ..database import ProjectRepository
 from ..database.models import Report as DbReport, Project as DbProject
 
 from ..services import get_vectorstore_service, VectorstoreService
-from ..services import get_maintenance_service, MaintenanceService
-from ..services import get_agent_service, AutomationService
-from ..services import get_linkage_service,LinkageService
+from ..services import MaintenanceService
+from ..services import AutomationService
+from ..services import LinkageService
 from ..services import get_project_pubsub_service, ProjectPubSubService
+
+from ..background.wrapper import run_process_report_background, run_start_automation_background
 
 from .resources import Report, Study, StudyCreate, transform_to_output_studies
 
@@ -372,7 +374,7 @@ async def get_user_tasks(project_repo: ProjectRepository = Depends(get_project_r
     return tasks
 
 @router.post("/projects", dependencies=[Depends(is_admin)], summary="Upload a project (batch of new reports that need to be assigned to studies) (usually in the .ris file format)", status_code=201) 
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), project_repo : ProjectRepository = Depends(get_project_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service), maintenance_service: MaintenanceService = Depends(get_maintenance_service), pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service)):
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), project_repo : ProjectRepository = Depends(get_project_repo), pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service), user_id : str = Depends(get_user_id)):
 
     entries = await parse_file(file)
 
@@ -449,7 +451,8 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     # schedule background tasks
     #for report in reports:
     #    print("Report provcess appended")
-    background_tasks.add_task(process_report, reports, project_id, project_repo, vectorstore, maintenance_service, pubsub_service)
+    report_ids = [report.CRGReportID for report in reports]
+    background_tasks.add_task(run_process_report_background, project_id, report_ids, user_id, process_report)
 
     await pubsub_service.publish_project_update(project_id)
 
@@ -503,13 +506,11 @@ async def delete_project(project_id : str, project_repo: ProjectRepository = Dep
 async def assign_user_to_project(
     background_tasks: BackgroundTasks,
     project_id: str = project_id_path,
-    user_id: str = Body(..., embed=False, description="User ID to assign"),
+    assignee_user_id: str = Body(..., embed=False, description="User ID to assign"),
+    model: str = Query("gpt-5-nano", description="LLM model name to use for study prediction"),
     project_repo: ProjectRepository = Depends(get_project_repo),
-    report_repo: ReportRepository = Depends(get_report_repo),
-    vectorstore: VectorstoreService = Depends(get_vectorstore_service),
-    linkage_service : LinkageService = Depends(get_linkage_service),
-    agent_service: AutomationService = Depends(get_agent_service),
     pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
+    user_id : str = Depends(get_user_id)
 ):
     try:
         project = await project_repo.get_project_by_id(project_id)
@@ -520,7 +521,7 @@ async def assign_user_to_project(
         raise HTTPException(status_code=404, detail="Project not found")
 
     try:
-        created = await project_repo.add_project_assignee(project_id, user_id)
+        created = await project_repo.add_project_assignee(project_id, assignee_user_id)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except PermissionError as exc:
@@ -531,10 +532,10 @@ async def assign_user_to_project(
 
     await pubsub_service.publish_project_update(project_id)
 
-    if user_id == "bot":
-        background_tasks.add_task(start_automation, project_id, project_repo, report_repo, vectorstore, linkage_service, agent_service, pubsub_service)
+    if assignee_user_id == "bot":
+        background_tasks.add_task(run_start_automation_background, project_id, user_id, model, start_automation)
 
-    return ProjectAssignee(userId=user_id, numberReportsLinked=0)
+    return ProjectAssignee(userId=assignee_user_id, numberReportsLinked=0)
 
 @router.delete("/projects/{project_id}/assignees/{user_id}", dependencies=[Depends(is_admin)],summary="Remove a user assignment from a project",status_code=204,)
 async def remove_user_from_project(

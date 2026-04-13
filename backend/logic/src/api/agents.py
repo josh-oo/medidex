@@ -7,11 +7,11 @@ from .auth import is_verified_api_call
 
 router = APIRouter(tags=["agents"], dependencies=[Depends(is_verified_api_call)])
 
-@router.get("/reports/{report_id}/chat", summary="Get the current chat history.")
+@router.get("/reports/{report_id}/chat", summary="Get the current chat history for a given report.")
 async def chat_history(report_id : int, agent_service: QuestionAnsweringService = Depends(get_question_answering_service)):
     return await agent_service.get_history(report_id)
 
-@router.post("/reports/{report_id}/chat", summary="Get the current chat history.")
+@router.post("/reports/{report_id}/chat", summary="Text with the chatbot.")
 async def chat_question(report_id: int, question: str = Body(..., embed=False, description="Question to ask about the prediction"),agent_service: QuestionAnsweringService = Depends(get_question_answering_service)):
     return await agent_service.ask_me(report_id, question)
 
@@ -20,13 +20,9 @@ async def chat_delete(report_id: int, agent_service: QuestionAnsweringService = 
     await agent_service.delete_chat(report_id)
     return await agent_service.get_history(report_id)
 
-@router.get("/reports/{report_id}/prediction/chat", summary="Get the current chat history.")
-async def chat_history(report_id : int, agent_service: AutomationService = Depends(get_agent_service)):
+@router.get("/reports/{report_id}/prediction/logs", summary="Get the logs for the given prediction")
+async def prediction_log(report_id : int, agent_service: AutomationService = Depends(get_agent_service)):
     return await agent_service.get_history(report_id)
-
-@router.post("/reports/{report_id}/prediction/chat", summary="Get the current chat history.")
-async def chat_question(report_id: int, question: str = Body(..., embed=False, description="Question to ask about the prediction"),agent_service: AutomationService = Depends(get_agent_service),):
-    return await agent_service.ask_me(report_id, question)
 
 @router.get("/reports/{report_id}/prediction/stream", summary="Stream agent execution for finding a matching study.")
 async def predict_stream(report_id : int, agent_service: AutomationService = Depends(get_agent_service)):
