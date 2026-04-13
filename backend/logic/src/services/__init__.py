@@ -1,4 +1,5 @@
 from fastapi import Depends, Path, HTTPException, Query
+from typing import Any
 
 from .vectorstore import VectorstoreService
 from .linkage import LinkageService
@@ -12,6 +13,7 @@ from .llm import LanguageModelService
 from .crawler import CrawlerService, DoclingService
 from .maintenance import MaintenanceService, ReadinessService
 from .pubsub import ProjectPubSubService
+from ..utils.llm.agent import get_checkpointer
 
 from ..database import get_aspect_repo, get_report_repo, get_study_repo, get_project_repo, db_ready
 
@@ -84,18 +86,21 @@ def get_maintenance_service(report_repo : ReportRepository = Depends(get_report_
 def get_readiness_service(db_ready : str = Depends(db_ready), vectorstore : VectorstoreService = Depends(get_vectorstore_service), embedding_service : EmbeddingService = Depends(get_embedding_service)) -> ReadinessService:
     return ReadinessService(db_ready=db_ready, vectorstore=vectorstore, embedding_service=embedding_service)
 
-def get_agent_service(
+async def get_agent_service(
     model: str = Query("gpt-5-nano", description="LLM model name to use for study prediction"),
     report_repo : ReportRepository = Depends(get_report_repo),
     study_repo : StudyRepository = Depends(get_study_repo),
     document_service : DocumentService = Depends(get_document_service),
     study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service),
+    checkpointer: Any = Depends(get_checkpointer),
 ) -> AgentService:
+    await checkpointer.setup()
     return AgentService(
         report_repo=report_repo,
         study_repo=study_repo,
         document_service=document_service,
         study_similarity_service=study_similarity_service,
+        checkpointer=checkpointer,
         model=model,
     )
 

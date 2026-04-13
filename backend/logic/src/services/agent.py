@@ -14,6 +14,10 @@ from ..database import ReportRepository, StudyRepository
 from .core import StudySimilaritySearchService
 from .report import DocumentService
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 SYSTEM_MESSAGE_TEXT = """
 You are a clinical research assistant tasked with determining whether a new report belongs to an existing candidate study. 
 This is necessary since one study sometimes produces multiple scientific reports or articles which then need to be mapped back to the study they belong to.
@@ -178,6 +182,7 @@ class AgentService:
         study_repo : StudyRepository,
         document_service :  DocumentService,
         study_similarity_service: StudySimilaritySearchService,
+        checkpointer: Any,
         model: Any,
     ):
         self.report_repo = report_repo
@@ -200,6 +205,7 @@ class AgentService:
             tools=[fetch_next_candidate_study, fetch_report_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract],
             context_schema=AgentContext,
             system_prompt=system_message,
+            checkpointer=checkpointer,
             response_format=ToolStrategy(Output),
         )
 
@@ -231,6 +237,7 @@ class AgentService:
                     }
                 ]
             },
+            {"configurable": {"thread_id": "prediction-" + str(report_id)}},
             context=AgentContext(
                 current_report=report_id,
                 visited_candidate_studies=0,
@@ -262,6 +269,7 @@ class AgentService:
                     }
                 ]
             },
+            {"configurable": {"thread_id": "prediction-" + str(report_id)}},
             context=AgentContext(
                 current_report=report_id,
                 visited_candidate_studies=0,

@@ -22,4 +22,6 @@ langchain>=1.0.0
 langchain-core>=1.0.0
 langchain-openai==1.1.7
 langgraph>=1.0.6
+langgraph-checkpoint-postgres==3.0.5
+psycopg[binary]==3.3.3
 redis==5.2.1
