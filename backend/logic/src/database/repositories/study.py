@@ -90,6 +90,11 @@ class StudyRepository:
     
     async def get_study_by_id(self, study_id: int) -> Study:
         return await self.db.get(Study, study_id)
+        
+    async def search_studies_by_shortname(self, shortname: str) -> List[Study]:
+        stmt = select(Study).where(Study.ShortName.ilike(f"%{shortname}%"))
+        result = (await self.db.execute(stmt)).scalars().all()
+        return result
     
     async def get_study_reports_by_study_ids(self, study_ids: Optional[List[int]], cutoff: Optional[str] = None, fields: Optional[List[str]] = None) -> Dict[int, List[Report]]:
         select_fields, field_names = self.process_fields(fields)

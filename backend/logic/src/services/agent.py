@@ -108,7 +108,7 @@ async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentCont
         "shortName": response.ShortName,
         "trialId": response.TrialistContactDetails,
         "numberParticipants": response.NumberParticipants,
-        "countries": response.Countries,
+        "countries": response.Countries.split("//"),
         "duration": response.Duration,
         "comparison": response.Comparison,
     }
@@ -135,6 +135,8 @@ async def fetch_report_abstract(report_id: int, runtime: ToolRuntime[AgentContex
         report_id: The id of the report you want the abstract for
     """
     response = await runtime.context.report_repo.get_report_by_id(report_id)
+    if response.Abstract is None:
+        return "No abstract available"
     return response.Abstract
 
 @tool
@@ -161,6 +163,53 @@ async def fetch_study_interventions(study_id : int, runtime: ToolRuntime[AgentCo
     results = []
     for item in response:
         results.append(item['Description'])
+    return results
+
+@tool
+async def fetch_study_conditions(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[str]:  
+    """Get all the health conditions already assigned to the corresponding study
+
+    Args:
+        study_id: The id of the study 
+    """
+    response = await runtime.context.study_repo.get_study_conditions_single(study_id)
+    results = []
+    for item in response:
+        results.append(item['Description'])
+    return results
+
+@tool
+async def fetch_study_outcomes(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[str]:  
+    """Get all the outcomes already assigned to the corresponding study
+
+    Args:
+        study_id: The id of the study 
+    """
+    response = await runtime.context.study_repo.get_study_outcomes_single(study_id)
+    results = []
+    for item in response:
+        results.append(item['Description'])
+    return results
+
+@tool
+async def search_for_study_by_shortname(short_name : str, runtime: ToolRuntime[AgentContext]) -> List[Dict[str, Any]]:  
+    """Get a study for a given shortname / acronym (if available). The search is case insensitive 
+
+    Args:
+        short_name: The shortname or acronym of the target study (typical shortnames are either acronyms or author name + year)
+    """
+    response = await runtime.context.study_repo.search_studies_by_shortname(short_name)
+    results = []
+    for item in response:
+        results.append({
+            "studyId": item.CRGStudyID,
+            "shortName": item.ShortName,
+            "trialId": item.TrialistContactDetails,
+            "numberParticipants": item.NumberParticipants,
+            "countries": item.Countries.split("//"),
+            "duration": item.Duration,
+            "comparison": item.Comparison,
+        })
     return results
 
 @tool
@@ -205,7 +254,7 @@ class BaseAgentService:
 
         agent_config: Dict[str, Any] = {
             "model": self.model,
-            "tools": [fetch_next_candidate_study, fetch_report_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract],
+            "tools": [fetch_next_candidate_study, fetch_report_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract, fetch_study_conditions, fetch_study_outcomes, search_for_study_by_shortname],
             "context_schema": AgentContext,
             "system_prompt": system_message,
             "checkpointer": checkpointer,
@@ -232,8 +281,8 @@ class BaseAgentService:
 
         authors = [author.strip() for author in (report.Authors or "").split("//") if author.strip()]
         return (
-            f"Title: {report.Title or ''}\n"
-            f"Abstract: {report.Abstract or ''}\n"
+            f"Title: {report.Title or 'No title available'}\n"
+            f"Abstract: {report.Abstract or 'No abstract available'}\n"
             f"Authors: {', '.join(authors)}"
         )
 
