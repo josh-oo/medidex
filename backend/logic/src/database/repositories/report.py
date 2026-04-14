@@ -248,6 +248,12 @@ class ReportRepository:
     async def get_report_by_id(self, report_id: int) -> Report:
         return await self.db.get(Report, report_id)
 
+    async def delete_report(self, report_id: int) -> bool:
+        stmt = delete(Report).where(Report.CRGReportID == report_id)
+        result = await self.db.execute(stmt)
+        await self.db.commit()
+        return bool(result.rowcount)
+
     async def get_report_flag(self, report_id: int) -> Optional[ReportFlag]:
         stmt = (
             select(ReportFlag)

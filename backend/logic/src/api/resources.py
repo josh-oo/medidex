@@ -1,6 +1,7 @@
 from fastapi import APIRouter, File, UploadFile
 from fastapi import Depends, HTTPException, Query, Path
 from fastapi.responses import FileResponse
+from starlette.responses import Response
 import os
 import json
 import enum
@@ -25,9 +26,10 @@ from ..utils.logger import setup_logging
 from ..database.repositories.study import StudyRepository
 from ..database.repositories.aspects import AspectRepository
 from ..database.repositories.report import ReportRepository
-from ..database import get_study_repo, get_aspect_repo, get_report_repo
+from ..database.repositories.project import ProjectRepository
+from ..database import get_study_repo, get_aspect_repo, get_report_repo, get_project_repo
 
-from ..services import get_document_service, get_report_service, get_project_pubsub_service, DocumentService, ReportService, ProjectPubSubService
+from ..services import get_document_service, get_report_service, get_project_pubsub_service, get_vectorstore_service, DocumentService, ReportService, ProjectPubSubService, VectorstoreService
 from ..services.crawler import OpenAlexService
 
 load_dotenv()
@@ -261,6 +263,39 @@ async def get_report_by_id(report_id: int = report_id_path, report_repo: ReportR
     if result is None:
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
     return result
+
+@router.delete("/reports/{report_id}", status_code=204, summary="Delete a report. Only the owner of the report's project can delete it.")
+async def delete_report(
+    report_id: int = report_id_path,
+    user_id: str = Depends(get_user_id),
+    report_repo: ReportRepository = Depends(get_report_repo),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    vectorstore: VectorstoreService = Depends(get_vectorstore_service),
+    pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
+):
+    report = await report_repo.get_report_by_id(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+
+    project_id = await project_repo.get_project_id_by_report_id(report_id)
+    if project_id is None:
+        raise HTTPException(status_code=400, detail="Report is not associated with a project")
+
+    project = await project_repo.get_project_by_hash(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project.UploadedBy != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the project owner can delete reports from this project")
+
+    deleted = await report_repo.delete_report(report_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+
+    await vectorstore.delete_vectors_by_report_ids([report_id])
+    await pubsub_service.publish_project_update(project_id)
+
+    return Response(status_code=204)
 
 @router.get("/reports/{report_id}/studies", summary="Get the studies linked to this specific report.")
 async def get_report_studies_by_id(

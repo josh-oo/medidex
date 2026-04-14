@@ -619,7 +619,7 @@ async def get_project_reports(
     return result
 
 @router.get( "/projects/{project_id}/annotations",dependencies=[Depends(is_admin)],summary="Get reports annotated by all assigned users in a project.")
-async def get_project_annotations(project: DbProject = Depends(get_project_by_id), project_repo: ProjectRepository = Depends(get_project_repo)) -> Dict[int, List[Dict[str, Any]]]:
+async def get_project_annotations(project: DbProject = Depends(get_project_by_id), project_repo: ProjectRepository = Depends(get_project_repo)) -> Dict[int, Dict[str, List[Dict[str, Any]]]]:
     
     report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
     

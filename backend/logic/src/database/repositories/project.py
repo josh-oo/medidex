@@ -9,6 +9,7 @@ from ..models import (
     Report,
     Study,
     ReportAdded,
+    ReportFlag,
     Project,
     ProjectInnerScore,
     StudyReport,
@@ -268,6 +269,21 @@ class ProjectRepository:
                 continue
             completion.setdefault(report_id, set()).add(user_id)
 
+        # Treat reports with public flags as completed by the users who created those flags.
+        public_flag_stmt = (
+            select(ReportFlag.CRGReportID, ReportFlag.CreatedBy)
+            .select_from(ReportFlag)
+            .join(ReportAdded, ReportAdded.CRGReportID == ReportFlag.CRGReportID)
+            .where(ReportAdded.BatchHash == project_id)
+            .where(ReportFlag.Public.is_(True))
+        )
+
+        public_flag_result = await self.db.execute(public_flag_stmt)
+        for report_id, user_id in public_flag_result.all():
+            if not user_id:
+                continue
+            completion.setdefault(report_id, set()).add(user_id)
+
         return completion
 
     async def get_project_annotations_by_assignees(
@@ -275,7 +291,7 @@ class ProjectRepository:
         project_id: str,
         assignees: Set[str],
         report_ids: Optional[List[int]] = None,
-    ) -> Dict[int, List[Dict[str, Any]]]:
+    ) -> Dict[int, Dict[str, List[Dict[str, Any]]]]:
         if not assignees:
             return {}
 
@@ -299,17 +315,46 @@ class ProjectRepository:
         if report_ids:
             stmt = stmt.where(StudyReport.CRGReportID.in_(report_ids))
 
+        annotations: Dict[int, Dict[str, List[Dict[str, Any]]]] = defaultdict(
+            lambda: {"studies": [], "flags": []}
+        )
+
         result = await self.db.execute(stmt)
         rows = result.all()
-
-        annotations: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
         for report_id, created_by, study_id, study_name, confirmed in rows:
-            annotations[report_id].append(
+            annotations[report_id]["studies"].append(
                 {
                     "user": created_by,
                     "studyId": study_id,
                     "studyShortName": study_name,
                     "confirmed": bool(confirmed),
+                }
+            )
+
+        flag_stmt = (
+            select(
+                ReportFlag.CRGReportID,
+                ReportFlag.CreatedBy,
+                ReportFlag.Message,
+            )
+            .select_from(ReportFlag)
+            .join(ReportAdded, ReportAdded.CRGReportID == ReportFlag.CRGReportID)
+            .where(ReportAdded.BatchHash == project_id)
+            .where(ReportFlag.CreatedBy.in_(assignees))
+            .where(ReportFlag.Public.is_(True))
+            .order_by(ReportFlag.CRGReportID, ReportFlag.CreatedBy)
+        )
+
+        if report_ids:
+            flag_stmt = flag_stmt.where(ReportFlag.CRGReportID.in_(report_ids))
+
+        flag_result = await self.db.execute(flag_stmt)
+        for report_id, created_by, message in flag_result.all():
+            annotations[report_id]["flags"].append(
+                {
+                    "user": created_by,
+                    "flag": message,
+                    "public": True,
                 }
             )
 
