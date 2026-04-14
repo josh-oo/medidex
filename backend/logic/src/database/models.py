@@ -253,6 +253,19 @@ class StudyReportAdded(SQLModel, table=True, metadata=metadata_resources):
         Index('idx_studyreportadded_created_by', 'CreatedBy'),  # For user filtering
     )
 
+class ReportFlag(SQLModel, table=True, metadata=metadata_resources):
+    __tablename__ = "tblReportFlag"
+
+    CRGReportID: int = Field(primary_key=True, foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
+    CreatedBy: str = Field(primary_key=True)
+    DateCreated: datetime.datetime = Field(default_factory=_current_utc_datetime)
+    Message: str
+    Public: bool = Field(default=False, nullable=False)
+
+    __table_args__ = (
+        Index('idx_reportflag_created_by', 'CreatedBy'),
+    )
+
 class AnalyticsEvent(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblEvent"
 

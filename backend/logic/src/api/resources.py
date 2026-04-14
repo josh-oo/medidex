@@ -18,6 +18,7 @@ from .auth import is_verified_api_call, get_user_id, is_admin
 
 from ..database.models import Report as DbReport, Study as DbStudy
 from ..database.models import Condition as DbCondition, Intervention as DbIntervention, Design as DbDesign, Outcome as DbOutcome, Participant as DbParticipant
+from ..database.models import ReportFlag as DbReportFlag
 
 from ..utils.logger import setup_logging
 
@@ -52,6 +53,17 @@ class Report(BaseModel):
     authors: List[str]
     createdAt: Optional[str]
     updatedAt: Optional[str]
+
+class ReportFlagUpdate(BaseModel):
+    message: str
+    public: bool = False
+
+class ReportFlag(BaseModel):
+    reportId: int
+    createdBy: str
+    message: str
+    public: bool
+    createdAt: str
 
 class Study(BaseModel):
     studyId: int
@@ -132,6 +144,15 @@ def transform_to_output_studies(studies):
         )
         result.append(output_study)
     return result
+
+def transform_to_output_report_flag(flag: DbReportFlag) -> ReportFlag:
+    return ReportFlag(
+        reportId=flag.CRGReportID,
+        createdBy=flag.CreatedBy,
+        message=flag.Message,
+        public=flag.Public,
+        createdAt=flag.DateCreated.isoformat(),
+    )
 
 @router.put("/studies", summary="Add new study to meerkat.")
 async def add_study(study_params: StudyCreate, user_id = Depends(get_user_id), study_repo : StudyRepository = Depends(get_study_repo)) -> Study:
@@ -321,6 +342,43 @@ async def get_report_trial_ids(report_id: int = report_id_path, include_fulltext
     if result is None:
         raise HTTPException(status_code=404, detail="Report not found.")
     return result
+
+@router.get("/reports/{report_id}/flag", summary="Get your report flag for a specific report.")
+async def get_report_flag(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)) -> Optional[ReportFlag]:
+    report = await report_repo.get_report_by_id(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+
+    flag = await report_repo.get_report_flag(report_id)
+    if flag is None:
+        return None
+
+    return transform_to_output_report_flag(flag)
+
+@router.put("/reports/{report_id}/flag", summary="Create or edit your report flag for a specific report.")
+async def upsert_report_flag(
+    payload: ReportFlagUpdate,
+    report_id: int = report_id_path,
+    report_repo: ReportRepository = Depends(get_report_repo),
+) -> ReportFlag:
+    try:
+        flag = await report_repo.upsert_report_flag(
+            report_id=report_id,
+            message=payload.message,
+            public=payload.public,
+        )
+        return transform_to_output_report_flag(flag)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+
+@router.delete("/reports/{report_id}/flag", status_code=204, summary="Delete your report flag for a specific report.")
+async def delete_report_flag(report_id: int = report_id_path, report_repo: ReportRepository = Depends(get_report_repo)):
+    report = await report_repo.get_report_by_id(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+
+    await report_repo.delete_report_flag(report_id)
+    return None
 
 @router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
 async def post_report_event(report_id : int, event: Event, user_id = Depends(get_user_id), report_repo : ReportRepository = Depends(get_report_repo)):

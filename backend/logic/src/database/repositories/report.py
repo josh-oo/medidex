@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, delete
 
-from ..models import Report, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions
+from ..models import Report, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions, ReportFlag
 from typing import List, Dict, Any, Optional
 
 class ReportRepository:
@@ -247,6 +247,66 @@ class ReportRepository:
     
     async def get_report_by_id(self, report_id: int) -> Report:
         return await self.db.get(Report, report_id)
+
+    async def get_report_flag(self, report_id: int) -> Optional[ReportFlag]:
+        stmt = (
+            select(ReportFlag)
+            .where(ReportFlag.CRGReportID == report_id)
+            .where(ReportFlag.CreatedBy == self.user_id)
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def upsert_report_flag(self, report_id: int, message: str, public: bool = False) -> ReportFlag:
+
+        report = await self.db.get(Report, report_id)
+        if not report:
+            raise ValueError("Report not found")
+
+        stmt = (
+            select(ReportFlag)
+            .where(ReportFlag.CRGReportID == report_id)
+            .where(ReportFlag.CreatedBy == self.user_id)
+        )
+        report_flag = (await self.db.execute(stmt)).scalar_one_or_none()
+
+        if report_flag is None:
+            report_flag = ReportFlag(
+                CRGReportID=report_id,
+                CreatedBy=self.user_id,
+                Message=message,
+                Public=public,
+            )
+            self.db.add(report_flag)
+        else:
+            report_flag.Message = message
+            report_flag.Public = public
+
+        await self.db.commit()
+        await self.db.refresh(report_flag)
+        return report_flag
+
+    async def delete_report_flag(self, report_id: int) -> bool:
+        stmt = (
+            delete(ReportFlag)
+            .where(ReportFlag.CRGReportID == report_id)
+            .where(ReportFlag.CreatedBy == self.user_id)
+        )
+        result = await self.db.execute(stmt)
+        await self.db.commit()
+        return bool(result.rowcount)
+
+    async def get_report_flags_for_reports(self, report_ids: List[int]) -> Dict[int, ReportFlag]:
+        report_ids = report_ids or []
+        if not report_ids:
+            return {}
+
+        stmt = (
+            select(ReportFlag)
+            .where(ReportFlag.CRGReportID.in_(report_ids))
+            .where(ReportFlag.CreatedBy == self.user_id)
+        )
+        flags = (await self.db.execute(stmt)).scalars().all()
+        return {flag.CRGReportID: flag for flag in flags}
 
     async def set_study_report_confirmation(self, report_id: int, study_id: int, confirmed: bool) -> bool:
         """

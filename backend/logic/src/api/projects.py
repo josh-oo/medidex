@@ -69,6 +69,7 @@ class ProjectTask(BaseModel):
 class BatchedReport(BaseModel):
     report: Report
     hasPdf: Optional[bool]
+    flag: Optional[str]
     assignedStudies: List[Study] = Field(default_factory=list)
 
 async def process_report(reports : List[DbReport], project_id : str, project_repo : ProjectRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService, pubsub_service: ProjectPubSubService):
@@ -587,6 +588,7 @@ async def get_project_reports(
 
     reports = await report_repo.get_all_reports(report_ids)
     all_linked_studies = await report_repo.get_linked_studies_for_reports(report_ids)
+    report_flags = await report_repo.get_report_flags_for_reports(report_ids)
 
     result = []
     for report in reports:
@@ -610,6 +612,7 @@ async def get_project_reports(
                     updatedAt=report.DateEdited
                 ),
                 hasPdf=report.CRGReportID in reports_with_pdf,
+                flag=report_flags.get(report.CRGReportID).Message if report.CRGReportID in report_flags else None,
                 assignedStudies=linked_studies,
             )
         )
