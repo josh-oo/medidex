@@ -2,12 +2,15 @@
 from fastapi import APIRouter, Request
 from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks, Body, Form
 from fastapi.responses import Response, StreamingResponse
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any, Tuple, Set
 import json
 import logging
+import io
 
 from datetime import datetime
+import httpx
 
 from ..utils.trial_registration_id import extract_trial_id
 from ..utils.ris_parser import parse_file
@@ -30,10 +33,20 @@ from ..services import MaintenanceService
 from ..services import AutomationService
 from ..services import LinkageService
 from ..services import get_project_pubsub_service, ProjectPubSubService
+from ..services.report import DocumentService
 
-from ..background.wrapper import run_process_report_background, run_start_automation_background
+from ..background.wrapper import (
+    run_process_report_background,
+    run_start_automation_background,
+)
 
-from .resources import Report, Study, StudyCreate, transform_to_output_studies
+from .resources import (
+    Report,
+    Study,
+    StudyCreate,
+    get_report_fulltext_links,
+    transform_to_output_studies,
+)
 
 router = APIRouter(tags=["projects"])
 
@@ -42,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 # Limit concurrent bot processing across reports
 agent_process_semaphore = asyncio.Semaphore(10)
+pdf_semaphore = asyncio.Semaphore(1)
 
 project_id_path = Path(..., description="The projects's id")
 
@@ -60,6 +74,8 @@ class ProjectDetails(Project):
     numberReportsTotal: int
     numberReportsPreProcessed: int = 0
     numberReportsReadyForReview: int = 0
+    numberReportsAutoSearchedPdf: int = 0
+    numberReportsConfirmed: int = 0
     assignees: List[ProjectAssignee] = Field(default_factory=list)
 
 class ProjectTask(BaseModel):
@@ -72,18 +88,109 @@ class BatchedReport(BaseModel):
     flag: Optional[str]
     assignedStudies: List[Study] = Field(default_factory=list)
 
-async def process_report(reports : List[DbReport], project_id : str, project_repo : ProjectRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService, pubsub_service: ProjectPubSubService):
+
+class _InMemoryPdfUpload:
+    def __init__(self, content: bytes, filename: str = "autosearch.pdf"):
+        self._buffer = io.BytesIO(content)
+        self.filename = filename
+        self.content_type = "application/pdf"
+
+    async def read(self) -> bytes:
+        self._buffer.seek(0)
+        return self._buffer.read()
+
+
+def _looks_like_pdf(content: bytes, content_type: str) -> bool:
+    if not content:
+        return False
+    if content.startswith(b"%PDF-"):
+        return True
+    return "application/pdf" in (content_type or "").lower()
+
+
+async def _download_pdf_bytes(client: httpx.AsyncClient, url: str) -> Optional[bytes]:
+    try:
+        response = await client.get(url)
+        response.raise_for_status()
+    except Exception:
+        return None
+
+    payload = response.content
+    if _looks_like_pdf(payload, response.headers.get("content-type", "")):
+        return payload
+    return None
+
+import traceback
+
+async def process_report_pdf(
+    client,
+    report_id : int,
+    project_id: str,
+    project_repo: ProjectRepository,
+    report_repo: ReportRepository,
+    document_service: DocumentService,
+) -> None:
+    async with pdf_semaphore:
+        project = await project_repo.get_project_by_id(project_id)
+        if not project:
+            return
+        try:
+            links_payload = await get_report_fulltext_links(
+                report_id=report_id,
+                report_repo=report_repo,
+            )
+            for link in links_payload.links:
+                payload = await _download_pdf_bytes(client, link)
+                if payload is None:
+                    continue
+
+                upload_file = _InMemoryPdfUpload(payload)
+                print("Success download: ", report_id)
+                await document_service.upload_pdf(report_id, upload_file)
+                print("Success upload: ", report_id)
+                break
+        except Exception as exc:
+            #print(f"Upload failed: {report_id} Exc {exc}")
+            print(f"Upload failed: {report_id} Exc {exc}\n{traceback.format_exc()}")
+            logger.warning(
+                "Auto PDF processing failed for report %s in project %s: %s",
+                report_id,
+                project_id,
+                exc,
+            )
+        finally:
+            # Mark that an automatic PDF search attempt has completed, regardless of outcome.
+            await project_repo.set_report_auto_searched_pdf(project_id, report_id, True)
+
+async def process_report(reports : List[DbReport], project_id : str, project_repo : ProjectRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService, pubsub_service: ProjectPubSubService, report_repo : ReportRepository, document_service : DocumentService):
     # Check if project exists before launching concurrent operations
     project = await project_repo.get_project_by_id(project_id)
     if not project:
         return  # Skip processing if project was deleted
     
-    async def process(report):
-        await vectorstore.add_report_to_vectorstore(report)
+    timeout = httpx.Timeout(30.0, connect=10.0)
+
+    async def load_pdf(report, client):
+        await process_report_pdf(
+            client,
+            report.CRGReportID,
+            project_id,
+            project_repo,
+            report_repo,
+            document_service,
+        )
         await pubsub_service.publish_project_update(project_id)
     
-    all_tasks = [process(report) for report in reports]
-    await asyncio.gather(*all_tasks)
+    async def prepare_vectorstore(report):
+        await vectorstore.add_report_to_vectorstore(report)
+        await pubsub_service.publish_project_update(project_id)
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+
+        load_pdf_tasks = [load_pdf(report, client) for report in reports]
+        prepare_vectorstore_tasks = [prepare_vectorstore(report) for report in reports]
+        await asyncio.gather(*prepare_vectorstore_tasks + load_pdf_tasks)
+
 
     await finalize_project_upload(project_id, project_repo, vectorstore, maintenance_service, pubsub_service)
 
@@ -224,6 +331,8 @@ async def get_project_stats(
 ) -> ProjectDetails:
     
     report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
+    auto_searched_pdf_count = await project_repo.get_auto_searched_pdf_count_for_project(project.BatchHash)
+    confirmed_report_count = await project_repo.get_confirmed_report_count_for_project(project.BatchHash)
 
     embedded_reports, _, ready_reports = await get_vectorized_and_ready_report_ids(project.BatchHash, project_repo, report_repo, vectorstore)
 
@@ -252,6 +361,8 @@ async def get_project_stats(
         numberReportsPreProcessed=len(embedded_reports),
         numberReportsReadyForProcessing=len(ready_reports),
         numberReportsReadyForReview=ready_for_review_count,
+        numberReportsAutoSearchedPdf=auto_searched_pdf_count,
+        numberReportsConfirmed=confirmed_report_count,
         owner=project.UploadedBy,
         assignees=assignee_payload,
     )
@@ -384,9 +495,9 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     for entry in entries:
         title = entry.get('primary_title', None)
         if not title:
-            title = entry.get('title', None)
+            title = entry.get('title', "")
 
-        authors = entry.get('authors', None)
+        authors = entry.get('authors', [])
         abstract = entry.get('abstract', None)
         report_number = int(entry.get('research_notes', -1))
 
@@ -396,17 +507,9 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
         else:
             trial_ids = None
 
-        try:
-            authors_str = "//".join(authors)
-        except Exception as e:
-            print(f"UPLOAD FILE: Error joining authors for entry: {entry}\nException: {e}")
-            authors_str = str(authors) if authors is not None else ""
+        authors_str = "//".join(authors)
 
-        try:
-            safe_title = title.replace("\n", " ") if title is not None else ""
-        except AttributeError as e:
-            print(f"UPLOAD FILE: Error replacing in title for entry: {entry}\nException: {e}")
-            safe_title = str(title) if title is not None else ""
+        safe_title = title.replace("\n", " ")
 
         try:
             safe_abstract = abstract.replace("\n", " ") if abstract is not None else ""
@@ -454,7 +557,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     #    print("Report provcess appended")
     report_ids = [report.CRGReportID for report in reports]
     background_tasks.add_task(run_process_report_background, project_id, report_ids, user_id, process_report)
-
+    
     await pubsub_service.publish_project_update(project_id)
 
     #TODO disabled for legacy reasons
@@ -570,21 +673,20 @@ async def remove_user_from_project(
 @router.get("/projects/{project_id}/reports", dependencies=[Depends(is_verified_api_call)], summary="Get all reports in a project by project id.")
 async def get_project_reports(
     project_id : str,
-    ready_only: bool = Query(False, description="Only include reports that have generated embeddings and a linked PDF."),
     project_repo: ProjectRepository = Depends(get_project_repo),
     report_repo: ReportRepository = Depends(get_report_repo),
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
-    roles: List[str] = Depends(get_roles)
+    raw: bool = Query(False, description="Include unprocessed items."),
 ) -> List[BatchedReport]:
     
+    project = await project_repo.get_project_by_id(project_id)
     report_ids = await project_repo.get_project_associated_report_ids(project_id)
-    
-    ready_report_ids: Optional[Set[int]] = None
     _, reports_with_pdf, ready_report_ids = await get_vectorized_and_ready_report_ids(
-        project_id, project_repo, report_repo, vectorstore
+            project_id, project_repo, report_repo, vectorstore
     )
-    if not ready_only and "ADMIN" in roles:
-        ready_report_ids = None
+
+    if raw and project is not None: #if the current user is the owner allow everything except for items not yet autosearched
+        ready_report_ids = await project_repo.get_auto_searched_pdf_for_project(project_id)
 
     reports = await report_repo.get_all_reports(report_ids)
     all_linked_studies = await report_repo.get_linked_studies_for_reports(report_ids)
@@ -592,7 +694,9 @@ async def get_project_reports(
 
     result = []
     for report in reports:
-        if ready_report_ids is not None and report.CRGReportID not in ready_report_ids:
+        print(report.CRGReportID, report.CRGReportID not in ready_report_ids)
+        print()
+        if report.CRGReportID not in ready_report_ids:
             continue
         authors = report.Authors.split("//") if report.Authors else []
         linked_studies = []
@@ -616,6 +720,7 @@ async def get_project_reports(
                 assignedStudies=linked_studies,
             )
         )
+    print("result", len(result))
     return result
 
 @router.get( "/projects/{project_id}/annotations",dependencies=[Depends(is_admin)],summary="Get reports annotated by all assigned users in a project.")

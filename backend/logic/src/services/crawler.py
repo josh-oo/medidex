@@ -154,7 +154,7 @@ class OpenAlexService:
     OPEN_ALEX_API = "https://api.openalex.org/works/https://doi.org/{doi}"
     def __init__(self):
         # OPEN Alex is limited to 10 requests per second
-        self.sem = asyncio.Semaphore(8)
+        self.sem = asyncio.Semaphore(1)
 
     async def get_data_by_doi(self, doi : str) -> Any:
         url = OpenAlexService.OPEN_ALEX_API.format(doi=doi)
@@ -170,7 +170,7 @@ class OpenAlexService:
                     return {}
                 else:
                     raise
-            
+            await asyncio.sleep(0.1)  # Non-blocking cooldown after each request
         return resp.json()
     
     async def get_pdf_links_by_doi(self, doi : str) -> List[str]:

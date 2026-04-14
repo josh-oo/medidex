@@ -24,6 +24,7 @@ IMPORTANT: The external interfaces follow the "project" naming scheme while the 
 """
 
 class ProjectRepository:
+        
     def __init__(self, db : AsyncSession, user_id : str):
         self.db = db
         self.user_id = str(user_id)
@@ -139,6 +140,21 @@ class ProjectRepository:
         )
         return result.scalars().all()
 
+    async def set_report_auto_searched_pdf(self, project_id: str, report_id: int, value: bool = True) -> None:
+        stmt = (
+            select(ReportAdded)
+            .where(ReportAdded.BatchHash == project_id)
+            .where(ReportAdded.CRGReportID == report_id)
+            .limit(1)
+        )
+        report_added = (await self.db.execute(stmt)).scalar_one_or_none()
+        if report_added is None:
+            return
+
+        report_added.AutoSearchedPdf = value
+        await self.db.flush()
+        await self.db.commit()
+
     async def get_assigned_projects(self) -> List[Project]:
         if not self.user_id:
             return []
@@ -152,19 +168,40 @@ class ProjectRepository:
 
         result = await self.db.execute(stmt)
         return result.scalars().all()
+    
+    async def get_confirmed_report_count_for_project(self, project_id: str) -> int:
+            """
+            Returns the number of distinct reports for a given project (BatchHash)
+            that are confirmed (StudyReportAdded.Confirmed == True).
+            """
+            stmt = (
+                select(func.count(func.distinct(ReportAdded.CRGReportID)))
+                .select_from(ReportAdded)
+                .join(StudyReport, StudyReport.CRGReportID == ReportAdded.CRGReportID)
+                .join(StudyReportAdded, StudyReportAdded.StudyReportID == StudyReport.StudyReportID)
+                .where(ReportAdded.BatchHash == project_id)
+                .where(StudyReportAdded.Confirmed.is_(True))
+            )
+            result = await self.db.execute(stmt)
+            return int(result.scalar_one() or 0)
 
-    async def get_report_counts_for_projects(self, project_ids: List[str]) -> Dict[str, int]:
-        if not project_ids:
-            return {}
-
+    async def get_auto_searched_pdf_count_for_project(self, project_id: str) -> int:
         stmt = (
-            select(ReportAdded.BatchHash, func.count(ReportAdded.CRGReportID))
-            .where(ReportAdded.BatchHash.in_(project_ids))
-            .group_by(ReportAdded.BatchHash)
+            select(func.count(ReportAdded.CRGReportID))
+            .where(ReportAdded.BatchHash == project_id)
+            .where(ReportAdded.AutoSearchedPdf.is_(True))
         )
-
         result = await self.db.execute(stmt)
-        return {batch_hash: count for batch_hash, count in result.all()}
+        return int(result.scalar_one() or 0)
+    
+    async def get_auto_searched_pdf_for_project(self, project_id: str) -> List[int]:
+        stmt = (
+            select(ReportAdded.CRGReportID)
+            .where(ReportAdded.BatchHash == project_id)
+            .where(ReportAdded.AutoSearchedPdf.is_(True))
+        )
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
 
     async def get_user_link_counts_by_project(self) -> Dict[str, int]:
         if not self.user_id:
@@ -236,7 +273,7 @@ class ProjectRepository:
             return []
 
         count_stmt = (
-            select(StudyReportAdded.CreatedBy, func.count(StudyReportAdded.StudyReportID))
+            select(StudyReportAdded.CreatedBy, func.count(func.distinct(StudyReport.CRGReportID)))
             .select_from(StudyReportAdded)
             .join(StudyReport, StudyReportAdded.StudyReportID == StudyReport.StudyReportID)
             .join(ReportAdded, ReportAdded.CRGReportID == StudyReport.CRGReportID)

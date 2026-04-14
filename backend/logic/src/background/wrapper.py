@@ -31,6 +31,11 @@ async def run_process_report_background(
         vectorstore = VectorstoreService(user_id=user_id, embedding_service=embedding_service)
         maintenance_service = MaintenanceService(report_repo=report_repo, vectorstore=vectorstore)
         pubsub_service = ProjectPubSubService(project_repo=project_repo)
+        document_service = DocumentService(
+            report_repo=report_repo,
+            crawler_service=CrawlerService(),
+            docling_service=DoclingService(),
+        )
 
         reports: List[DbReport] = []
         for report_id in report_ids:
@@ -38,7 +43,8 @@ async def run_process_report_background(
             if report is not None:
                 reports.append(report)
 
-        await process_report(reports, project_id, project_repo, vectorstore, maintenance_service, pubsub_service)
+        await process_report(reports, project_id, project_repo, vectorstore, maintenance_service, pubsub_service, report_repo, document_service)
+
 
 
 async def run_start_automation_background(

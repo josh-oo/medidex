@@ -207,6 +207,7 @@ class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
 
     CRGReportID: int = Field(primary_key=True, foreign_key="tblReport.CRGReportID", ondelete="CASCADE")
     BatchHash: str = Field(foreign_key="tblBatch.BatchHash", ondelete="CASCADE")
+    AutoSearchedPdf: bool = Field(default=False, nullable=False)
     
     __table_args__ = (
         Index('idx_reportadded_batch_report', 'BatchHash', 'CRGReportID'),

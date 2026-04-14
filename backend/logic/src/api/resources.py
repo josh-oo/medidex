@@ -273,27 +273,31 @@ async def delete_report(
     vectorstore: VectorstoreService = Depends(get_vectorstore_service),
     pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
 ):
-    report = await report_repo.get_report_by_id(report_id)
-    if report is None:
-        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+    try:
+        report = await report_repo.get_report_by_id(report_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
-    project_id = await project_repo.get_project_id_by_report_id(report_id)
-    if project_id is None:
-        raise HTTPException(status_code=400, detail="Report is not associated with a project")
+        project_id = await project_repo.get_project_id_by_report_id(report_id)
+        if project_id is None:
+            raise HTTPException(status_code=400, detail="Report is not associated with a project")
 
-    project = await project_repo.get_project_by_hash(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        project = await project_repo.get_project_by_hash(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
 
-    if project.UploadedBy != str(user_id):
-        raise HTTPException(status_code=403, detail="Only the project owner can delete reports from this project")
+        if project.UploadedBy != str(user_id):
+            raise HTTPException(status_code=403, detail="Only the project owner can delete reports from this project")
 
-    deleted = await report_repo.delete_report(report_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+        deleted = await report_repo.delete_report(report_id)
+        report_repo.commit()
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
-    await vectorstore.delete_vectors_by_report_ids([report_id])
-    await pubsub_service.publish_project_update(project_id)
+        await vectorstore.delete_vectors_by_report_ids([report_id])
+        await pubsub_service.publish_project_update(project_id)
+    except:
+        report_repo.roolback()
 
     return Response(status_code=204)
 
@@ -402,8 +406,10 @@ async def upsert_report_flag(
             message=payload.message,
             public=payload.public,
         )
+        await report_repo.commit()
         return transform_to_output_report_flag(flag)
-    except ValueError:
+    except:
+        await report_repo.roolback()
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
 @router.delete("/reports/{report_id}/flag", status_code=204, summary="Delete your report flag for a specific report.")
@@ -412,8 +418,12 @@ async def delete_report_flag(report_id: int = report_id_path, report_repo: Repor
     if report is None:
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
-    await report_repo.delete_report_flag(report_id)
-    return None
+    try:
+        await report_repo.delete_report_flag(report_id)
+        await report_repo.commit()
+    except:
+        await report_repo.roolback()
+        raise HTTPException(status_code=501, detail=f"Failed delting report flag") 
 
 @router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
 async def post_report_event(report_id : int, event: Event, user_id = Depends(get_user_id), report_repo : ReportRepository = Depends(get_report_repo)):

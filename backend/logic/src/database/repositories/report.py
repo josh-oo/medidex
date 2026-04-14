@@ -1,5 +1,4 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, delete
 
 from ..models import Report, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions, ReportFlag
@@ -9,6 +8,12 @@ class ReportRepository:
     def __init__(self, db : AsyncSession, user_id : str):
         self.db = db
         self.user_id = str(user_id)
+
+    async def commit(self):
+        return await self.db.commit()
+    
+    async def roolback(self):
+        return await self.db.rollback()
 
     async def _remove_orphaned_studies(self, affected_study_ids : set) -> List[int]:
         """
@@ -47,6 +52,7 @@ class ReportRepository:
             delete(Study).where(Study.CRGStudyID.in_(orphan_list))
         )
         
+        self.db.flush()
         return orphan_list
     
     async def link_study(self, report_id: int, study_id: int, user_id : str = None) -> Dict[str, Any]:
@@ -56,53 +62,36 @@ class ReportRepository:
         if user_id is None:
             user_id = self.user_id
 
-        try:
-            # Validate report exists
-            report = await self.db.get(Report, report_id)
-            if not report:
-                raise Exception("Report not found")
+        # Validate report exists
+        report = await self.db.get(Report, report_id)
+        if not report:
+            raise Exception("Report not found")
 
-            # Validate study exists
-            study = await self.db.get(Study, study_id)
-            if not study:
-                raise Exception("Study not found")
+        # Validate study exists
+        study = await self.db.get(Study, study_id)
+        if not study:
+            raise Exception("Study not found")
 
-            # Avoid duplicate links
-            existing_stmt = (
-                select(StudyReport)
-                .where(StudyReport.CRGReportID == report_id)
-                .where(StudyReport.CRGStudyID == study_id)
-            )
-            link = (await self.db.execute(existing_stmt)).scalar_one_or_none()
+        # Avoid duplicate links
+        existing_stmt = (
+            select(StudyReport)
+            .where(StudyReport.CRGReportID == report_id)
+            .where(StudyReport.CRGStudyID == study_id)
+        )
+        link = (await self.db.execute(existing_stmt)).scalar_one_or_none()
 
-            if not link:
-                # Create new link and track creator
-                link = StudyReport(CRGReportID=report_id, CRGStudyID=study_id)
-                self.db.add(link)
-                try:
-                    await self.db.flush()
-                except IntegrityError:
-                    await self.db.rollback()
-                    raise
+        if not link:
+            # Create new link and track creator
+            link = StudyReport(CRGReportID=report_id, CRGStudyID=study_id)
+            self.db.add(link)
+            await self.db.flush()
 
-            self.db.add(StudyReportAdded(
-                StudyReportID=link.StudyReportID,
-                CreatedBy=user_id
-            ))
+        self.db.add(StudyReportAdded(
+            StudyReportID=link.StudyReportID,
+            CreatedBy=user_id
+        ))
 
-            await self.db.commit()
-
-            return {
-                "report_id": report_id,
-                "created_count": 1,
-                "invalid_study_ids": [],
-                "created_links": [{"CRGReportID": report_id, "CRGStudyID": study_id}],
-                "was_duplicate": False
-            }
-
-        except Exception as e:
-            await self.db.rollback()
-            raise Exception(f"Failed to append study link: {str(e)}")
+        await self.db.flush()
         
     async def unlink_study(self, report_id: int, study_id: int = None, user_id : str = None) -> Dict[str, Any]:
         """
@@ -113,57 +102,45 @@ class ReportRepository:
         if user_id is None:
             user_id = self.user_id
             
-        try:
-            # Validate report exists
-            report = await self.db.get(Report, report_id)
-            if not report:
-                raise Exception("Report not found")
+        # Validate report exists
+        report = await self.db.get(Report, report_id)
+        if not report:
+            raise Exception("Report not found")
 
-            # Build query joining StudyReport with StudyReportAdded
-            stmt = (
-                select(StudyReport, StudyReportAdded.CreatedBy)
-                .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
-                .where(StudyReport.CRGReportID == report_id)
-            )
-            
-            if study_id is not None:
-                stmt = stmt.where(StudyReport.CRGStudyID == study_id)
-
-            # If user is provided, filter by CreatedBy
-            if user_id:
-                stmt = stmt.where(StudyReportAdded.CreatedBy == user_id)
-
-            # Fetch all matching links
-            rows = (await self.db.execute(stmt)).all()
-
-            deleted_links: List[Dict[str, int]] = [
-                {"CRGReportID": sr.CRGReportID, "CRGStudyID": sr.CRGStudyID}
-                for sr, _ in rows
-            ]
-            deleted_orphans = []
-
-            # Bulk delete matching links
-            if rows:
-                study_report_ids = [sr.StudyReportID for sr, _ in rows]
-                await self.db.execute(
-                    delete(StudyReport).where(StudyReport.StudyReportID.in_(study_report_ids))
-                )
-                # Check if some of the affected studies are now orphans and delete them
-                affected_studies = {item['CRGStudyID'] for item in deleted_links}
-                deleted_orphans = await self._remove_orphaned_studies(affected_studies)
-
-                await self.db.commit()
-
-            return {
-                "report_id": report_id,
-                "deleted_count": len(rows),
-                "deleted_links": deleted_links,
-                "deleted_orphans": deleted_orphans
-            }
+        # Build query joining StudyReport with StudyReportAdded
+        stmt = (
+            select(StudyReport, StudyReportAdded.CreatedBy)
+            .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+            .where(StudyReport.CRGReportID == report_id)
+        )
         
-        except Exception as e:
-            await self.db.rollback()
-            raise Exception(f"Failed to delete report-study links: {str(e)}")
+        if study_id is not None:
+            stmt = stmt.where(StudyReport.CRGStudyID == study_id)
+
+        # If user is provided, filter by CreatedBy
+        if user_id:
+            stmt = stmt.where(StudyReportAdded.CreatedBy == user_id)
+
+        # Fetch all matching links
+        rows = (await self.db.execute(stmt)).all()
+
+        deleted_links: List[Dict[str, int]] = [
+            {"CRGReportID": sr.CRGReportID, "CRGStudyID": sr.CRGStudyID}
+            for sr, _ in rows
+        ]
+        deleted_orphans = []
+
+        # Bulk delete matching links
+        if rows:
+            study_report_ids = [sr.StudyReportID for sr, _ in rows]
+            await self.db.execute(
+                delete(StudyReport).where(StudyReport.StudyReportID.in_(study_report_ids))
+            )
+            # Check if some of the affected studies are now orphans and delete them
+            affected_studies = {item['CRGStudyID'] for item in deleted_links}
+            deleted_orphans = await self._remove_orphaned_studies(affected_studies)
+
+        await self.db.flush()
         
     async def get_linked_studies(self, report_id : int, date_from : Optional[str] = None, date_to : Optional[str] = None):
         report = await self.db.get(Report, report_id)
@@ -251,7 +228,7 @@ class ReportRepository:
     async def delete_report(self, report_id: int) -> bool:
         stmt = delete(Report).where(Report.CRGReportID == report_id)
         result = await self.db.execute(stmt)
-        await self.db.commit()
+        await self.db.flush()
         return bool(result.rowcount)
 
     async def get_report_flag(self, report_id: int) -> Optional[ReportFlag]:
@@ -287,8 +264,6 @@ class ReportRepository:
             report_flag.Message = message
             report_flag.Public = public
 
-        await self.db.commit()
-        await self.db.refresh(report_flag)
         return report_flag
 
     async def delete_report_flag(self, report_id: int) -> bool:
@@ -298,7 +273,7 @@ class ReportRepository:
             .where(ReportFlag.CreatedBy == self.user_id)
         )
         result = await self.db.execute(stmt)
-        await self.db.commit()
+        await self.db.flush()
         return bool(result.rowcount)
 
     async def get_report_flags_for_reports(self, report_ids: List[int]) -> Dict[int, ReportFlag]:
@@ -319,25 +294,20 @@ class ReportRepository:
         Set confirmation state for a report-study link tracked in StudyReportAdded.
         The StudyReportAdded row is resolved through tblStudyReport by report/study ids.
         """
-        try:
-            stmt = (
-                select(StudyReportAdded)
-                .join(StudyReport, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
-                .where(StudyReport.CRGReportID == report_id)
-                .where(StudyReport.CRGStudyID == study_id)
-            )
-            study_report_added = (await self.db.execute(stmt)).scalar_one_or_none()
+        stmt = (
+            select(StudyReportAdded)
+            .join(StudyReport, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
+            .where(StudyReport.CRGReportID == report_id)
+            .where(StudyReport.CRGStudyID == study_id)
+        )
+        study_report_added = (await self.db.execute(stmt)).scalar_one_or_none()
 
-            if not study_report_added:
-                return False
+        if not study_report_added:
+            return False
 
-            study_report_added.Confirmed = confirmed
-            await self.db.commit()
-            return True
-
-        except Exception:
-            await self.db.rollback()
-            raise
+        study_report_added.Confirmed = confirmed
+        await self.flush()
+        return True
 
     async def get_report_numbers(self, report_ids: List[int]) -> Dict[int, Optional[int]]:
         report_ids = report_ids or []
@@ -385,18 +355,8 @@ class ReportRepository:
         next_number = (max_number or 0) + 1
 
         report.ReportNumber = next_number
-        await self.db.flush()  # Update the existing report in the session
-        await self.db.commit()
+        await self.db.flush()
         return next_number
-    
-    async def save_report_metadata(self, report_id : int, data : Any):
-        # Save to database
-        new_extraction = FulltextExtractions(
-            CRGReportID=report_id,
-            data=data
-        )
-        self.db.add(new_extraction)
-        await self.db.commit()
 
     async def save_report_metadata_field(self, report_id: int, field: str, value: Any):
         stmt = select(FulltextExtractions).where(FulltextExtractions.CRGReportID == report_id)
@@ -410,7 +370,7 @@ class ReportRepository:
             data = extraction.data or {}
         data[field] = value
         extraction.data = data
-        await self.db.commit()
+        await self.db.flush()
 
     async def load_report_metadata(self, report_id : int):
         stmt = select(FulltextExtractions).where(FulltextExtractions.CRGReportID == report_id)

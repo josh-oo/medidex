@@ -269,9 +269,13 @@ async def confirm_report_study_link(report_id : int, study_id: int, report_repo 
     if not project:
         raise HTTPException(status_code=403, detail="You can only confirm links for reports in your own projects")
 
-    updated = await report_repo.set_study_report_confirmation(report_id, study_id, True)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Tracked report-study link not found")
+    try:
+        updated = await report_repo.set_study_report_confirmation(report_id, study_id, True)
+        await report_repo.commit()
+        if not updated:
+            raise HTTPException(status_code=404, detail="Tracked report-study link not found")
+    except:
+        await report_repo.roolback()
 
     payload = {"user": user_id, "event_type": "study::links::confirmed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})

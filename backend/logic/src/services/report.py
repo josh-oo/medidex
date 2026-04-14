@@ -39,7 +39,12 @@ class DocumentService:
             if not mkdirs and report_number == -1:
                 raise Exception("Report number not found")   
             if report_number <= 0 and mkdirs:
-                report_number = await self.report_repo.assign_pdf_numbers_for_report_id(report_id)
+                try:
+                    report_number = await self.report_repo.assign_pdf_numbers_for_report_id(report_id)
+                    await self.report_repo.commit()
+                except:
+                    await self.report_repo.roolback()
+                    raise
             
             pdf_name = str(report_number).zfill(5) + ".pdf"
             file_name = os.path.join(PDF_PATH, pdf_name)
@@ -226,8 +231,8 @@ class DocumentService:
             report = await self.report_repo.get_report_by_id(report_id)
             if report:
                 report.ReportNumber = -1
-                await self.report_repo.db.flush()
-                await self.report_repo.db.commit()
+                #await self.report_repo.db.flush()
+                #await self.report_repo.db.commit()
             self.path_cache.pop(report_id, None)
             self.pages_cache.pop(report_id, None)
 
@@ -236,7 +241,6 @@ class DocumentService:
             report = await self.report_repo.get_report_by_id(report_id)
             if report:
                 report.ReportNumber = 0
-                await self.report_repo.db.flush()
                 await self.report_repo.db.commit()
             return {"report_id": report_id, "file_path": None, "size_bytes": 0}
 
@@ -279,7 +283,11 @@ class ReportService:
                 return data["trial_id"]
         trial_ids = await self._get_trial_ids(report_id, include_fulltext)
         if include_fulltext and use_cache:
-            await self.report_repo.save_report_metadata_field(report_id, "trial_id", trial_ids)
+            try:
+                await self.report_repo.save_report_metadata_field(report_id, "trial_id", trial_ids)
+                await self.report_repo.commit()
+            except:
+                await self.report_repo.roolback()
         return trial_ids
 
     async def _get_trial_ids(self, report_id: int, include_fulltext: bool) -> List[str]:
