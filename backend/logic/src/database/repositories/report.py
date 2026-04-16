@@ -4,6 +4,11 @@ from sqlmodel import select, delete
 from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions, ReportFlag
 from typing import List, Dict, Any, Optional
 
+import os
+
+DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
+FULLTEXT_PATH = os.path.join(DATABASE_VOLUME,"resources", "fulltexts")
+
 class ReportRepository:
     def __init__(self, db : AsyncSession, user_id : str):
         self.db = db
@@ -324,7 +329,14 @@ class ReportRepository:
         )
 
         rows = await self.db.execute(stmt)
-        return rows.scalars().all()
+
+        result = []
+        for report_id in rows.scalars().all():
+            txt_name = str(report_id).zfill(5) + ".txt"
+            txt_path = os.path.join(FULLTEXT_PATH, txt_name)
+            if os.path.exists(txt_path):
+                result.append(report_id)
+        return result
     
     async def get_pdf_numbers_by_report_id(self, report_id: int) -> int:
         """
