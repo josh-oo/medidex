@@ -13,6 +13,7 @@ from langchain.agents.structured_output import ToolStrategy
 from ..database import ReportRepository, StudyRepository
 from .core import StudySimilaritySearchService
 from .report import DocumentService
+from enum import Enum
 
 from dotenv import load_dotenv
 
@@ -43,7 +44,27 @@ You are a clinical research assistant tasked with answering follow-up questions 
 Use the available tools to inspect candidate studies, report metadata, and report full text when needed.
 Ground your answers in the retrieved evidence and avoid unsupported assumptions.
 If information is missing, say so clearly and explain what additional context would help.
+If the user asks you about a specific study you don't have context for try to search this study by its shortname.
 """
+
+class StudyTagCategory(str, Enum):
+    """
+    Category of structured tags associated with a clinical study.
+
+    Attributes:
+        interventions:
+            Treatments, drugs, procedures, or actions applied within the study.
+            Includes both experimental and control arm interventions.
+        conditions:
+            Medical conditions, diseases, or disorders targeted or studied.
+            Represents the clinical focus or eligibility context of the study.
+        outcomes:
+            Measured endpoints or results used to evaluate study effectiveness.
+            Includes primary and secondary endpoints such as efficacy or safety metrics.
+    """
+    INTERVENTIONS = "interventions"
+    CONDITIONS = "conditions"
+    OUTCOMES = "outcomes"
 
 @dataclass
 class AgentContext:
@@ -79,12 +100,28 @@ class NewStudy(BaseModel):
 Output = Union[ExistingStudy, NewStudy]
 
 @tool
-async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentContext]) -> Dict[str,str]:  
+async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentContext]) -> dict:  
     """
-    Fetch the next (most relevant) candidate study for the current report based on its title / abstract
+    Retrieve the next most relevant candidate study for the current report.
+
+    This function queries a similarity service to rank studies related to the
+    active report and returns the next unvisited study based on the internal
+    visitation counter. The selection is driven by similarity to the report
+    title/abstract and filtered according to previously visited candidates.
 
     Args:
-        reason: The reason why you need to visit the next study
+        reason: Explanation for why the next candidate study is being requested.
+            Used for logging, traceability, or agent reasoning context.
+
+    Returns:
+        dict: A dictionary containing metadata about the selected study:
+            - studyId (str): Unique identifier of the study
+            - shortName (str): Human-readable study name
+            - trialId (str): Identifier for trial contact details
+            - numberParticipants (str): Number of participants in the study
+            - countries (List[str]): List of countries involved in the study
+            - duration (str): Duration of the study
+            - comparison (str): Comparator/intervention description
     """
     report_id = runtime.context.current_report
     visited_candidate_studies = runtime.context.visited_candidate_studies
@@ -117,107 +154,170 @@ async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentCont
     return result
 
 @tool
-async def fetch_report_fulltext(report_id: Optional[int], runtime: ToolRuntime[AgentContext]) -> str:  
-    """Fetch the corresponding fulltext for a given report
+async def fetch_report_fulltext(
+    report_id: Optional[int],
+    runtime: ToolRuntime[AgentContext],
+) -> str:
+    """
+    Retrieve the full text content of a report.
 
-     Args:
-        report_id: The id of the report you want the fulltext for leave it empty (None) to retrieve the current reports fulltext
+    If no report ID is provided, the function returns the full text of the
+    currently active report stored in the agent context.
+
+    Args:
+        report_id: Identifier of the report whose full text should be retrieved.
+            If None, the full text of the current active report is returned.
+
+    Returns:
+        str: Full text content of the report.
     """
     if report_id is None:
-        return await runtime.context.document_service.get_fulltext(runtime.context.current_report, fast=False)
-    return await runtime.context.document_service.get_fulltext(report_id, fast=False)
+        return await runtime.context.document_service.get_fulltext(
+            runtime.context.current_report,
+            fast=False,
+        )
+
+    return await runtime.context.document_service.get_fulltext(
+        report_id,
+        fast=False,
+    )
 
 @tool
-async def fetch_report_abstract(report_id: int, runtime: ToolRuntime[AgentContext]) -> str:  
-    """Fetch the corresponding abstract for a given report
-    
+async def fetch_report_abstract(
+    report_id: int,
+    runtime: ToolRuntime[AgentContext],
+) -> str:
+    """
+    Retrieve the abstract of a specific report.
+
+    This function fetches the report record by its identifier and returns
+    the abstract text if available.
+
     Args:
-        report_id: The id of the report you want the abstract for
+        report_id: Unique identifier of the report.
+
+    Returns:
+        str: The abstract text of the report, or a fallback message if no abstract is available.
     """
     response = await runtime.context.report_repo.get_report_by_id(report_id)
+
     if response.Abstract is None:
         return "No abstract available"
+
     return response.Abstract
 
 @tool
-async def fetch_study_reports(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[Dict[str,str]]:  
-    """Get all the reports already assigned to the corresponding study
+async def fetch_reports_linked_to_study(
+    study_id: int,
+    runtime: ToolRuntime[AgentContext],
+) -> List[Dict[str, str]]:
+    """
+    Retrieve all reports associated with a given study.
+
+    This function returns a list of report titles linked to the specified
+    study identifier.
 
     Args:
-        study_id: The id of the study 
+        study_id: Unique identifier of the study.
+
+    Returns:
+        List[Dict[str, str]]: A list of report metadata dictionaries, each containing:
+            - reportId (str): Unique identifier of the report
+            - title (str): Title of the report
     """
-    result = []
     response = await runtime.context.study_repo.get_study_reports_by_study_id(study_id)
-    for item in response:
-        result.append({'reportId': item['CRGReportID'], 'title': item['Title']})
-    return result
 
+    return [
+        {
+            "reportId": item["CRGReportID"],
+            "title": item["Title"],
+        }
+        for item in response
+    ]
 @tool
-async def fetch_study_interventions(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[str]:  
-    """Get all the interventions already assigned to the corresponding study
-
-    Args:
-        study_id: The id of the study 
+async def fetch_tags_associated_with_study(study_id: int, tag_category: StudyTagCategory,runtime: ToolRuntime[AgentContext]) -> List[str]:
     """
-    response = await runtime.context.study_repo.get_study_interventions_single(study_id)
-    results = []
-    for item in response:
-        results.append(item['Description'])
-    return results
+    Retrieve structured tags associated with a clinical study.
 
-@tool
-async def fetch_study_conditions(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[str]:  
-    """Get all the health conditions already assigned to the corresponding study
+    This function returns standardized descriptors linked to a study,
+    grouped by category (interventions, conditions, or outcomes).
 
     Args:
-        study_id: The id of the study 
+        study_id: Unique identifier of the study.
+        tag_category: Type of study metadata to retrieve.
+
+    Returns:
+        List[str]: List of tag descriptions for the requested category.
     """
-    response = await runtime.context.study_repo.get_study_conditions_single(study_id)
-    results = []
-    for item in response:
-        results.append(item['Description'])
-    return results
+    if tag_category == StudyTagCategory.INTERVENTIONS:
+        response = await runtime.context.study_repo.get_study_interventions_single(study_id)
+    elif tag_category == StudyTagCategory.CONDITIONS:
+        response = await runtime.context.study_repo.get_study_conditions_single(study_id)
+    elif tag_category == StudyTagCategory.OUTCOMES:
+        response = await runtime.context.study_repo.get_study_outcomes_single(study_id)
+    else:
+        raise ValueError(f"Unsupported tag category: {tag_category}")
+
+    return [item["Description"] for item in response]
 
 @tool
-async def fetch_study_outcomes(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[str]:  
-    """Get all the outcomes already assigned to the corresponding study
-
-    Args:
-        study_id: The id of the study 
+async def fetch_study_by_shortname(
+    short_name: str,
+    runtime: ToolRuntime[AgentContext],
+) -> dict:
     """
-    response = await runtime.context.study_repo.get_study_outcomes_single(study_id)
-    results = []
-    for item in response:
-        results.append(item['Description'])
-    return results
+    Search for a study by its short name.
 
-@tool
-async def search_for_study_by_shortname(short_name : str, runtime: ToolRuntime[AgentContext]) -> List[Dict[str, Any]]:  
-    """Get a study for a given shortname / acronym (if available). The search is case insensitive 
+    Returns a single matching study record or raises an error if none is found.
 
     Args:
-        short_name: The shortname or acronym of the target study (typical shortnames are either acronyms or author name + year)
+        short_name: Shortname of the study to search for (typically first author + year / trial id / study acronym).
+
+    Returns:
+        dict: A dictionary containing study metadata with the following fields:
+            - studyId (int): Unique identifier of the study
+            - shortName (str): Human-readable short name of the study
+            - trialId (str): Trial registration identifier
+            - numberParticipants (int): Number of participants enrolled
+            - countries (List[str]): List of countries involved in the study
+            - duration (str): Duration of the study
+            - comparison (str): Comparator or intervention description
+
+    Raises:
+        ValueError: If no study is found matching the provided short name.
     """
-    response = await runtime.context.study_repo.search_studies_by_shortname(short_name)
-    results = []
-    for item in response:
-        results.append({
-            "studyId": item.CRGStudyID,
-            "shortName": item.ShortName,
-            "trialId": item.TrialistContactDetails,
-            "numberParticipants": item.NumberParticipants,
-            "countries": item.Countries.split("//"),
-            "duration": item.Duration,
-            "comparison": item.Comparison,
-        })
-    return results
+    response = await runtime.context.study_repo.search_study_by_shortname(short_name)
+
+    if response is None:
+        raise ValueError(f"No study found with shortname '{short_name}'")
+
+    return {
+        "studyId": response.CRGStudyID,
+        "shortName": response.ShortName,
+        "trialId": response.TrialRegistrationID,
+        "numberParticipants": response.NumberParticipants,
+        "countries": response.Countries.split("//"),
+        "duration": response.Duration,
+        "comparison": response.Comparison,
+    }
 
 @tool
-async def fetch_study_persons(study_id : int, runtime: ToolRuntime[AgentContext]) -> List[str]:
-    """Get all persons associated with this study
+async def fetch_persons_associated_with_study(
+    study_id: int,
+    runtime: ToolRuntime[AgentContext],
+) -> List[str]:
+    """
+    Retrieve all persons associated with a clinical study.
+
+    This includes individuals linked to the study such as investigators,
+    collaborators, sponsors, or other recorded personnel depending on
+    repository configuration.
 
     Args:
-        study_id: The id of the study 
+        study_id: Unique identifier of the study.
+
+    Returns:
+        List[str]: List of person names or identifiers associated with the study.
     """
     return await runtime.context.study_repo.get_study_persons_single(study_id)
 
@@ -254,7 +354,7 @@ class BaseAgentService:
 
         agent_config: Dict[str, Any] = {
             "model": self.model,
-            "tools": [fetch_next_candidate_study, fetch_report_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract, fetch_study_conditions, fetch_study_outcomes, search_for_study_by_shortname],
+            "tools": [fetch_next_candidate_study, fetch_report_fulltext, fetch_reports_linked_to_study, fetch_tags_associated_with_study, fetch_persons_associated_with_study, fetch_report_abstract, fetch_study_by_shortname],
             "context_schema": AgentContext,
             "system_prompt": system_message,
             "checkpointer": checkpointer,
@@ -366,8 +466,7 @@ class AutomationService(BaseAgentService):
         )
         structured_agent_config: Dict[str, Any] = {
             "model": self.model,
-            "tools": [fetch_next_candidate_study, fetch_report_fulltext, fetch_study_reports, fetch_study_interventions, fetch_study_persons, fetch_report_abstract],
-            "context_schema": AgentContext,
+            "tools": [fetch_next_candidate_study, fetch_report_fulltext, fetch_reports_linked_to_study, fetch_tags_associated_with_study, fetch_persons_associated_with_study, fetch_report_abstract, fetch_study_by_shortname],
             "system_prompt": structured_system_message,
             "checkpointer": checkpointer,
             "response_format": ToolStrategy(Output),
