@@ -321,7 +321,7 @@ class ReportRepository:
             return {}
 
         stmt = (
-            select(Report.CRGReportID)
+            select(Report.CRGReportID, Report.ReportNumber)
             .join(ReportAdded, Report.CRGReportID == ReportAdded.CRGReportID)
             .where(Report.CRGReportID.in_(report_ids))
             .where(Report.ReportNumber >= 0)
@@ -331,7 +331,10 @@ class ReportRepository:
         rows = await self.db.execute(stmt)
 
         result = []
-        for report_id in rows.scalars().all():
+        for report_id, report_number in rows.all():
+            if report_number == 0:
+                result.append(report_id)
+                continue
             txt_name = str(report_id).zfill(5) + ".txt"
             txt_path = os.path.join(FULLTEXT_PATH, txt_name)
             if os.path.exists(txt_path):
