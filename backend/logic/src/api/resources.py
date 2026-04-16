@@ -23,7 +23,7 @@ from ..database.models import ReportFlag as DbReportFlag
 
 from ..utils.logger import setup_logging
 
-from ..database.repositories.study import StudyRepository
+from ..database.repositories.study import StudyRepository, DuplicateShortNameError
 from ..database.repositories.aspects import AspectRepository
 from ..database.repositories.report import ReportRepository
 from ..database.repositories.project import ProjectRepository
@@ -31,6 +31,9 @@ from ..database import get_study_repo, get_aspect_repo, get_report_repo, get_pro
 
 from ..services import get_document_service, get_report_service, get_project_pubsub_service, get_vectorstore_service, DocumentService, ReportService, ProjectPubSubService, VectorstoreService
 from ..services.crawler import OpenAlexService
+
+from ..services import StudyResourceService, get_study_service
+from ..services.study import Study, StudyCreate, transform_to_output_studies
 
 load_dotenv()
 
@@ -66,27 +69,6 @@ class ReportFlag(BaseModel):
     message: str
     public: bool
     createdAt: str
-
-class Study(BaseModel):
-    studyId: int
-    shortName: str
-    status: str
-    countries: List[str]
-    numberParticipants: Optional[str]
-    duration: Optional[str]
-    comparison: Optional[str]
-    trialId: Optional[str]
-    createdAt: Optional[str]
-    updatedAt: Optional[str]
-
-class StudyCreate(BaseModel):
-    shortName: str
-    status: str
-    countries: List[str]
-    numberParticipants: Optional[str]
-    duration: Optional[str]
-    comparison: Optional[str]
-    trialId: Optional[str] = None
 
 class StudyStatus(str, enum.Enum):
     closed = "Closed"
@@ -129,24 +111,6 @@ report_id_path = Path(..., description="ReportID")
 Study Endpoints
 """
 
-def transform_to_output_studies(studies):
-    result = []
-    for study in studies:
-        output_study = Study(
-            studyId=study.CRGStudyID,
-            shortName=study.ShortName,
-            numberParticipants=study.NumberParticipants,
-            duration=study.Duration,
-            comparison=study.Comparison,
-            countries=study.Countries.split("//"),
-            createdAt=study.DateEntered,
-            updatedAt=study.DateEdited,
-            status=study.StatusofStudy,
-            trialId=study.ISRCTN,
-        )
-        result.append(output_study)
-    return result
-
 def transform_to_output_report_flag(flag: DbReportFlag) -> ReportFlag:
     return ReportFlag(
         reportId=flag.CRGReportID,
@@ -157,15 +121,15 @@ def transform_to_output_report_flag(flag: DbReportFlag) -> ReportFlag:
     )
 
 @router.put("/studies", summary="Add new study to meerkat.")
-async def add_study(study_params: StudyCreate, user_id = Depends(get_user_id), study_repo : StudyRepository = Depends(get_study_repo)) -> Study:
-    result = await study_repo.add_study(short_name=study_params.shortName, study_status=study_params.status, countries=study_params.countries, duration =study_params.duration, number_of_participants = study_params.numberParticipants, comparison = study_params.comparison)
-    return transform_to_output_studies([result])[0]
+async def add_study(study_params: StudyCreate, study_service : StudyResourceService = Depends(get_study_service)) -> Study:
+    try:
+        return await study_service.add_study(short_name=study_params.shortName, study_status=study_params.status, countries=study_params.countries, duration =study_params.duration, number_of_participants = study_params.numberParticipants, comparison = study_params.comparison)
+    except DuplicateShortNameError:
+        raise HTTPException(status_code=409, detail="Shortname already exists")
 
 @router.get("/studies", summary="Get study details for all studies specified in the query.")
-async def get_studies(study_ids: List[int] = study_ids_query, user_id = Depends(get_user_id), study_repo : StudyRepository = Depends(get_study_repo)) -> List[Study]:
-    result = await study_repo.get_studies(study_ids)# _get_studies(study_ids, session)
-    await asyncio.gather(*[post_report_event(-1, Event(event_type=f"study::{study_id}::visited", timestamp=datetime.now(timezone.utc).isoformat()), user_id) for study_id in study_ids])
-    return transform_to_output_studies(result)
+async def get_studies(study_ids: List[int] = study_ids_query, study_service : StudyResourceService = Depends(get_study_service)) -> List[Study]:
+    return await study_service.get_studies(study_ids)
 
 @router.get("/studies/reports", include_in_schema=False)
 async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, fields: Optional[List[str]] = Query(None), study_repo : StudyRepository = Depends(get_study_repo)) -> Dict[int, List[DbReport]]:
@@ -290,16 +254,17 @@ async def delete_report(
             raise HTTPException(status_code=403, detail="Only the project owner can delete reports from this project")
 
         deleted = await report_repo.delete_report(report_id)
-        report_repo.commit()
+        await report_repo.commit()
         if not deleted:
             raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
         await vectorstore.delete_vectors_by_report_ids([report_id])
         await pubsub_service.publish_project_update(project_id)
+        return Response(status_code=204)
     except:
         report_repo.roolback()
-
-    return Response(status_code=204)
+        raise
+    
 
 @router.get("/reports/{report_id}/studies", summary="Get the studies linked to this specific report.")
 async def get_report_studies_by_id(
@@ -322,9 +287,11 @@ async def uploaed_pdf(report_id: int = report_id_path, file: UploadFile = File(N
     
     try:
         result = await document_service.upload_pdf(report_id, file)
+        await document_service.report_repo.db.commit()
         await pubsub_service.publish_report_update(report_id)
         return result
     except:
+        await document_service.report_repo.db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to save PDF.")
     
 @router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})

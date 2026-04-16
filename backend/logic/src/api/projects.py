@@ -2,7 +2,6 @@
 from fastapi import APIRouter, Request
 from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks, Body, Form
 from fastapi.responses import Response, StreamingResponse
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any, Tuple, Set
 import json
@@ -19,12 +18,13 @@ from ..utils.logger import setup_logging
 import hashlib
 import asyncio
 
-from .auth import is_verified_api_call, is_admin, get_roles, get_user_id
+from .auth import is_verified_api_call, is_admin, get_user_id
 
 from ..database import get_project_repo, get_report_repo
 
 from ..database import ReportRepository
 from ..database import ProjectRepository
+from ..database.repositories.study import DuplicateShortNameError
 
 from ..database.models import Report as DbReport, Project as DbProject
 
@@ -34,6 +34,10 @@ from ..services import AutomationService
 from ..services import LinkageService
 from ..services import get_project_pubsub_service, ProjectPubSubService
 from ..services.report import DocumentService
+from ..services.crawler import OpenAlexService
+from ..services.report import CrawlerService, DoclingService
+
+from ..database.sessions import AsyncSessionLocal, AsyncSession
 
 from ..background.wrapper import (
     run_process_report_background,
@@ -44,7 +48,6 @@ from .resources import (
     Report,
     Study,
     StudyCreate,
-    get_report_fulltext_links,
     transform_to_output_studies,
 )
 
@@ -56,6 +59,8 @@ logger = logging.getLogger(__name__)
 # Limit concurrent bot processing across reports
 agent_process_semaphore = asyncio.Semaphore(10)
 pdf_semaphore = asyncio.Semaphore(1)
+write_semaphore = asyncio.Semaphore(1)
+vectorstore_semaphore = asyncio.Semaphore(8)
 
 project_id_path = Path(..., description="The projects's id")
 
@@ -73,6 +78,7 @@ class Project(BaseModel):
 class ProjectDetails(Project):
     numberReportsTotal: int
     numberReportsPreProcessed: int = 0
+    numberReportsWithPdf: int = 0
     numberReportsReadyForReview: int = 0
     numberReportsAutoSearchedPdf: int = 0
     numberReportsConfirmed: int = 0
@@ -124,75 +130,80 @@ import traceback
 
 async def process_report_pdf(
     client,
-    report_id : int,
-    project_id: str,
-    project_repo: ProjectRepository,
-    report_repo: ReportRepository,
+    report : DbReport,
     document_service: DocumentService,
 ) -> None:
-    async with pdf_semaphore:
-        project = await project_repo.get_project_by_id(project_id)
-        if not project:
-            return
-        try:
-            links_payload = await get_report_fulltext_links(
-                report_id=report_id,
-                report_repo=report_repo,
-            )
-            for link in links_payload.links:
-                payload = await _download_pdf_bytes(client, link)
-                if payload is None:
-                    continue
+    #async with pdf_semaphore:
 
-                upload_file = _InMemoryPdfUpload(payload)
-                print("Success download: ", report_id)
-                await document_service.upload_pdf(report_id, upload_file)
-                print("Success upload: ", report_id)
-                break
-        except Exception as exc:
-            #print(f"Upload failed: {report_id} Exc {exc}")
-            print(f"Upload failed: {report_id} Exc {exc}\n{traceback.format_exc()}")
-            logger.warning(
-                "Auto PDF processing failed for report %s in project %s: %s",
-                report_id,
-                project_id,
-                exc,
-            )
-        finally:
-            # Mark that an automatic PDF search attempt has completed, regardless of outcome.
-            await project_repo.set_report_auto_searched_pdf(project_id, report_id, True)
-
-async def process_report(reports : List[DbReport], project_id : str, project_repo : ProjectRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService, pubsub_service: ProjectPubSubService, report_repo : ReportRepository, document_service : DocumentService):
-    # Check if project exists before launching concurrent operations
-    project = await project_repo.get_project_by_id(project_id)
-    if not project:
-        return  # Skip processing if project was deleted
+    if report.ReportNumber > 0: #if report already has pdf
+        return None
     
+    try:
+        service = OpenAlexService()
+        links = await service.get_pdf_links_by_doi(report.DOI)
+        
+        for link in links:
+            print("Link: ", link)
+            payload = await _download_pdf_bytes(client, link)
+            if payload is None:
+                continue
+
+            upload_file = _InMemoryPdfUpload(payload)
+            print("Success download: ", report.CRGReportID,flush=True)
+            #await document_service.upload_pdf(report.CRGReportID, upload_file)
+            #print("Success upload: ", report.CRGReportID,flush=True)
+            return upload_file
+
+    except Exception as exc:
+        #print(f"Upload failed: {report_id} Exc {exc}")
+        print(f"Upload failed: {report.CRGReportID} Exc {exc}\n{traceback.format_exc()}",flush=True)
+        logger.warning(
+            "Auto PDF processing failed for report %s in project %s: %s",
+            report.CRGReportID,
+            exc,
+        )
+    return None
+
+async def process_report(reports : List[DbReport], project_id : str, vectorstore : VectorstoreService, maintenance_service : MaintenanceService, pubsub_service: ProjectPubSubService, document_service : DocumentService, user_id : str):    
     timeout = httpx.Timeout(30.0, connect=10.0)
 
     async def load_pdf(report, client):
-        await process_report_pdf(
-            client,
-            report.CRGReportID,
-            project_id,
-            project_repo,
-            report_repo,
-            document_service,
-        )
-        await pubsub_service.publish_project_update(project_id)
-    
+        async with write_semaphore:
+            async with AsyncSessionLocal() as write_session:
+                project_repo = ProjectRepository(db=write_session,user_id=user_id)
+                report_repo = ReportRepository(db=write_session,user_id=user_id)
+                document_service = DocumentService(report_repo=report_repo,crawler_service=CrawlerService(), docling_service=DoclingService())
+                project = await project_repo.get_project_by_id(project_id)
+                if not project: #if project already deleted
+                    return
+                pdf_file = await process_report_pdf(client, report, document_service)
+                if pdf_file:
+                    print("Start upload: ", report.CRGReportID,flush=True)
+                    await document_service.upload_pdf(report.CRGReportID, pdf_file)
+                print("Start Set auto searched: ", report.CRGReportID,flush=True)
+                await project_repo.set_report_auto_searched_pdf(report.CRGReportID)
+                await write_session.commit()
+                await pubsub_service.publish_project_update(project_id)
+
     async def prepare_vectorstore(report):
-        await vectorstore.add_report_to_vectorstore(report)
-        await pubsub_service.publish_project_update(project_id)
+        async with vectorstore_semaphore:
+            async with AsyncSessionLocal() as session:
+                project_repo = ProjectRepository(db=session, user_id=user_id)
+                project = await project_repo.get_project_by_id(project_id)
+                if not project: #if project already deleted
+                    return
+                await vectorstore.add_report_to_vectorstore(report)
+                await pubsub_service.publish_project_update(project_id)
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
-
         load_pdf_tasks = [load_pdf(report, client) for report in reports]
         prepare_vectorstore_tasks = [prepare_vectorstore(report) for report in reports]
         await asyncio.gather(*prepare_vectorstore_tasks + load_pdf_tasks)
 
-
-    await finalize_project_upload(project_id, project_repo, vectorstore, maintenance_service, pubsub_service)
+        # Finalize with a new session
+        async with AsyncSessionLocal() as session:
+            project_repo = ProjectRepository(db=session, user_id=user_id)
+            await finalize_project_upload(project_id, project_repo, vectorstore, maintenance_service, pubsub_service)
 
 async def finalize_project_upload(project_id : str, project_repo : ProjectRepository, vectorstore : VectorstoreService, maintenance_service : MaintenanceService, pubsub_service: ProjectPubSubService):
     """
@@ -228,15 +239,11 @@ async def get_vectorized_and_ready_report_ids(project_id, project_repo : Project
         return set(), set(), set()
 
     # Run database query first, then vectorstore query to avoid concurrent session usage
-    report_numbers = await report_repo.get_report_numbers(report_ids)
-    vectorized_report_ids_raw = await vectorstore.reports_exist(report_ids)
+    reports_with_pdf = await report_repo.get_pdf_availabilities(report_ids)
+    reports_with_embedding = await vectorstore.reports_exist(report_ids)
     
-    embedded_reports = set(vectorized_report_ids_raw)
-    pdf_ready_reports = {
-        report_id
-        for report_id, report_number in report_numbers.items()
-        if report_number is not None and report_number >= 0
-    }
+    embedded_reports = set(reports_with_embedding)
+    pdf_ready_reports = set(reports_with_pdf)
     ready_reports = embedded_reports & pdf_ready_reports
     return embedded_reports, pdf_ready_reports, ready_reports
 
@@ -318,7 +325,12 @@ async def agent_process_report(
                 comparison=comparison,
                 trialId=suggested_study.get("trialId"),
             )
-            await linkage_service.create_study_and_link_to_report(report_id, study_payload, "bot")
+            for appendix in ['a', 'b', 'c', 'd', 'f']:
+                try:
+                    await linkage_service.create_study_and_link_to_report(report_id, study_payload, "bot")
+                    break
+                except DuplicateShortNameError:
+                    study_payload.shortName = study_payload.shortName + appendix #if the name is already taken try the next name
 
         await pubsub_service.publish_project_update(project_id)
         logger.info("Agent processing completed for report %s in project %s", report_id, project_id)
@@ -334,7 +346,7 @@ async def get_project_stats(
     auto_searched_pdf_count = await project_repo.get_auto_searched_pdf_count_for_project(project.BatchHash)
     confirmed_report_count = await project_repo.get_confirmed_report_count_for_project(project.BatchHash)
 
-    embedded_reports, _, ready_reports = await get_vectorized_and_ready_report_ids(project.BatchHash, project_repo, report_repo, vectorstore)
+    embedded_reports, reports_with_pdf, ready_reports = await get_vectorized_and_ready_report_ids(project.BatchHash, project_repo, report_repo, vectorstore)
 
     assignees = await project_repo.get_project_assignees(project.BatchHash)
     assignee_ids = [user_id for user_id, _ in assignees if user_id]
@@ -360,6 +372,7 @@ async def get_project_stats(
         numberReportsTotal=len(report_ids),
         numberReportsPreProcessed=len(embedded_reports),
         numberReportsReadyForProcessing=len(ready_reports),
+        numberReportsWithPdf=len(reports_with_pdf),
         numberReportsReadyForReview=ready_for_review_count,
         numberReportsAutoSearchedPdf=auto_searched_pdf_count,
         numberReportsConfirmed=confirmed_report_count,
@@ -421,26 +434,6 @@ async def start_automation(
     finally:
         await pubsub_service.unsubscribe_from_project(project_id, pubsub)
 
-async def _get_report_progress(report_ids: Set[int], report_repo: ReportRepository, vectorstore: VectorstoreService) -> Tuple[Set[int], Set[int], Set[int]]:
-    """
-    Helper function to get report progress without fetching report IDs from database.
-    Avoids concurrent database session access when called from asyncio.gather.
-    """
-    if not report_ids:
-        return set(), set(), set()
-
-    # Run database query first, then vectorstore query to avoid concurrent session usage
-    report_numbers = await report_repo.get_report_numbers(report_ids)
-    vectorized_report_ids_raw = await vectorstore.reports_exist(report_ids)
-    
-    embedded_reports = set(vectorized_report_ids_raw)
-    pdf_ready_reports = {
-        report_id
-        for report_id, report_number in report_numbers.items()
-        if report_number is not None and report_number >= 0
-    }
-    ready_reports = embedded_reports & pdf_ready_reports
-    return embedded_reports, pdf_ready_reports, ready_reports
 
 @router.get("/tasks",dependencies=[Depends(is_verified_api_call)], summary="Get pending review tasks for the authenticated user.", description="Returns all projects the user is assigned to along with their personal study-link counts.")
 async def get_user_tasks(project_repo: ProjectRepository = Depends(get_project_repo), report_repo: ReportRepository = Depends(get_report_repo), vectorstore: VectorstoreService = Depends(get_vectorstore_service),) -> List[ProjectTask]:
@@ -455,14 +448,14 @@ async def get_user_tasks(project_repo: ProjectRepository = Depends(get_project_r
     user_link_counts = await project_repo.get_user_link_counts_by_project()
 
     # Pre-fetch all report IDs sequentially to avoid concurrent database access
-    project_report_ids = {}
-    for project in projects:
-        report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
-        project_report_ids[project.BatchHash] = report_ids or set()
+    #project_report_ids = {}
+    #for project in projects:
+    #    report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
+    #    project_report_ids[project.BatchHash] = report_ids or set()
 
     # Now run vectorstore queries concurrently (no database session conflicts)
     progress_tasks = [
-        _get_report_progress(project_report_ids[project.BatchHash], report_repo, vectorstore)
+        get_vectorized_and_ready_report_ids(project.BatchHash, project_repo, report_repo, vectorstore)
         for project in projects
     ]
     progress_results = await asyncio.gather(*progress_tasks)
@@ -694,8 +687,6 @@ async def get_project_reports(
 
     result = []
     for report in reports:
-        print(report.CRGReportID, report.CRGReportID not in ready_report_ids)
-        print()
         if report.CRGReportID not in ready_report_ids:
             continue
         authors = report.Authors.split("//") if report.Authors else []
@@ -720,7 +711,6 @@ async def get_project_reports(
                 assignedStudies=linked_studies,
             )
         )
-    print("result", len(result))
     return result
 
 @router.get( "/projects/{project_id}/annotations",dependencies=[Depends(is_admin)],summary="Get reports annotated by all assigned users in a project.")

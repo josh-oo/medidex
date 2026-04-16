@@ -3,6 +3,7 @@ import re
 import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, func, text
 
 from dotenv import load_dotenv
@@ -19,6 +20,9 @@ load_dotenv()
 
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 
+class DuplicateShortNameError(ValueError):
+    pass
+
 def load_trial_id_mapping():
     file_path = os.path.join(DATABASE_VOLUME,"resources", "trial_id_mapping.json")
     if not os.path.exists(file_path):
@@ -32,6 +36,12 @@ class StudyRepository:
     def __init__(self, db : AsyncSession, user_id : str):
         self.db = db
         self.user_id = str(user_id)
+
+    async def commit(self):
+        await self.db.commit()
+
+    async def rollback(self):
+        await self.db.rollback()
 
     def process_fields(self, fields):
         if fields is None:
@@ -47,33 +57,35 @@ class StudyRepository:
 
     async def add_study(self, short_name : str, study_status: str, countries : List[str], duration : str, number_of_participants : int, comparison : str) -> Study:
         #TODO add more sophisticated checks
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         
-        new_study = Study(
-            ShortName=short_name,
-            StatusofStudy=study_status,
-            Countries="//".join(countries),
-            Duration=duration,
-            NumberParticipants=str(number_of_participants),
-            Comparison=comparison,
-            DateEntered=timestamp,
-            DateEdited=timestamp,
-        )
-        
-        self.db.add(new_study)
-        await self.db.flush()
+        try:
+            new_study = Study(
+                ShortName=short_name,
+                StatusofStudy=study_status,
+                Countries="//".join(countries),
+                Duration=duration,
+                NumberParticipants=str(number_of_participants),
+                Comparison=comparison
+            )
 
-        study_added_entry = StudyAdded(
-            CRGStudyID=new_study.CRGStudyID,
-            CreatedBy=self.user_id,
-        )
-        self.db.add(study_added_entry)
+            self.db.add(new_study)
+            await self.db.flush()
 
-        await self.db.commit()
-        await self.db.refresh(new_study)
+            study_added_entry = StudyAdded(
+                CRGStudyID=new_study.CRGStudyID,
+                CreatedBy=self.user_id,
+            )
+            self.db.add(study_added_entry)
 
-        #await log_event(-1, Event(event_type=f"study::{new_study.CRGStudyID}::created", timestamp=datetime.now(timezone.utc).isoformat()),self.user_id)
-        return new_study
+            await self.db.flush()
+            await self.db.refresh(new_study)
+
+            return new_study
+
+        except IntegrityError as e:
+            if getattr(e.orig.diag, "constraint_name", None) == "uq_tblstudy_shortname":
+                raise DuplicateShortNameError("ShortName already exists")
+            raise
     
     async def search_studies(self, trial_ids : Optional[List[str]] = None, number_of_participants : Optional[List[int]] = None, authors : Optional[List[str]] = None):
         study_ids = []

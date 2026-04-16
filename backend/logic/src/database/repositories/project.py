@@ -140,20 +140,20 @@ class ProjectRepository:
         )
         return result.scalars().all()
 
-    async def set_report_auto_searched_pdf(self, project_id: str, report_id: int, value: bool = True) -> None:
+    async def set_report_auto_searched_pdf(self, report_id: int) -> None:
+        print("Set auto searched: ", report_id,flush=True)
         stmt = (
             select(ReportAdded)
-            .where(ReportAdded.BatchHash == project_id)
             .where(ReportAdded.CRGReportID == report_id)
-            .limit(1)
         )
         report_added = (await self.db.execute(stmt)).scalar_one_or_none()
         if report_added is None:
             return
 
-        report_added.AutoSearchedPdf = value
+        report_added.AutoSearchedPdf = True
         await self.db.flush()
-        await self.db.commit()
+        print("Set auto searched: ", report_added,flush=True)
+        #await self.db.commit()
 
     async def get_assigned_projects(self) -> List[Project]:
         if not self.user_id:

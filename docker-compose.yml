@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   docling:
-    image: quay.io/docling-project/docling-serve-cpu:v1.10.0
+    image: quay.io/docling-project/docling-serve-cpu:v1.16.1
     container_name: docling
     environment:
       DOCLING_SERVE_ENABLE_UI: "1"

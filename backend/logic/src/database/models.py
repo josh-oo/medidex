@@ -3,6 +3,7 @@ from sqlalchemy import MetaData
 from sqlalchemy import Index
 from sqlalchemy import Column
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import UniqueConstraint
 from typing import Optional, Dict, Any
 import datetime
 
@@ -80,9 +81,9 @@ class Study(SQLModel, table=True, metadata=metadata_resources):
     TrialistContactDetails: Optional[str]
     CENTRALSubmissionStatus: Optional[str]
     Notes: Optional[str]
-    DateEntered: str
+    DateEntered: str = Field(default_factory=_current_utc_timestamp)
+    DateEdited: Optional[str] = Field(default_factory=_current_utc_timestamp)
     DateToCENTRAL: Optional[str]
-    DateEdited: Optional[str]
     Search_Tagged: Optional[int]
     NumberParticipants: Optional[str]
     Countries: Optional[str]
@@ -97,6 +98,7 @@ class Study(SQLModel, table=True, metadata=metadata_resources):
         Index('idx_study_dateentered', 'DateEntered'),  # For cutoff filtering
         Index('idx_study_shortname', 'ShortName'),  # For trial ID matching
         Index('idx_study_trial_id', 'TrialRegistrationID'),  # For trial ID lookups
+        UniqueConstraint("ShortName", name="uq_tblstudy_shortname"),
     )
 
 class StudyReport(SQLModel, table=True, metadata=metadata_resources):

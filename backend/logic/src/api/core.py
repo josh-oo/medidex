@@ -16,7 +16,7 @@ from .auth import is_verified_api_call, is_admin, get_user_id
 
 from ..database import get_study_repo, get_project_repo, get_report_repo
 
-from ..database import StudyRepository
+from ..database.repositories.study import DuplicateShortNameError
 from ..database import ReportRepository
 from ..database import ProjectRepository
 
@@ -90,18 +90,15 @@ async def get_vectorized_and_ready_report_ids(
     if not report_ids:
         return set(), set()
 
-    vectorized_report_ids_raw, report_numbers = await asyncio.gather(
+    reports_with_embedding, reports_with_pdf = await asyncio.gather(
         vectorstore.reports_exist(report_ids),
-        report_repo.get_report_numbers(report_ids),
+        report_repo.get_pdf_availabilities(report_ids),
     )
-    embedded_report_ids = set(vectorized_report_ids_raw)
-    pdf_ready_reports = {
-        report_id
-        for report_id, report_number in report_numbers.items()
-        if report_number is not None and report_number >= 0
-    }
-    ready_report_ids = embedded_report_ids & pdf_ready_reports
-    return embedded_report_ids, pdf_ready_reports, ready_report_ids
+    embedded_reports = set(reports_with_embedding)
+    pdf_ready_reports = set(reports_with_pdf)
+    
+    ready_report_ids =  embedded_reports & pdf_ready_reports
+    return embedded_reports, reports_with_pdf, ready_report_ids
 
 async def check_report_access(
     report_id: int = Path(...),
@@ -247,17 +244,19 @@ async def link_to_new_study(
     project_id: str = Depends(check_report_access),
     pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
 ):
+    try:
+        new_study = await linkage_service.create_study_and_link_to_report(report_id, study, user_id)
 
-    new_study = await linkage_service.create_study_and_link_to_report(report_id, study, user_id)
+        payload = {"user": user_id, "event_type": "study::links::changed::new", "report_id": report_id, "original_timestamp": "-"}
+        logger.info("ReportInteraction", extra={"payload": payload})
 
-    payload = {"user": user_id, "event_type": "study::links::changed::new", "report_id": report_id, "original_timestamp": "-"}
-    logger.info("ReportInteraction", extra={"payload": payload})
+        output_study = transform_to_output_studies([new_study])[0]
 
-    output_study = transform_to_output_studies([new_study])[0]
+        await pubsub_service.publish_project_update(project_id)
 
-    await pubsub_service.publish_project_update(project_id)
-
-    return output_study
+        return output_study
+    except DuplicateShortNameError:
+        raise HTTPException(status_code=409, detail="Study shortName already exists")
 
 @router.put("/reports/{report_id}/studies/{study_id}/confirmation", dependencies=[Depends(is_admin)], summary="After reviewing the annotations the admin uses this endpoint to confirm that the report belongs to the study.", status_code=200)
 async def confirm_report_study_link(report_id : int, study_id: int, report_repo : ReportRepository = Depends(get_report_repo), project_repo: ProjectRepository = Depends(get_project_repo), user_id: Optional[str] = Depends(get_user_id), vectorstore: VectorstoreService = Depends(get_vectorstore_service)):

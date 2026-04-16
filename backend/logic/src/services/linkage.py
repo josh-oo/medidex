@@ -3,6 +3,7 @@ from typing import Any, Optional
 from ..database.repositories.report import ReportRepository
 from ..database.repositories.study import StudyRepository
 from .vectorstore import VectorstoreService
+from ..services.study import StudyCreate
 
 
 class LinkageService:
@@ -47,7 +48,7 @@ class LinkageService:
     async def create_study_and_link_to_report(
         self,
         report_id: int,
-        study: Any,
+        study: StudyCreate,
         user_id: Optional[str],
     ) -> Any:
         try:
@@ -63,6 +64,6 @@ class LinkageService:
             await self.vectorstore.link_report_to_study_id(report_id, new_study.CRGStudyID, user_id)
             await self.report_repo.commit()
             return new_study
-        except Exception as e:
+        except:
             await self.report_repo.roolback()
-            raise Exception(f"Failed to link new study: {str(e)}")
+            raise

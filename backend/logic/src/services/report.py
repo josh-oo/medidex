@@ -39,12 +39,7 @@ class DocumentService:
             if not mkdirs and report_number == -1:
                 raise Exception("Report number not found")   
             if report_number <= 0 and mkdirs:
-                try:
-                    report_number = await self.report_repo.assign_pdf_numbers_for_report_id(report_id)
-                    await self.report_repo.commit()
-                except:
-                    await self.report_repo.roolback()
-                    raise
+                report_number = await self.report_repo.assign_pdf_numbers_for_report_id(report_id)
             
             pdf_name = str(report_number).zfill(5) + ".pdf"
             file_name = os.path.join(PDF_PATH, pdf_name)
@@ -67,7 +62,12 @@ class DocumentService:
                 print(f"Error extracting text from PDF: {e}")
                 return []
         if report_id not in self.pages_cache:
-            path = await self.get_path(report_id)
+            try:
+                path = await self.get_path(report_id)
+                await self.report_repo.db.commit()
+            except:
+                await self.report_repo.db.rollback()
+                raise
             self.pages_cache[report_id] = await asyncio.to_thread(_sync_extract, path)
         return self.pages_cache[report_id]
     
@@ -227,21 +227,13 @@ class DocumentService:
         }
     
     async def upload_pdf(self, report_id: int, file):
-        async def _clear_report_number():
-            report = await self.report_repo.get_report_by_id(report_id)
-            if report:
-                report.ReportNumber = -1
-                #await self.report_repo.db.flush()
-                #await self.report_repo.db.commit()
-            self.path_cache.pop(report_id, None)
-            self.pages_cache.pop(report_id, None)
 
         if file is None:
             # Set ReportNumber to 0 and stop
             report = await self.report_repo.get_report_by_id(report_id)
             if report:
                 report.ReportNumber = 0
-                await self.report_repo.db.commit()
+                await self.report_repo.db.flush()
             return {"report_id": report_id, "file_path": None, "size_bytes": 0}
 
         path = None
@@ -261,7 +253,8 @@ class DocumentService:
                 "size_bytes": len(content)
             }
         except Exception:
-            await _clear_report_number()
+            self.path_cache.pop(report_id, None)
+            self.pages_cache.pop(report_id, None)
             if path and os.path.exists(path):
                 os.remove(path)
             raise

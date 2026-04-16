@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select, delete
 
-from ..models import Report, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions, ReportFlag
+from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions, ReportFlag
 from typing import List, Dict, Any, Optional
 
 class ReportRepository:
@@ -306,21 +306,25 @@ class ReportRepository:
             return False
 
         study_report_added.Confirmed = confirmed
-        await self.flush()
+        await self.db.flush()
         return True
 
-    async def get_report_numbers(self, report_ids: List[int]) -> Dict[int, Optional[int]]:
+
+    async def get_pdf_availabilities(self, report_ids: List[int]) -> Dict[int, Optional[int]]:
         report_ids = report_ids or []
         if not report_ids:
             return {}
 
         stmt = (
-            select(Report.CRGReportID, Report.ReportNumber)
+            select(Report.CRGReportID)
+            .join(ReportAdded, Report.CRGReportID == ReportAdded.CRGReportID)
             .where(Report.CRGReportID.in_(report_ids))
+            .where(Report.ReportNumber > 0)
+            .where(ReportAdded.AutoSearchedPdf.is_(True))
         )
 
         rows = await self.db.execute(stmt)
-        return {report_id: report_number for report_id, report_number in rows.all()}
+        return rows.scalars().all()
     
     async def get_pdf_numbers_by_report_id(self, report_id: int) -> int:
         """

@@ -13,6 +13,7 @@ from .llm import LanguageModelService
 from .crawler import CrawlerService, DoclingService
 from .maintenance import MaintenanceService, ReadinessService
 from .pubsub import ProjectPubSubService
+from .study import StudyResourceService
 from ..utils.llm.agent import get_checkpointer
 
 from ..database import get_aspect_repo, get_report_repo, get_study_repo, get_project_repo, db_ready
@@ -128,3 +129,6 @@ async def get_question_answering_service(
 
 def get_project_pubsub_service(project_repo : ProjectRepository = Depends(get_project_repo)) -> ProjectPubSubService:
     return ProjectPubSubService(project_repo=project_repo)
+
+def get_study_service(study_repo : StudyRepository = Depends(get_study_repo)):
+    return StudyResourceService(study_repo=study_repo)

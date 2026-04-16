@@ -43,7 +43,7 @@ async def run_process_report_background(
             if report is not None:
                 reports.append(report)
 
-        await process_report(reports, project_id, project_repo, vectorstore, maintenance_service, pubsub_service, report_repo, document_service)
+        await process_report(reports, project_id, vectorstore, maintenance_service, pubsub_service, document_service, user_id)
 
 
 
