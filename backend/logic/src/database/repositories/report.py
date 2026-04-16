@@ -319,7 +319,7 @@ class ReportRepository:
             select(Report.CRGReportID)
             .join(ReportAdded, Report.CRGReportID == ReportAdded.CRGReportID)
             .where(Report.CRGReportID.in_(report_ids))
-            .where(Report.ReportNumber > 0)
+            .where(Report.ReportNumber >= 0)
             .where(ReportAdded.AutoSearchedPdf.is_(True))
         )
 
