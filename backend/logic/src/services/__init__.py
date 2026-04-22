@@ -1,5 +1,5 @@
 from fastapi import Depends, Path, HTTPException, Query
-from typing import Any
+from typing import Any, Optional
 
 from .vectorstore import VectorstoreService
 from .linkage import LinkageService
@@ -24,6 +24,8 @@ from ..database.repositories.report import ReportRepository
 from ..database.repositories.project import ProjectRepository
 
 from ..api.auth import get_user_id
+
+cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
 
 async def project_path_to_report_id(project_id: str = Path(...), report_index: int = Path(...),  project_repo: ProjectRepository = Depends(get_project_repo)) -> int:
     result = await project_repo.project_item_to_report_id(project_id, report_index)
@@ -95,6 +97,7 @@ async def get_agent_service(
     document_service : DocumentService = Depends(get_document_service),
     study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service),
     checkpointer: Any = Depends(get_checkpointer),
+    cutoff: Optional[str] = cutoff_query,
 ) -> AutomationService:
     await checkpointer.setup()
     return AutomationService(
@@ -105,6 +108,7 @@ async def get_agent_service(
         study_similarity_service=study_similarity_service,
         checkpointer=checkpointer,
         model=model,
+        cutoff=cutoff,
     )
 
 async def get_question_answering_service(

@@ -22,6 +22,7 @@ class TagSimilaritySearchService:
         vector_names = {TagCategories.interventions: 'intervention', TagCategories.conditions: 'condition', TagCategories.outcomes: 'outcome'}
 
         embedding = vectors[vector_names[aspect]]
+        #embedding = vectors['default']
 
         data = await self.vectorstore.get_similar_tags_by_embedding(embedding, sources, aspect, k)
 

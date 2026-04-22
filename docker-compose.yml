@@ -49,6 +49,8 @@ services:
       - ./backend/_data/qdrant:/qdrant/storage
       # Uncomment if you want a custom config file:
       # - ./backend/_data/qdrant_config/production.yaml:/qdrant/config/production.yaml
+    ports:
+      - "6333:6333"
     networks:
       - internal_net
 

@@ -12,6 +12,8 @@ load_dotenv()
 BACKEND_API = os.getenv("BACKEND_API_URL")
 BACKEND_API_KEY = os.getenv("BACKEND_API_KEY")
 
+print("Bakcned test: ", BACKEND_API)
+
 async def wait_for_services(timeout=120):
     """Wait for backend service to be ready"""
     print("Waiting for backend service to be ready...")
@@ -47,7 +49,7 @@ async def calculate_rank_score(report_id, cutoff, client, semaphore, fixed_k=Non
 
         response = await client.get(BACKEND_API + f"/reports/{report_id}/studies", params={"date_to": exclusive_cutoff})
         response.raise_for_status()
-        ground_truth = [item['CRGStudyID'] for item in response.json()]
+        ground_truth = [item['studyId'] for item in response.json()]
 
         rank = 10_000
         score = -1
@@ -56,13 +58,14 @@ async def calculate_rank_score(report_id, cutoff, client, semaphore, fixed_k=Non
             ground_truth = ground_truth[0]
             for k in ks:
                 params = {"cutoff":cutoff, 'k': k}
-                response = await client.get(BACKEND_API + f"/reports/{report_id}/similar_studies",params=params)
+                response = await client.get(BACKEND_API + f"/reports/{report_id}/similar-studies",params=params)
                 response.raise_for_status()
-                predicted_studies = response.json()['CRGStudyID']
+                result = response.json()
+                predicted_studies = [item['study']['studyId'] for item in result]
 
                 if ground_truth in predicted_studies:
                     index = predicted_studies.index(ground_truth)
-                    score = response.json()['Relevance'][index]
+                    score = result[index]['relevance']
                     rank = index + 1
                     break
             return (rank, score, report_id)
@@ -77,7 +80,7 @@ async def calculate_rank_score_negative_hints(report_id, cutoff, client, fixed_k
     exclusive_cutoff = dt - timedelta(days=1)
 
     response = await client.get(BACKEND_API + f"/reports/{report_id}/studies", params={"date_to": exclusive_cutoff})
-    ground_truth = [item['CRGStudyID'] for item in response.json()]
+    ground_truth = [item['studyId'] for item in response.json()]
 
     rank = 10_000
     score = -1
@@ -90,14 +93,14 @@ async def calculate_rank_score_negative_hints(report_id, cutoff, client, fixed_k
         for k in ks:
             #params = {"cutoff":cutoff, 'k': k, 'negative_studies': negative_studies, 'negative_reports': negative_reports}
             params = {"cutoff":cutoff, 'k': k, 'negative_reports': negative_reports}
-            response = await client.get(BACKEND_API + f"/reports/{report_id}/similar_studies",params=params)
+            response = await client.get(BACKEND_API + f"/reports/{report_id}/similar-studies",params=params)
             response.raise_for_status()
             result = response.json()
-            predicted_studies = result['CRGStudyID']
+            predicted_studies = [item['study']['studyId'] for item in result]
 
             if ground_truth in predicted_studies:
                 index = predicted_studies.index(ground_truth)
-                score = result['Relevance'][index]
+                score = result[index]['relevance']
                 rank = index + 1
                 break
 
@@ -324,10 +327,10 @@ if __name__ == "__main__":
         
         # Original behavior for manual testing
         print("Evaluate 5th update")
-        evaluate_with_cutoff_("2024-01-24 00:00:00") # 5th update
+        evaluate_with_cutoff("2024-01-24 00:00:00") # 5th update
 
         print("Evaluate 6th update")
-        evaluate_with_cutoff_("2024-07-26 00:00:00") # 6th update
+        evaluate_with_cutoff("2024-07-26 00:00:00") # 6th update
 
         print("Evaluate 7th update")
-        evaluate_with_cutoff_("2025-01-13 00:00:00") # 7th update
+        evaluate_with_cutoff("2025-01-13 00:00:00") # 7th update

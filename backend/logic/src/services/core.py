@@ -24,6 +24,10 @@ class StudySimilaritySearchService:
 
     async def get_similar_study_by_query(self, query : Any, aspect: TagCategories, cutoff: str, k: int, negative_studies: List[int], trial_ids: List[str], authors:List[str], return_details: bool):
     
+        #Convert TagCategories:
+        if aspect and aspect != TagCategories.default:
+            mapping = {'interventions': 'intervention', 'outcomes': 'outcome', 'conditions': 'condition', 'participants':'participants'}
+            aspect = mapping[aspect]
         found_study_ids = {}
         #found_study_titles = {}
         debug_map = {}
@@ -190,7 +194,8 @@ class RelatedTagSearchService:
     
     async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : str):
         
-        similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, TagCategories.default, cutoff, k, None, None, False)
+        #similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, TagCategories.default, cutoff, k, None, None, False)
+        similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, aspect, cutoff, k, None, None, False)
         predicted_studies = similar_studies['CRGStudyID']
 
         vectors = await self.vectorstore.get_vectors_by_report_id(report_id)

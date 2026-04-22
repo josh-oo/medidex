@@ -103,8 +103,10 @@ class StudyRepository:
     async def get_study_by_id(self, study_id: int) -> Study:
         return await self.db.get(Study, study_id)
         
-    async def search_study_by_shortname(self, shortname: str) -> Study:
+    async def search_study_by_shortname(self, shortname: str, cutoff: Optional[str] = None) -> Study:
         stmt = select(Study).where(Study.ShortName.ilike(f"%{shortname}%"))
+        if cutoff:
+            stmt = stmt.where(Study.DateEntered < cutoff)
         result = (await self.db.execute(stmt)).scalar_one_or_none()
         return result
     
@@ -131,8 +133,8 @@ class StudyRepository:
             grouped.setdefault(study_id, []).append(report_data)
         return grouped
 
-    async def get_study_reports_by_study_id(self, study_id: int) -> List[Report]:
-        result = await self.get_study_reports_by_study_ids(study_ids=[study_id], fields=None, cutoff=None)
+    async def get_study_reports_by_study_id(self, study_id: int, cutoff=None,) -> List[Report]:
+        result = await self.get_study_reports_by_study_ids(study_ids=[study_id], cutoff=cutoff, fields=None,)
         if study_id in result:
             return result[study_id]
         return []

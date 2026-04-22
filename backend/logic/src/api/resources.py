@@ -146,9 +146,9 @@ async def get_study_by_id(study_id: int = study_id_path, study_repo : StudyRepos
     return study
 
 @router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
-async def get_study_reports_by_id(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[Report]:
+async def get_study_reports_by_id(study_id : int = study_id_path,  cutoff: str = cutoff_query, study_repo : StudyRepository = Depends(get_study_repo)) -> List[Report]:
 
-    db_reports = await study_repo.get_study_reports_by_study_id(study_id)
+    db_reports = await study_repo.get_study_reports_by_study_id(study_id, cutoff=cutoff)
     result = []
     for db_report in db_reports:
         result.append(Report(

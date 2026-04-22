@@ -25,7 +25,7 @@ This is necessary since one study sometimes produces multiple scientific reports
 Please look at common signals such as trial registration ID, number of participants, interventions and the countries mentioned.
 You will get the title, abstract and authors for the corresponding new report. 
 If you need more information you can use a tool to retrieve the full text of the current report.
-Please use the available tools to retrieve candidate studies.
+Please use the available tools to retrieve teh most similar candidate studies. If the report is a retraction, corrigendum, or similar notice, consider resolving the reference directly.
 The workflow should look like:
 1. retrieve the next likely study candidate. The most likely candidate (cosine similarity retrieval based on title and abstract) is returned when calling the tool for the first time, the second time the second most likely candidate is returned and so on ...
    For each candidate you will retrieve metadata like 'number of participants' if you need further information you can use the corresponding tools to retrieve more detailed information.
@@ -74,6 +74,7 @@ class AgentContext:
     report_repo : ReportRepository
     study_similarity_service : StudySimilaritySearchService
     document_service :  DocumentService
+    cutoff_date: str #For evaluation only
 
 class ExistingStudy(BaseModel):
     reason: str = Field(description="The reason why this study is a match for the input report")
@@ -125,11 +126,12 @@ async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentCont
     """
     report_id = runtime.context.current_report
     visited_candidate_studies = runtime.context.visited_candidate_studies
+    cutoff = runtime.context.cutoff_date
     
     response = await runtime.context.study_similarity_service.get_similar_studies_by_id(
         report_id,
         aspect='default',
-        cutoff=None,
+        cutoff=cutoff,
         negative_reports=None,
         negative_studies=None,
         k=visited_candidate_studies + 1,
@@ -225,7 +227,8 @@ async def fetch_reports_linked_to_study(
             - reportId (str): Unique identifier of the report
             - title (str): Title of the report
     """
-    response = await runtime.context.study_repo.get_study_reports_by_study_id(study_id)
+    cutoff = runtime.context.cutoff_date
+    response = await runtime.context.study_repo.get_study_reports_by_study_id(study_id, cutoff=cutoff)
 
     return [
         {
@@ -286,7 +289,8 @@ async def fetch_study_by_shortname(
     Raises:
         ValueError: If no study is found matching the provided short name.
     """
-    response = await runtime.context.study_repo.search_study_by_shortname(short_name)
+    cutoff = runtime.context.cutoff_date
+    response = await runtime.context.study_repo.search_study_by_shortname(short_name, cutoff=cutoff)
 
     if response is None:
         raise ValueError(f"No study found with shortname '{short_name}'")
@@ -319,7 +323,8 @@ async def fetch_persons_associated_with_study(
     Returns:
         List[str]: List of person names or identifiers associated with the study.
     """
-    return await runtime.context.study_repo.get_study_persons_single(study_id)
+    cutoff = runtime.context.cutoff_date
+    return await runtime.context.study_repo.get_study_persons_single(study_id, cutoff=cutoff)
 
 class BaseAgentService:
     def __init__(
@@ -333,6 +338,7 @@ class BaseAgentService:
         model: Any,
         system_prompt: str,
         thread_prefix: str,
+        cutoff: Optional[str],
     ):
         self.report_repo = report_repo
         self.study_repo = study_repo
@@ -342,6 +348,7 @@ class BaseAgentService:
         self.model = model
         self.thread_prefix = thread_prefix
         self.user_id = user_id
+        self.cutoff = cutoff
 
         system_message = SystemMessage(
             content=[
@@ -372,6 +379,7 @@ class BaseAgentService:
             report_repo=self.report_repo,
             study_similarity_service=self.study_similarity_service,
             document_service=self.document_service,
+            cutoff_date=self.cutoff,
         )
 
     async def _load_report_context(self, report_id : int) -> str:
@@ -443,6 +451,7 @@ class AutomationService(BaseAgentService):
         study_similarity_service: StudySimilaritySearchService,
         checkpointer: Any,
         model: Any,
+        cutoff: Optional[str],
     ):
         super().__init__(
             user_id="",#TODO make this chat user specific
@@ -454,6 +463,7 @@ class AutomationService(BaseAgentService):
             model=model,
             system_prompt=SYSTEM_MESSAGE_AUTOBOT,
             thread_prefix="prediction",
+            cutoff=cutoff,
         )
 
         structured_system_message = SystemMessage(
@@ -580,6 +590,7 @@ class QuestionAnsweringService(BaseAgentService):
         study_similarity_service: StudySimilaritySearchService,
         checkpointer: Any,
         model: Any,
+        cutoff: Optional[str],
     ):
         super().__init__(
             user_id=user_id,
@@ -591,4 +602,5 @@ class QuestionAnsweringService(BaseAgentService):
             model=model,
             system_prompt=SYSTEM_MESSAGE_QUESTION_ANSWERING,
             thread_prefix="question-answering",
+            cutoff=cutoff,
         )
