@@ -116,7 +116,7 @@ class StudySimilaritySearchService:
         authors = [item.strip() for item in report.Authors.split("//")]
         trial_ids = await self.report_service.get_trial_ids(report_id, include_fulltext=True)
 
-        query = self.vectorstore.build_recommandation_based_on_report_id(report.CRGReportID, negative_reports)
+        query = self.vectorstore.build_recommendation_based_on_report_id(report.CRGReportID, negative_reports)
         
 
         result = await self.get_similar_study_by_query(query,cutoff,k,negative_studies, trial_ids, authors, return_details=return_details)
@@ -184,28 +184,26 @@ class RelatedTagSearchService:
         self.study_similarity_service = study_similarity_service
         self.study_repo = study_repo
 
-    async def search_related_tags_by_study_ids(self, study_ids: List[int], aspect : TagCategories, vectors : Any):
+    async def search_related_tags_by_study_ids(self,report_id : int, study_ids: List[int], aspect : TagCategories):
         
         related_tags = []
+        query = self.vectorstore.build_recommendation_based_on_report_id(report_id)
         if aspect == TagCategories.interventions:
             related_tags = await self.study_repo.get_study_interventions(study_ids)
             related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["intervention"], TagCategories.interventions)
+            return await self.tag_scoring_service.score_related_tags(related_ids, query, TagCategories.interventions)
         elif aspect == TagCategories.conditions:
             related_tags = await self.study_repo.get_study_conditions(study_ids)
             related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["condition"], TagCategories.conditions)
+            return await self.tag_scoring_service.score_related_tags(related_ids, query, TagCategories.conditions)
         elif aspect == TagCategories.outcomes:
-            related_tags = await self.study_repo.get_study_outcomes(study_ids=s)
+            related_tags = await self.study_repo.get_study_outcomes(study_ids)
             related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["outcome"], TagCategories.outcomes)
+            return await self.tag_scoring_service.score_related_tags(related_ids, query, TagCategories.outcomes)
     
     async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : str):
         
-        #similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, TagCategories.default, cutoff, k, None, None, False)
         similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, cutoff, k, None, None, False)
         predicted_studies = similar_studies['CRGStudyID']
-
-        vectors = await self.vectorstore.get_vectors_by_report_id(report_id)
         
-        return await self.search_related_tags_by_study_ids(predicted_studies, aspect, vectors)
+        return await self.search_related_tags_by_study_ids(report_id, predicted_studies, aspect)

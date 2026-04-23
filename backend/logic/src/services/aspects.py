@@ -1,6 +1,6 @@
 from .vectorstore import VectorstoreService
 from ..database.repositories.aspects import AspectRepository
-from typing import List
+from typing import List, Any
 import enum
 
 class TagCategories(str, enum.Enum):
@@ -17,7 +17,7 @@ class TagSimilaritySearchService:
 
     async def get_similar_tags_by_id(self, report_id : int, aspect : TagCategories, sources : List[str], k : int):
         
-        query = self.vectorstore.build_recommandation_based_on_report_id(report_id)
+        query = self.vectorstore.build_recommendation_based_on_report_id(report_id)
         data = await self.vectorstore.get_similar_tags(query, sources, aspect, k)
 
         result = [
@@ -40,11 +40,11 @@ class TagScoringService:
         self.vectorstore = vectorstore
         self.aspect_repo =aspect_repo
 
-    async def score_related_tags(self, tag_ids : List[int], embedding : List[float], aspect : TagCategories):
+    async def score_related_tags(self, tag_ids : List[int], query : Any, aspect : TagCategories):
         if len(tag_ids) == 0:
             return []
         
-        tag_scores = await self.vectorstore.score_tags(embedding, tag_ids, aspect)
+        tag_scores = await self.vectorstore.score_tags(query, tag_ids, aspect)
 
         all_ids = [item['id'] for item in tag_scores]
 
@@ -61,6 +61,6 @@ class TagScoringService:
             name_mapping = {item.OutcomeID: item.OutcomeDescription for item in result}
 
         for item in tag_scores:
-            item['name'] = name_mapping[item['id']].strip()
+            item['keyword'] = name_mapping[item['id']].strip()
         
         return tag_scores

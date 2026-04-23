@@ -323,7 +323,7 @@ class VectorstoreService():
 
         return results
     
-    async def score_tags(self, embedding : List[float], tag_ids : List[int], aspect : str):
+    async def score_tags(self, query : Any, tag_ids : List[int], aspect : str):
         tag_filter = models.Filter(
             must=[
                 models.FieldCondition(key="source", match=models.MatchValue(value="meerkat")),
@@ -334,7 +334,7 @@ class VectorstoreService():
 
         result = await self.client.query_points(
             collection_name=COLLECTION_NAME,
-            query=embedding,
+            query=query,
             limit=len(tag_ids),
             query_filter=tag_filter,
         )
@@ -348,7 +348,7 @@ class VectorstoreService():
 
         return related_tags
     
-    def build_recommandation_based_on_report_id(self, report_id : int, negative_reports : Optional[List[int]] = None):
+    def build_recommendation_based_on_report_id(self, report_id : int, negative_reports : Optional[List[int]] = None):
 
         if not negative_reports:
             negative_reports = []
