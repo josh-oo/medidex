@@ -1,216 +1,39 @@
-
-from dotenv import load_dotenv
-from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import Distance, VectorParams, MultiVectorComparator, MultiVectorConfig
-from qdrant_client.http.models import PointStruct
-from tqdm import tqdm
-import requests
 import os
-import re
-
 import asyncio
-from collections import Counter
-import json
 import httpx
-
-import grpc
-
+from tqdm.asyncio import tqdm
+from dotenv import load_dotenv
+from qdrant_client import AsyncQdrantClient, models
+from qdrant_client.models import Distance, VectorParams, PointStruct
 import xml.etree.ElementTree as ET
-#import sys
 
-#sys.path.append("../utils")
-#import embedding_pb2
-#import embedding_pb2_grpc
+from openai import AsyncOpenAI
 
+import re
 
 load_dotenv()
 
-MODEL_HOST = os.getenv("EMBEDDING_SERVICE_HOST")
-MODEL_PORT = os.getenv("EMBEDDING_SERVICE_PORT")
-VECTORSTORE_HOST = os.getenv("VECTORSTORE_SERVICE_HOST")
-VECTORSTORE_PORT = os.getenv("VECTORSTORE_SERVICE_PORT")
+# --- Configuration ---
+BACKEND_API = os.getenv("BACKEND_API_URL")
+BACKEND_API_KEY = os.getenv("BACKEND_API_KEY")
+VECTORSTORE_HOST = "localhost"
+VECTORSTORE_PORT = 6334
+COLLECTION_NAME = "report_embeddings_medidex"
+EMBEDDING_DIM = 768
 
 MESH_DUMP_LOCATION = os.getenv("MESH_DUMP_LOCATION")
 
-BACKEND_API = os.getenv("BACKEND_API_URL")
-BACKEND_API_KEY = os.getenv("BACKEND_API_KEY")
+# --- Throttling Controls ---
+BACKEND_SEMAPHORE = asyncio.Semaphore(4)
+EMBEDDING_SEMAPHORE = asyncio.Semaphore(8)
 
-async def get_missing_ids(client, collection_name, ids):
-    response = await client.retrieve(collection_name=collection_name, ids=ids)
-
-    existing_ids = {item.id for item in response} 
-    missing_ids = [item for item in ids if item not in existing_ids]
-
-    return missing_ids 
-
-""""
-async def calculate_report_embeddings(data, client=None, batch_size=128):
-    #ids = iter(ids)
-
-    def stream_requests(data):
-        for id, item in data.items():
-            test = embedding_pb2.EmbedReportRequest(id=id, text=item['texts'][0], authors=item['authors'])
-            yield test
-            
-    channel = grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
-    stub = embedding_pb2_grpc.EmbedServiceStub(channel)
-
-    responses = stub.GetReportEmbedding(stream_requests(data))
-
-    all_points = []
-
-    metadata = dict(responses.initial_metadata())
-
-    if len(data) == 0 or client is None:
-        return metadata
-
-    collection_name = metadata['model'].replace("/", "_") + "_" + metadata['revision']
-
-    for response in tqdm(responses, total=len(data)):
-        if client is None:
-            continue
-
-        new_vectors = {"default": response.embedding.values,}
-        for i, aspect in enumerate(metadata['aspects'].split(";")):
-            new_vectors[aspect] = response.aspect_embeddings[i].values
-
-        new_vectors['authors'] = response.author_embeddings.values
-
-        current_id = response.id#next(ids)
-        payload = data[current_id]['metadata']
-
-        all_points.append(PointStruct(id=current_id,vector=new_vectors, payload=payload))
-
-        if len(all_points) == batch_size:
-            await client.upsert(wait=False, collection_name=collection_name, points=all_points)
-            all_points = []
-
-    if client and len(all_points) > 0: #upload the remaining vectors
-        await client.upsert(wait=False, collection_name=collection_name, points=all_points)
-
-    return metadata
-
-def preprocess_reports(reports, report_study_mapping):
-    session = requests.Session()
-    session.headers.update({"Authorization": "Bearer DEBUG"})
-
-    def check_author(author):
-        return len(author.replace("?", "").strip()) > 0
-    
-    response = requests.get(BACKEND_API + f"/trial/studies")
-    if response.status_code != 200:
-        print("Cannot refresh vectorstore: Database API (/trial/studies) not reachable")
-        return
-    all_studies_mapped_to_trial_id = response.json()
-    
-    results = {}
-    for id, title, abstract, date_entered, authors in zip(reports['CRGReportID'], reports['Title'],reports['Abstract'], reports['Dateentered'], reports['Authors']):
-        title_abstract = []
-        if title:
-            title_abstract.append(title)
-        if abstract:
-            title_abstract.append(abstract)
-        
-        item = {}
-        authors = [author.strip() for author in authors.split("//") if check_author(author)]
-        #trial_id = None
-        #data = {'title': title, 'abstract': abstract, 'authors': []}
-        
-        #response = session.post(BACKEND_API + "/extract_trial_id", json=data)
-        #if response.status_code == 200 and response.json():
-        #    trial_id = response.json()
-
-        belongs_to_trial_id = True
-        for study in report_study_mapping[str(id)]:
-            if not study in all_studies_mapped_to_trial_id:
-                belongs_to_trial_id = False
-                break
-
-        item['metadata'] = {'belongs_to_study': report_study_mapping[str(id)], 'source_id': id, "date_entered": date_entered, "authors": authors, "title": title, "abstract":abstract, "belongs_to_trial_id":belongs_to_trial_id}
-        item['texts'] = [" ".join(title_abstract)]
-        item['authors'] = authors
-
-        vector_store_id = transform_to_uuid(id, "0000")
-
-        results[vector_store_id] = item
-    
-    return results
-
-def load_report_data():
-    response = requests.get(BACKEND_API + f"/reports/all")
-    if response.status_code != 200:
-        print("Cannot refresh vectorstore: Database API (/reports/all) not reachable")
-        return
-    all_reports = response.json()
-    
-    response = requests.get(BACKEND_API + f"/mappings/report_study")
-    if response.status_code != 200:
-        print("Cannot refresh study embeddings: Database API (/mappings/report_study) not reachable")
-        return
-    report_study_mapping = response.json()
-
-    return preprocess_reports(all_reports, report_study_mapping)
-
-
-async def refresh_vector_store(force_recompute_embeddings=False):
-
-    data = load_report_data()
-    all_ids = data.keys()
-
-    client = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
-
-    model_info = calculate_report_embeddings({}) 
-    collection_name = model_info['model'].replace("/", "_") + "_" + model_info['revision']
-
-    collections = await client.get_collections().collections
-    exists = any(c.name == collection_name for c in collections)
-
-    points_that_need_computation = all_ids
-
-    if not exists:
-        vector_config = {"default": VectorParams(size=model_info['dimension'], distance=Distance.COSINE), "authors":VectorParams(size=model_info['dimension'], distance=Distance.COSINE) }
-        for aspect in model_info['aspects'].split(";"):
-            vector_config[aspect] = VectorParams(size=model_info['dimension'], distance=Distance.COSINE)
-        
-        await client.create_collection(
-            collection_name=collection_name,
-            vectors_config=vector_config,
-        )
-    if not force_recompute_embeddings:
-        points_that_need_computation = get_missing_ids(client, collection_name, all_ids)
-
-    relevant_data = {}
-    for id in points_that_need_computation:
-        relevant_data[id] = data[id]
-
-    calculate_report_embeddings(relevant_data,client=client)
-"""
-    
-"""
-def refresh_study_embeddings():
-
-    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
-    #client = QdrantClient(url="http://localhost:6333")
-
-    collection_name="josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"
-
-    response = requests.get(f"http://{LOGIC_HOST}:{LOGIC_PORT}/mappings/report_study")
-    if response.status_code != 200:
-        print("Cannot refresh study embeddings: Database API (/reports/all) not reachable")
-        return
-    
-    all_reports = response.json()
-
-    for report, studies in tqdm(all_reports.items()):
-        uuid = transform_to_uuid(report, "0000")
-        client.set_payload(
-            collection_name=collection_name,
-            payload={
-                "belongs_to_study": [int(item) for item in studies],
-            },
-            points=[uuid],
-    )
-"""
+#IMPORTANT: do not use langchain since it applies tokenization before sending it to TEI
+#https://github.com/huggingface/text-embeddings-inference/issues/273
+embeddings_model = AsyncOpenAI(
+        base_url="https://kueq8w7uodo0c2bd.us-east-1.aws.endpoints.huggingface.cloud/v1",
+        #base_url="http://localhost:8080/v1",
+        api_key="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", 
+)
 
 REMOVE_CURLY_BRACKETS = re.compile(r'{.*?}')
 REMOVE_REGULAR_BRACKETS = re.compile(r'\(.*?\)')
@@ -245,104 +68,33 @@ def normalize_tags(example):
 
     return example
 
-async def calculate_tag_embeddings(data, client=None, batch_size=128):
-
-    def stream_requests(data):
-        for id, item in data.items():
-            test = embedding_pb2.EmbedAspectsRequest(id=id, aspects=item['texts'])
-            yield test
-            
-    channel = grpc.insecure_channel(f"{MODEL_HOST}:{MODEL_PORT}")
-    stub = embedding_pb2_grpc.EmbedServiceStub(channel)
-
-    responses = stub.GetAspectEmbeddings(stream_requests(data))
-
-    all_points = []
-
-    metadata = dict(responses.initial_metadata())
-
-    if len(data) == 0 or client is None:
-        return metadata
-    
-    collection_name = metadata['model'].replace("/", "_") + "_" + metadata['revision'] + "_tags"
-
-    for response in tqdm(responses, total=len(data)):
-        current_id = response.id
-        payload = data[current_id]['metadata']
-        all_vectors = []
-        for item in response.embedding:
-            all_vectors.append(item.values)
-        all_points.append(PointStruct(id=current_id,vector=all_vectors, payload=payload))
-
-        if len(all_points) == batch_size:
-            await client.upsert(wait=False, collection_name=collection_name, points=all_points)
-            all_points = []
-
-    if client and len(all_points) > 0: #upload the remaining vectors
-        await client.upsert(wait=False, collection_name=collection_name, points=all_points)
-
-    return metadata
-
 def transform_to_uuid(id, tag="0000"):
-    id = str(id).lower()
-    missing_zeros = 12 - len(id)
-    id = "0"*missing_zeros + id
-    return f"00000000-{tag}-4000-a000-{id}"
+    return f"00000000-{tag}-4000-a000-{str(id).lower().zfill(12)}"
 
-def load_meerkat_tag_data(tag, tag_id="0000"):
-    response = requests.get(BACKEND_API + f"/{tag}")
-    if response.status_code != 200:
-        print(f"Cannot refresh tag embeddings: Database API (/{tag}) not reachable")
-        return
-    all_tags = response.json()
-
-    result = {}
-    for key, value in all_tags.items():
-        item = {}
-        vector_store_id = transform_to_uuid(key, tag_id)
-        item['metadata'] = {"tree_ids": [tag], 'source': "meerkat", 'source_id': key, 'display_name': value}
-        item['texts'] = [normalize_tags(value)]
-
-        result[vector_store_id] = item
+#################### Tag Embeddings
+async def load_meerkat_tag_data(tag, tag_id="0000"):
+    headers = {"X-API-Key": BACKEND_API_KEY, "Content-Type": "application/json"}
     
-    return result
+    async with httpx.AsyncClient(headers=headers, timeout=60.0) as client:
+        response = await client.get(f"{BACKEND_API}/{tag}")
+        if response.status_code != 200:
+            raise Exception("Auth or Connection Failed for initial fetch.")
+        all_tags = response.json()
 
-async def refresh_all_tag_embeddings(data, force_recompute_embeddings=False):
-    all_ids = data.keys()
+        result = {}
+        for tag_item in all_tags:
+            key = tag_item['id']
+            value = tag_item['keyword']
+            item = {}
+            vector_store_id = transform_to_uuid(key, tag_id)
+            item['metadata'] = {"tree_ids": [tag], 'source': "meerkat", 'source_id': key, 'display_name': value, "is_report": False}
+            item['texts'] = [normalize_tags(value)]
 
-    client = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+            result[vector_store_id] = item
+        
+        return result
 
-    model_info = calculate_tag_embeddings({}) 
-    collection_name = model_info['model'].replace("/", "_") + "_" + model_info['revision'] + "_tags"
-
-    collections = await client.get_collections().collections
-    exists = any(c.name == collection_name for c in collections)
-
-    points_that_need_computation = all_ids
-    
-    if not exists:
-        vector_config = VectorParams(size=model_info['dimension'], 
-                                     distance=Distance.COSINE, 
-                                     multivector_config=MultiVectorConfig(comparator=MultiVectorComparator.MAX_SIM),
-                                     )
-        await client.create_collection(
-            collection_name=collection_name,
-            vectors_config=vector_config,
-        )
-    if not force_recompute_embeddings:
-        points_that_need_computation = get_missing_ids(client, collection_name, all_ids)
-
-    relevant_data = {}
-    for id in points_that_need_computation:
-        relevant_data[id] = data[id]
-
-    calculate_tag_embeddings(relevant_data,client=client)
-
-def refresh_meerkat_tags(tag, tag_id, force_recompute_embeddings=False):
-    data = load_meerkat_tag_data(tag, tag_id)
-    refresh_all_tag_embeddings(data,force_recompute_embeddings=force_recompute_embeddings)
-
-def parse_large_xml(file_path):
+def load_mesh_tag_data(file_path):
     result = {}
     context = ET.iterparse(file_path, events=("end",))
     
@@ -375,6 +127,7 @@ def parse_large_xml(file_path):
                 'source_id': record_id,
                 'display_name': name,
                 'tree_ids': tree_numbers,
+                "is_report": False
             }
 
             record = {
@@ -389,78 +142,217 @@ def parse_large_xml(file_path):
 
     return result
 
-def refresh_mesh_tags(force_recompute_embeddings=False):
-    data= parse_large_xml(MESH_DUMP_LOCATION)
-    refresh_all_tag_embeddings(data,force_recompute_embeddings=force_recompute_embeddings)
+#################### Report Embeddings
 
-"""
-def add_date_entered_info():
-
-    client = QdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
-    #client = QdrantClient(url="http://localhost:6333")
-
-    collection_name="josh-oo_aspect-based-embeddings-v3_6b211a8f4e27b904ab146da7d63a084c2fd94223"
-
-    response = requests.get(BACKEND_API + f"/reports/all")
-    if response.status_code != 200:
-        print("Cannot refresh vectorstore: Database API (/reports/all) not reachable")
-        return
-    all_reports = response.json()
-
-    for report_id, date_entered in tqdm(zip(all_reports['CRGReportID'], all_reports['Dateentered'])):
-        uuid = transform_to_uuid(report_id, "0000")
-        client.set_payload(
-            collection_name=collection_name,
-            payload={
-                "date_entered": transform_date_entered(date_entered),
-            },
-            points=[uuid],
-    )
-"""
-#refresh_vector_store()
-#refresh_meerkat_tags("interventions", tag_id="0001")
-#refresh_meerkat_tags("conditions", tag_id="0002")
-#refresh_meerkat_tags("outcomes", tag_id="0003")
-#refresh_mesh_tags()
-
-#from sklearn.feature_extraction.text import TfidfVectorizer
-
-async def author_frequency():
-    timeout = httpx.Timeout(
-        read=20.0,
-        connect=10.0,
-        write=30.0,
-        pool=30.0
-    )
-
-    limits = httpx.Limits(
-        max_keepalive_connections=20,
-        max_connections=50,
-        keepalive_expiry=30.0
-    )
+async def fetch_report_mapping(client, report_item, all_trial_studies):
+    """Parallel worker for fetching study mappings from backend."""
+    resp = await client.get(f"{BACKEND_API}/reports/{report_item['CRGReportID']}/studies")
+    study_data = resp.json() if resp.status_code == 200 else []
+    study_ids = [s['studyId'] for s in study_data]
     
-    async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=timeout, limits=limits) as client:
-        response = await client.get(BACKEND_API + f"/studies/persons", params={'normalize_names': True})
-
-        all_authors = []
-        for value in response.json().values():
-            all_authors.extend(set(value))
-
-        counts = Counter(all_authors)
-
-        with open("../_data/backend/resources/author_frequencies.json", "w") as json_file:
-            json.dump(counts, json_file)
-
-    #all_docs = []
-    #for key, value in response.json().items():
-    #    all_docs.append(value)
+    clean_authors = [a.strip() for a in report_item['Authors'].split("//") if a.strip()]
+    belongs_to_trial_id = all(s in all_trial_studies for s in study_ids) if study_ids else False
     
-    #print(len(all_docs))  
-    #vectorizer = TfidfVectorizer(analyzer=lambda x: x, lowercase=False)
-    #tfidf_matrix = vectorizer.fit_transform(all_docs)
-    #print(len(vectorizer.get_feature_names_out()))
-    #print(vectorizer.get_feature_names_out())
-    #print(tfidf_matrix)
-    
+    return transform_to_uuid(report_item['CRGReportID']), {
+        "text": f"{report_item['Title'] or ''} \n {report_item['Abstract'] or ''}".strip(),
+        "metadata": {
+            "is_report": True,
+            "belongs_to_study": study_ids,
+            "report_id": report_item['CRGReportID'],
+            "date_entered": report_item['Dateentered'],
+            "authors": clean_authors,
+            "title": report_item['Title'],
+            "abstract": report_item['Abstract'],
+            "belongs_to_trial_id": belongs_to_trial_id
+        }
+    }
 
-asyncio.run(author_frequency())
+
+async def load_report_data_async(vectorstore, report_ids=None):
+    """Fetches all reports and studies, then parallels the mapping lookups."""
+    
+    headers = {"X-API-Key": BACKEND_API_KEY, "Content-Type": "application/json"}
+    
+    async with httpx.AsyncClient(headers=headers, timeout=60.0) as client:
+        print("Fetching initial report list...")
+        report_params = {}
+        if report_ids:
+            report_params['report_ids'] = report_ids
+        resp_reports = await client.get(f"{BACKEND_API}/reports", params=report_params)
+        resp_studies = await client.get(f"{BACKEND_API}/trial/studies")
+        
+        if resp_reports.status_code != 200 or resp_studies.status_code != 200:
+            raise Exception("Auth or Connection Failed for initial fetch.")
+        
+        
+        reports = resp_reports.json()
+        all_studies = resp_studies.json()
+
+        # 4. Process Batches (Parallel Embedding Calls)
+        async def report_processing(batch_reports):
+            tasks = [
+                fetch_report_mapping(client, r, all_studies)
+                for r in batch_reports
+            ]
+
+            async with BACKEND_SEMAPHORE:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+            data = {k: v for item in results if isinstance(item, tuple) and item for k, v in [item]}
+            await process_batch(vectorstore, data)
+
+        batch_size = 32 
+        tasks = []
+        for i in range(0, len(reports), batch_size):
+            batch_reports = reports[i:i + batch_size]
+            tasks.append(report_processing(batch_reports))
+
+        print(f"Embedding {len(reports)} points...")
+        await tqdm.gather(*tasks, desc="Embedding & Upserting")
+
+
+async def process_batch(client, data):
+    """Parallel worker for embedding generation and Qdrant upsert."""
+    async with EMBEDDING_SEMAPHORE:
+        batch_texts = [value["text"] for _, value in data.items()]
+        batch_ids = [key for key, _ in data.items()]
+        if not batch_texts:
+            return
+        #print(batch_texts)
+
+        # Generate embeddings
+        response = await embeddings_model.embeddings.create(
+            input=batch_texts,
+            model=None
+        )
+        vectors = [data.embedding for data in response.data]
+
+        points = [
+            PointStruct(id=bid, vector=vec, payload=data[bid]["metadata"])
+            for bid, vec in zip(batch_ids, vectors)
+        ]
+
+        await client.upsert(collection_name=COLLECTION_NAME, points=points)
+
+# --- Tag Embedding Batch Upsert ---
+async def process_tag_batch(client, batch_ids, tag_data):
+    """Batch embedding and upsert for tag data."""
+    async with EMBEDDING_SEMAPHORE:
+        batch_texts = [tag_data[bid]["texts"][0] for bid in batch_ids if tag_data[bid]["texts"]]
+        if not batch_texts:
+            return
+        response = await embeddings_model.embeddings.create(
+            input=batch_texts,
+            model=None
+        )
+        vectors = [data.embedding for data in response.data]
+        points = [
+            PointStruct(id=bid, vector=vec, payload=tag_data[bid]["metadata"])
+            for bid, vec in zip(batch_ids, vectors)
+        ]
+        await client.upsert(collection_name=COLLECTION_NAME, points=points)
+
+async def process_and_upsert():
+    client = AsyncQdrantClient(host=VECTORSTORE_HOST, grpc_port=VECTORSTORE_PORT, prefer_grpc=True)
+
+    # 1. Prepare Collection
+    collections = await client.get_collections()
+    if not any(c.name == COLLECTION_NAME for c in collections.collections):
+        await client.create_collection(
+            collection_name=COLLECTION_NAME,
+            on_disk_payload=True,
+            vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE)
+        )
+
+        await client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="is_report",
+            field_schema=models.PayloadSchemaType.BOOL,
+        )
+
+        await client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="source",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+
+        await client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="tree_ids",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+
+        await client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="source_id",
+            field_schema=models.PayloadSchemaType.UUID,
+        )
+
+        await client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="belongs_to_trial_id",
+            field_schema=models.PayloadSchemaType.BOOL,
+        )
+
+        await client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="belongs_to_study",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+
+        await client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="date_entered",
+            field_schema=models.PayloadSchemaType.DATETIME,
+        )
+
+        await client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="date_entered",
+            field_schema=models.PayloadSchemaType.DATETIME,
+        )
+
+    # 2. Load Report Data (Parallel Backend Calls)
+    await load_report_data_async(vectorstore=client)
+
+    # --- Tag Embedding Upsert ---
+    # Example: interventions
+    for tag, tag_uuid in [("interventions", "0001"), ("conditions", "0002"), ("outcomes", "0003")]:
+        tag_data = await load_meerkat_tag_data(tag, tag_id=tag_uuid)
+        tag_ids = list(tag_data.keys())
+        tag_batch_size = 32
+        tag_tasks = []
+        for i in range(0, len(tag_ids), tag_batch_size):
+            batch_ids = tag_ids[i:i + tag_batch_size]
+            tag_tasks.append(process_tag_batch(client, batch_ids, tag_data))
+        print(f"Embedding & upserting {len(tag_ids)} {tag} tags...")
+        await tqdm.gather(*tag_tasks, desc="Tag Embedding & Upserting")
+
+    # Tag embedding mesh
+    tag_data_mesh = load_mesh_tag_data(MESH_DUMP_LOCATION)
+    tag_ids = list(tag_data_mesh.keys())
+    tag_batch_size = 32
+    tag_tasks = []
+    for i in range(0, len(tag_ids), tag_batch_size):
+        batch_ids = tag_ids[i:i + tag_batch_size]
+        tag_tasks.append(process_tag_batch(client, batch_ids, tag_data_mesh))
+    print(f"Embedding & upserting {len(tag_ids)} mesh tags...")
+    await tqdm.gather(*tag_tasks, desc="Tag Embedding & Upserting")
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(process_and_upsert())
+    except RuntimeWarning as e:
+        print(f"RuntimeWarning: {e}")
+    except Exception as e:
+        print(f"Exception: {e}")
+    finally:
+        # Attempt to cancel all running tasks to avoid shutdown errors
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
+                for task in tasks:
+                    task.cancel()
+                loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        except Exception:
+            pass

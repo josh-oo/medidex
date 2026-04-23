@@ -17,17 +17,11 @@ class TagSimilaritySearchService:
 
     async def get_similar_tags_by_id(self, report_id : int, aspect : TagCategories, sources : List[str], k : int):
         
-        vectors = await self.vectorstore.get_vectors_by_report_id(report_id)
-
-        vector_names = {TagCategories.interventions: 'intervention', TagCategories.conditions: 'condition', TagCategories.outcomes: 'outcome'}
-
-        embedding = vectors[vector_names[aspect]]
-        #embedding = vectors['default']
-
-        data = await self.vectorstore.get_similar_tags_by_embedding(embedding, sources, aspect, k)
+        query = self.vectorstore.build_recommandation_based_on_report_id(report_id)
+        data = await self.vectorstore.get_similar_tags(query, sources, aspect, k)
 
         result = [
-            {"id": i, "name": n, "score": s}
+            {"id": i, "keyword": n, "relevance": s}
             for i, n, s in zip(data["ID"], data["Keyword"], data["Relevance"])
         ]
         return result  
