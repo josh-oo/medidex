@@ -5,7 +5,6 @@ from starlette.responses import Response
 import os
 import json
 import enum
-import asyncio
 import logging
 
 from typing import List, Optional
@@ -33,7 +32,8 @@ from ..services import get_document_service, get_report_service, get_project_pub
 from ..services.crawler import OpenAlexService
 
 from ..services import StudyResourceService, get_study_service
-from ..services.study import Study, StudyCreate, transform_to_output_studies
+
+from ..utils.dto import Study, StudyCreate, ReportSources, Report, ReportFlagUpdate, ReportFlag, Tag, tags_to_dto, studies_to_dto, report_flag_to_dto
 
 load_dotenv()
 
@@ -45,30 +45,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified_api_call)])
 
-class ReportSources(BaseModel):
-    doi: str
-    links: List[str]
-
-class Report(BaseModel):
-    reportId: int
-    year: int 
-    title: str
-    abstract: Optional[str]
-    trialId: Optional[str]
-    authors: List[str]
-    createdAt: Optional[str]
-    updatedAt: Optional[str]
-
-class ReportFlagUpdate(BaseModel):
-    message: str
-    public: bool = False
-
-class ReportFlag(BaseModel):
-    reportId: int
-    createdBy: str
-    message: str
-    public: bool
-    createdAt: str
 
 class StudyStatus(str, enum.Enum):
     closed = "Closed"
@@ -110,15 +86,6 @@ report_id_path = Path(..., description="ReportID")
 """
 Study Endpoints
 """
-
-def transform_to_output_report_flag(flag: DbReportFlag) -> ReportFlag:
-    return ReportFlag(
-        reportId=flag.CRGReportID,
-        createdBy=flag.CreatedBy,
-        message=flag.Message,
-        public=flag.Public,
-        createdAt=flag.DateCreated.isoformat(),
-    )
 
 @router.put("/studies", summary="Add new study to meerkat.")
 async def add_study(study_params: StudyCreate, study_service : StudyResourceService = Depends(get_study_service)) -> Study:
@@ -179,16 +146,19 @@ async def get_study_date_by_id(study_id: int = study_id_path, study_repo : Study
     return result
 
 @router.get("/studies/{study_id}/interventions", summary="Get interventions for a specific study (e.g. 'Placebo', 'Group Therapy', ...)")
-async def get_study_interventions_single(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[Dict[str, Any]]:
-    return await study_repo.get_study_interventions_single(study_id)
+async def get_study_interventions_single(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[Tag]:
+    result = await study_repo.get_study_interventions_single(study_id)
+    return tags_to_dto(result)
 
 @router.get("/studies/{study_id}/conditions", summary="Get the health conditions of participants in a specific study (e.g., 'COVID-19', 'Diabetes', ...).")
-async def get_study_conditions_single(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[Dict[str, Any]]:
-    return await study_repo.get_study_conditions_single(study_id)
+async def get_study_conditions_single(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[Tag]:
+    result = await study_repo.get_study_conditions_single(study_id)
+    return tags_to_dto(result)
 
 @router.get("/studies/{study_id}/outcomes", summary="Get outcomes for a specific study (e.g. 'Mortality', 'Hospitalization', ...)")
-async def get_study_outcomes_single(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[Dict[str, Any]]:
-    return await study_repo.get_study_outcomes_single(study_id)
+async def get_study_outcomes_single(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[Tag]:
+    result = await study_repo.get_study_outcomes_single(study_id)
+    return tags_to_dto(result)
 
 @router.get("/studies/{study_id}/participants", summary="Get participant description for a specific study (e.g. Male, Female, Adult, Child, ...)")
 async def get_study_participants_single(study_id : int = study_id_path, study_repo : StudyRepository = Depends(get_study_repo)) -> List[Dict[str, Any]]:
@@ -205,7 +175,7 @@ async def get_study_persons_single(study_id : int = study_id_path, cutoff: str =
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
 async def get_study_by_id_legacy(study: DbStudy = Depends(get_study_by_id), user_id = Depends(get_user_id)) -> Study:
     await post_report_event(-1, Event(event_type=f"study::{study.CRGStudyID}::visted", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
-    return transform_to_output_studies([study])[0]
+    return studies_to_dto([study])[0]
 
 
 """
@@ -274,7 +244,7 @@ async def get_report_studies_by_id(
     report_repo : ReportRepository = Depends(get_report_repo)
 ) -> List[Study]:
     result = await report_repo.get_linked_studies(report_id, date_from, date_to)
-    return transform_to_output_studies(result)
+    return studies_to_dto(result)
 
 @router.put("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
 async def uploaed_pdf(report_id: int = report_id_path, file: UploadFile = File(None, description="PDF file to upload"), document_service : DocumentService = Depends(get_document_service), pubsub_service : ProjectPubSubService = Depends(get_project_pubsub_service)) -> Dict[str, Any]:
@@ -359,7 +329,7 @@ async def get_report_flag(report_id: int = report_id_path, report_repo: ReportRe
     if flag is None:
         return None
 
-    return transform_to_output_report_flag(flag)
+    return report_flag_to_dto(flag)
 
 @router.put("/reports/{report_id}/flag", summary="Create or edit your report flag for a specific report.")
 async def upsert_report_flag(
@@ -374,7 +344,7 @@ async def upsert_report_flag(
             public=payload.public,
         )
         await report_repo.commit()
-        return transform_to_output_report_flag(flag)
+        return report_flag_to_dto(flag)
     except:
         await report_repo.roolback()
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
@@ -439,25 +409,28 @@ async def get_all_design(ids: List[int] = Query(None,description="If you are onl
 async def get_study_interventions(study_ids: List[int] = study_ids_query, study_repo : StudyRepository = Depends(get_study_repo)) -> Dict[int, List[Dict[str, Any]]]:
     return await study_repo.get_study_interventions(study_ids)
 
-@router.get("/interventions", summary="Get all intervention items or filter them by id." )
-async def get_all_interventions(ids: List[int] = Query(None,description="If you are only interested in specific interventions. Leave this blank for retrieving all interventions."),aspect_repo : AspectRepository = Depends(get_aspect_repo)) -> List[DbIntervention]:
-    return await aspect_repo.get_all_interventions(ids)
+@router.get("/interventions", summary="Get all intervention items or filter them by id.", response_model_exclude_none=True)
+async def get_all_interventions(ids: List[int] = Query(None,description="If you are only interested in specific interventions. Leave this blank for retrieving all interventions."),aspect_repo : AspectRepository = Depends(get_aspect_repo)) -> List[Tag]:
+    result = await aspect_repo.get_all_interventions(ids)
+    return tags_to_dto(result)
 
 @router.get("/conditions/by_studies", summary="Get conditions grouped by studies.")
 async def get_study_conditions(study_ids: List[int] = study_ids_query, study_repo : StudyRepository = Depends(get_study_repo)):
     return await study_repo.get_study_conditions(study_ids)
 
-@router.get("/conditions", summary="Get all condition items or filter them by id.", description="Conditions might be for example 'Diabetes', 'Schizophrenia', ... ") 
-async def get_all_conditions(ids: List[int] = Query(None, description="If you are only interested in specific conditions. Leave this blank for retrieving all conditions."), aspect_repo : AspectRepository = Depends(get_aspect_repo)) -> List[DbCondition]:
-    return await aspect_repo.get_all_conditions(ids)
+@router.get("/conditions", summary="Get all condition items or filter them by id.", description="Conditions might be for example 'Diabetes', 'Schizophrenia', ... ", response_model_exclude_none=True) 
+async def get_all_conditions(ids: List[int] = Query(None, description="If you are only interested in specific conditions. Leave this blank for retrieving all conditions."), aspect_repo : AspectRepository = Depends(get_aspect_repo)) -> List[Tag]:
+    result = await aspect_repo.get_all_conditions(ids)
+    return tags_to_dto(result)
 
 @router.get("/outcomes/by_studies", summary="Get outcomes grouped by studies.")
 async def get_study_outcomes(study_ids: List[int] = study_ids_query, study_repo : StudyRepository = Depends(get_study_repo)):
     return await study_repo.get_study_outcomes(study_ids)
 
-@router.get("/outcomes", summary="Get all study outcome items or filter them by id.", description="Outcomes might be for example 'Mortality', 'Quality of Life', etc. These items are linked to studies.")
-async def get_all_outcomes(ids: List[int] = Query(None,description="If you are only interested in specific outcomes. Leave this blank for retrieving all outcomes."), aspect_repo : AspectRepository = Depends(get_aspect_repo)) -> List[DbOutcome]:
-    return await aspect_repo.get_all_outcomes(ids)
+@router.get("/outcomes", summary="Get all study outcome items or filter them by id.", description="Outcomes might be for example 'Mortality', 'Quality of Life', etc. These items are linked to studies.", response_model_exclude_none=True)
+async def get_all_outcomes(ids: List[int] = Query(None,description="If you are only interested in specific outcomes. Leave this blank for retrieving all outcomes."), aspect_repo : AspectRepository = Depends(get_aspect_repo)) -> List[Tag]:
+    result = await aspect_repo.get_all_outcomes(ids)
+    return tags_to_dto(result)
 
 @router.get("/countries", summary="Get all study countries or filter them by prefix.")
 async def get_all_countries(prefix: Optional[str] = Query(None, description="Filter countries by prefix (case-insensitive)."), aspect_repo : AspectRepository = Depends(get_aspect_repo)) -> List[str]:    
@@ -469,4 +442,4 @@ Other Endpoints
 
 @router.get("/trial/studies", include_in_schema=False)
 async def get_possible_trial_ids_by_report(study_repo: StudyRepository = Depends(get_study_repo)):
-    await study_repo.get_all_studies_connected_to_trial_id()
+    return await study_repo.get_all_studies_connected_to_trial_id()

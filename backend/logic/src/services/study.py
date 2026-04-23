@@ -1,46 +1,7 @@
 from ..database.repositories.study import StudyRepository
+from ..utils.dto import StudyCreate, studies_to_dto
 
-from typing import List, Optional
-from pydantic import BaseModel
-
-class Study(BaseModel):
-    studyId: int
-    shortName: str
-    status: str
-    countries: List[str]
-    numberParticipants: Optional[str]
-    duration: Optional[str]
-    comparison: Optional[str]
-    trialId: Optional[str]
-    createdAt: Optional[str]
-    updatedAt: Optional[str]
-
-class StudyCreate(BaseModel):
-    shortName: str
-    status: str
-    countries: List[str]
-    numberParticipants: Optional[str]
-    duration: Optional[str]
-    comparison: Optional[str]
-    trialId: Optional[str] = None
-
-def transform_to_output_studies(studies):
-    result = []
-    for study in studies:
-        output_study = Study(
-            studyId=study.CRGStudyID,
-            shortName=study.ShortName,
-            numberParticipants=study.NumberParticipants,
-            duration=study.Duration,
-            comparison=study.Comparison,
-            countries=study.Countries.split("//"),
-            createdAt=study.DateEntered,
-            updatedAt=study.DateEdited,
-            status=study.StatusofStudy,
-            trialId=study.ISRCTN,
-        )
-        result.append(output_study)
-    return result
+from typing import List
 
 class StudyResourceService:
     def __init__(self, study_repo : StudyRepository):
@@ -57,11 +18,11 @@ class StudyResourceService:
                     comparison=study.comparison,
             )
             await self.study_repo.commit()
-            return transform_to_output_studies([new_study])[0]
+            return studies_to_dto([new_study])[0]
         except:
             await self.study_repo.rollback()
             raise
 
     async def get_studies(self, study_ids : List[int]):
         result = await self.study_repo.get_studies(study_ids)
-        return transform_to_output_studies(result)
+        return studies_to_dto(result)

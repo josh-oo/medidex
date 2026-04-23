@@ -351,63 +351,63 @@ class StudyRepository:
         return []
     
     async def get_all_studies_connected_to_trial_id(self):
-        # Register REGEXP for SQLite
-        self.db.connection().connection.create_function("REGEXP", 2, lambda expr, item: 1 if item and re.search(expr, item) else 0)
+        # Define the reusable regex pattern block for PostgreSQL (~ operator)
+        regex_conditions = [
+            "{col} ~ 'ISRCTN[0-9]{{8}}'",
+            "{col} ~ 'ChiCTR[0-9]{{10}}'",
+            "{col} ~ 'ChiCTR\\.TRC\\.[0-9]{{8}}'",
+            "{col} ~ 'ChiCTR\\.IOR\\.[0-9]{{8}}'",
+            "{col} ~ 'ChiCTR-(INR|IPR|POC|IIR|IOQ|OPC)-[0-9]{{8}}'",
+            "{col} ~ 'ACTR(N|[0-9])[0-9]{{14}}'",
+            "{col} ~ 'CTRI(/|-)[0-9]{{4}}(/|-)[0-9]{{2,3}}(/|-)[0-9]{{6}}'",
+            "{col} ~ 'NCT[0-9]{{8}}'",
+            "{col} ~ 'DRKS[0-9]{{8}}'",
+            "{col} ~ 'NL-OMON[0-9]{{5}}'",
+            "{col} ~ 'NL[0-9]{{4}}'",
+            "{col} ~ 'IRCT[0-9]{{11,13}}N[0-9]+'",
+            "{col} ~ 'KCT[0-9]{{7}}'",
+            "{col} ~ 'TCTR[0-9]{{11}}'",
+            "{col} ~ 'RBR-.{{7}}'",
+            "{col} ~ 'CTIS[0-9]{{4}}-[0-9]{{6}}-[0-9]{{2}}-[0-9]{{2}}'",
+            "{col} ~ '(JPRN-)?UMIN[0-9]{{9}}'",
+            "{col} ~ '(JPRN-)?JapicCTI-[0-9]{{6}}'",
+            "{col} ~ 'JPRN-jRCTs?[0-9]{{9,10}}'",
+            "{col} ~ 'EUCTR[0-9]{{4}}-[0-9]{{6}}-[0-9]{{2}}'",
+            "{col} ~ 'ITMCTR[0-9]{{10}}'",
+            "{col} ~ 'PACTR[0-9]{{15}}'",
+            "{col} ~ 'NTR[0-9]{{4,5}}'",
+            "{col} ~ 'UKCRNID[0-9]{{4,5}}'",
+            "{col} ~ 'SLCTR-[0-9]{{4}}-[0-9]{{3}}'",
+            "{col} ~ 'HKCTR-[0-9]{{4}}'",
+            "{col} ~ 'M[0-9]{{2}}-[0-9]{{3}}'",
+            "{col} ~ 'MCT-[0-9]{{5}}'",
+        ]
 
-        # Define the reusable regex pattern block
-        query_regex = """
-            (COLUMN_NAME REGEXP 'ISRCTN[0-9]{8}'
-            OR COLUMN_NAME REGEXP 'ChiCTR[0-9]{10}'
-            OR COLUMN_NAME REGEXP 'ChiCTR\\.TRC\\.[0-9]{8}'
-            OR COLUMN_NAME REGEXP 'ChiCTR\\.IOR\\.[0-9]{8}'
-            OR COLUMN_NAME REGEXP 'ChiCTR-(INR|IPR|POC|IIR|IOQ|OPC)-[0-9]{8}'
-            OR COLUMN_NAME REGEXP 'ACTR(N|[0-9])[0-9]{14}'
-            OR COLUMN_NAME REGEXP 'CTRI(/|-)[0-9]{4}(/|-)[0-9]{2,3}(/|-)[0-9]{6}'
-            OR COLUMN_NAME REGEXP 'NCT[0-9]{8}'
-            OR COLUMN_NAME REGEXP 'DRKS[0-9]{8}'
-            OR COLUMN_NAME REGEXP 'NL-OMON[0-9]{5}'
-            OR COLUMN_NAME REGEXP 'NL[0-9]{4}'
-            OR COLUMN_NAME REGEXP 'IRCT[0-9]{11,13}N[0-9]+'
-            OR COLUMN_NAME REGEXP 'KCT[0-9]{7}'
-            OR COLUMN_NAME REGEXP 'TCTR[0-9]{11}'
-            OR COLUMN_NAME REGEXP 'RBR-.{7}'
-            OR COLUMN_NAME REGEXP 'CTIS[0-9]{4}-[0-9]{6}-[0-9]{2}-[0-9]{2}'
-            OR COLUMN_NAME REGEXP '(JPRN-)?UMIN[0-9]{9}'
-            OR COLUMN_NAME REGEXP '(JPRN-)?JapicCTI-[0-9]{6}'
-            OR COLUMN_NAME REGEXP 'JPRN-jRCTs?[0-9]{9,10}'
-            OR COLUMN_NAME REGEXP 'EUCTR[0-9]{4}-[0-9]{6}-[0-9]{2}'
-            OR COLUMN_NAME REGEXP 'ITMCTR[0-9]{10}'
-            OR COLUMN_NAME REGEXP 'PACTR[0-9]{15}'
-            OR COLUMN_NAME REGEXP 'NTR[0-9]{4,5}'
-            OR COLUMN_NAME REGEXP 'UKCRNID[0-9]{4,5}'
-            OR COLUMN_NAME REGEXP 'SLCTR-[0-9]{4}-[0-9]{3}'
-            OR COLUMN_NAME REGEXP 'HKCTR-[0-9]{4}'
-            OR COLUMN_NAME REGEXP 'M[0-9]{2}-[0-9]{3}'
-            OR COLUMN_NAME REGEXP 'MCT-[0-9]{5}')
-        """
+        def build_regex_block(col):
+            return " OR ".join([cond.format(col=col) for cond in regex_conditions])
 
         # --- Query 1: studies with trial IDs in ShortName ---
         query_studies = text(f"""
-            SELECT CRGStudyID
-            FROM tblStudy
-            WHERE FALSE OR {query_regex.replace("COLUMN_NAME", "ShortName")}
+            SELECT "CRGStudyID"
+            FROM "tblStudy"
+            WHERE {build_regex_block('"ShortName"')}
         """)
         result_studies = (await self.db.execute(query_studies)).fetchall()
         all_studies = [row[0] for row in result_studies]
 
         # --- Query 2: reports with single-trial studies in Authors field ---
         query_reports = text(f"""
-            SELECT sr.CRGStudyID
-            FROM tblReport r
-            JOIN tblStudyReport sr ON r.CRGReportID = sr.CRGReportID
-            WHERE r.Authors NOT LIKE '%//%'
-            AND sr.CRGReportID IN (
-                SELECT CRGReportID
-                FROM tblStudyReport
-                GROUP BY CRGReportID
-                HAVING COUNT(DISTINCT CRGStudyID) = 1
+            SELECT sr."CRGStudyID"
+            FROM "tblReport" r
+            JOIN "tblStudyReport" sr ON r."CRGReportID" = sr."CRGReportID"
+            WHERE r."Authors" NOT LIKE '%//%'
+            AND sr."CRGReportID" IN (
+                SELECT "CRGReportID"
+                FROM "tblStudyReport"
+                GROUP BY "CRGReportID"
+                HAVING COUNT(DISTINCT "CRGStudyID") = 1
             )
-            AND {query_regex.replace("COLUMN_NAME", "r.Authors")}
+            AND {build_regex_block('r."Authors"')}
         """)
         result_reports = (await self.db.execute(query_reports)).fetchall()
         all_reports = [row[0] for row in result_reports]

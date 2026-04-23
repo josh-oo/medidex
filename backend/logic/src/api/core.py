@@ -1,7 +1,6 @@
 from fastapi import APIRouter
 from fastapi import Query, Path, HTTPException, Depends
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from typing import List, Optional, Tuple, Set
 import os
@@ -14,7 +13,7 @@ import asyncio
 import enum
 from .auth import is_verified_api_call, is_admin, get_user_id
 
-from ..database import get_study_repo, get_project_repo, get_report_repo
+from ..database import get_project_repo, get_report_repo
 
 from ..database.repositories.study import DuplicateShortNameError
 from ..database import ReportRepository
@@ -30,7 +29,8 @@ from ..services import get_vectorstore_service, VectorstoreService
 
 from ..services import get_embedding_service, EmbeddingService
 
-from .resources import Study, StudyCreate, transform_to_output_studies
+from ..utils.dto import StudyCreate, Study, Tag, SimilarStudy, studies_to_dto, similar_studies_to_dto
+from datetime import datetime
 
 load_dotenv()
 
@@ -41,21 +41,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["logic"])
 
-cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
+cutoff_query : Optional[datetime] = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
 
-k_query = Query(10, description="Maximum number of returned results.")
+k_query : int = Query(10, description="Maximum number of returned results.")
 
 # Track background tasks to prevent resource leaks
 background_tasks: set = set()
-
-class SimilarStudy(BaseModel):
-    relevance: float
-    study: Study
-
-class TagResponse(BaseModel):
-    id: str
-    keyword: str
-    relevance: str
 
 class TagCategories(str, enum.Enum):
     default = 'default'
@@ -63,24 +54,6 @@ class TagCategories(str, enum.Enum):
     conditions = 'conditions'
     outcomes = 'outcomes'
     participants = 'participants'
-
-def transform_raw_similar_studies(studies):
-    results = []
-    for i in range(0, len(studies['Relevance'])):
-        study = Study(
-            studyId=studies['CRGStudyID'][i],
-            shortName=studies['ShortName'][i],
-            numberParticipants=studies['NumberParticipants'][i],
-            duration=studies['Duration'][i],
-            comparison=studies['Comparison'][i],
-            countries=studies['Countries'][i].split("//"),
-            createdAt=studies['DateEntered'][i],
-            updatedAt=studies['DateEdited'][i],
-            status=studies['StatusofStudy'][i],
-            trialId=studies['ISRCTN'][i],
-        )
-        results.append(SimilarStudy(relevance=studies['Relevance'][i], study=study))
-    return results
 
 async def get_vectorized_and_ready_report_ids(
     report_ids: List[int],
@@ -127,25 +100,14 @@ async def check_report_access(
 
     return project_id
 
-@router.get("/{tag_category}/{tag_value}/related-studies", dependencies=[Depends(is_verified_api_call)], summary="Get studies related to a specific tag (intervention, outcome, ...) currently only vector-similarity search is available.", description="Retrieve studies that are related to a specific tag value (e.g., 'Placebo' for interventions) using vector similarity search based on the embedding of the tag value. The similarity search is done at runtime.")
-async def get_aspect_related_studies(tag_category: TagCategories = Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value: str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), k : int = k_query, study_similarity_service : StudySimilaritySearchService = Depends(get_study_similarity_service), embedding_service : EmbeddingService = Depends(get_embedding_service)):
-    embeddings = await embedding_service.embed_aspect(tag_value)
-
-    aspect = tag_category
-    aspect_mapping = {'interventions': 'intervention', 'conditions': 'condition', 'outcomes': 'outcome'}
-    if tag_category in aspect_mapping.keys():
-        aspect = aspect_mapping[tag_category]
-
-    return await study_similarity_service.get_similar_study_by_query(embeddings['embedding'],aspect, None, k, [], [], [], return_details=False)
-
 @router.get("/reports/{report_id}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a project based on its embedding vectors.")
-async def similar_tags_by_report(report_id: int, tag_category: TagCategories =Query(TagCategories.default), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), k : int = k_query, tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)):
+async def similar_tags_by_report(report_id: int, tag_category: TagCategories =Query(TagCategories.default), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), k : int = k_query, tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[Tag]:
     if tag_category == TagCategories.default:
         raise HTTPException(status_code=400, detail="No tags for 'default' embedding.")
     return await tag_similarity_service.get_similar_tags_by_id(report_id, tag_category, sources, k)
 
 @router.get("/{tag_category}/{tag_value}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a project based on its embedding vectors.")
-async def similar_tags(tag_category: TagCategories =Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value : str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), k : int = k_query, tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[TagResponse]:
+async def similar_tags(tag_category: TagCategories =Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value : str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), k : int = k_query, tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[Tag]:
     if tag_category == TagCategories.default:
         raise HTTPException(status_code=400, detail="No tags for 'default' embedding.")
     return await tag_similarity_service.get_similar_tags_by_string(tag_value, tag_category, sources, k)
@@ -153,7 +115,6 @@ async def similar_tags(tag_category: TagCategories =Path(..., description="The t
 @router.get("/reports/{report_id}/similar-studies", dependencies=[Depends(is_verified_api_call), Depends(check_report_access)], summary="")
 async def similarity_search_studies_by_id(
     report_id: int,
-    aspect: TagCategories = Query(TagCategories.default, description="This value is rarely needed. Just if you want to search studies based on a certain aspect."),
     cutoff: str = Query(None),
     k: int = Query(10),
     source: str = Query(None),
@@ -174,7 +135,6 @@ async def similarity_search_studies_by_id(
     if source is None:
         result = await study_similarity_service.get_similar_studies_by_id(
             report_id,
-            aspect,
             cutoff,
             k,
             negative_studies,
@@ -188,14 +148,13 @@ async def similarity_search_studies_by_id(
 
         result = await study_similarity_service.get_similar_studies_by_id(
             report_id,
-            aspect,
             cutoff,
             k,
             negative_studies,
             negative_reports,
             return_details,
         )
-    studies = transform_raw_similar_studies(result)
+    studies = similar_studies_to_dto(result)
     return studies
 
 @router.get("/reports/{report_id}/similar-studies/tags", dependencies=[Depends(is_verified_api_call), Depends(check_report_access)], summary="")
@@ -249,18 +208,18 @@ async def link_to_new_study(
     user_id: Optional[str] = Depends(get_user_id),
     project_id: str = Depends(check_report_access),
     pubsub_service: ProjectPubSubService = Depends(get_project_pubsub_service),
-):
+) -> Study:
     try:
         new_study = await linkage_service.create_study_and_link_to_report(report_id, study, user_id)
 
         payload = {"user": user_id, "event_type": "study::links::changed::new", "report_id": report_id, "original_timestamp": "-"}
         logger.info("ReportInteraction", extra={"payload": payload})
 
-        output_study = transform_to_output_studies([new_study])[0]
+        study_dto = studies_to_dto([new_study])[0]
 
         await pubsub_service.publish_project_update(project_id)
 
-        return output_study
+        return study_dto
     except DuplicateShortNameError:
         raise HTTPException(status_code=409, detail="Study shortName already exists")
 

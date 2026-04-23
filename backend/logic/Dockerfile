@@ -1,13 +1,4 @@
-# Stage 1: Compile the .proto file
-FROM python:3.13.11-slim AS proto-builder
-
-WORKDIR /proto
-RUN pip3 install --no-cache-dir grpcio-tools==1.76.0
-
-COPY tools/utils/embedding.proto .
-RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. embedding.proto
-
-# Stage 2: Main app
+# Main app
 FROM python:3.13.11-slim
 
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
@@ -22,10 +13,6 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY logic/main.py .
 COPY logic/src/ ./src/
 COPY logic/src_agent/ ./src_agent/
-
-# 👇 Copy compiled proto files from the builder stage
-COPY --from=proto-builder /proto/embedding_pb2.py .
-COPY --from=proto-builder /proto/embedding_pb2_grpc.py .
 
 ARG APP_UID=1000
 ARG APP_GID=1000

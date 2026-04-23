@@ -39,7 +39,7 @@ services:
 
   qdrant:
     container_name: qdrant
-    image: qdrant/qdrant:v1-unprivileged
+    image: qdrant/qdrant:v1.17.1-unprivileged
     restart: always
     expose:
       - 6333
@@ -51,32 +51,49 @@ services:
       # - ./backend/_data/qdrant_config/production.yaml:/qdrant/config/production.yaml
     ports:
       - "6333:6333"
+      - "6334:6334"
     networks:
       - internal_net
 
   embedding:
     container_name: embedding
-    build:
-      context: ./backend
-      dockerfile: embedding/Dockerfile
-      args:
-        - EMBEDDING_MODEL_PATH=${EMBEDDING_MODEL_PATH}
-        - EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
-        - EMBEDDING_MODEL_DTYPE=${EMBEDDING_MODEL_DTYPE}
-        - EMBEDDING_MODEL_TOKENIZER_PATH=${EMBEDDING_MODEL_TOKENIZER_PATH}
-        - EMBEDDING_MODEL_TOKENIZER_REVISION=${EMBEDDING_MODEL_TOKENIZER_REVISION}
-        - EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
-    expose:
-      - 50051
-    read_only: true
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest
+    command: >
+      --model-id ${EMBEDDING_MODEL_ID}
+      --hf-token ${HF_TOKEN}
+      --revision ${EMBEDDING_MODEL_REVISION}
+      --max-batch-tokens 4096
+    ports:
+      - "8080:80"
+    volumes:
+      - ./backend/_data/embeddings:/data
+    pull_policy: always
     networks:
       - internal_net
-    environment:
-      - EMBEDDING_MODEL_PATH=${EMBEDDING_MODEL_PATH}
-      - EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
-      - EMBEDDING_MODEL_DIM=${EMBEDDING_MODEL_DIM}
-      - EMBEDDING_MODEL_MAX_INPUT_LENGTH=${EMBEDDING_MODEL_MAX_INPUT_LENGTH}
-      - EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
+
+  #embedding:
+  #  container_name: embedding
+  #  build:
+  #    context: ./backend
+  #    dockerfile: embedding/Dockerfile
+  #    args:
+  #      - EMBEDDING_MODEL_PATH=${EMBEDDING_MODEL_PATH}
+  #      - EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
+  #      - EMBEDDING_MODEL_DTYPE=${EMBEDDING_MODEL_DTYPE}
+  #      - EMBEDDING_MODEL_TOKENIZER_PATH=${EMBEDDING_MODEL_TOKENIZER_PATH}
+  #      - EMBEDDING_MODEL_TOKENIZER_REVISION=${EMBEDDING_MODEL_TOKENIZER_REVISION}
+  #      - EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
+  #  expose:
+  #    - 50051
+  #  read_only: true
+  #  networks:
+  #    - internal_net
+  #  environment:
+  #    - EMBEDDING_MODEL_PATH=${EMBEDDING_MODEL_PATH}
+  #    - EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
+  #    - EMBEDDING_MODEL_DIM=${EMBEDDING_MODEL_DIM}
+  #    - EMBEDDING_MODEL_MAX_INPUT_LENGTH=${EMBEDDING_MODEL_MAX_INPUT_LENGTH}
+  #    - EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
 
   logic:
     container_name: logic
@@ -95,8 +112,8 @@ services:
       - /var/tmp
     environment:
       - DATABASE_VOLUME=/data
-      - EMBEDDING_SERVICE_HOST=${EMBEDDING_SERVICE_HOST}
-      - EMBEDDING_SERVICE_PORT=${EMBEDDING_SERVICE_PORT}
+      - EMBEDDING_MODEL_BASE_URL=${EMBEDDING_MODEL_BASE_URL}
+      - EMBEDDING_MODEL_API_KEY=${EMBEDDING_MODEL_API_KEY}
       - VECTORSTORE_SERVICE_HOST=${VECTORSTORE_SERVICE_HOST}
       - VECTORSTORE_SERVICE_PORT=${VECTORSTORE_SERVICE_PORT}
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME}

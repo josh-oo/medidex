@@ -2,13 +2,11 @@
 from fastapi import APIRouter, Request
 from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks, Body, Form
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any, Tuple, Set
 import json
 import logging
 import io
 
-from datetime import datetime
 import httpx
 
 from ..utils.trial_registration_id import extract_trial_id
@@ -44,12 +42,7 @@ from ..background.wrapper import (
     run_start_automation_background,
 )
 
-from .resources import (
-    Report,
-    Study,
-    StudyCreate,
-    transform_to_output_studies,
-)
+from ..utils.dto import Report, StudyCreate,BatchedReport, Project, ProjectAssignee, ProjectDetails, ProjectTask, studies_to_dto
 
 router = APIRouter(tags=["projects"])
 
@@ -63,37 +56,6 @@ write_semaphore = asyncio.Semaphore(1)
 vectorstore_semaphore = asyncio.Semaphore(8)
 
 project_id_path = Path(..., description="The projects's id")
-
-class ProjectAssignee(BaseModel):
-    userId : str
-    numberReportsLinked: int = 0
-
-class Project(BaseModel):
-    projectId: str
-    name: str
-    owner: str
-    createdAt: datetime
-    numberReportsReadyForProcessing: int = 0
-
-class ProjectDetails(Project):
-    numberReportsTotal: int
-    numberReportsPreProcessed: int = 0
-    numberReportsWithPdf: int = 0
-    numberReportsReadyForReview: int = 0
-    numberReportsAutoSearchedPdf: int = 0
-    numberReportsConfirmed: int = 0
-    assignees: List[ProjectAssignee] = Field(default_factory=list)
-
-class ProjectTask(BaseModel):
-    project: Project
-    numberReportsProcessed: int
-
-class BatchedReport(BaseModel):
-    report: Report
-    hasPdf: Optional[bool]
-    flag: Optional[str]
-    assignedStudies: List[Study] = Field(default_factory=list)
-
 
 class _InMemoryPdfUpload:
     def __init__(self, content: bytes, filename: str = "autosearch.pdf"):
@@ -692,7 +654,7 @@ async def get_project_reports(
         authors = report.Authors.split("//") if report.Authors else []
         linked_studies = []
         if report.CRGReportID in all_linked_studies.keys():
-            linked_studies = transform_to_output_studies(all_linked_studies[report.CRGReportID])
+            linked_studies = studies_to_dto(all_linked_studies[report.CRGReportID])
 
         result.append(
             BatchedReport(

@@ -315,23 +315,27 @@ class ReportRepository:
         return True
 
 
-    async def get_pdf_availabilities(self, report_ids: List[int]) -> Dict[int, Optional[int]]:
+    async def get_pdf_availabilities(self, report_ids: List[int]) -> List[int]:
         report_ids = report_ids or []
         if not report_ids:
-            return {}
+            return []
 
-        stmt = (
-            select(Report.CRGReportID, Report.ReportNumber)
-            .join(ReportAdded, Report.CRGReportID == ReportAdded.CRGReportID)
-            .where(Report.CRGReportID.in_(report_ids))
-            .where(Report.ReportNumber >= 0)
-            .where(ReportAdded.AutoSearchedPdf.is_(True))
-        )
+        # Get all ReportAdded entries for the given report_ids
+        report_added_stmt = select(ReportAdded.CRGReportID, ReportAdded.AutoSearchedPdf).where(ReportAdded.CRGReportID.in_(report_ids))
+        report_added_rows = (await self.db.execute(report_added_stmt)).all()
+        report_added_map = {rid: auto for rid, auto in report_added_rows}
 
-        rows = await self.db.execute(stmt)
+        # Get all reports (with ReportNumber) for the given report_ids
+        report_stmt = select(Report.CRGReportID, Report.ReportNumber).where(Report.CRGReportID.in_(report_ids)).where(Report.ReportNumber >= 0)
+        report_rows = (await self.db.execute(report_stmt)).all()
 
         result = []
-        for report_id, report_number in rows.all():
+        for report_id, report_number in report_rows:
+            # If there is a ReportAdded entry, require AutoSearchedPdf == True
+            if report_id in report_added_map:
+                if not report_added_map[report_id]:
+                    continue
+            # If there is no ReportAdded entry, ignore AutoSearchedPdf
             if report_number == 0:
                 result.append(report_id)
                 continue

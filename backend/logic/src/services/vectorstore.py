@@ -212,7 +212,7 @@ class VectorstoreService():
             with_vectors=True,
             with_payload=False,
         )
-        vectors = np.array([point.vector['default'] for point in results])
+        vectors = np.array([point.vector for point in results])
         # Compute cosine similarity matrix
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         normalized = vectors / norms
@@ -251,7 +251,7 @@ class VectorstoreService():
             text_to_process.append(abstract)
         text_to_process = "\n".join(text_to_process)
     
-        vectors = await self.embedding_service.embed_report(report.CRGReportID, text_to_process)
+        vector = await self.embedding_service.embed(text_to_process)
 
         new_id = transform_to_uuid(report.CRGReportID)
         payload = {
@@ -264,20 +264,20 @@ class VectorstoreService():
             'belongs_to_trial_id': False,
             'temporary': {},
         }
-        new_vectors = {"default": vectors.pop("embedding"), "authors": vectors.pop("author_embedding")}
-        for key, value in vectors.items():
-            new_vectors[key] = value
+        #new_vectors = {"default": vectors.pop("embedding")}#, "authors": vectors.pop("author_embedding")}
+        #for key, value in vectors.items():
+        #    new_vectors[key] = value
 
-        new_vectors.pop("model_id")
+        #new_vectors.pop("model_id")
+        #new_vectors = {"default": vector}
 
-        points = [PointStruct(id=new_id,vector=new_vectors, payload=payload)]
+        points = [PointStruct(id=new_id,vector=vector, payload=payload)]
         await self.client.upsert(wait=True, collection_name=COLLECTION_NAME, points=points)
 
-    async def search_report(self, query : Any, aspect : str ,k : int, filter : Any):
+    async def search_report(self, query : Any ,k : int, filter : Any):
         return await self.client.query_points_groups(
                 collection_name=COLLECTION_NAME,
                 query=query,
-                using=aspect,
                 group_by="belongs_to_study",  # Path of the field to group by
                 limit=k,  # Max amount of groups
                 group_size=1,  # Max amount of points per group
@@ -286,10 +286,10 @@ class VectorstoreService():
             )
     
     async def get_similar_tags_by_string(self, text : str, sources: List[str], aspect: str, k: int):
-        embeddings = await self.embedding_service.embed_aspect(text)
-        return await self.get_similar_tags_by_embedding(embeddings['embedding'], sources, aspect, k)
+        vector = await self.embedding_service.embed(text)
+        return await self.get_similar_tags(query=vector, sources=sources, aspect=aspect, k=k)
 
-    async def get_similar_tags_by_embedding(self, embedding : List[float], sources: List[str], aspect: str, k: int):
+    async def get_similar_tags(self, query : Any, sources: List[str], aspect: str, k: int):
     
         #TODO implement more sophisticated tree based search here
 
@@ -308,8 +308,8 @@ class VectorstoreService():
         filter = models.Filter(should=filters)
 
         search_results = await self.client.query_points(
-            collection_name=COLLECTION_NAME + "_tags",
-            query=embedding,
+            collection_name=COLLECTION_NAME,
+            query=query,
             limit=k,
             query_filter=filter,
         )
@@ -333,7 +333,7 @@ class VectorstoreService():
         )
 
         result = await self.client.query_points(
-            collection_name=COLLECTION_NAME + "_tags",
+            collection_name=COLLECTION_NAME,
             query=embedding,
             limit=len(tag_ids),
             query_filter=tag_filter,
@@ -348,7 +348,7 @@ class VectorstoreService():
 
         return related_tags
     
-    def recommendation_query_builder(self, report_id : int, negative_reports : Optional[List[int]]):
+    def build_recommandation_based_on_report_id(self, report_id : int, negative_reports : Optional[List[int]] = None):
 
         if not negative_reports:
             negative_reports = []
@@ -364,8 +364,8 @@ class VectorstoreService():
                     )
                 )
     
-    async def search_similar_studies(self, query : Any, aspect : str, k : int, cutoff : str, excluded_studies : List[int], exclude_trial_related_studies : bool):
-        filters = []
+    async def search_similar_studies(self, query : Any, k : int, cutoff : str, excluded_studies : List[int], exclude_trial_related_studies : bool):
+        filters = [models.FieldCondition(key="is_report",match=models.MatchValue(value=True))]
         if cutoff:
             filters.append(Filter(
                 must=[
@@ -399,7 +399,7 @@ class VectorstoreService():
         
         filter = models.Filter(must=filters)
     
-        search_results = await self.search_report(query,aspect,k,filter)
+        search_results = await self.search_report(query,k,filter)
 
         return search_results.groups
     
