@@ -4,9 +4,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api import auth, resources, core, agents, projects
 from src.api import maintenance
 from src_agent import agent
+from src.database.sessions import init_db
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # This runs ON STARTUP
+    # It creates tables if they do not exist
+    await init_db()
+    yield
 
 # Initialize FastAPI
-app = FastAPI(root_path="/backend/api")
+app = FastAPI(root_path="/backend/api", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

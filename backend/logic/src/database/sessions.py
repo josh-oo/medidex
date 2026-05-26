@@ -2,7 +2,7 @@ import os
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import NullPool, QueuePool
+from sqlmodel import SQLModel
 from sqlmodel import select
 
 from dotenv import load_dotenv
@@ -27,6 +27,10 @@ engine = create_async_engine(
     pool_recycle=3600,  # Recycle connections after 1 hour
     pool_pre_ping=True,  # Verify connections are alive before using them
 )
+
+async def init_db() -> None:
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
 
 AsyncSessionLocal = sessionmaker(
     bind=engine,
