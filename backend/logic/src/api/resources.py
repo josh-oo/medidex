@@ -103,6 +103,7 @@ def load_trial_id_mapping():
 
 cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
 study_ids_query =  Query(None, description="List of CRGStudyIDs (used to filter your results)")
+search_query = Query(None, min_length=3, description="Free-text search query (e.g. 'Aspirin', 'NCT00034892', 'Smith 2019'). At least 3 characters.")
 study_id_path = Path(..., description="CRGStudyID")
 report_ids_query = Query(None, description="List of ReportIDs (used to filter your results)")
 report_id_path = Path(..., description="ReportID")
@@ -127,9 +128,9 @@ async def add_study(study_params: StudyCreate, study_service : StudyResourceServ
     except DuplicateShortNameError:
         raise HTTPException(status_code=409, detail="Shortname already exists")
 
-@router.get("/studies", summary="Get study details for all studies specified in the query.")
-async def get_studies(study_ids: List[int] = study_ids_query, study_service : StudyResourceService = Depends(get_study_service)) -> List[Study]:
-    return await study_service.get_studies(study_ids)
+@router.get("/studies", summary="Get study details for all studies specified in the query.", description="Optionally filter the studies by a free-text search query. The query is matched against the short name, trial registration id, interventions, outcomes, conditions, number of participants and authors of a study. Studies matching in the most of these fields are returned first.")
+async def get_studies(study_ids: List[int] = study_ids_query, q: Optional[str] = search_query, study_service : StudyResourceService = Depends(get_study_service)) -> List[Study]:
+    return await study_service.get_studies(study_ids, q)
 
 @router.get("/studies/reports", include_in_schema=False)
 async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, fields: Optional[List[str]] = Query(None), study_repo : StudyRepository = Depends(get_study_repo)) -> Dict[int, List[DbReport]]:

@@ -7,7 +7,7 @@
 
 # Environments
 **/.venv
-**/.env
+**/.env**
 **/.env.production
 
 **/meerkat.db

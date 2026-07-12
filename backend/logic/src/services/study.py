@@ -62,6 +62,9 @@ class StudyResourceService:
             await self.study_repo.rollback()
             raise
 
-    async def get_studies(self, study_ids : List[int]):
-        result = await self.study_repo.get_studies(study_ids)
+    async def get_studies(self, study_ids : List[int], query : Optional[str] = None):
+        if query:
+            result = await self.study_repo.search_studies(query, study_ids)
+        else:
+            result = await self.study_repo.get_studies(study_ids)
         return transform_to_output_studies(result)

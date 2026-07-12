@@ -2,6 +2,7 @@ import os
 import re
 import json
 
+from sqlalchemy import literal, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, func, text
@@ -87,9 +88,63 @@ class StudyRepository:
                 raise DuplicateShortNameError("ShortName already exists")
             raise
     
-    async def search_studies(self, trial_ids : Optional[List[str]] = None, number_of_participants : Optional[List[int]] = None, authors : Optional[List[str]] = None):
-        study_ids = []
-        return await self.get_studies(study_ids=study_ids)
+    def _search_match_selects(self, pattern : str):
+        # (source table/join, field name exposed to the client, matched value)
+        return [
+            select(Study.CRGStudyID.label("StudyID"), literal("shortName").label("Field"), Study.ShortName.label("Value"))
+                .where(Study.ShortName.ilike(pattern, escape="\\")),
+            select(Study.CRGStudyID, literal("trialId"), Study.TrialRegistrationID)
+                .where(Study.TrialRegistrationID.ilike(pattern, escape="\\")),
+            select(Study.CRGStudyID, literal("trialId"), Study.ISRCTN)
+                .where(Study.ISRCTN.ilike(pattern, escape="\\")),
+            select(Study.CRGStudyID, literal("numberParticipants"), Study.NumberParticipants)
+                .where(Study.NumberParticipants.ilike(pattern, escape="\\")),
+            select(StudyReport.CRGStudyID, literal("trialId"), Report.TrialRegistrationID)
+                .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
+                .where(Report.TrialRegistrationID.ilike(pattern, escape="\\")),
+            select(StudyReport.CRGStudyID, literal("authors"), Report.Authors)
+                .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
+                .where(Report.Authors.ilike(pattern, escape="\\")),
+            select(StudyIntervention.CRGStudyID, literal("interventions"), Intervention.InterventionDescription)
+                .join(Intervention, Intervention.InterventionID == StudyIntervention.InterventionID)
+                .where(Intervention.InterventionDescription.ilike(pattern, escape="\\")),
+            select(StudyOutcome.CRGStudyID, literal("outcomes"), Outcome.OutcomeDescription)
+                .join(Outcome, Outcome.OutcomeID == StudyOutcome.OutcomeID)
+                .where(Outcome.OutcomeDescription.ilike(pattern, escape="\\")),
+            select(StudyCondition.CRGStudyID, literal("conditions"), Condition.HealthCareConditionDescription)
+                .join(Condition, Condition.HealthCareConditionID == StudyCondition.HealthCareConditionID)
+                .where(Condition.HealthCareConditionDescription.ilike(pattern, escape="\\")),
+        ]
+
+    async def search_studies(self, query : str, study_ids: Optional[List[int]] = None) -> List[Study]:
+        # Escape the LIKE wildcards so that a query such as '%' does not match every study.
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+
+        rows = (await self.db.execute(union_all(*self._search_match_selects(pattern)))).all()
+
+        # Which fields (shortName, interventions, ...) each study matched in.
+        matched_fields : Dict[int, set] = {}
+        exact_shortname : set = set()
+        for study_id, field, value in rows:
+            if study_ids and study_id not in study_ids:
+                continue
+            matched_fields.setdefault(study_id, set()).add(field)
+            if field == "shortName" and value.lower() == query.lower():
+                exact_shortname.add(study_id)
+
+        if not matched_fields:
+            return []
+
+        # Rank exact shortname hits first, then the studies matching in the most fields.
+        matched_ids = sorted(
+            matched_fields,
+            key=lambda study_id: (study_id not in exact_shortname, -len(matched_fields[study_id]), study_id),
+        )
+
+        # get_studies does not preserve the order of the ids it is given.
+        studies_by_id = {study.CRGStudyID: study for study in await self.get_studies(study_ids=matched_ids)}
+        return [studies_by_id[study_id] for study_id in matched_ids if study_id in studies_by_id]
 
     async def get_studies(self, study_ids: Optional[List[int]] = None) -> List[Study]:
         stmt = select(Study)
