@@ -245,7 +245,7 @@ class StudyRepository:
 
         return final_result
     
-    async def get_study_interventions(self, study_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
+    async def get_study_interventions(self, study_ids: List[int]):
         if not study_ids:
             return {}
         stmt = (

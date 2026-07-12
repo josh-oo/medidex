@@ -339,10 +339,11 @@ class ReportRepository:
             if report_number == 0:
                 result.append(report_id)
                 continue
-            txt_name = str(report_id).zfill(5) + ".txt"
-            txt_path = os.path.join(FULLTEXT_PATH, txt_name)
-            if os.path.exists(txt_path):
-                result.append(report_id)
+            #txt_name = str(report_id).zfill(5) + ".txt"
+            #txt_path = os.path.join(FULLTEXT_PATH, txt_name)
+            #if os.path.exists(txt_path):
+            #    result.append(report_id)
+            result.append(report_id)
         return result
     
     async def get_pdf_numbers_by_report_id(self, report_id: int) -> int:

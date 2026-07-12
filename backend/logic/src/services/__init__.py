@@ -53,14 +53,14 @@ def get_linkage_service(
 def get_author_feature_service(study_repo : StudyRepository = Depends(get_study_repo)) -> AuthorFeatureService:
     return AuthorFeatureService(study_repo=study_repo)
 
-def get_tag_similarity_service(vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> TagSimilaritySearchService:
-    return TagSimilaritySearchService(vectorstore=vectorstore)
+def get_document_service(report_repo : ReportRepository = Depends(get_report_repo)) -> DocumentService:
+    return DocumentService(report_repo=report_repo, crawler_service=CrawlerService(), docling_service=DoclingService())
+
+def get_tag_similarity_service(vectorstore : VectorstoreService = Depends(get_vectorstore_service), document_service : DocumentService = Depends(get_document_service)) -> TagSimilaritySearchService:
+    return TagSimilaritySearchService(vectorstore=vectorstore, document_service=document_service)
 
 def get_tag_scoring_service(aspect_repo : AspectRepository = Depends(get_aspect_repo), vectorstore : VectorstoreService = Depends(get_vectorstore_service)) -> TagScoringService:
     return TagScoringService(vectorstore=vectorstore, aspect_repo=aspect_repo)
-
-def get_document_service(report_repo : ReportRepository = Depends(get_report_repo)) -> DocumentService:
-    return DocumentService(report_repo=report_repo, crawler_service=CrawlerService(), docling_service=DoclingService())
 
 def get_document_service_project(report_repo : ReportRepository = Depends(get_report_repo)) -> DocumentService:
     return DocumentService(report_repo=report_repo, crawler_service=CrawlerService(), docling_service=DoclingService())

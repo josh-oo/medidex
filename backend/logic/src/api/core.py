@@ -29,7 +29,7 @@ from ..services import get_vectorstore_service, VectorstoreService
 
 from ..services import get_embedding_service, EmbeddingService
 
-from ..utils.dto import StudyCreate, Study, Tag, SimilarStudy, studies_to_dto, similar_studies_to_dto
+from ..utils.dto import StudyCreate, Study, Tag, SimilarStudy, studies_to_dto, similar_studies_to_dto, tags_to_dto
 from datetime import datetime
 
 load_dotenv()
@@ -101,10 +101,10 @@ async def check_report_access(
     return project_id
 
 @router.get("/reports/{report_id}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a project based on its embedding vectors.")
-async def similar_tags_by_report(report_id: int, tag_category: TagCategories =Query(TagCategories.default), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), k : int = k_query, tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[Tag]:
+async def similar_tags_by_report(report_id: int, tag_category: TagCategories =Query(TagCategories.default), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), k : int = k_query, include_fulltext : bool = Query(False), tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[Tag]:
     if tag_category == TagCategories.default:
         raise HTTPException(status_code=400, detail="No tags for 'default' embedding.")
-    return await tag_similarity_service.get_similar_tags_by_id(report_id, tag_category, sources, k)
+    return await tag_similarity_service.get_similar_tags_by_id(report_id, tag_category, sources, k, include_fulltext)
 
 @router.get("/{tag_category}/{tag_value}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a project based on its embedding vectors.")
 async def similar_tags(tag_category: TagCategories =Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value : str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'meerkat' or both)"), k : int = k_query, tag_similarity_service : TagSimilaritySearchService = Depends(get_tag_similarity_service)) -> List[Tag]:
@@ -158,10 +158,12 @@ async def similarity_search_studies_by_id(
     return studies
 
 @router.get("/reports/{report_id}/similar-studies/tags", dependencies=[Depends(is_verified_api_call), Depends(check_report_access)], summary="")
-async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(..., description="The number of related studies considered for retrieving relevant tags."), related_tag_service : RelatedTagSearchService = Depends(get_related_tag_service)):
+async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(..., description="The number of related studies considered for retrieving relevant tags."), related_tag_service : RelatedTagSearchService = Depends(get_related_tag_service)) -> List[Tag]:
     if aspect not in [TagCategories.interventions, TagCategories.conditions, TagCategories.outcomes]:
          raise HTTPException(status_code=501, detail="Not implemented")
-    return await related_tag_service.search_related_tags_by_report_id(report_id, aspect, k, cutoff)
+    result = await related_tag_service.search_related_tags_by_report_id(report_id, aspect, k, cutoff)
+    print(result)
+    return tags_to_dto(result)
 
 @router.put("/reports/{report_id}/studies/{study_id}", dependencies=[Depends(is_verified_api_call), Depends(check_report_access)], summary="Assign studies to a specific report in a project.", status_code=200)
 async def assign_studies(

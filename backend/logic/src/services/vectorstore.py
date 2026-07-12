@@ -342,8 +342,8 @@ class VectorstoreService():
         related_tags = []
         for point in result.points:
             item = {}
-            item['id'] = int(point.payload['source_id'])
-            item['score'] = point.score
+            item['ID'] = int(point.payload['source_id'])
+            item['Relevance'] = point.score
             related_tags.append(item)
 
         return related_tags

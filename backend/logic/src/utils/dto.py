@@ -92,12 +92,15 @@ def tags_to_dto(tags) -> List[Tag]:
     for tag in tags:
         name = None
         tag_id = None
-        for key, value in tag.model_dump().items():
+        relevance = None
+        for key, value in tag.items():
             if "ID" in key:
                 tag_id = str(value)
             elif "Description" in key:
                 name = value
-        result.append(Tag(id=tag_id,keyword=name))
+            elif "Relevance" in key:
+                relevance = value
+        result.append(Tag(id=tag_id,keyword=name, relevance=relevance))
     return result
 
 def report_flag_to_dto(flag) -> ReportFlag:
