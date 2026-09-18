@@ -1,70 +1,115 @@
 # About
 This is the backend (including a frontend prototype) of the meerkat tool.
-# Building
-This is a dockerized applicatiion. The most simple way to install this project is therefore using docker:  
-Please install *docker* if not already done: [Windows](https://docs.docker.com/desktop/setup/install/windows-install/), [Mac](https://docs.docker.com/desktop/setup/install/mac-install/), [Linux](https://docs.docker.com/desktop/setup/install/linux/)  
-Now you are ready to install this app on your machine:
-1. Clone this repo either by `git clone https://github.com/josh-oo/meerkat-tool.git` or by just downloading and unzipping the .zip file. You should find it clicking on the green "code" button above.
-2. Use your command line to navigate to the projects location for example if you it is on your desktop `cd desktop/meerkat-tool`.
-3. To provide the tool with access to the meerkat data. Please copy the meerkat sqlite (.db) file to `_data/database/` and name it *meerkat.db*
-4. OPTIONAL: If you want to skip the vector indexing process (which can take about 8h since it runs on cpu only) you can also put precomputed indices to the folder `_data/qdrant/`. It should then look like:
-If you leave the `qdrant` folder empty the app starts indexing the reports after running the next step.  
-<pre> 📁 <b>_data</b> 
-  ├── 📁 <b>database</b> 
-  │ └── 📄 <b>meerkat.db</b> 
-  └── 📁 <b>qdrant</b> 
-    ├── 📁 <b>aliases</b> 
-    ├── 📁 <b>collections</b> 
-    └── 📄 <b>raft_state.json</b> 
-</pre> 
 
-6. Place .env.production files for all services in the corresponding folders. The env vars needed are described in the section below.
-7. Run `docker network create internal_net` and `docker network create public_net`
-8. Run `docker compose up` (it may take a while building all the images)  
-9. If it is done you can use the tool at http://localhost:8051
-   
+# Quick start
+This is a dockerized application, so the simplest way to run it is with Docker.
+Install *docker* if you have not already: [Windows](https://docs.docker.com/desktop/setup/install/windows-install/), [Mac](https://docs.docker.com/desktop/setup/install/mac-install/), [Linux](https://docs.docker.com/desktop/setup/install/linux/)
+
+1. Clone the repository **including its submodule** (the frontend lives in its own repo):
+   ```bash
+   git clone --recurse-submodules https://github.com/josh-oo/meerkat-tool.git
+   cd meerkat-tool
+   ```
+   If you cloned without `--recurse-submodules`, run `git submodule update --init` afterwards.
+2. Create your environment file and adjust the values marked `CHANGE ME`:
+   ```bash
+   cp .env.example .env
+   ```
+   Every variable has a working local default, so the stack also starts unedited — but do
+   not expose it to anyone else with the example secrets in place.
+3. Start everything:
+   ```bash
+   docker compose up
+   ```
+   The first run builds the images and downloads the embedding model, so it takes a while.
+4. Once the containers are up:
+   - Frontend: http://localhost:3000
+   - API docs: http://localhost:8002/backend/api/docs
+   - Readiness/health of all sub-services: http://localhost:8002/backend/api/readyz
+   - Qdrant dashboard: http://localhost:6333/dashboard
+
+# Data and databases
+The repository ships **no data and no database schema**. A fresh checkout starts all
+containers successfully, but the application itself has nothing to work with until you
+provide it:
+
+- **Postgres.** The services expect three databases — `POSTGRES_DB_RESOURCES` (studies and
+  reports), `POSTGRES_DB_USERS` (backend users) and `POSTGRES_DB_FRONTEND` (frontend,
+  managed by Prisma). Neither the databases nor their tables are created automatically.
+  Put your own `.sql`/`.sh` files into [`backend/postgres-init/`](backend/postgres-init/)
+  to have them applied on the first start; see the README in that folder. Missing
+  databases surface as errors at request time, and `/backend/api/readyz` shows which
+  dependency is unhealthy.
+- **Frontend schema.** The frontend's tables come from its Prisma migrations
+  (`npx prisma migrate deploy` inside `medidex/`); they are not applied on container start.
+- **Initialization.** On `docker compose up`, the one-shot `app-init` service runs before
+  `logic` starts. It:
+  1. Creates the Qdrant collection if it doesn't exist yet (with `EMBEDDING_MODEL_DIM`
+     dimensions, cosine distance and the required payload indices). Idempotent: an existing
+     collection is left untouched. The layout must stay in sync with
+     `backend/tools/scripts/prepare_vectorstore.py`.
+  2. Creates the data directories inside `backend/_data/backend/` (logs, PDFs, fulltexts)
+     that the bind mount hides, and hands them to the unprivileged user `logic` runs as.
+     Keep this list in sync when new `DATABASE_VOLUME` paths are added in `backend/logic/src/`.
+  
+  The script lives in [`backend/app-init/`](backend/app-init/).
+
+On Linux, Docker creates missing bind-mount folders as `root`, which the unprivileged
+Qdrant image cannot write to (`logic-init` already takes care of the logic volume).
+Create them upfront if the container fails to start:
+```bash
+mkdir -p backend/_data/qdrant backend/_data/backend backend/_data/embeddings
+sudo chown -R 1000:1000 backend/_data
+```
+
+# Configuration
+All configuration lives in a single `.env` file in the repository root; every variable is
+documented in [`.env.example`](.env.example). The values that must be changed before any
+non-local use are `POSTGRES_PASSWORD`, `JWT_SECRET`, `BETTER_AUTH_SECRET` and
+`BACKEND_API_KEY`. `OPENAI_API_KEY` is required for the agent and extraction features only.
+
 # Services
-The application is divided into multiple services to facilitate hosting it on different machines later.
+The application is divided into multiple services to facilitate hosting it on different
+machines later.
+
 ## frontend
-This is just a prototype to visualize and test the applications features.  
-### Env Vars (development):
-`BACKEND_API_URL=http://logic:8002`  
+The Next.js user interface. It is maintained in a separate repository
+([MaxiMittel/medidex](https://github.com/MaxiMittel/medidex)) and included here as the
+`medidex` git submodule. To move it to a different commit: `cd medidex && git pull`, then
+commit the updated submodule pointer in this repository.
+
 ## logic
-This services manages the incoming requests from the frontend and calls the appropriate sub-services in the backend
-### Env Vars (development):
-`EMBEDDING_SERVICE_HOST=localhost` 
-`EMBEDDING_SERVICE_PORT=50051`  
-`VECTORSTORE_SERVICE_HOST=localhost`  
-`VECTORSTORE_SERVICE_PORT=6334`  
-`DATABASE_VOLUME="../_data/backend"`  
-`JWT_SECRET=DEBUG_SECRET_KEY`  
-`DEBUG=true`   
+This service manages the incoming requests from the frontend and calls the appropriate
+sub-services in the backend.
+
 ## embedding
-This service is used to transform plain text into vector embeddings using a fine-tuned embedding model. Currently this service runs on a CPU machine. Depending on the workload it might make sense to move this service to a GPU machine later. The model is publicly available on huggingface (https://huggingface.co/josh-oo/aspect-based-embeddings-v3).
-### Env Vars (development):
-`MODEL_PATH="josh-oo/aspect-based-embeddings-v3"`  
-`MODEL_REVISION="6b211a8f4e27b904ab146da7d63a084c2fd94223"`  
-`MODEL_DTYPE="bfloat16"`  
-`TOKENIZER_PATH="josh-oo/aspect-based-embeddings-v3"`  
-`TOKENIZER_REVISION="6b211a8f4e27b904ab146da7d63a084c2fd94223"`  
-`ASPECTS="participants,intervention,condition,outcome"`  
-`MODEL_DIM=1024`  
-`MODEL_MAX_INPUT_LENGTH=8192`  
-If you use another model please adapt the parameters accordingly
+This service transforms plain text into vector embeddings. It runs HuggingFace
+[text-embeddings-inference](https://github.com/huggingface/text-embeddings-inference) and
+exposes an OpenAI-compatible API, which the logic service reaches through
+`EMBEDDING_MODEL_BASE_URL`. The model is selected with `EMBEDDING_MODEL_ID` and
+`EMBEDDING_MODEL_REVISION` and defaults to [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3)
+(1024 dimensions, 8192 token context); it is downloaded from the HuggingFace Hub on first
+start and cached in `backend/_data/embeddings/`.
+
+`EMBEDDING_MAX_BATCH_TOKENS` (default 2048) caps the tokens per batch and is the main
+driver of this container's memory use: on a stock Docker Desktop VM (~8 GB) bge-m3 is
+killed during warm-up at 4096. Inputs longer than the cap are truncated, so raise it
+together with the VM's memory if you embed long full texts.
+
+Pointing it at a different model means
+re-indexing: update `EMBEDDING_MODEL_DIM` and use a fresh `VECTORSTORE_COLLECTION_NAME`,
+because vectors from different models are not comparable. Set `HF_TOKEN` only if you point it at a gated or
+private model. Currently this service runs on CPU; depending on the workload it might make
+sense to move it to a GPU machine later.
+
 ## tools
-This service hosts routínes like searching for unindexed reports in meerkat to add them to the index properly.
-### Env Vars (development):
-`EMBEDDING_SERVICE_HOST=localhost`  
-`EMBEDDING_SERVICE_PORT=50051`  
-`VECTORSTORE_SERVICE_HOST=localhost`  
-`VECTORSTORE_SERVICE_PORT=6334`  
-`MESH_DUMP_LOCATION="../_data/backend/tools/desc2025.xml"`  
-`BACKEND_API_URL=http://localhost:8002`  
-`BACKEND_API_KEY=PLEASE_CREATE_YOUR_OWN_API_KEY`  
-## qdrant
-This is where all the vectores are stored to index the meerkat reports based on their similarity.
-### Env Vars:
-No environment variables
+This service hosts routines like searching for unindexed reports in meerkat to add them to
+the index properly. It is not part of `docker compose up`; the scripts in `backend/tools`
+are run on demand and use `BACKEND_API_URL` / `BACKEND_API_KEY` to talk to the logic service.
+
+## qdrant / postgres / redis / docling
+Vector store, relational database, task/cache backend and PDF conversion service. They run
+from upstream images and need no configuration beyond the variables above.
 
 # Rules for editing this repository
 1. If you are working on this repository please create a new branch for every feature / bugfix and use meaningful prefixes.
@@ -73,7 +118,9 @@ No environment variables
 3. The `prod` branch is currently empty we will use it later for CI/CD as soon as we are ready for production.
 
 # Local Development
-Running the project locally (without docker) requires you to run a local vectorstor: `docker run -p 6333:6333 -p 6334:6334 -v /backend/_data/qdrant:/qdrant/storage qdrant/qdrant`. For the storage location (backend/_data/qdrant in this case) an absolute path is required.
+Running the project locally (without docker) requires you to run a local vectorstore:
+`docker run -p 6333:6333 -p 6334:6334 -v /backend/_data/qdrant:/qdrant/storage qdrant/qdrant`.
+For the storage location (backend/_data/qdrant in this case) an absolute path is required.
 
 # Important
 In the sqlite table:  

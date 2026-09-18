@@ -1,0 +1,3 @@
+[submodule "medidex"]
+	path = medidex
+	url = https://github.com/MaxiMittel/medidex.git

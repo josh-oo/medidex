@@ -19,7 +19,7 @@ BACKEND_API_KEY = os.getenv("BACKEND_API_KEY")
 VECTORSTORE_HOST = "localhost"
 VECTORSTORE_PORT = 6334
 COLLECTION_NAME = "report_embeddings_medidex"
-EMBEDDING_DIM = 768
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_MODEL_DIM", "1024"))
 
 MESH_DUMP_LOCATION = os.getenv("MESH_DUMP_LOCATION")
 
@@ -30,9 +30,8 @@ EMBEDDING_SEMAPHORE = asyncio.Semaphore(8)
 #IMPORTANT: do not use langchain since it applies tokenization before sending it to TEI
 #https://github.com/huggingface/text-embeddings-inference/issues/273
 embeddings_model = AsyncOpenAI(
-        base_url="https://kueq8w7uodo0c2bd.us-east-1.aws.endpoints.huggingface.cloud/v1",
-        #base_url="http://localhost:8080/v1",
-        api_key="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", 
+        base_url=os.getenv("EMBEDDING_MODEL_BASE_URL", "http://localhost:8080/v1"),
+        api_key=os.getenv("EMBEDDING_MODEL_API_KEY", "unused"),
 )
 
 REMOVE_CURLY_BRACKETS = re.compile(r'{.*?}')

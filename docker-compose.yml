@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   docling:
     image: quay.io/docling-project/docling-serve-cpu:v1.16.1
@@ -15,12 +13,13 @@ services:
     image: postgres:18-alpine
     container_name: postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql
-      - ./backend/_data/postgres-init:/docker-entrypoint-initdb.d
-      - ${POSTGRES_BACKUPS}:/backups
+      # Any .sql / .sh placed here runs once, on first start of an empty data volume.
+      - ./backend/postgres-init:/docker-entrypoint-initdb.d
+      - ${POSTGRES_BACKUPS:-./backend/_data/postgres-backups}:/backups
     expose:
       - 5432
     ports:
@@ -55,14 +54,37 @@ services:
     networks:
       - internal_net
 
+  # One-shot: prepares both qdrant collection and logic data volume, then exits.
+  # Runs before `logic` starts. Idempotent: safe to run multiple times.
+  app-init:
+    container_name: app-init
+    build:
+      context: ./backend
+      dockerfile: app-init/Dockerfile
+    restart: "no"
+    depends_on:
+      - qdrant
+    environment:
+      - QDRANT_URL=http://${VECTORSTORE_SERVICE_HOST:-qdrant}:6333
+      - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
+      - EMBEDDING_MODEL_DIM=${EMBEDDING_MODEL_DIM:-1024}
+      - DATABASE_VOLUME=/data
+    volumes:
+      - ./backend/_data/qdrant:/qdrant/storage
+      - ./backend/_data/backend:/data
+    networks:
+      - internal_net
+
   embedding:
     container_name: embedding
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest
     command: >
-      --model-id ${EMBEDDING_MODEL_ID}
-      --hf-token ${HF_TOKEN}
-      --revision ${EMBEDDING_MODEL_REVISION}
-      --max-batch-tokens 4096
+      --model-id ${EMBEDDING_MODEL_ID:-BAAI/bge-m3}
+      --revision ${EMBEDDING_MODEL_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
+      --max-batch-tokens ${EMBEDDING_MAX_BATCH_TOKENS:-2048}
+    environment:
+      # Only needed for gated/private models. Left unset unless defined in .env.
+      - HF_TOKEN
     ports:
       - "8080:80"
     volumes:
@@ -71,30 +93,6 @@ services:
     networks:
       - internal_net
 
-  #embedding:
-  #  container_name: embedding
-  #  build:
-  #    context: ./backend
-  #    dockerfile: embedding/Dockerfile
-  #    args:
-  #      - EMBEDDING_MODEL_PATH=${EMBEDDING_MODEL_PATH}
-  #      - EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
-  #      - EMBEDDING_MODEL_DTYPE=${EMBEDDING_MODEL_DTYPE}
-  #      - EMBEDDING_MODEL_TOKENIZER_PATH=${EMBEDDING_MODEL_TOKENIZER_PATH}
-  #      - EMBEDDING_MODEL_TOKENIZER_REVISION=${EMBEDDING_MODEL_TOKENIZER_REVISION}
-  #      - EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
-  #  expose:
-  #    - 50051
-  #  read_only: true
-  #  networks:
-  #    - internal_net
-  #  environment:
-  #    - EMBEDDING_MODEL_PATH=${EMBEDDING_MODEL_PATH}
-  #    - EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
-  #    - EMBEDDING_MODEL_DIM=${EMBEDDING_MODEL_DIM}
-  #    - EMBEDDING_MODEL_MAX_INPUT_LENGTH=${EMBEDDING_MODEL_MAX_INPUT_LENGTH}
-  #    - EMBEDDING_MODEL_ASPECTS=${EMBEDDING_MODEL_ASPECTS}
-
   logic:
     container_name: logic
     build:
@@ -102,6 +100,9 @@ services:
       dockerfile: logic/Dockerfile
     ports:
       - "8002:8002"
+    depends_on:
+      app-init:
+        condition: service_completed_successfully
     volumes:
       - ./backend/_data/backend:/data
     read_only: true
@@ -112,22 +113,22 @@ services:
       - /var/tmp
     environment:
       - DATABASE_VOLUME=/data
-      - EMBEDDING_MODEL_BASE_URL=${EMBEDDING_MODEL_BASE_URL}
-      - EMBEDDING_MODEL_API_KEY=${EMBEDDING_MODEL_API_KEY}
-      - VECTORSTORE_SERVICE_HOST=${VECTORSTORE_SERVICE_HOST}
-      - VECTORSTORE_SERVICE_PORT=${VECTORSTORE_SERVICE_PORT}
-      - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME}
+      - EMBEDDING_MODEL_BASE_URL=${EMBEDDING_MODEL_BASE_URL:-http://embedding:80/v1}
+      - EMBEDDING_MODEL_API_KEY=${EMBEDDING_MODEL_API_KEY:-unused}
+      - VECTORSTORE_SERVICE_HOST=${VECTORSTORE_SERVICE_HOST:-qdrant}
+      - VECTORSTORE_SERVICE_PORT=${VECTORSTORE_SERVICE_PORT:-6334}
+      - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
       - JWT_SECRET=${JWT_SECRET}
       - JWKS_URL=http://frontend:3000/api/auth/jwks
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES}
-      - POSTGRES_DB_USERS=${POSTGRES_DB_USERS}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-meerkat}
+      - POSTGRES_DB_USERS=${POSTGRES_DB_USERS:-users}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - DOCLING_URL=${DOCLING_URL}
-      - DEBUG=${DEBUG}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DOCLING_URL=${DOCLING_URL:-http://docling:5001}
+      - DEBUG=${DEBUG:-false}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
 
   frontend:
@@ -139,20 +140,20 @@ services:
       - "3000:3000"
     environment:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
-      - BETTER_AUTH_URL=${BETTER_AUTH_URL}
-      - STAGE=${STAGE}
-      - MEERKAT_API_URL=${BACKEND_API_URL}
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/medidex?schema=public
-      - INACTIVITY_DIALOG=${INACTIVITY_DIALOG}
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3000}
+      - STAGE=${STAGE:-local}
+      - MEERKAT_API_URL=${BACKEND_API_URL:-http://logic:8002/backend}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB_FRONTEND:-medidex}?schema=public
+      - INACTIVITY_DIALOG=${INACTIVITY_DIALOG:-false}
     networks:
       - internal_net
-      - public_net
+      #- public_net
 
 networks:
   internal_net:
-    external: true
-  public_net:
-    external: true
+    driver: bridge
+  #public_net:
+  #  external: true
 
 volumes:
   postgres_data:
