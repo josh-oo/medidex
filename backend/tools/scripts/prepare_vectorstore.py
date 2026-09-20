@@ -327,15 +327,18 @@ async def process_and_upsert():
         await tqdm.gather(*tag_tasks, desc="Tag Embedding & Upserting")
 
     # Tag embedding mesh
-    tag_data_mesh = load_mesh_tag_data(MESH_DUMP_LOCATION)
-    tag_ids = list(tag_data_mesh.keys())
-    tag_batch_size = 32
-    tag_tasks = []
-    for i in range(0, len(tag_ids), tag_batch_size):
-        batch_ids = tag_ids[i:i + tag_batch_size]
-        tag_tasks.append(process_tag_batch(client, batch_ids, tag_data_mesh))
-    print(f"Embedding & upserting {len(tag_ids)} mesh tags...")
-    await tqdm.gather(*tag_tasks, desc="Tag Embedding & Upserting")
+    if MESH_DUMP_LOCATION:
+        tag_data_mesh = load_mesh_tag_data(MESH_DUMP_LOCATION)
+        tag_ids = list(tag_data_mesh.keys())
+        tag_batch_size = 32
+        tag_tasks = []
+        for i in range(0, len(tag_ids), tag_batch_size):
+            batch_ids = tag_ids[i:i + tag_batch_size]
+            tag_tasks.append(process_tag_batch(client, batch_ids, tag_data_mesh))
+        print(f"Embedding & upserting {len(tag_ids)} mesh tags...")
+        await tqdm.gather(*tag_tasks, desc="Tag Embedding & Upserting")
+    else:
+        print("MESH_DUMP_LOCATION not set, skipping mesh tag embeddings.")
 
 if __name__ == "__main__":
     try:
