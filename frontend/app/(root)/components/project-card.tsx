@@ -203,6 +203,7 @@ export function ProjectCard({
           onAssigneesChange?.({ projectId: project.projectId, userIds: next });
           return next;
         });
+        router.refresh();
       } catch (error) {
         console.error(`Failed to update assignee ${normalizedUserId}`, error);
         window.alert(

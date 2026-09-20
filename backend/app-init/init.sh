@@ -135,6 +135,16 @@ done
 if [ ! -f "$DATABASE_VOLUME/resources/pdfs/00000.pdf" ]; then
     cp /app-init/placeholder.pdf "$DATABASE_VOLUME/resources/pdfs/00000.pdf"
 fi
+if [ -d /seed/pdfs ]; then
+    seed_pdf_count=$(find /seed/pdfs -type f -name '*.pdf' | wc -l | tr -d ' ')
+    echo "app-init: copying $seed_pdf_count seeded PDFs from /seed/pdfs to $DATABASE_VOLUME/resources/pdfs"
+    find /seed/pdfs -type f -name '*.pdf' -exec sh -c '
+        target="$1/resources/pdfs/$(basename "$2")"
+        [ -f "$target" ] || cp "$2" "$target"
+    ' sh "$DATABASE_VOLUME" {} \;
+    runtime_pdf_count=$(find "$DATABASE_VOLUME/resources/pdfs" -type f -name '*.pdf' | wc -l | tr -d ' ')
+    echo "app-init: runtime PDF count is $runtime_pdf_count"
+fi
 chown -R "$APP_UID:$APP_GID" "$DATABASE_VOLUME"
 echo "app-init: data volume prepared for uid $APP_UID:$APP_GID"
 

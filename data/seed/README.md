@@ -6,6 +6,7 @@ does not generate any data.
 
 - 100 studies with IDs in the `1000001`-`1000100` range.
 - An uneven set of 242 reports: many studies have one report, while a small number have 10 or more, including protocol, results, follow-up, and correction/retraction-style records.
+- `pdfs/` contains one dummy PDF per seeded report. Each file contains the report title and abstract and is named by its zero-padded `ReportNumber`.
 - [`sample_reports.ris`](sample_reports.ris) contains five newest reports from distinct studies for upload testing; those reports are intentionally excluded from the seed.
 - Study/report links and provenance rows required by the backend repositories.
 - Linked conditions, interventions, outcomes, designs, and participant groups.

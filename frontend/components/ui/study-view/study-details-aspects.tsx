@@ -35,21 +35,21 @@ const categoryConfig = {
     label: "Interventions",
     accentClass: "text-emerald-600 dark:text-emerald-400",
     bgClass: "bg-emerald-50 dark:bg-emerald-950/30",
-    borderClass: "border-l-blue-500",
+    borderClass: "border-l-emerald-500",
   },
   conditions: {
     icon: Stethoscope,
     label: "Conditions",
     accentClass: "text-blue-600 dark:text-blue-400",
     bgClass: "bg-blue-50 dark:bg-blue-950/30",
-    borderClass: "border-l-rose-500",
+    borderClass: "border-l-blue-500",
   },
   outcomes: {
     icon: Target,
     label: "Outcomes",
     accentClass: "text-rose-600 dark:text-rose-400",
     bgClass: "bg-rose-50 dark:bg-rose-950/30",
-    borderClass: "border-l-emerald-500",
+    borderClass: "border-l-rose-500",
   },
   design: {
     icon: Activity,
@@ -68,15 +68,25 @@ const categoryConfig = {
 };
 
 type DescriptionItem = {
-  id?: number;
+  id?: number | string;
   description?: string;
+};
+
+type DescriptionSource = {
+  ID?: number | string;
+  Description?: string;
+  id?: number | string;
+  description?: string;
+  keyword?: string;
+  name?: string;
+  value?: string;
 };
 
 interface StudyAspectData {
   interventions: DescriptionItem[];
   conditions: DescriptionItem[];
   outcomes: DescriptionItem[];
-  design: string[];
+  design: DescriptionItem[];
   persons: string[];
 }
 
@@ -89,11 +99,17 @@ const defaultAspectData: StudyAspectData = {
 };
 
 const mapDescriptionItems = (
-  items: Array<{ ID?: number; Description?: string }>
+  items: DescriptionSource[]
 ): DescriptionItem[] =>
   items.map((item, index) => ({
-    id: item.ID ?? index,
-    description: item.Description ?? "",
+    id: item.ID ?? item.id ?? index,
+    description:
+      item.Description ??
+      item.description ??
+      item.keyword ??
+      item.name ??
+      item.value ??
+      "",
   }));
 
 export function StudyAspects({ study }: StudyDetailsProps) {
@@ -151,7 +167,10 @@ export function StudyAspects({ study }: StudyDetailsProps) {
             "condition information"
           ),
           fetchJson<OutcomeDto[]>("outcomes", "outcome information"),
-          fetchJson<string[]>("design", "design information"),
+          fetchJson<Array<{ ID?: number | string; Description?: string }>>(
+            "design",
+            "design information"
+          ),
           fetchJson<string[]>("persons", "persons information"),
         ]);
 
@@ -163,7 +182,7 @@ export function StudyAspects({ study }: StudyDetailsProps) {
           interventions: mapDescriptionItems(interventionsResponse),
           conditions: mapDescriptionItems(conditionsResponse),
           outcomes: mapDescriptionItems(outcomesResponse),
-          design: designResponse ?? [],
+          design: mapDescriptionItems(designResponse ?? []),
           persons: personsResponse ?? [],
         });
       } catch (fetchError) {
@@ -226,7 +245,7 @@ export function StudyAspects({ study }: StudyDetailsProps) {
   }
 
   const renderCategoryItems = (
-    items: Array<{ id?: number; description?: string }> | string[],
+    items: Array<DescriptionItem | string>,
     category: keyof typeof categoryConfig,
     emptyMessage: string
   ) => {
@@ -255,7 +274,7 @@ export function StudyAspects({ study }: StudyDetailsProps) {
                 config.bgClass
               } transition-colors`}
             >
-              <p className="text-sm leading-relaxed">{text}</p>
+              <p className="text-foreground text-sm leading-relaxed">{text}</p>
             </div>
           );
         })}
