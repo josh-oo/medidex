@@ -7,8 +7,8 @@ Install *docker* if you have not already: [Windows](https://docs.docker.com/desk
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/josh-oo/meerkat-tool.git
-   cd meerkat-tool
+   git clone https://github.com/josh-oo/medidex.git
+   cd medidex
    ```
 2. Create your environment file and adjust the values marked `CHANGE ME`:
    ```bash
