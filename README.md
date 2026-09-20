@@ -34,13 +34,18 @@ provide it:
 
 - **Postgres.** The services expect three databases — `POSTGRES_DB_RESOURCES` (studies and
   reports), `POSTGRES_DB_USERS` (backend users) and `POSTGRES_DB_FRONTEND` (frontend,
-  managed by Prisma). Neither the databases nor their tables are created automatically.
-  Put your own `.sql`/`.sh` files into [`backend/postgres-init/`](backend/postgres-init/)
-  to have them applied on the first start; see the README in that folder. Missing
-  databases surface as errors at request time, and `/backend/api/readyz` shows which
-  dependency is unhealthy.
+   managed by Prisma). The databases are created automatically on the first start;
+   see [`backend/postgres-init/`](backend/postgres-init/) for details. Application
+   data tables for the logic service still need to come from your own dump or
+   provisioning step. Missing databases surface as errors at request time, and
+   `/backend/api/readyz` shows which dependency is unhealthy.
 - **Frontend schema.** The frontend's tables come from its Prisma migrations
-   (`npx prisma migrate deploy` inside `frontend/`); they are not applied on container start.
+    (`npx prisma migrate deploy` inside `frontend/`), which run automatically before
+    the frontend container starts.
+- **Admin account.** Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` to create an
+   approved admin account automatically on frontend startup. The seed is idempotent;
+   an existing account with that email is promoted to admin without changing its
+   password. `ADMIN_NAME` is optional and defaults to `Administrator`.
 - **Initialization.** On `docker compose up`, the one-shot `app-init` service runs before
   `logic` starts. It:
   1. Creates the Qdrant collection if it doesn't exist yet (with `EMBEDDING_MODEL_DIM`

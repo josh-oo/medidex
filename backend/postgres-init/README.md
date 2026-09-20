@@ -6,19 +6,11 @@ This directory is mounted into the `postgres` container at
 `docker compose up`). Files are run in alphabetical order. This `README.md` is
 ignored by the entrypoint.
 
-The project ships **no** schema on purpose: databases and tables are expected to
-come from your own dump or provisioning step. Until they exist, the containers
-still start, and the services report the missing database at request time
-(`GET /backend/api/readyz` on the logic service shows the connection status).
-
-To create the empty databases the services expect, drop a file like
-`01-create-databases.sql` here:
-
-```sql
-CREATE DATABASE meerkat;   -- POSTGRES_DB_RESOURCES
-CREATE DATABASE users;     -- POSTGRES_DB_USERS
-CREATE DATABASE medidex;   -- POSTGRES_DB_FRONTEND (frontend / Prisma)
-```
+The project creates the three empty databases from the configured
+`POSTGRES_DB_RESOURCES`, `POSTGRES_DB_USERS`, and `POSTGRES_DB_FRONTEND` values
+using `01-create-databases.sh`. The frontend applies its committed Prisma
+migrations when its container starts. Application data tables for the logic
+service still need to come from your own dump or provisioning step.
 
 Restoring a dump instead works the same way — put the `.sql` (or a `.sh` wrapping
 `pg_restore`) here, or mount the dump through `POSTGRES_BACKUPS`, which is
@@ -26,4 +18,5 @@ available inside the container at `/backups`.
 
 Note: changing files here has no effect on an existing volume. To re-run them,
 remove the volume first (`docker compose down -v`), which deletes all Postgres
-data.
+data. For an existing volume, create any missing databases manually or run the
+script against the container before restarting the frontend.

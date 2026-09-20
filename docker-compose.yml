@@ -15,6 +15,9 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB_RESOURCES: ${POSTGRES_DB_RESOURCES:-meerkat}
+      POSTGRES_DB_USERS: ${POSTGRES_DB_USERS:-users}
+      POSTGRES_DB_FRONTEND: ${POSTGRES_DB_FRONTEND:-medidex}
     volumes:
       - postgres_data:/var/lib/postgresql
       # Any .sql / .sh placed here runs once, on first start of an empty data volume.
@@ -141,6 +144,9 @@ services:
     environment:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3000}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - ADMIN_NAME=${ADMIN_NAME:-Administrator}
       - STAGE=${STAGE:-local}
       - MEERKAT_API_URL=${BACKEND_API_URL:-http://logic:8002/backend}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB_FRONTEND:-medidex}?schema=public

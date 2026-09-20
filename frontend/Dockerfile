@@ -35,7 +35,12 @@ COPY --from=builder /app/app/generated ./app/generated
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/lib ./lib
+COPY --from=builder /app/enums ./enums
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
 
 USER nextjs
 
+ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
 CMD ["npm", "run", "start", "--", "-H", "0.0.0.0"]
