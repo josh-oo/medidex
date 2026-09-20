@@ -1,0 +1,36 @@
+/* Abstract.module.css */
+
+.container mark {
+  /* Resetting browser defaults */
+  background-image: none !important;
+  background-color: transparent !important;
+  color: inherit !important;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.container mark[data-type="intervention"] {
+  background-color: #dcfce7 !important;
+  color: #166534 !important;
+}
+
+.container mark[data-type="duration"] {
+  background-color: #dcfce7 !important;
+  color: #166534 !important;
+}
+
+.container mark[data-type="population"] {
+  background-color: #dbeafe !important;
+  color: #1e40af !important;
+}
+
+.container mark[data-type="condition"]{
+  background-color: #dbeafe !important;
+  color: #1e40af !important;
+}
+
+.container mark[data-type="outcome"] {
+  background-color: #fee2e2 !important;
+  color: #991b1b !important;
+}

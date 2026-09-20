@@ -5,12 +5,11 @@ This is the backend (including a frontend prototype) of the meerkat tool.
 This is a dockerized application, so the simplest way to run it is with Docker.
 Install *docker* if you have not already: [Windows](https://docs.docker.com/desktop/setup/install/windows-install/), [Mac](https://docs.docker.com/desktop/setup/install/mac-install/), [Linux](https://docs.docker.com/desktop/setup/install/linux/)
 
-1. Clone the repository **including its submodule** (the frontend lives in its own repo):
+1. Clone the repository:
    ```bash
-   git clone --recurse-submodules https://github.com/josh-oo/meerkat-tool.git
+   git clone https://github.com/josh-oo/meerkat-tool.git
    cd meerkat-tool
    ```
-   If you cloned without `--recurse-submodules`, run `git submodule update --init` afterwards.
 2. Create your environment file and adjust the values marked `CHANGE ME`:
    ```bash
    cp .env.example .env
@@ -41,7 +40,7 @@ provide it:
   databases surface as errors at request time, and `/backend/api/readyz` shows which
   dependency is unhealthy.
 - **Frontend schema.** The frontend's tables come from its Prisma migrations
-  (`npx prisma migrate deploy` inside `medidex/`); they are not applied on container start.
+   (`npx prisma migrate deploy` inside `frontend/`); they are not applied on container start.
 - **Initialization.** On `docker compose up`, the one-shot `app-init` service runs before
   `logic` starts. It:
   1. Creates the Qdrant collection if it doesn't exist yet (with `EMBEDDING_MODEL_DIM`
@@ -73,10 +72,7 @@ The application is divided into multiple services to facilitate hosting it on di
 machines later.
 
 ## frontend
-The Next.js user interface. It is maintained in a separate repository
-([MaxiMittel/medidex](https://github.com/MaxiMittel/medidex)) and included here as the
-`medidex` git submodule. To move it to a different commit: `cd medidex && git pull`, then
-commit the updated submodule pointer in this repository.
+The Next.js user interface, maintained in the `frontend/` directory of this repository.
 
 ## logic
 This service manages the incoming requests from the frontend and calls the appropriate
