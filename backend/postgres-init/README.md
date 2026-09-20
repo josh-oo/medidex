@@ -12,6 +12,11 @@ using `01-create-databases.sh`. The frontend applies its committed Prisma
 migrations when its container starts. Application data tables for the logic
 service still need to come from your own dump or provisioning step.
 
+The resource database defaults to `resources`. On an existing Postgres volume,
+rename the old database manually with `ALTER DATABASE meerkat RENAME TO resources`
+before restarting the services, or set `POSTGRES_DB_RESOURCES` to the database
+name you already use.
+
 Restoring a dump instead works the same way — put the `.sql` (or a `.sh` wrapping
 `pg_restore`) here, or mount the dump through `POSTGRES_BACKUPS`, which is
 available inside the container at `/backups`.

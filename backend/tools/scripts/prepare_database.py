@@ -91,7 +91,7 @@ def access_to_sql(file_path):
 def normalize_date_time(tbl_name, column_name, id_column):
 
     # Connect to your SQLite database
-    conn = sqlite3.connect(os.path.join(DATA_VOLUME,"resources","meerkat.db"))
+    conn = sqlite3.connect(os.path.join(DATA_VOLUME,"resources","resources.db"))
     cursor = conn.cursor()
 
     def format_to_iso(date_str):
@@ -138,7 +138,7 @@ def remove_non_informative_values():
     pass
 
 def rename_columns():
-    conn = sqlite3.connect(os.path.join(DATA_VOLUME,"resources","meerkat.db"))
+    conn = sqlite3.connect(os.path.join(DATA_VOLUME,"resources","resources.db"))
     cursor = conn.cursor()
     cursor.execute(f"ALTER TABLE tblStudy RENAME COLUMN UDef1 TO NumberParticipants;")
     cursor.execute(f"ALTER TABLE tblStudy RENAME COLUMN UDef2 TO Countries;")

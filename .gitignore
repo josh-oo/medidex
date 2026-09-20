@@ -10,7 +10,7 @@
 **/.env
 **/.env.production
 
-**/meerkat.db
+**/resources.db
 **/qdrant_storage
 
 **/*pb2.py

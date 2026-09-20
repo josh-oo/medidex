@@ -15,7 +15,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB_RESOURCES: ${POSTGRES_DB_RESOURCES:-meerkat}
+      POSTGRES_DB_RESOURCES: ${POSTGRES_DB_RESOURCES:-resources}
       POSTGRES_DB_USERS: ${POSTGRES_DB_USERS:-users}
       POSTGRES_DB_FRONTEND: ${POSTGRES_DB_FRONTEND:-medidex}
     volumes:
@@ -72,7 +72,7 @@ services:
       - DATABASE_VOLUME=/data
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-meerkat}
+      - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-resources}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - EMBEDDING_MODEL_BASE_URL=http://embedding:80/v1
@@ -131,7 +131,7 @@ services:
       - JWKS_URL=http://frontend:3000/api/auth/jwks
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-meerkat}
+      - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-resources}
       - POSTGRES_DB_USERS=${POSTGRES_DB_USERS:-users}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
