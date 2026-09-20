@@ -73,6 +73,7 @@ machines later.
 
 ## frontend
 The Next.js user interface, maintained in the `frontend/` directory of this repository.
+The original frontend code can be found in the [MaxiMittel/medidex repository](https://github.com/MaxiMittel/medidex).
 
 ## logic
 This service manages the incoming requests from the frontend and calls the appropriate
