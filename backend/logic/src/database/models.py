@@ -33,7 +33,7 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
     Notes: Optional[str]
     OriginalTitle: Optional[str]
     Authors: str
-    Journal: str
+    Journal: Optional[str]
     Year: int
     Volume: Optional[str]
     Issue: Optional[str]

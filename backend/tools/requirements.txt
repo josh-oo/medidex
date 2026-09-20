@@ -3,3 +3,4 @@ qdrant-client==1.17.1
 tqdm==4.67.1
 httpx==0.28.1
 openai==3.16.2
+asyncpg==0.31.0

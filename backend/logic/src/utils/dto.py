@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Mapping, Optional, List
 from datetime import datetime
 
 class Study(BaseModel):
@@ -92,7 +92,8 @@ def tags_to_dto(tags) -> List[Tag]:
     for tag in tags:
         name = None
         tag_id = None
-        for key, value in tag.model_dump().items():
+        tag_data = tag if isinstance(tag, Mapping) else tag.model_dump()
+        for key, value in tag_data.items():
             if "ID" in key:
                 tag_id = str(value)
             elif "Description" in key:

@@ -21,6 +21,7 @@ load_dotenv()
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
 FULLTEXT_PATH = os.path.join(DATABASE_VOLUME,"resources", "fulltexts")
+PLACEHOLDER_PDF_PATH = os.getenv("PLACEHOLDER_PDF_PATH", "/app/placeholder.pdf")
 
 class DocumentService:
 
@@ -43,6 +44,8 @@ class DocumentService:
             
             pdf_name = str(report_number).zfill(5) + ".pdf"
             file_name = os.path.join(PDF_PATH, pdf_name)
+            if report_number == 0 and not os.path.isfile(file_name):
+                file_name = PLACEHOLDER_PDF_PATH
 
             self.path_cache[report_id] = file_name
         return self.path_cache[report_id]

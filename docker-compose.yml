@@ -22,7 +22,7 @@ services:
       - postgres_data:/var/lib/postgresql
       # Any .sql / .sh placed here runs once, on first start of an empty data volume.
       - ./backend/postgres-init:/docker-entrypoint-initdb.d
-      - ${POSTGRES_BACKUPS:-./backend/_data/postgres-backups}:/backups
+      - ${POSTGRES_BACKUPS:-./data/runtime/postgres-backups}:/backups
     expose:
       - 5432
     ports:
@@ -33,7 +33,6 @@ services:
   redis:
     image: redis:7-alpine
     container_name: redis
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
     expose:
       - 6379
     networks:
@@ -48,17 +47,14 @@ services:
       - 6334
       - 6335
     volumes:
-      - ./backend/_data/qdrant:/qdrant/storage
-      # Uncomment if you want a custom config file:
-      # - ./backend/_data/qdrant_config/production.yaml:/qdrant/config/production.yaml
+      - ./data/runtime/qdrant:/qdrant/storage
     ports:
       - "6333:6333"
       - "6334:6334"
     networks:
       - internal_net
 
-  # One-shot: prepares both qdrant collection and logic data volume, then exits.
-  # Runs before `logic` starts. Idempotent: safe to run multiple times.
+  # One-shot: prepares databases, Qdrant, PDFs, and vectors before logic starts.
   app-init:
     container_name: app-init
     build:
@@ -67,14 +63,24 @@ services:
     restart: "no"
     depends_on:
       - qdrant
+      - postgres
+      - embedding
     environment:
       - QDRANT_URL=http://${VECTORSTORE_SERVICE_HOST:-qdrant}:6333
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
       - EMBEDDING_MODEL_DIM=${EMBEDDING_MODEL_DIM:-1024}
       - DATABASE_VOLUME=/data
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-meerkat}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - EMBEDDING_MODEL_BASE_URL=http://embedding:80/v1
+      - EMBEDDING_MODEL_API_KEY=${EMBEDDING_MODEL_API_KEY:-unused}
     volumes:
-      - ./backend/_data/qdrant:/qdrant/storage
-      - ./backend/_data/backend:/data
+      - ./data/runtime/qdrant:/qdrant/storage
+      - ./data/runtime/backend:/data
+      - ./data/seed:/seed:ro
     networks:
       - internal_net
 
@@ -91,7 +97,7 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ./backend/_data/embeddings:/data
+      - ./data/runtime/embeddings:/data
     pull_policy: always
     networks:
       - internal_net
@@ -107,7 +113,7 @@ services:
       app-init:
         condition: service_completed_successfully
     volumes:
-      - ./backend/_data/backend:/data
+      - ./data/runtime/backend:/data
     read_only: true
     networks:
       - internal_net

@@ -22,6 +22,9 @@
 
 **/_data/
 
+# Runtime data is bind-mounted by Docker and must not be committed.
+/data/runtime/
+
 **/.cache/
 
 # Test artifacts
