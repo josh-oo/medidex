@@ -213,14 +213,26 @@ export default function PdfDetailsPage({ params }: PdfPageProps) {
 
       {/* PDF Preview Section */}
       <div className="mt-6">
-        <iframe
+        <object
           key={iframeKey}
-          src={`/api/backend/reports/${reportId}/pdf`}
-          title="PDF Preview"
+          data={`/api/backend/reports/${reportId}/pdf`}
+          type="application/pdf"
           width="100%"
           height="500px"
           style={{ border: "1px solid #ccc", borderRadius: "8px" }}
-        />
+        >
+          <div className="p-4 text-center border rounded-md">
+            <p className="mb-2">Your browser restricts inline PDF viewing.</p>
+            <a 
+              href={`/api/backend/reports/${reportId}/pdf`} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              Open PDF in a new tab
+            </a>
+          </div>
+        </object>
       </div>
     </div>
   </div>
