@@ -1,5 +1,7 @@
 # About
-
+Medidex is an application designed to streamline report-trial linkage (also known as publication-trial linkage or "studification").
+Maintaining study-based registers—databases of relevant clinical trials for specific medical domains (e.g., lung cancer, mental health, ...)—requires continuously screening new publications and manually linking them to their parent studies.
+Medidex facilitates the linking phase of this workflow. For every newly entered report, the tool automatically provides a targeted candidate list of relevant parent studies, reducing manual effort and enabling junior researchers to achieve the same high-quality linking as senior experts.
 
 # Quick start
 This is a dockerized application, so the simplest way to run it is with Docker.
