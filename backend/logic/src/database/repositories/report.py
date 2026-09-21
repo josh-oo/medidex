@@ -57,7 +57,7 @@ class ReportRepository:
             delete(Study).where(Study.CRGStudyID.in_(orphan_list))
         )
         
-        self.db.flush()
+        await self.db.flush()
         return orphan_list
     
     async def link_study(self, report_id: int, study_id: int, user_id : str = None) -> Dict[str, Any]:

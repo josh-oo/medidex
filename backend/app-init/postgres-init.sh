@@ -30,3 +30,4 @@ SQL
 create_database "${POSTGRES_DB_RESOURCES:-resources}"
 create_database "${POSTGRES_DB_USERS:-users}"
 create_database "${POSTGRES_DB_FRONTEND:-medidex}"
+create_database "${POSTGRES_DB_LANGGRAPH:-langgraph_state}"

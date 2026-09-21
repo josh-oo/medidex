@@ -129,6 +129,7 @@ async def get_question_answering_service(
         study_similarity_service=study_similarity_service,
         checkpointer=checkpointer,
         model=model,
+        cutoff=None,
     )
 
 def get_project_pubsub_service(project_repo : ProjectRepository = Depends(get_project_repo)) -> ProjectPubSubService:
