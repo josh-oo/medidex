@@ -20,8 +20,8 @@ services:
       POSTGRES_DB_FRONTEND: ${POSTGRES_DB_FRONTEND:-medidex}
     volumes:
       - postgres_data:/var/lib/postgresql
-      # Any .sql / .sh placed here runs once, on first start of an empty data volume.
-      - ./backend/postgres-init:/docker-entrypoint-initdb.d
+      # Runs once, on first start of an empty data volume.
+      - ./backend/app-init/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh
       - ${POSTGRES_BACKUPS:-./data/runtime/postgres-backups}:/backups
     expose:
       - 5432

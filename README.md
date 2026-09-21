@@ -30,14 +30,14 @@ Install *docker* if you have not already: [Windows](https://docs.docker.com/desk
 # Data and databases
 The repository ships a deterministic synthetic study/report dataset for local deployments.
 On first startup, `app-init` creates the resource tables used by the study/report adapters
-when absent and loads 100 studies with an uneven set of 242 linked reports. Existing resource data is left
+when absent and loads 100 studies with an uneven set of 210 linked reports. Existing resource data is left
 unchanged. Production deployments can omit the `data/seed/` mount if they provision their own
 resource schema and data:
 
 - **Postgres.** The services expect three databases — `POSTGRES_DB_RESOURCES` (studies and
    reports), `POSTGRES_DB_USERS` (backend users) and `POSTGRES_DB_FRONTEND` (frontend,
    managed by Prisma). The databases are created automatically on the first start; see
-   [`backend/postgres-init/`](backend/postgres-init/) for details. The demo resource seed
+   [`backend/app-init/postgres-init.sh`](backend/app-init/postgres-init.sh) for details. The demo resource seed
    lives in [`data/seed/`](data/seed/) and is loaded by `app-init` only when the resource
    database is empty. Docker-mounted runtime state lives in `data/runtime/`.
 - **Frontend schema.** The frontend's tables come from its Prisma migrations
@@ -120,17 +120,3 @@ are run on demand and use `BACKEND_API_URL` / `BACKEND_API_KEY` to talk to the l
 Vector store, relational database, task/cache backend and PDF conversion service. They run
 from upstream images and need no configuration beyond the variables above.
 
-# Rules for editing this repository
-1. If you are working on this repository please create a new branch for every feature / bugfix and use meaningful prefixes.
-   For example: `bugfix/embedding-model-data-type` or `feature/new-upload-button`
-2. If the bugfix is done you can create a pull request, to merge it back to `main`
-3. The `prod` branch is currently empty we will use it later for CI/CD as soon as we are ready for production.
-
-# Local Development
-Running the project locally (without docker) requires you to run a local vectorstore:
-`docker run -p 6333:6333 -p 6334:6334 -v /data/runtime/qdrant:/qdrant/storage qdrant/qdrant`.
-For the storage location (data/runtime/qdrant in this case) an absolute path is required.
-
-# Important
-In the sqlite table:  
-tblStudy Dateentered and tblReport Dateentered need to be in iso format YYYY-MM-DD HH:MM:SS, use the script database/helper.py.

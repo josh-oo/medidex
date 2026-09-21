@@ -62,7 +62,10 @@ SEED_FILE="/seed/synthetic_seed.sql"
 if [ -f "$SEED_FILE" ]; then
     echo "app-init: waiting for postgres at $POSTGRES_HOST:$POSTGRES_PORT..."
     attempt=1
-    until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres >/dev/null 2>&1; do
+    # The postgres container runs backend/app-init/postgres-init.sh (which creates
+    # POSTGRES_DB_RESOURCES/USERS/FRONTEND) before it accepts connections here,
+    # so by the time this succeeds the resource database already exists.
+    until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB_RESOURCES" >/dev/null 2>&1; do
         if [ "$attempt" -ge 60 ]; then
             echo "app-init: ERROR: postgres is not reachable after 120s" >&2
             exit 1
@@ -70,23 +73,6 @@ if [ -f "$SEED_FILE" ]; then
         attempt=$((attempt + 1))
         sleep 2
     done
-    create_database() {
-        database_name="$1"
-        PGPASSWORD="$POSTGRES_PASSWORD" psql \
-            --host "$POSTGRES_HOST" \
-            --port "$POSTGRES_PORT" \
-            --username "$POSTGRES_USER" \
-            --dbname postgres \
-            --set db_name="$database_name" <<'SQL'
-SELECT format('CREATE DATABASE %I', :'db_name')
-WHERE NOT EXISTS (
-    SELECT FROM pg_database WHERE datname = :'db_name'
-)\gexec
-SQL
-    }
-    create_database "$POSTGRES_DB_RESOURCES"
-    create_database "${POSTGRES_DB_USERS:-users}"
-    create_database "${POSTGRES_DB_FRONTEND:-medidex}"
     resource_table_exists=$(PGPASSWORD="$POSTGRES_PASSWORD" psql \
         --host "$POSTGRES_HOST" \
         --port "$POSTGRES_PORT" \
@@ -133,7 +119,7 @@ for dir in logs resources resources/pdfs resources/pdf_metadata resources/fullte
     mkdir -p "$DATABASE_VOLUME/$dir"
 done
 if [ ! -f "$DATABASE_VOLUME/resources/pdfs/00000.pdf" ]; then
-    cp /app-init/placeholder.pdf "$DATABASE_VOLUME/resources/pdfs/00000.pdf"
+    cp /app-init/data/placeholder.pdf "$DATABASE_VOLUME/resources/pdfs/00000.pdf"
 fi
 if [ -d /seed/pdfs ]; then
     seed_pdf_count=$(find /seed/pdfs -type f -name '*.pdf' | wc -l | tr -d ' ')

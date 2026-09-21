@@ -13,7 +13,7 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY logic/main.py .
 COPY logic/src/ ./src/
 COPY logic/src_agent/ ./src_agent/
-COPY app-init/placeholder.pdf /app/placeholder.pdf
+COPY app-init/data/placeholder.pdf /app/placeholder.pdf
 
 ARG APP_UID=1000
 ARG APP_GID=1000
