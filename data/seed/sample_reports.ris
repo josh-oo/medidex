@@ -1,87 +1,199 @@
 TY  - JOUR
-AU  - Okafor, Amina
-AU  - Martinez, Luis
-AU  - Nair, Priya
-T1  - Cost-effectiveness ofstructured medication review for heart failure with
-preserved ejection fraction: a pragmatic registry analysis
-JF  - Journal of Clinical Epidemiology
-PY  - 2025
+AU  - Quraishi, Tariq
+AU  - Valdes, Camille
+AU  - Almeida, Chiara
+AU  - Kallio, Oleksandr
+T1  - Implementation Strategy Intensity and Fidelity in School-Based Health
+Promotion: Results From a Cluster Randomized Effectiveness Trial
+JF  - International Trials Register Quarterly
+PY  - 2021
 U3  - Journal Article
 Clinical Trial
-AB  - A within-trial economic evaluation estimated healthcare use and costs
-associated with structured medication review for heart failure with preserved
-ejection fraction. Resource use, service contacts, medication changes, and
-quality-adjusted survival were compared with standard care. Results were
-sensitive to assumptions about intervention delivery and longer-term
-maintenance. The economic model varied staff time, service intensity, and the
-assumed duration of treatment benefit. The authors described uncertainty around
-maintenance of the observed pattern beyond follow-up.
+AB  - Advancing widespread adoption of obesity prevention programs in schools
+requires understanding which implementation support strategies most effectively
+promote sustained program delivery. We randomized 45 school clusters to receive
+either standard implementation support or enhanced implementation support
+combining multiple reinforcement and linkage strategies over two academic
+years. Fidelity assessment revealed that approximately 75% of program
+components were delivered to the intended standards across both implementation
+arms. The enhanced support bundle did not produce significantly greater
+component delivery adherence compared to standard support. Two specific
+enhanced strategies (provider educational sessions and intersectoral
+coordination) were adopted by only a minority of participating schools due to
+reported staffing constraints and competing priorities. In contrast, parental
+participation and receipt of core health messages were more strongly influenced
+by school demographics and family characteristics than by implementation
+strategy intensity. These findings highlight that implementation success is
+complex and contextual, requiring adaptive refinement rather than static
+strategy application.
 LA  - eng
-DO  - 10.5555/medidex.synthetic.0116
-N1  - Underlying parallel-group randomized controlled trial comparing usual care with pharmacist medication review.
+DO  - 10.5555/medidex.synthetic.0061
+N1  - Underlying cluster randomized hybrid effectiveness-implementation trial
+comparing standard school-based health promotion with Healthy School Start
+program with implementation strategy optimization.
+N1  - Synthetic report loosely inspired by an open-access PMC randomized
+controlled trial abstract (source PMID: 41455974); text has been
+substantially rewritten and all author/journal/identifier metadata
+fabricated for demonstration purposes.
 M4  - Citavi
 ER  -
 
 TY  - JOUR
-AU  - Mensah, Kwame
-AU  - Rossi, Sofia
-AU  - Wilson, Hannah
-T1  - Design And Implementation Protocol for home blood pressure monitoring in hypertension: a participant-level secondary analysis
-JF  - The Lancet Regional Health
-PY  - 2024
+AU  - Moreau, Hana
+AU  - Farrell, Jana
+AU  - Toivonen, Bruno
+AU  - Adeyemi, Oleksandr
+AU  - Okoye, Aisling
+T1  - Costimulatory Blockade After Initial Biologic Response in Psoriasis: Relapse
+Prevention and Long-Term Disease Control
+JF  - Digital Health Trials Journal
+PY  - 2019
 U3  - Journal Article
 Clinical Trial
-AB  - this prospective study assessed home blood pressure monitoring for adults with hypertension. Participants will be recruited within a pragmatic network of hospital and community providers; the planned sample is 261 and blood pressure control is the principal endpoint. The protocol prespecifies safety, adherence, and quality-of-life measures and describes procedures for missing observations. The findings should be considered alongside short follow-up and incomplete adherence data. A prespecified sensitivity analysis produced estimates in the same general direction.
+AB  - Patients with psoriasis who respond favorably to biologic therapy face
+uncertainty regarding optimal long-term disease management strategies. We
+evaluated whether switching to an alternative costimulatory-blocking biologic
+agent could prevent disease relapse following withdrawal of an initial biologic
+therapy. One hundred eight adults with moderate-to-severe psoriasis received
+lead-in therapy with an established biologic agent, and 91 responders were
+subsequently randomized to either continue the original biologic or transition
+to costimulatory blockade, with both withdrawn at week 39. Over the subsequent
+observation period through week 88, approximately 91% of participants assigned
+to the alternative costimulatory-blocking agent experienced psoriasis relapse
+compared to 87% in the continued-therapy group—a difference that was not
+statistically significant. Median time from treatment discontinuation to
+disease relapse was similar in both groups (approximately 5 weeks). Molecular
+assessment of lesional tissue revealed that costimulatory blockade did not
+adequately suppress the pathogenic inflammatory cascade responsible for
+psoriasis. Safety profiles remained acceptable in both treatment arms. These
+findings indicate that costimulatory blockade alone is insufficient to maintain
+control after withdrawal of the original biologic therapy.
 LA  - eng
-DO  - 10.5555/medidex.synthetic.0185
-N1  - Underlying parallel-group randomized controlled trial comparing usual care with home blood pressure monitoring.
+DO  - 10.5555/medidex.synthetic.0063
+N1  - Underlying double-blind randomized controlled trial comparing continued therapy
+with established biologic agent with costimulatory blockade with abatacept
+after prior biologic therapy.
+N1  - Synthetic report loosely inspired by an open-access PMC randomized
+controlled trial abstract (source PMID: 34643650); text has been
+substantially rewritten and all author/journal/identifier metadata
+fabricated for demonstration purposes.
 M4  - Citavi
 ER  -
 
 TY  - JOUR
-AU  - Chen, Mei
-AU  - Brooks, Daniel
-AU  - Haddad, Fatima
-T1  - Secondary analysis of sleep efficiency after brief sleep restriction therapy for insomnia in older adults: a mixed-methods implementation report
-JF  - BMJ Open
-PY  - 2025
+AU  - Petrov, Tariq
+AU  - Adeyemi, Lena
+AU  - Schmidt, Aisling
+T1  - Postoperative Pain Outcomes Following Root Canal Treatment: Electronic Apex
+Locators versus Radiographic Working Length Determination
+JF  - Journal of Translational Patient Care
+PY  - 2021
 U3  - Journal Article
 Clinical Trial
-AB  - A prespecified secondary analysis examined variation in sleep efficiency after brief sleep restriction therapy among adults with insomnia in older adults. Effects were explored by baseline severity, age, adherence, and recruitment setting. The pattern was directionally consistent with the primary analysis, but subgroup estimates were imprecise. The analysis also considered differences between hospital and community delivery settings.
+AB  - One hundred twenty-five patients with asymptomatic irreversible pulpitis
+underwent single-visit root canal treatment with working length determined via
+one of five methods. Postoperative pain assessments revealed that discomfort
+gradually diminished over the 48-hour evaluation window in all treatment
+groups. Statistical analysis comparing pain intensities across the five working
+length determination approaches showed no clinically or statistically
+significant differences at any assessment timepoint. Pain patterns were similar
+whether patients underwent electronic locator-guided or radiography-based
+working length determination. Variables including age, sex, tooth location, and
+analgesic intake patterns did not demonstrate significant associations with
+postoperative pain across groups. Medication use for post-treatment discomfort
+management showed no meaningful variation among the five treatment approaches.
+These findings indicate that under standardised clinical conditions, the
+specific working length determination methodology does not substantially
+influence pain experience following root canal completion in this patient
+population with straightforward single-rooted anatomy.
 LA  - eng
-DO  - 10.5555/medidex.synthetic.0129
-N1  - Underlying parallel-group randomized controlled trial comparing usual care with brief sleep restriction therapy.
+DO  - 10.5555/medidex.synthetic.0127
+N1  - Underlying randomised trial, five treatment arms comparing periapical
+radiography for working length determination with various electronic apex
+locators for working length determination.
+N1  - Synthetic report loosely inspired by an open-access PMC randomized
+controlled trial abstract (source PMID: 42698074); text has been
+substantially rewritten and all author/journal/identifier metadata
+fabricated for demonstration purposes.
 M4  - Citavi
 ER  -
 
 TY  - JOUR
-AU  - Adeyemi, Tunde
-AU  - Novak, Elena
-AU  - Silva, Rafael
-T1  - Clinical outcomes after pharmacist-led medication review for hypertension: a report on clinical decision-making
-JF  - BMJ Open
-PY  - 2025
+AU  - Castellano, Quentin
+AU  - Ionescu, Yuki
+AU  - Novak, Dawit
+AU  - Yamada, Chiara
+AU  - Csik, Omar
+T1  - Long-term tolerability and patient-reported outcomes with cosmetic versus
+prescription acne therapy
+JF  - Journal of Primary Care Innovation
+PY  - 2021
 U3  - Journal Article
 Clinical Trial
-AB  - Investigators explored pharmacist-led medication review against standard care in 435 adults with hypertension. The intervention showed a small but measurable benefit for blood pressure control, while treatment exposure and adverse events were broadly comparable between groups. Generalisability may be reduced because participating sites had established research infrastructure. Results were interpreted alongside baseline severity, treatment exposure, and concurrent care.
+AB  - Secondary analysis examined tolerability and quality-of-life endpoints from the
+12-week acne treatment comparison. Skin irritation symptoms were mild to absent
+in the cosmetic regimen group across all assessment windows, whereas
+prescription therapy produced higher irritation scores peaking at week 4.
+Facial skin hydration, assessed via transepidermal water loss measurements,
+showed greater preservation with cosmetic treatment. Post-inflammatory
+hyperpigmentation improved more favorably in those with baseline darker skin
+types receiving cosmetic therapy. Patient-reported confidence in appearance and
+social comfort improved significantly more in the cosmetic group. Among
+patients completing the full 12-week course, 96.8% in the cosmetic arm versus
+82.6% in the prescription arm reported willingness to continue their assigned
+regimen. Subset analysis in darker skin types (Fitzpatrick IV-VI) revealed
+superior tolerability with cosmetic therapy while maintaining comparable
+efficacy. These findings suggest the cosmetic regimen may offer particular
+advantage in diverse populations with sensitivity concerns.
 LA  - eng
-DO  - 10.5555/medidex.synthetic.0149
-N1  - Underlying parallel-group randomized controlled trial comparing usual care with pharmacist-led medication review.
+DO  - 10.5555/medidex.synthetic.0165
+N1  - Underlying double-blind randomized active-control trial comparing prescription
+retinoid-peroxide combination (adapalene 0.1%/benzoyl peroxide 2.5%) with over-
+the-counter salicylic acid regimen (1% cleanser, 2% lotion).
+N1  - Synthetic report loosely inspired by an open-access PMC randomized
+controlled trial abstract (source PMID: 39301780); text has been
+substantially rewritten and all author/journal/identifier metadata
+fabricated for demonstration purposes.
 M4  - Citavi
 ER  -
 
 TY  - JOUR
-AU  - Ibrahim, Leila
-AU  - Thompson, Marcus
-AU  - Yamamoto, Keiko
-T1  - Secondary analysis of depressive symptom severity after guided behavioural activation for major depressive disorder: a real-world assessment of delivery
-JF  - The Lancet Regional Health
-PY  - 2026
+AU  - Farrell, Quentin
+AU  - Eriksson, Sofia
+AU  - Ricci, Hana
+AU  - Dubois, Rosalind
+AU  - Ricci, Aisling
+T1  - Expanded TB screening does not improve diagnostic yield or mortality in
+hospitalized HIV-positive patients
+JF  - Journal of Nursing-Led Care Research
+PY  - 2016
 U3  - Journal Article
 Clinical Trial
-AB  - A prespecified secondary analysis examined variation in depressive symptom severity after guided behavioural activation among adults with major depressive disorder. Effects were explored by baseline severity, age, adherence, and recruitment setting. The pattern was directionally consistent with the primary analysis, but subgroup estimates were imprecise. The report discusses how missing observations may affect interpretation of the final estimates.
+AB  - Background: Early TB diagnosis may improve outcomes in hospitalized HIV
+patients. We evaluated whether expanded diagnostic testing from multiple
+specimen types improves case detection and treatment initiation. Setting: 11
+hospitals (Tanzania and Mozambique), Sept 2022-March 2024. Participants: 1172
+hospitalized adults with HIV (582 expanded arm, 590 standard arm); 61% female,
+median CD4 232 cells/μL. Intervention: Expanded testing (sputum/stool/urine
+plus urine antigen) versus standard symptom-based testing. Results:
+Microbiologically confirmed TB was detected in 16.0% of expanded arm and 15.3%
+of standard arm, with no significant difference (0.7%, 95% CI -3.4 to 4.8,
+p=0.73). Treatment initiation within 72 hours occurred in 93 expanded versus 90
+standard arm participants (p>0.05). 8-week mortality was 25.8% (expanded)
+versus 28.8% (standard) (HR 0.86, 95% CI 0.69-1.07, p=0.18). Time from
+admission to TB treatment did not differ significantly between arms (median
+0.98 vs 0.92 days, p=0.72). In the control arm, 85.6% had TB-compatible
+symptoms yet only 60.6% provided sputum samples. Conclusions: Expanded
+diagnostic strategies did not improve TB case detection, treatment timeliness,
+or 8-week survival despite increased testing.
 LA  - eng
-DO  - 10.5555/medidex.synthetic.0015
-N1  - Underlying parallel-group randomized controlled trial comparing usual care with guided behavioural activation.
+DO  - 10.5555/medidex.synthetic.0169
+N1  - Underlying pragmatic randomized controlled trial comparing standard symptom-
+based diagnostic approach with expanded diagnostic testing from multiple
+specimen types.
+N1  - Synthetic report loosely inspired by an open-access PMC randomized
+controlled trial abstract (source PMID: 42105779); text has been
+substantially rewritten and all author/journal/identifier metadata
+fabricated for demonstration purposes.
 M4  - Citavi
 ER  -
