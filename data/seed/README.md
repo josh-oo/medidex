@@ -5,8 +5,8 @@ It contains the complete set of explicit titles, abstracts, IDs, and relationshi
 does not generate any data.
 
 - 100 studies with IDs in the `1000001`-`1000100` range.
-- An uneven set of 242 reports: many studies have one report, while a small number have 10 or more, including protocol, results, follow-up, and correction/retraction-style records.
-- `pdfs/` contains one dummy PDF per seeded report. Each file contains the report title and abstract and is named by its zero-padded `ReportNumber`.
+- An uneven set of 210 reports: most studies have one or two reports, while a smaller number have three or four, including protocol, results, follow-up, and correction/retraction-style records.
+- `pdfs/` contains one dummy PDF per seeded report. Each file contains the report title and abstract and is named by its zero-padded `ReportNumber`. `ReportNumber` is assigned as a globally unique, sequential value (`1`-`210`) matching insertion order, since the backend uses it as the PDF filename lookup key.
 - [`sample_reports.ris`](sample_reports.ris) contains five newest reports from distinct studies for upload testing; those reports are intentionally excluded from the seed.
 - Study/report links and provenance rows required by the backend repositories.
 - Linked conditions, interventions, outcomes, designs, and participant groups.

@@ -10,7 +10,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
 endobj
 4 0 obj
-<< /Length 892 >>
+<< /Length 1507 >>
 stream
 BT
 /F1 12 Tf
@@ -18,28 +18,41 @@ BT
 14 TL
 (Title) Tj
 T*
-(Correction: A Graded Activity Programme and pain-related function in chronic low back pain:) Tj
+(Multimodal Neuroimaging Integration Does Not Enhance Motor Interface Performance in) Tj
 T*
-(an assessment of variation in response) Tj
+(Healthy Learners) Tj
 T*
 () Tj
 T*
 (Abstract) Tj
 T*
-(This notice corrects a nonclinical metadata error in an earlier report on a graded activity) Tj
+(The combination of scalp electroencephalography and near-infrared spectroscopy was) Tj
 T*
-(programme for chronic low back pain. The participant population, intervention, comparator,) Tj
+(hypothesized to improve brain-machine interface control fidelity compared to) Tj
 T*
-(analyses, and clinical conclusions are unchanged. The corrected record clarifies the outcome) Tj
+(electroencephalography alone. Sixteen healthy participants completed five standardized) Tj
 T*
-(definition and preserves the original study context for evidence review. A prespecified) Tj
+(motor control training sessions using either single-source \(electroencephalography-only\)) Tj
 T*
-(sensitivity analysis produced estimates in the same general direction. This report is from a) Tj
+(or dual-source \(electroencephalography plus near-infrared spectroscopy\) signal) Tj
 T*
-(parallel-group randomized controlled trial comparing Control: wait-list care vs) Tj
+(interpretation systems. Classification recall measured in real-time during three-class) Tj
 T*
-(Intervention: strength and balance exercise + inhaled anti-inflammatory therapy.) Tj
+(motor tasks averaged 58.2% in the electroencephalography-only condition and 54.1% in the) Tj
 T*
+(multimodal condition \(p = 0.34\). Agency perception, quantified on standardized scales,) Tj
+T*
+(approached 73% of maximum in both groups \(p = 0.61\). Computational optimization identified) Tj
+T*
+(fronto-central electrode placement as most informative across both modalities, while near-) Tj
+T*
+(infrared sensor positioning required individual-level calibration. Post-hoc simulation) Tj
+T*
+(analysis indicated comparable predictive utility between modalities. These findings) Tj
+T*
+(suggest that within standard classification and fusion methodologies, additional) Tj
+T*
+(neuroimaging channels do not confer performance advantage during acute training periods.) Tj
 ET
 endstream
 endobj
@@ -53,9 +66,9 @@ xref
 0000000064 00000 n 
 0000000121 00000 n 
 0000000247 00000 n 
-0000001190 00000 n 
+0000001805 00000 n 
 trailer
 << /Size 6 /Root 1 0 R >>
 startxref
-1260
+1875
 %%EOF
