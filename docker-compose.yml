@@ -154,7 +154,7 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - ADMIN_NAME=${ADMIN_NAME:-Administrator}
       - STAGE=${STAGE:-local}
-      - MEERKAT_API_URL=${BACKEND_API_URL:-http://logic:8002/backend}
+      - BACKEND_API_URL=${BACKEND_API_URL:-http://logic:8002/backend}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB_FRONTEND:-medidex}?schema=public
       - INACTIVITY_DIALOG=${INACTIVITY_DIALOG:-false}
     networks:

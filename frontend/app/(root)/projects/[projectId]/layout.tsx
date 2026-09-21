@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { ReportDetailDto } from "@/types/apiDTOs";
 import { ReportColumnClient } from "./components/report-column-client";
 import { getProjectReports as fetchProjectReports } from "@/lib/api/projectApi";
-import { getMeerkatHeaders } from "@/lib/server/meerkatHeaders";
+import { getBackendHeaders } from "@/lib/server/backendHeaders";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface ReportColumnProps {
@@ -15,7 +15,7 @@ interface ReportColumnProps {
 }
 
 async function getProjectReports(projectId: string): Promise<ReportDetailDto[]> {
-    const headers = await getMeerkatHeaders();
+    const headers = await getBackendHeaders();
 
     try {
         const reports = await fetchProjectReports(projectId, false, { headers });

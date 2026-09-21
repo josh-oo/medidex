@@ -61,7 +61,7 @@ const formatParticipantCount = (value?: string | null) => {
 };
 
 const getStudyConfirmationPath = (reportId: string, studyId: number) =>
-  `/api/meerkat/reports/${reportId}/studies/${studyId}/confirmation`;
+  `/api/backend/reports/${reportId}/studies/${studyId}/confirmation`;
 
 const toggleStudyConfirmation = async (
   reportId: string,
@@ -271,7 +271,7 @@ export default function ReviewDetailsPage() {
       const entries = await Promise.all(
         missingStudyIds.map(async (studyId) => {
           try {
-            const response = await fetch(`/api/meerkat/studies/${studyId}`, {
+            const response = await fetch(`/api/backend/studies/${studyId}`, {
               cache: "no-store",
             });
 
@@ -385,7 +385,7 @@ export default function ReviewDetailsPage() {
     setIsDeletingReport(true);
     setDeleteReportError(null);
     try {
-      const response = await fetch(`/api/meerkat/reports/${reportIdParam}`, {
+      const response = await fetch(`/api/backend/reports/${reportIdParam}`, {
         method: "DELETE",
       });
 

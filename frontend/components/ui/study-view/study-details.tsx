@@ -60,7 +60,7 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
     const fetchReports = async () => {
       try {
         const response = await fetch(
-          `/api/meerkat/studies/${studyId}/reports`,
+          `/api/backend/studies/${studyId}/reports`,
           { cache: "no-store" }
         );
 
@@ -108,7 +108,7 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
       for (const report of reports) {
         try {
           const response = await fetch(
-            `/api/meerkat/reports/${report.reportId}/pdf`,
+            `/api/backend/reports/${report.reportId}/pdf`,
             { cache: "no-store" }
           );
           if (!response.ok) {
@@ -156,7 +156,7 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
 
     try {
       const response = await fetch(
-        `/api/meerkat/reports/${reportId}/pdf`,
+        `/api/backend/reports/${reportId}/pdf`,
         { cache: "no-store" }
       );
       if (!response.ok) {

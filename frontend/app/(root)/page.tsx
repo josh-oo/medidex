@@ -1,6 +1,6 @@
 import { getProjects, getTasks } from "@/lib/api/projectApi";
 import prisma from "@/lib/db";
-import { getMeerkatHeaders } from "@/lib/server/meerkatHeaders";
+import { getBackendHeaders } from "@/lib/server/backendHeaders";
 import { ProjectCard } from "./components/project-card";
 import { TaskCard } from "./components/task-card";
 import { auth } from "../../lib/auth";
@@ -19,7 +19,7 @@ import { CreateProjectDialog } from "@/components/projects/create-project-dialog
 
 async function fetchProjects() {
   try {
-    const headers = await getMeerkatHeaders();
+    const headers = await getBackendHeaders();
     return await getProjects({ headers });
   } catch (error) {
     console.error("Failed to fetch projects:", error);
@@ -29,7 +29,7 @@ async function fetchProjects() {
 
 async function fetchTasks() {
   try {
-    const headers = await getMeerkatHeaders();
+    const headers = await getBackendHeaders();
     return await getTasks({ headers });
   } catch (error) {
     console.error("Failed to fetch tasks:", error);

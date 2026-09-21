@@ -189,7 +189,7 @@ SELECT json_build_object(
     'text', description,
     'payload', json_build_object(
         'tree_ids', json_build_array(source),
-        'source', 'meerkat',
+        'source', 'internal',
         'source_id', id::text,
         'display_name', description,
         'is_report', false

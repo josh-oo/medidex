@@ -45,7 +45,7 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
     onStateChange,
     allowedFileExtension = ".ris",
     hint = "RIS files only",
-    uploadUrl = "/api/meerkat/projects"
+    uploadUrl = "/api/backend/projects"
   }: UploadSectionProps,
   ref,
 ) {

@@ -87,7 +87,7 @@ export function ProjectCard({
   }, [project.assignees]);
 
   useEffect(() => {
-    const streamUrl = `/api/meerkat/projects/${encodeURIComponent(project.projectId)}/stream`;
+    const streamUrl = `/api/backend/projects/${encodeURIComponent(project.projectId)}/stream`;
     const eventSource = new EventSource(streamUrl);
 
     const handleMessage = (event: MessageEvent) => {
@@ -165,8 +165,8 @@ export function ProjectCard({
       }
       const isSelected = assigneeIds.includes(normalizedUserId);
       const endpoint = isSelected
-        ? `/api/meerkat/projects/${project.projectId}/assignees/${encodeURIComponent(normalizedUserId)}`
-        : `/api/meerkat/projects/${project.projectId}/assignees`;
+        ? `/api/backend/projects/${project.projectId}/assignees/${encodeURIComponent(normalizedUserId)}`
+        : `/api/backend/projects/${project.projectId}/assignees`;
       const requestInit: RequestInit = isSelected
         ? { method: "DELETE" }
         : {
@@ -223,7 +223,7 @@ export function ProjectCard({
 
     setIsDeleting(true);
     try {
-      const response = await fetch(`/api/meerkat/projects/${project.projectId}`, {
+      const response = await fetch(`/api/backend/projects/${project.projectId}`, {
         method: "DELETE",
       });
 

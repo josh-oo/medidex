@@ -46,7 +46,7 @@ class VectorstoreService():
     async def get_all_saved_report_ids(self):
         """
         Remove orphan nodes from vectorstore - delete points whose source_id 
-        doesn't exist in the Meerkat database anymore.
+        doesn't exist in the database anymore.
         """
         # Get all points with their source_id from vectorstore
         scroll_result = await self.client.scroll(
@@ -297,10 +297,10 @@ class VectorstoreService():
         if "mesh" in sources:
             filters.append(models.FieldCondition(key="source", match=models.MatchValue(value="mesh")))
 
-        if "meerkat" in sources:
+        if "internal" in sources:
             filters.append(models.Filter(
                 must=[
-                    models.FieldCondition(key="source", match=models.MatchValue(value="meerkat")),
+                    models.FieldCondition(key="source", match=models.MatchValue(value="internal")),
                     models.FieldCondition(key="tree_ids",match=models.MatchAny(any=[aspect]))
                 ]
             ))
@@ -326,7 +326,7 @@ class VectorstoreService():
     async def score_tags(self, embedding : List[float], tag_ids : List[int], aspect : str):
         tag_filter = models.Filter(
             must=[
-                models.FieldCondition(key="source", match=models.MatchValue(value="meerkat")),
+                models.FieldCondition(key="source", match=models.MatchValue(value="internal")),
                 models.FieldCondition(key="tree_ids",match=models.MatchAny(any=[aspect])),
                 models.FieldCondition(key="source_id",match=models.MatchAny(any=[str(item) for item in tag_ids]))
             ]

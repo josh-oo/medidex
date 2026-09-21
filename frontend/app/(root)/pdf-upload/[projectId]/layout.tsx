@@ -5,7 +5,7 @@ import { adminGuard } from "@/guards/role.guard";
 import { ReportColumnClient } from "./components/report-column-client";
 import type { ReportDetailDto } from "@/types/apiDTOs";
 import { getProjectReports as fetchProjectReports } from "@/lib/api/projectApi";
-import { getMeerkatHeaders } from "@/lib/server/meerkatHeaders";
+import { getBackendHeaders } from "@/lib/server/backendHeaders";
 
 interface PdfUploadPageProps {
   children: ReactNode;
@@ -15,7 +15,7 @@ interface PdfUploadPageProps {
 }
 
 async function loadProjectReports(projectId: string): Promise<ReportDetailDto[]> {
-  const headers = await getMeerkatHeaders();
+  const headers = await getBackendHeaders();
 
   try {
     const reports = await fetchProjectReports(projectId, true, { headers });

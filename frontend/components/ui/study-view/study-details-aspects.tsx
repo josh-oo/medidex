@@ -131,7 +131,7 @@ export function StudyAspects({ study }: StudyDetailsProps) {
 
     let isMounted = true;
     const controller = new AbortController();
-    const basePath = `/api/meerkat/studies/${study.studyId}`;
+    const basePath = `/api/backend/studies/${study.studyId}`;
 
     async function fetchJson<T>(endpoint: string, label: string): Promise<T> {
       const response = await fetch(`${basePath}/${endpoint}`, {

@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const baseUrl = process.env.MEERKAT_API_URL;
+const baseUrl = process.env.BACKEND_API_URL;
 
 const API_BASE_URL = `${baseUrl}/api`;
 

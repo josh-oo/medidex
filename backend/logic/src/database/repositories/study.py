@@ -83,7 +83,8 @@ class StudyRepository:
             return new_study
 
         except IntegrityError as e:
-            if getattr(e.orig.diag, "constraint_name", None) == "uq_tblstudy_shortname":
+            diag = getattr(getattr(e.orig, "__cause__", None), "diag", None)
+            if getattr(diag, "constraint_name", None) == "uq_tblstudy_shortname":
                 raise DuplicateShortNameError("ShortName already exists")
             raise
     

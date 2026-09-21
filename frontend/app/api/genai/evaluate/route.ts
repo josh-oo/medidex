@@ -1,7 +1,7 @@
 
 import { NextResponse } from "next/server";
 import { evaluateStudies } from "@/lib/api/genaiApi";
-import { getMeerkatHeaders } from "@/lib/server/meerkatHeaders";
+import { getBackendHeaders } from "@/lib/server/backendHeaders";
 import type { EvaluateRequest } from "@/types/apiDTOs";
 
 export async function POST(request: Request) {
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const headers = await getMeerkatHeaders();
+    const headers = await getBackendHeaders();
     const result = await evaluateStudies(body as EvaluateRequest, { headers });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

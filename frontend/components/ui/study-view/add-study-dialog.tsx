@@ -194,7 +194,7 @@ export function AddStudyDialog({
 
       try {
         const response = await fetch(
-          `/api/meerkat/reports/${currentReportId}/similar-studies/tags`,
+          `/api/backend/reports/${currentReportId}/similar-studies/tags`,
           { signal: controller.signal,
             cache: "no-store",
            },
@@ -247,7 +247,7 @@ export function AddStudyDialog({
 
     const loadAllInterventions = async () => {
       try {
-        const response = await fetch("/api/meerkat/interventions", {
+        const response = await fetch("/api/backend/interventions", {
           signal: controller.signal,
           cache: "no-store",
         });

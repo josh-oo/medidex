@@ -42,7 +42,7 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/api/meerkat/:path*",
+    "/api/backend/:path*",
     "/((?!api|_next/static|_next/image|images|favicon.ico|login|register|pending-approval).*)",
   ],
 };

@@ -10,7 +10,7 @@ from openai import OpenAI
 
 from .config import logger
 from .llm_payloads import build_content_blocks_with_report_pdf
-from .meerkat_client import fetch_report_pdf
+from .backend_client import fetch_report_pdf
 from .prompts import PDF_ATTACHMENT_NOTE, PDF_ATTACHMENT_PAYLOAD_NOTE
 from .schemas import EvalState, ReportDto
 

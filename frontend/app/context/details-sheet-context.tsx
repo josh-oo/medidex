@@ -29,7 +29,7 @@ export function DetailsSheetProvider({ children }: DetailsSheetProviderProps) {
     setLoading(true)
     setStudy(null)
 
-    const res = await fetch(`/api/meerkat/studies/${studyId}`, { cache: "no-store" })
+    const res = await fetch(`/api/backend/studies/${studyId}`, { cache: "no-store" })
     const data = await res.json()
 
 

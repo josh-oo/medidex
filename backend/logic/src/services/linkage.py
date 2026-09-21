@@ -65,5 +65,5 @@ class LinkageService:
             await self.report_repo.commit()
             return new_study
         except:
-            await self.report_repo.roolback()
+            await self.report_repo.rollback()
             raise

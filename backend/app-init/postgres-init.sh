@@ -10,10 +10,7 @@
 #
 # Changing this file has no effect on an existing volume. To re-run it, remove
 # the volume first (docker compose down -v), which deletes all Postgres data.
-# For an existing volume, create any missing databases manually instead. On an
-# existing volume using the old name, rename it instead of recreating it:
-# ALTER DATABASE meerkat RENAME TO resources (or set POSTGRES_DB_RESOURCES to
-# the name you already use).
+# For an existing volume, create any missing databases manually instead.
 set -eu
 
 create_database() {

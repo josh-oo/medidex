@@ -283,7 +283,7 @@ class ReportService:
                 await self.report_repo.save_report_metadata_field(report_id, "trial_id", trial_ids)
                 await self.report_repo.commit()
             except:
-                await self.report_repo.roolback()
+                await self.report_repo.rollback()
         return trial_ids
 
     async def _get_trial_ids(self, report_id: int, include_fulltext: bool) -> List[str]:

@@ -87,7 +87,7 @@ report_id_path = Path(..., description="ReportID")
 Study Endpoints
 """
 
-@router.put("/studies", summary="Add new study to meerkat.")
+@router.put("/studies", summary="Add new study to the database.")
 async def add_study(study_params: StudyCreate, study_service : StudyResourceService = Depends(get_study_service)) -> Study:
     try:
         return await study_service.add_study(short_name=study_params.shortName, study_status=study_params.status, countries=study_params.countries, duration =study_params.duration, number_of_participants = study_params.numberParticipants, comparison = study_params.comparison)
@@ -232,9 +232,9 @@ async def delete_report(
         await pubsub_service.publish_project_update(project_id)
         return Response(status_code=204)
     except:
-        report_repo.roolback()
+        await report_repo.rollback()
         raise
-    
+
 
 @router.get("/reports/{report_id}/studies", summary="Get the studies linked to this specific report.")
 async def get_report_studies_by_id(
@@ -346,7 +346,7 @@ async def upsert_report_flag(
         await report_repo.commit()
         return report_flag_to_dto(flag)
     except:
-        await report_repo.roolback()
+        await report_repo.rollback()
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
 @router.delete("/reports/{report_id}/flag", status_code=204, summary="Delete your report flag for a specific report.")
@@ -359,8 +359,8 @@ async def delete_report_flag(report_id: int = report_id_path, report_repo: Repor
         await report_repo.delete_report_flag(report_id)
         await report_repo.commit()
     except:
-        await report_repo.roolback()
-        raise HTTPException(status_code=501, detail=f"Failed delting report flag") 
+        await report_repo.rollback()
+        raise HTTPException(status_code=501, detail=f"Failed delting report flag")
 
 @router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
 async def post_report_event(report_id : int, event: Event, user_id = Depends(get_user_id), report_repo : ReportRepository = Depends(get_report_repo)):

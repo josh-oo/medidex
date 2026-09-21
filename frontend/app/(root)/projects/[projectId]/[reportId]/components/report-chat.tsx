@@ -372,7 +372,7 @@ export default function ReportChat({ reportId, open, setOpen}: ReportChatProps) 
     setLoadError(null);
 
     try {
-      const response = await fetch(`/api/meerkat/reports/${reportId}/chat`, {
+      const response = await fetch(`/api/backend/reports/${reportId}/chat`, {
         method: "GET",
         cache: "no-store",
       });
@@ -402,7 +402,7 @@ export default function ReportChat({ reportId, open, setOpen}: ReportChatProps) 
     setPendingUserMessage(message);
 
     try {
-      const response = await fetch(`/api/meerkat/reports/${reportId}/chat`, {
+      const response = await fetch(`/api/backend/reports/${reportId}/chat`, {
         method: "POST",
         cache: "no-store",
         headers: {
@@ -436,7 +436,7 @@ export default function ReportChat({ reportId, open, setOpen}: ReportChatProps) 
     setDeleteError(null);
 
     try {
-      const response = await fetch(`/api/meerkat/reports/${reportId}/chat`, {
+      const response = await fetch(`/api/backend/reports/${reportId}/chat`, {
         method: "DELETE",
         cache: "no-store",
       });

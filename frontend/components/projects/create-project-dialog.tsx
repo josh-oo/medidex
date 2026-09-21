@@ -75,7 +75,7 @@ export function CreateProjectDialog({ trigger }: CreateProjectDialogProps) {
             <Label htmlFor="project-name">Project name</Label>
             <Input
               id="project-name"
-              placeholder="e.g. 7th Meerkat Update"
+              placeholder="e.g. 7th Update"
               value={projectName}
               onChange={(event) => setProjectName(event.target.value)}
             />

@@ -8,7 +8,7 @@ services:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL}
       - STAGE=${STAGE}
-      - MEERKAT_API_URL=${BACKEND_API_URL}
+      - BACKEND_API_URL=${BACKEND_API_URL}
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@host.docker.internal:5432/medidex?schema=public
       - INACTIVITY_DIALOG=${INACTIVITY_DIALOG}
     working_dir: /app

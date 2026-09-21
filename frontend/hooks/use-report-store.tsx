@@ -2,7 +2,7 @@ import { ReportDetailDto, StudyDto } from "@/types/apiDTOs"
 import { create } from "zustand"
 
 const getReportStudyPath = (reportId: number, studyId: number) =>
-    `/api/meerkat/reports/${reportId}/studies/${studyId}`
+    `/api/backend/reports/${reportId}/studies/${studyId}`
 
 const hasStudyById = (studies: StudyDto[] = [], studyId: number) =>
     studies.some((candidate) => candidate.studyId === studyId)

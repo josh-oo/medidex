@@ -119,7 +119,7 @@ export function ReportList({
     const loadExistingFlag = async () => {
       try {
         const response = await fetch(
-          `/api/meerkat/reports/${selectedFlagReport.id}/flag`,
+          `/api/backend/reports/${selectedFlagReport.id}/flag`,
           { cache: "no-store" }
         );
 
@@ -188,7 +188,7 @@ export function ReportList({
 
     setIsSubmittingFlag(true);
     try {
-      const response = await fetch(`/api/meerkat/reports/${selectedFlagReport.id}/flag`, {
+      const response = await fetch(`/api/backend/reports/${selectedFlagReport.id}/flag`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -218,7 +218,7 @@ export function ReportList({
   const handleDeleteFlag = async (reportId: number) => {
     setIsDeletingFlagReportId(reportId);
     try {
-      const response = await fetch(`/api/meerkat/reports/${reportId}/flag`, {
+      const response = await fetch(`/api/backend/reports/${reportId}/flag`, {
         method: "DELETE",
       });
 
@@ -255,7 +255,7 @@ export function ReportList({
       .trim();
 
     // 2. Pass the sanitized filename to the API
-    const response = await fetch(`/api/meerkat/reports/${reportId}/pdf?filename=${encodeURIComponent(`${reportId} - ${safeTitle || "report"}.pdf`)}`, {
+    const response = await fetch(`/api/backend/reports/${reportId}/pdf?filename=${encodeURIComponent(`${reportId} - ${safeTitle || "report"}.pdf`)}`, {
       cache: "no-store",
     });
 
@@ -379,7 +379,7 @@ export function ReportList({
               const pdfParams = new URLSearchParams({
                 filename: `${report.report.reportId} - ${report.report.title}.pdf`,
               }).toString();
-              const pdfUrl = `/api/meerkat/reports/${report.report.reportId}/pdf?${pdfParams}`;
+              const pdfUrl = `/api/backend/reports/${report.report.reportId}/pdf?${pdfParams}`;
 
               if (!reportHref) {
                 return null;

@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { evaluateStudiesStream } from "@/lib/api/genaiStreamApi";
-import { getMeerkatHeaders } from "@/lib/server/meerkatHeaders";
+import { getBackendHeaders } from "@/lib/server/backendHeaders";
 
 export async function POST(request: Request) {
   try {
     const body = await request.text();
     const reqJson = JSON.parse(body);
 
-    // Get meerkat headers (JWT for auth)
-    const meerkatHeaders = await getMeerkatHeaders("application/json");
+    // Get backend headers (JWT for auth)
+    const backendHeaders = await getBackendHeaders("application/json");
     const headersForStream = {
-      ...meerkatHeaders,
+      ...backendHeaders,
       "Content-Type": "application/json",
     };
 

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { fetchDefaultPrompts } from "@/lib/api/genaiApi";
-import { getMeerkatHeaders } from "@/lib/server/meerkatHeaders";
+import { getBackendHeaders } from "@/lib/server/backendHeaders";
 
 export async function GET() {
 
   try {
-      const headers = await getMeerkatHeaders();
+      const headers = await getBackendHeaders();
       const projects = await fetchDefaultPrompts({
         headers,
       });

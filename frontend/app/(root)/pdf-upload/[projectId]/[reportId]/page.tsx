@@ -53,7 +53,7 @@ export default function PdfDetailsPage({ params }: PdfPageProps) {
 
   const handleNotAvailableClick = useCallback(async () => {
     try {
-      const response = await fetch(`/api/meerkat/reports/${reportId}/pdf`, {
+      const response = await fetch(`/api/backend/reports/${reportId}/pdf`, {
         method: "POST",
         cache: "no-store",
         headers: {
@@ -70,7 +70,7 @@ export default function PdfDetailsPage({ params }: PdfPageProps) {
 
   const handleDeletePdf = useCallback(async () => {
     try {
-      const response = await fetch(`/api/meerkat/reports/${reportId}/pdf`, {
+      const response = await fetch(`/api/backend/reports/${reportId}/pdf`, {
         method: "DELETE",
         cache: "no-store",
         headers: {
@@ -96,7 +96,7 @@ export default function PdfDetailsPage({ params }: PdfPageProps) {
       setLinksError(null);
 
       try {
-        const res = await fetch(`/api/meerkat/reports/${reportId}/sources`);
+        const res = await fetch(`/api/backend/reports/${reportId}/sources`);
         if (!res.ok) throw new Error("Failed to fetch links");
 
         const data = await res.json();
@@ -207,7 +207,7 @@ export default function PdfDetailsPage({ params }: PdfPageProps) {
         autoStart={false}
         allowedFileExtension=".pdf"
         hint="PDF files only"
-        uploadUrl={`/api/meerkat/reports/${reportId}/pdf`}
+        uploadUrl={`/api/backend/reports/${reportId}/pdf`}
       />
       </div>
 
@@ -215,7 +215,7 @@ export default function PdfDetailsPage({ params }: PdfPageProps) {
       <div className="mt-6">
         <iframe
           key={iframeKey}
-          src={`/api/meerkat/reports/${reportId}/pdf`}
+          src={`/api/backend/reports/${reportId}/pdf`}
           title="PDF Preview"
           width="100%"
           height="500px"

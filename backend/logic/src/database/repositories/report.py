@@ -17,7 +17,7 @@ class ReportRepository:
     async def commit(self):
         return await self.db.commit()
     
-    async def roolback(self):
+    async def rollback(self):
         return await self.db.rollback()
 
     async def _remove_orphaned_studies(self, affected_study_ids : set) -> List[int]:

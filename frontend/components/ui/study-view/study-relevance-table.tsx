@@ -162,7 +162,7 @@ export function StudyRelevanceTable({
         throw new Error("Select a report before adding a new study.");
       }
 
-      const response = await fetch(`/api/meerkat/reports/${reportId}/studies`, {
+      const response = await fetch(`/api/backend/reports/${reportId}/studies`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -263,7 +263,7 @@ export function StudyRelevanceTable({
 
     try {
       const response = await fetch(
-        `/api/meerkat/studies?q=${encodeURIComponent(query)}`,
+        `/api/backend/studies?q=${encodeURIComponent(query)}`,
         { cache: "no-store" }
       );
 

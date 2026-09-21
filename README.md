@@ -1,5 +1,5 @@
 # About
-This is the backend (including a frontend prototype) of the meerkat tool.
+
 
 # Quick start
 This is a dockerized application, so the simplest way to run it is with Docker.
@@ -112,7 +112,7 @@ private model. Currently this service runs on CPU; depending on the workload it 
 sense to move it to a GPU machine later.
 
 ## tools
-This service hosts routines like searching for unindexed reports in meerkat to add them to
+This service hosts routines like searching for unindexed reports in the backend to add them to
 the index properly. It is not part of `docker compose up`; the scripts in `backend/tools`
 are run on demand and use `BACKEND_API_URL` / `BACKEND_API_KEY` to talk to the logic service.
 

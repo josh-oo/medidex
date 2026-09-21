@@ -8,7 +8,7 @@ import {
   getAnnotations,
   getProjectReports 
 } from "@/lib/api/projectApi";
-import { getMeerkatHeaders } from "@/lib/server/meerkatHeaders";
+import { getBackendHeaders } from "@/lib/server/backendHeaders";
 import { ReviewAnnotationsProvider } from "./components/review-annotations-context";
 
 interface PdfUploadPageProps {
@@ -24,7 +24,7 @@ interface ProjectReviewData {
 }
 
 async function loadProjectReports(projectId: string): Promise<ProjectReviewData> {
-  const headers = await getMeerkatHeaders();
+  const headers = await getBackendHeaders();
 
   try {
     const [reports, annotations] = await Promise.all([

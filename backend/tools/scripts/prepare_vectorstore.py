@@ -71,7 +71,7 @@ def transform_to_uuid(id, tag="0000"):
     return f"00000000-{tag}-4000-a000-{str(id).lower().zfill(12)}"
 
 #################### Tag Embeddings
-async def load_meerkat_tag_data(tag, tag_id="0000"):
+async def load_internal_tag_data(tag, tag_id="0000"):
     headers = {"X-API-Key": BACKEND_API_KEY, "Content-Type": "application/json"}
     
     async with httpx.AsyncClient(headers=headers, timeout=60.0) as client:
@@ -86,7 +86,7 @@ async def load_meerkat_tag_data(tag, tag_id="0000"):
             value = tag_item['keyword']
             item = {}
             vector_store_id = transform_to_uuid(key, tag_id)
-            item['metadata'] = {"tree_ids": [tag], 'source': "meerkat", 'source_id': key, 'display_name': value, "is_report": False}
+            item['metadata'] = {"tree_ids": [tag], 'source': "internal", 'source_id': key, 'display_name': value, "is_report": False}
             item['texts'] = [normalize_tags(value)]
 
             result[vector_store_id] = item
@@ -316,7 +316,7 @@ async def process_and_upsert():
     # --- Tag Embedding Upsert ---
     # Example: interventions
     for tag, tag_uuid in [("interventions", "0001"), ("conditions", "0002"), ("outcomes", "0003")]:
-        tag_data = await load_meerkat_tag_data(tag, tag_id=tag_uuid)
+        tag_data = await load_internal_tag_data(tag, tag_id=tag_uuid)
         tag_ids = list(tag_data.keys())
         tag_batch_size = 32
         tag_tasks = []

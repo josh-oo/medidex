@@ -190,15 +190,15 @@ class RelatedTagSearchService:
         if aspect == TagCategories.interventions:
             related_tags = await self.study_repo.get_study_interventions(study_ids)
             related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["intervention"], TagCategories.interventions)
+            return await self.tag_scoring_service.score_related_tags(related_ids, vectors, TagCategories.interventions)
         elif aspect == TagCategories.conditions:
             related_tags = await self.study_repo.get_study_conditions(study_ids)
             related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["condition"], TagCategories.conditions)
+            return await self.tag_scoring_service.score_related_tags(related_ids, vectors, TagCategories.conditions)
         elif aspect == TagCategories.outcomes:
-            related_tags = await self.study_repo.get_study_outcomes(study_ids=s)
+            related_tags = await self.study_repo.get_study_outcomes(study_ids=study_ids)
             related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors["outcome"], TagCategories.outcomes)
+            return await self.tag_scoring_service.score_related_tags(related_ids, vectors, TagCategories.outcomes)
     
     async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : str):
         
