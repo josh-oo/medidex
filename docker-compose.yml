@@ -90,7 +90,6 @@ services:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9.4
     command: >
       --model-id ${EMBEDDING_MODEL_ID:-BAAI/bge-m3}
-      --revision ${EMBEDDING_MODEL_REVISION}
       --max-batch-tokens ${EMBEDDING_MAX_BATCH_TOKENS:-2048}
     environment:
       # Only needed for gated/private models. Left unset unless defined in .env.
