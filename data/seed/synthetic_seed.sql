@@ -301,7 +301,8 @@ INSERT INTO "tblIntervention" ("InterventionID", "InterventionDescription") VALU
 (3000097, 'alofropodect, a phosphodiesterase 10A inhibitor'),
 (3000098, '10-week supervised combined resistance and elastic-band exercise program'),
 (3000099, 'weekly mandala artistic engagement sessions for 4 weeks'),
-(3000100, 'integrated digital adherence technology (TB-TST: mobile app plus metabolite testing)') ON CONFLICT DO NOTHING;
+(3000100, 'integrated digital adherence technology (TB-TST: mobile app plus metabolite testing)'),
+(3000101, 'Oral Ziltravir (800 mg twice daily)') ON CONFLICT DO NOTHING;
 
 INSERT INTO "tblHealthCareCondition" ("HealthCareConditionID", "HealthCareConditionDescription") VALUES
 
@@ -402,7 +403,8 @@ INSERT INTO "tblHealthCareCondition" ("HealthCareConditionID", "HealthCareCondit
 (3100095, 'acute schizophrenia'),
 (3100096, 'metabolic syndrome in older adults'),
 (3100097, 'psychological distress in family members of terminally ill patients'),
-(3100098, 'tuberculosis requiring multi-month treatment') ON CONFLICT DO NOTHING;
+(3100098, 'tuberculosis requiring multi-month treatment'),
+(3100099, 'mild-to-moderate COVID-19') ON CONFLICT DO NOTHING;
 
 INSERT INTO "tblOutcome" ("OutcomeID", "OutcomeDescription") VALUES
 
@@ -602,7 +604,8 @@ INSERT INTO "tblOutcome" ("OutcomeID", "OutcomeDescription") VALUES
 (3200194, 'psychological well-being as measured by validated psychometric scale'),
 (3200195, 'spiritual well-being and self-reported quality of life'),
 (3200196, 'treatment adherence measured by metabolite testing and app engagement'),
-(3200197, 'TB treatment completion rates and patient satisfaction with technology support') ON CONFLICT DO NOTHING;
+(3200197, 'TB treatment completion rates and patient satisfaction with technology support'),
+(3200198, 'incidence of COVID-19–related hospitalization or all-cause mortality by day 28') ON CONFLICT DO NOTHING;
 
 INSERT INTO "tblDesign" ("DesignID", "DesignDescription") VALUES
 
@@ -699,7 +702,8 @@ INSERT INTO "tblDesign" ("DesignID", "DesignDescription") VALUES
 (3300091, 'Randomized implementation study'),
 (3300092, 'Multi-country adaptation study'),
 (3300093, 'Phase 2, randomized, double-blind trial'),
-(3300094, 'Pragmatic randomized trial') ON CONFLICT DO NOTHING;
+(3300094, 'Pragmatic randomized trial'),
+(3300095, 'Phase 3, multicenter, double-blind, placebo-controlled trial') ON CONFLICT DO NOTHING;
 
 INSERT INTO "tblParticipant" ("ParticipantsID", "ParticipantDescription") VALUES
 
@@ -802,7 +806,8 @@ INSERT INTO "tblParticipant" ("ParticipantsID", "ParticipantDescription") VALUES
 (3400097, 'hospitalized adults aged 18-65 with acute schizophrenia, PANSS total score ≥80'),
 (3400098, 'women aged 70 years or older with metabolic syndrome (mean age 75.2 years)'),
 (3400099, 'adult family caregivers of patients in palliative/hospice care settings'),
-(3400100, 'adults with drug-susceptible tuberculosis in treatment initiation or continuation phase') ON CONFLICT DO NOTHING;
+(3400100, 'adults with drug-susceptible tuberculosis in treatment initiation or continuation phase'),
+(3400101, 'unvaccinated adults with mild-to-moderate COVID-19 and at least one risk factor for severe disease') ON CONFLICT DO NOTHING;
 
 -- The comments above each row below cite the real, open-access PubMed/PMC RCT
 -- that inspired that study's synthetic reports. These citations are SQL
@@ -1009,110 +1014,9 @@ INSERT INTO "tblStudy" ("CENTRALStudyID", "CRGStudyID", "ShortName", "StatusofSt
 -- Study S099 (CRGStudyID 1000099) — source PMID 41928589 (open-access RCT abstract used only as inspiration; not stored in any column below)
 (NULL, 1000099, 'SYNTH-PSYCHOLOGICAL--099', 'Closed', 'Oleksandr Yamada (Study Coordinator), yamada.trial@example.org', 'Accepted', 'Synthetic study derived from an open-access randomized controlled trial abstract (PMC open-access subset, permissively licensed). Text has been substantially reworded and all author, journal, and identifier metadata fabricated for demonstration purposes.', '2025-10-28 00:00:00', '2026-01-03 00:00:00', '1', 84, 'Denmark', '4 weeks', 'no intervention (standard care only)', 'SYNTH-ISRCTN-0000099'),
 -- Study S100 (CRGStudyID 1000100) — source PMID 40897502 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(NULL, 1000100, 'SYNTH-TUBERCULOSIS-R-100', 'Closed', 'Tariq Kowalski (Study Coordinator), kowalski.trial@example.org', 'Accepted', 'Synthetic study derived from an open-access randomized controlled trial abstract (PMC open-access subset, permissively licensed). Text has been substantially reworded and all author, journal, and identifier metadata fabricated for demonstration purposes.', '2025-08-27 00:00:00', '2026-03-16 00:00:00', '1', 38, 'Argentina', '26 weeks', 'standard TB treatment protocols', 'SYNTH-NCT0000100');
-
-INSERT INTO "tblStudyAdded" ("CRGStudyID", "CreatedBy") VALUES
-
-(1000001, 'synthetic-seed'),
-(1000002, 'synthetic-seed'),
-(1000003, 'synthetic-seed'),
-(1000004, 'synthetic-seed'),
-(1000005, 'synthetic-seed'),
-(1000006, 'synthetic-seed'),
-(1000007, 'synthetic-seed'),
-(1000008, 'synthetic-seed'),
-(1000009, 'synthetic-seed'),
-(1000010, 'synthetic-seed'),
-(1000011, 'synthetic-seed'),
-(1000012, 'synthetic-seed'),
-(1000013, 'synthetic-seed'),
-(1000014, 'synthetic-seed'),
-(1000015, 'synthetic-seed'),
-(1000016, 'synthetic-seed'),
-(1000017, 'synthetic-seed'),
-(1000018, 'synthetic-seed'),
-(1000019, 'synthetic-seed'),
-(1000020, 'synthetic-seed'),
-(1000021, 'synthetic-seed'),
-(1000022, 'synthetic-seed'),
-(1000023, 'synthetic-seed'),
-(1000024, 'synthetic-seed'),
-(1000025, 'synthetic-seed'),
-(1000026, 'synthetic-seed'),
-(1000027, 'synthetic-seed'),
-(1000028, 'synthetic-seed'),
-(1000029, 'synthetic-seed'),
-(1000030, 'synthetic-seed'),
-(1000031, 'synthetic-seed'),
-(1000032, 'synthetic-seed'),
-(1000033, 'synthetic-seed'),
-(1000034, 'synthetic-seed'),
-(1000035, 'synthetic-seed'),
-(1000036, 'synthetic-seed'),
-(1000037, 'synthetic-seed'),
-(1000038, 'synthetic-seed'),
-(1000039, 'synthetic-seed'),
-(1000040, 'synthetic-seed'),
-(1000041, 'synthetic-seed'),
-(1000042, 'synthetic-seed'),
-(1000043, 'synthetic-seed'),
-(1000044, 'synthetic-seed'),
-(1000045, 'synthetic-seed'),
-(1000046, 'synthetic-seed'),
-(1000047, 'synthetic-seed'),
-(1000048, 'synthetic-seed'),
-(1000049, 'synthetic-seed'),
-(1000050, 'synthetic-seed'),
-(1000051, 'synthetic-seed'),
-(1000052, 'synthetic-seed'),
-(1000053, 'synthetic-seed'),
-(1000054, 'synthetic-seed'),
-(1000055, 'synthetic-seed'),
-(1000056, 'synthetic-seed'),
-(1000057, 'synthetic-seed'),
-(1000058, 'synthetic-seed'),
-(1000059, 'synthetic-seed'),
-(1000060, 'synthetic-seed'),
-(1000061, 'synthetic-seed'),
-(1000062, 'synthetic-seed'),
-(1000063, 'synthetic-seed'),
-(1000064, 'synthetic-seed'),
-(1000065, 'synthetic-seed'),
-(1000066, 'synthetic-seed'),
-(1000067, 'synthetic-seed'),
-(1000068, 'synthetic-seed'),
-(1000069, 'synthetic-seed'),
-(1000070, 'synthetic-seed'),
-(1000071, 'synthetic-seed'),
-(1000072, 'synthetic-seed'),
-(1000073, 'synthetic-seed'),
-(1000074, 'synthetic-seed'),
-(1000075, 'synthetic-seed'),
-(1000076, 'synthetic-seed'),
-(1000077, 'synthetic-seed'),
-(1000078, 'synthetic-seed'),
-(1000079, 'synthetic-seed'),
-(1000080, 'synthetic-seed'),
-(1000081, 'synthetic-seed'),
-(1000082, 'synthetic-seed'),
-(1000083, 'synthetic-seed'),
-(1000084, 'synthetic-seed'),
-(1000085, 'synthetic-seed'),
-(1000086, 'synthetic-seed'),
-(1000087, 'synthetic-seed'),
-(1000088, 'synthetic-seed'),
-(1000089, 'synthetic-seed'),
-(1000090, 'synthetic-seed'),
-(1000091, 'synthetic-seed'),
-(1000092, 'synthetic-seed'),
-(1000093, 'synthetic-seed'),
-(1000094, 'synthetic-seed'),
-(1000095, 'synthetic-seed'),
-(1000096, 'synthetic-seed'),
-(1000097, 'synthetic-seed'),
-(1000098, 'synthetic-seed'),
-(1000099, 'synthetic-seed'),
-(1000100, 'synthetic-seed');
+(NULL, 1000100, 'SYNTH-TUBERCULOSIS-R-100', 'Closed', 'Tariq Kowalski (Study Coordinator), kowalski.trial@example.org', 'Accepted', 'Synthetic study derived from an open-access randomized controlled trial abstract (PMC open-access subset, permissively licensed). Text has been substantially reworded and all author, journal, and identifier metadata fabricated for demonstration purposes.', '2025-08-27 00:00:00', '2026-03-16 00:00:00', '1', 38, 'Argentina', '26 weeks', 'standard TB treatment protocols', 'SYNTH-NCT0000100'),
+-- synthetic
+(NULL, 1000101, 'ZILTRAVIR-COVID19-01', 'Closed', 'Smith J (Principal Investigator), smith.j@example.org', 'Accepted', 'Synthetic study evaluating early oral ziltravir versus placebo in outpatients with mild-to-moderate COVID-19.', '2026-09-22 00:00:00', '2026-09-22 00:00:00', '1', 1042, 'Multinational', '5 days', 'ziltravir vs. placebo', 'NCT0555XXXX');
 
 INSERT INTO "tblStudyHealthCareCondition" ("CRGStudyID", "HealthCareConditionID") VALUES
 
@@ -1215,7 +1119,8 @@ INSERT INTO "tblStudyHealthCareCondition" ("CRGStudyID", "HealthCareConditionID"
 (1000097, 3100095),
 (1000098, 3100096),
 (1000099, 3100097),
-(1000100, 3100098) ON CONFLICT DO NOTHING;
+(1000100, 3100098),
+(1000101, 3100099) ON CONFLICT DO NOTHING;
 
 INSERT INTO "tblStudyIntervention" ("CRGStudyID", "InterventionID") VALUES
 
@@ -1318,7 +1223,8 @@ INSERT INTO "tblStudyIntervention" ("CRGStudyID", "InterventionID") VALUES
 (1000097, 3000097),
 (1000098, 3000098),
 (1000099, 3000099),
-(1000100, 3000100) ON CONFLICT DO NOTHING;
+(1000100, 3000100),
+(1000101, 3000101) ON CONFLICT DO NOTHING;
 
 INSERT INTO "tblStudyOutcome" ("CRGStudyID", "OutcomeID") VALUES
 
@@ -1518,7 +1424,8 @@ INSERT INTO "tblStudyOutcome" ("CRGStudyID", "OutcomeID") VALUES
 (1000099, 3200194),
 (1000099, 3200195),
 (1000100, 3200196),
-(1000100, 3200197) ON CONFLICT DO NOTHING;
+(1000100, 3200197),
+(1000101, 3200198) ON CONFLICT DO NOTHING;
 
 INSERT INTO "tblStudyDesign" ("CRGStudyID", "DesignID") VALUES
 
@@ -1621,7 +1528,8 @@ INSERT INTO "tblStudyDesign" ("CRGStudyID", "DesignID") VALUES
 (1000097, 3300093),
 (1000098, 3300023),
 (1000099, 3300023),
-(1000100, 3300094) ON CONFLICT DO NOTHING;
+(1000100, 3300094),
+(1000101, 3300095) ON CONFLICT DO NOTHING;
 
 INSERT INTO "tblStudyParticipant" ("CRGStudyID", "ParticipantsID") VALUES
 
@@ -1724,7 +1632,8 @@ INSERT INTO "tblStudyParticipant" ("CRGStudyID", "ParticipantsID") VALUES
 (1000097, 3400097),
 (1000098, 3400098),
 (1000099, 3400099),
-(1000100, 3400100) ON CONFLICT DO NOTHING;
+(1000100, 3400100),
+(1000101, 3400101) ON CONFLICT DO NOTHING;
 
 INSERT INTO "tblReport" ("CENTRALReportID", "CRGReportID", "ReportNumber", "Title", "Authors", "Journal", "Year", "Abstract", "Dateentered", "DateEdited", "TypeofReportID", "PublicationTypeID", "StudyDesign", "DOI", "TrialRegistrationID", "OriginalTitle", "Language", "Publisher") VALUES
 
@@ -1937,7 +1846,9 @@ INSERT INTO "tblReport" ("CENTRALReportID", "CRGReportID", "ReportNumber", "Titl
 (NULL, 2000212, 207, 'Integrating digital technology with direct patient support to improve TB medication adherence: protocol for a pragmatic randomized trial', 'Tariq Kowalski//Chidi Ionescu//Hiroshi Zeleny//Felix Csik//Nadia Okoye', 'Journal of Applied Clinical Trials', 2020, 'Tuberculosis remains a leading infectious cause of mortality globally, with medication non-adherence driving both treatment failure and drug resistance. Digital tools offer scalable adjuncts to clinical supervision, yet real-world implementation barriers remain incompletely understood. The TB Treatment Support Tools (TB-TST) intervention combines a smartphone application delivering personalized medication reminders, educational content, and bidirectional communication with a reliable, objective adherence biomarker (urine drug metabolite assay). This pragmatic randomized trial protocol describes evaluation of TB-TST integrated with standard directly observed therapy in four urban TB treatment centers in Argentina. A total of 90 newly diagnosed TB patients will be randomized 1:1 to standard care or standard care plus TB-TST. Primary outcomes are treatment completion rates and medication adherence measured by metabolite testing at predetermined intervals. Secondary outcomes include patient satisfaction, technical usability, cost-effectiveness, and qualitative insights into implementation barriers and facilitators. This study aims to generate evidence for scalable, patient-centered digital adherence strategies in TB programs.', '2020-06-01 09:00:00', '2026-07-18 00:00:00', 1, '1', 'Pragmatic randomized controlled trial', '10.5555/medidex.synthetic.0212', 'SYNTH-NCT0000100', NULL, 'English', 'Journal of Applied Clinical Trials Press'),
 (NULL, 2000213, 208, 'Digital adherence technology with metabolite-based verification improves TB treatment completion in resource-limited settings', 'Tariq Kowalski//Chidi Ionescu//Hiroshi Zeleny//Felix Csik//Nadia Okoye', 'Clinical Outcomes Research Review', 2020, 'Background: TB treatment non-adherence threatens individual outcomes and public health through emergence of drug-resistant strains. Digital adherence technologies combined with objective biomarker verification may improve outcomes. Objective: To evaluate whether integrated digital technology (TB-TST) plus standard care improves TB treatment completion compared to standard care alone. Methods: A total of 68 TB patients (mean age 38 years; 64% male) in Argentina''s public TB program were randomized to standard directly observed therapy (n=34) or standard care plus TB-TST mobile app with urine metabolite monitoring (n=34). Primary endpoint was TB treatment completion at 6 months. Secondary endpoints included metabolite-confirmed adherence rates, app engagement metrics, and patient satisfaction. Results: Treatment completion occurred in 76% of TB-TST participants versus 56% of standard care (relative risk 1.36; 95% CI 1.01–1.82; P = 0.039). Metabolite testing confirmed adherence on 87% of scheduled assessments in the intervention arm. App utilization was high (mean 68% of prescribed daily reminders accessed). Patients reported improved confidence in their adherence (P = 0.008) and strengthened therapeutic relationships with treatment supporters. No serious adverse events occurred. Conclusion: Integrated digital adherence technology with metabolite verification enhances TB treatment completion in pragmatic clinical settings, supporting scale-up for TB program implementation.', '2020-07-21 09:00:00', '2026-04-09 00:00:00', 2, '1', 'Pragmatic randomized trial', '10.5555/medidex.synthetic.0213', 'SYNTH-NCT0000100', NULL, 'English', 'Clinical Outcomes Research Review Press'),
 (NULL, 2000214, 209, 'Patient perspectives and implementation factors shaping acceptance and sustained use of digital TB adherence support tools', 'Tariq Kowalski//Chidi Ionescu//Hiroshi Zeleny//Felix Csik//Nadia Okoye', 'International Trials Register Quarterly', 2021, 'Background: Digital health tools for TB adherence require sustained patient engagement for effectiveness. Understanding facilitators and barriers to technology adoption in diverse, resource-limited settings is critical for implementation success. Objective: Qualitative analysis of patient experiences and perceptions regarding TB-TST implementation. Methods: Semi-structured interviews with 33 intervention-arm participants and 5 treatment support workers were conducted during or shortly after TB treatment completion. Data were analyzed using thematic coding informed by normalization process theory to identify factors enabling or hindering technology integration into routine TB care. Results: Patients identified app medication reminders and direct messaging with treatment supporters as most valuable; many used the app to ask sensitive questions avoided in face-to-face settings. Perceived benefits included improved organization, reduced treatment burden perceptions, and psychological reassurance. Initial confusion about the metabolite test purpose resolved over time through repeated explanation. Key barriers included inconsistent smartphone access, limited internet connectivity in some neighborhoods, burden of cumulative TB medication side effects, and work schedule conflicts with testing appointments. Qualitative feedback emphasized the importance of the treatment supporter relationship as a trusted anchor for technology use. Conclusions: Successful digital TB adherence tools require attention to social context, patient-centered design, and integration with human support systems rather than technology-only approaches.', '2021-02-06 09:00:00', '2026-05-08 00:00:00', 4, '1', 'Qualitative implementation analysis', '10.5555/medidex.synthetic.0214', 'SYNTH-NCT0000100', NULL, 'English', 'International Trials Register Quarterly Press'),
-(NULL, 2000215, 210, 'Corrigendum: Digital adherence technology with metabolite-based verification improves TB treatment completion', 'Tariq Kowalski//Chidi Ionescu//Hiroshi Zeleny//Felix Csik//Nadia Okoye', 'Clinical Outcomes Research Review', 2022, 'In the primary results article of this trial, Table 2 contained a mislabeled column header. The percentages reported under ''Baseline Adherence'' were inadvertently duplicated in the row for ''Week 12 Metabolite Detection'' due to a data import error. The corrected table reflects accurate metabolite detection rates at all timepoints and does not affect the primary efficacy conclusions. The study conclusions remain unchanged. We regret any confusion this may have caused.', '2022-04-23 09:00:00', '2026-06-17 00:00:00', 5, '1', 'Corrigendum notice', '10.5555/medidex.synthetic.0215', NULL, NULL, 'English', 'Clinical Outcomes Research Review Press');
+(NULL, 2000215, 210, 'Corrigendum: Digital adherence technology with metabolite-based verification improves TB treatment completion', 'Tariq Kowalski//Chidi Ionescu//Hiroshi Zeleny//Felix Csik//Nadia Okoye', 'Clinical Outcomes Research Review', 2022, 'In the primary results article of this trial, Table 2 contained a mislabeled column header. The percentages reported under ''Baseline Adherence'' were inadvertently duplicated in the row for ''Week 12 Metabolite Detection'' due to a data import error. The corrected table reflects accurate metabolite detection rates at all timepoints and does not affect the primary efficacy conclusions. The study conclusions remain unchanged. We regret any confusion this may have caused.', '2022-04-23 09:00:00', '2026-06-17 00:00:00', 5, '1', 'Corrigendum notice', '10.5555/medidex.synthetic.0215', NULL, NULL, 'English', 'Clinical Outcomes Research Review Press'),
+(NULL, 2000216, 211, 'Efficacy and Safety of Oral Ziltravir in Early COVID-19: Protocol for a Phase 3, Randomized, Placebo-Controlled Trial', 'Smith J//Doe A//Johnson R', 'Journal of Infectious Disease Interventions', 2025, 'Background: Accessible oral antiviral treatments remain critical for preventing COVID-19 progression. This protocol describes a trial evaluating ziltravir, a novel oral RNA-dependent RNA polymerase inhibitor, in non-hospitalized adults. Methods: This is a phase 3, multicenter, double-blind, placebo-controlled trial. Approximately 1,050 symptomatic adults with mild-to-moderate COVID-19 and at least one risk factor for severe disease will be randomized 1:1 to receive ziltravir (800 mg twice daily) or a matching placebo for 5 days. The primary endpoint is the incidence of COVID-19–related hospitalization or all-cause mortality by day 28. Secondary endpoints include time to sustained symptom resolution, viral load reduction, and safety metrics. Discussion: This trial will determine whether early intervention with ziltravir safely and effectively mitigates severe COVID-19 outcomes in high-risk outpatients, potentially offering a new therapeutic option for clinical management.', '2025-01-10 09:00:00', '2025-01-10 09:00:00', 2, 1, 'Phase 3, multicenter, double-blind, placebo-controlled trial', '10.5555/medidex.synthetic.0002', 'NCT0555XXXX', NULL, 'English', 'Journal of Infectious Disease Interventions Press');
+-- (NULL, 2000217, 212, 'Efficacy and Safety of Oral Ziltravir in High-Risk Outpatients with COVID-19: Results from a Phase 3 Randomized Controlled Trial', 'Smith J//Doe A//Johnson R', 'Journal of Infectious Disease Interventions', 2026, 'Background: We evaluated the efficacy and safety of oral ziltravir in non-hospitalized adults with early-stage COVID-19 to determine its impact on disease progression. Methods: In this phase 3, double-blind trial, 1,042 unvaccinated adults with mild-to-moderate COVID-19 and at least one risk factor for progression were randomized 1:1 to receive a 5-day course of ziltravir (800 mg twice daily) or placebo. The primary endpoint was COVID-19–related hospitalization or all-cause mortality through day 28. Results: Hospitalization or death occurred in 15 of 521 (2.9%) ziltravir recipients compared with 38 of 521 (7.3%) placebo recipients (relative risk reduction, 60.3%; 95% CI, 25.1 to 80.2; P = 0.002). No deaths occurred in the ziltravir group, while two occurred in the placebo group. Adverse events were comparable between groups (18.2% ziltravir vs. 20.5% placebo), consisting mostly of mild gastrointestinal symptoms. Conclusion: A 5-day course of oral ziltravir safely and significantly reduced the risk of hospitalization or death in high-risk outpatients with mild-to-moderate COVID-19.', '2026-09-22 09:00:00', '2026-09-22 09:00:00', 2, 1, 'Phase 3, multicenter, double-blind, placebo-controlled trial', '10.5555/medidex.synthetic.0003', 'NCT0555XXXX', NULL, 'English', 'Journal of Infectious Disease Interventions Press');
 
 INSERT INTO "tblStudyReport" ("StudyReportID", "CRGStudyID", "CRGReportID") VALUES
 
@@ -2150,220 +2061,9 @@ INSERT INTO "tblStudyReport" ("StudyReportID", "CRGStudyID", "CRGReportID") VALU
 (4000212, 1000100, 2000212),
 (4000213, 1000100, 2000213),
 (4000214, 1000100, 2000214),
-(4000215, 1000100, 2000215);
-
-INSERT INTO "tblStudyReportAdded" ("StudyReportID", "CreatedBy", "Confirmed") VALUES
-
-(4000001, 'synthetic-seed', 'True'),
-(4000002, 'synthetic-seed', 'False'),
-(4000003, 'synthetic-seed', 'False'),
-(4000004, 'synthetic-seed', 'False'),
-(4000005, 'synthetic-seed', 'False'),
-(4000006, 'synthetic-seed', 'False'),
-(4000007, 'synthetic-seed', 'False'),
-(4000008, 'synthetic-seed', 'False'),
-(4000009, 'synthetic-seed', 'True'),
-(4000010, 'synthetic-seed', 'True'),
-(4000011, 'synthetic-seed', 'True'),
-(4000012, 'synthetic-seed', 'False'),
-(4000013, 'synthetic-seed', 'True'),
-(4000014, 'synthetic-seed', 'True'),
-(4000015, 'synthetic-seed', 'False'),
-(4000016, 'synthetic-seed', 'False'),
-(4000017, 'synthetic-seed', 'True'),
-(4000018, 'synthetic-seed', 'True'),
-(4000019, 'synthetic-seed', 'True'),
-(4000020, 'synthetic-seed', 'True'),
-(4000021, 'synthetic-seed', 'True'),
-(4000022, 'synthetic-seed', 'True'),
-(4000023, 'synthetic-seed', 'False'),
-(4000024, 'synthetic-seed', 'False'),
-(4000025, 'synthetic-seed', 'False'),
-(4000026, 'synthetic-seed', 'True'),
-(4000027, 'synthetic-seed', 'False'),
-(4000028, 'synthetic-seed', 'False'),
-(4000029, 'synthetic-seed', 'False'),
-(4000030, 'synthetic-seed', 'False'),
-(4000031, 'synthetic-seed', 'True'),
-(4000032, 'synthetic-seed', 'True'),
-(4000033, 'synthetic-seed', 'False'),
-(4000034, 'synthetic-seed', 'True'),
-(4000035, 'synthetic-seed', 'True'),
-(4000036, 'synthetic-seed', 'False'),
-(4000037, 'synthetic-seed', 'True'),
-(4000038, 'synthetic-seed', 'False'),
-(4000039, 'synthetic-seed', 'False'),
-(4000040, 'synthetic-seed', 'True'),
-(4000041, 'synthetic-seed', 'True'),
-(4000042, 'synthetic-seed', 'False'),
-(4000043, 'synthetic-seed', 'False'),
-(4000044, 'synthetic-seed', 'True'),
-(4000045, 'synthetic-seed', 'False'),
-(4000046, 'synthetic-seed', 'False'),
-(4000047, 'synthetic-seed', 'True'),
-(4000048, 'synthetic-seed', 'False'),
-(4000049, 'synthetic-seed', 'False'),
-(4000050, 'synthetic-seed', 'False'),
-(4000051, 'synthetic-seed', 'False'),
-(4000052, 'synthetic-seed', 'True'),
-(4000053, 'synthetic-seed', 'True'),
-(4000054, 'synthetic-seed', 'True'),
-(4000055, 'synthetic-seed', 'False'),
-(4000056, 'synthetic-seed', 'False'),
-(4000057, 'synthetic-seed', 'False'),
-(4000058, 'synthetic-seed', 'False'),
-(4000059, 'synthetic-seed', 'True'),
-(4000060, 'synthetic-seed', 'True'),
-(4000062, 'synthetic-seed', 'False'),
-(4000064, 'synthetic-seed', 'True'),
-(4000065, 'synthetic-seed', 'True'),
-(4000066, 'synthetic-seed', 'True'),
-(4000067, 'synthetic-seed', 'False'),
-(4000068, 'synthetic-seed', 'False'),
-(4000069, 'synthetic-seed', 'True'),
-(4000070, 'synthetic-seed', 'True'),
-(4000071, 'synthetic-seed', 'False'),
-(4000072, 'synthetic-seed', 'False'),
-(4000073, 'synthetic-seed', 'True'),
-(4000074, 'synthetic-seed', 'True'),
-(4000075, 'synthetic-seed', 'False'),
-(4000076, 'synthetic-seed', 'False'),
-(4000077, 'synthetic-seed', 'False'),
-(4000078, 'synthetic-seed', 'True'),
-(4000079, 'synthetic-seed', 'True'),
-(4000080, 'synthetic-seed', 'True'),
-(4000081, 'synthetic-seed', 'False'),
-(4000082, 'synthetic-seed', 'False'),
-(4000083, 'synthetic-seed', 'True'),
-(4000084, 'synthetic-seed', 'False'),
-(4000085, 'synthetic-seed', 'True'),
-(4000086, 'synthetic-seed', 'True'),
-(4000087, 'synthetic-seed', 'True'),
-(4000088, 'synthetic-seed', 'False'),
-(4000089, 'synthetic-seed', 'False'),
-(4000090, 'synthetic-seed', 'True'),
-(4000091, 'synthetic-seed', 'False'),
-(4000092, 'synthetic-seed', 'False'),
-(4000093, 'synthetic-seed', 'False'),
-(4000094, 'synthetic-seed', 'False'),
-(4000095, 'synthetic-seed', 'False'),
-(4000096, 'synthetic-seed', 'True'),
-(4000097, 'synthetic-seed', 'False'),
-(4000098, 'synthetic-seed', 'True'),
-(4000099, 'synthetic-seed', 'False'),
-(4000100, 'synthetic-seed', 'True'),
-(4000101, 'synthetic-seed', 'False'),
-(4000102, 'synthetic-seed', 'True'),
-(4000103, 'synthetic-seed', 'False'),
-(4000104, 'synthetic-seed', 'True'),
-(4000105, 'synthetic-seed', 'True'),
-(4000106, 'synthetic-seed', 'True'),
-(4000107, 'synthetic-seed', 'False'),
-(4000108, 'synthetic-seed', 'False'),
-(4000109, 'synthetic-seed', 'True'),
-(4000110, 'synthetic-seed', 'True'),
-(4000111, 'synthetic-seed', 'True'),
-(4000112, 'synthetic-seed', 'False'),
-(4000113, 'synthetic-seed', 'False'),
-(4000114, 'synthetic-seed', 'False'),
-(4000115, 'synthetic-seed', 'True'),
-(4000116, 'synthetic-seed', 'True'),
-(4000117, 'synthetic-seed', 'True'),
-(4000118, 'synthetic-seed', 'True'),
-(4000119, 'synthetic-seed', 'True'),
-(4000120, 'synthetic-seed', 'True'),
-(4000121, 'synthetic-seed', 'True'),
-(4000122, 'synthetic-seed', 'True'),
-(4000123, 'synthetic-seed', 'True'),
-(4000124, 'synthetic-seed', 'False'),
-(4000125, 'synthetic-seed', 'True'),
-(4000126, 'synthetic-seed', 'False'),
-(4000128, 'synthetic-seed', 'True'),
-(4000129, 'synthetic-seed', 'True'),
-(4000130, 'synthetic-seed', 'True'),
-(4000131, 'synthetic-seed', 'False'),
-(4000132, 'synthetic-seed', 'True'),
-(4000133, 'synthetic-seed', 'False'),
-(4000134, 'synthetic-seed', 'True'),
-(4000135, 'synthetic-seed', 'False'),
-(4000136, 'synthetic-seed', 'True'),
-(4000137, 'synthetic-seed', 'False'),
-(4000138, 'synthetic-seed', 'False'),
-(4000139, 'synthetic-seed', 'True'),
-(4000140, 'synthetic-seed', 'False'),
-(4000141, 'synthetic-seed', 'True'),
-(4000142, 'synthetic-seed', 'True'),
-(4000143, 'synthetic-seed', 'True'),
-(4000144, 'synthetic-seed', 'True'),
-(4000145, 'synthetic-seed', 'False'),
-(4000146, 'synthetic-seed', 'False'),
-(4000147, 'synthetic-seed', 'False'),
-(4000148, 'synthetic-seed', 'True'),
-(4000149, 'synthetic-seed', 'False'),
-(4000150, 'synthetic-seed', 'False'),
-(4000151, 'synthetic-seed', 'True'),
-(4000152, 'synthetic-seed', 'False'),
-(4000153, 'synthetic-seed', 'True'),
-(4000154, 'synthetic-seed', 'True'),
-(4000155, 'synthetic-seed', 'False'),
-(4000156, 'synthetic-seed', 'True'),
-(4000157, 'synthetic-seed', 'False'),
-(4000158, 'synthetic-seed', 'True'),
-(4000159, 'synthetic-seed', 'False'),
-(4000160, 'synthetic-seed', 'True'),
-(4000161, 'synthetic-seed', 'False'),
-(4000162, 'synthetic-seed', 'False'),
-(4000163, 'synthetic-seed', 'False'),
-(4000164, 'synthetic-seed', 'True'),
-(4000166, 'synthetic-seed', 'False'),
-(4000167, 'synthetic-seed', 'False'),
-(4000168, 'synthetic-seed', 'True'),
-(4000170, 'synthetic-seed', 'True'),
-(4000171, 'synthetic-seed', 'True'),
-(4000172, 'synthetic-seed', 'True'),
-(4000173, 'synthetic-seed', 'False'),
-(4000174, 'synthetic-seed', 'True'),
-(4000175, 'synthetic-seed', 'True'),
-(4000176, 'synthetic-seed', 'True'),
-(4000177, 'synthetic-seed', 'False'),
-(4000178, 'synthetic-seed', 'False'),
-(4000179, 'synthetic-seed', 'False'),
-(4000180, 'synthetic-seed', 'False'),
-(4000181, 'synthetic-seed', 'False'),
-(4000182, 'synthetic-seed', 'False'),
-(4000183, 'synthetic-seed', 'False'),
-(4000184, 'synthetic-seed', 'False'),
-(4000185, 'synthetic-seed', 'True'),
-(4000186, 'synthetic-seed', 'False'),
-(4000187, 'synthetic-seed', 'False'),
-(4000188, 'synthetic-seed', 'False'),
-(4000189, 'synthetic-seed', 'False'),
-(4000190, 'synthetic-seed', 'False'),
-(4000191, 'synthetic-seed', 'True'),
-(4000192, 'synthetic-seed', 'False'),
-(4000193, 'synthetic-seed', 'False'),
-(4000194, 'synthetic-seed', 'False'),
-(4000195, 'synthetic-seed', 'False'),
-(4000196, 'synthetic-seed', 'False'),
-(4000197, 'synthetic-seed', 'False'),
-(4000198, 'synthetic-seed', 'False'),
-(4000199, 'synthetic-seed', 'True'),
-(4000200, 'synthetic-seed', 'True'),
-(4000201, 'synthetic-seed', 'True'),
-(4000202, 'synthetic-seed', 'True'),
-(4000203, 'synthetic-seed', 'True'),
-(4000204, 'synthetic-seed', 'False'),
-(4000205, 'synthetic-seed', 'True'),
-(4000206, 'synthetic-seed', 'True'),
-(4000207, 'synthetic-seed', 'True'),
-(4000208, 'synthetic-seed', 'True'),
-(4000209, 'synthetic-seed', 'True'),
-(4000210, 'synthetic-seed', 'False'),
-(4000211, 'synthetic-seed', 'False'),
-(4000212, 'synthetic-seed', 'True'),
-(4000213, 'synthetic-seed', 'True'),
-(4000214, 'synthetic-seed', 'True'),
-(4000215, 'synthetic-seed', 'False');
+(4000215, 1000100, 2000215),
+(4000217, 1000101, 2000216);
+--(4000218, 1000101, 2000217);
 
 SELECT setval(
     pg_get_serial_sequence('"tblReport"', 'CRGReportID'),
