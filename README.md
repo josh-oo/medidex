@@ -37,43 +37,37 @@ unchanged. Production deployments can omit the `data/seed/` mount if they provis
 resource schema and data:
 
 - **Postgres.** The services expect three databases — `POSTGRES_DB_RESOURCES` (studies and
-   reports), `POSTGRES_DB_USERS` (backend users) and `POSTGRES_DB_FRONTEND` (frontend,
-   managed by Prisma). The databases are created automatically on the first start; see
-   [`backend/app-init/postgres-init.sh`](backend/app-init/postgres-init.sh) for details. The demo resource seed
-   lives in [`data/seed/`](data/seed/) and is loaded by `app-init` only when the resource
-   database is empty. Docker-mounted runtime state lives in `data/runtime/`.
+    reports), `POSTGRES_DB_USERS` (backend users) and `POSTGRES_DB_FRONTEND` (frontend,
+    managed by Prisma). The databases are created automatically on the first start; see
+    [`backend/app-init/postgres-init.sh`](backend/app-init/postgres-init.sh) for details. The demo resource seed
+    lives in [`data/seed/`](data/seed/) and is loaded by `app-init` only when the resource
+    database is empty. Docker-mounted runtime state lives in `data/runtime/`.
 - **Frontend schema.** The frontend's tables come from its Prisma migrations
     (`npx prisma migrate deploy` inside `frontend/`), which run automatically before
     the frontend container starts.
 - **Admin account.** Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` to create an
-   approved admin account automatically on frontend startup. The seed is idempotent;
-   an existing account with that email is promoted to admin without changing its
-   password. `ADMIN_NAME` is optional and defaults to `Administrator`.
+    approved admin account automatically on frontend startup. The seed is idempotent;
+    an existing account with that email is promoted to admin without changing its
+    password. `ADMIN_NAME` is optional and defaults to `Administrator`.
 - **Initialization.** On `docker compose up`, the one-shot `app-init` service prepares
-   PostgreSQL, Qdrant, the logic data volume, and the seeded vectors before `logic` starts.
-   The initialization chain:
+    PostgreSQL, Qdrant, the logic data volume, and the seeded vectors before `logic` starts.
+    The initialization chain:
   1. Creates the Qdrant collection if it doesn't exist yet (with `EMBEDDING_MODEL_DIM`
      dimensions, cosine distance and the required payload indices). Idempotent: an existing
      collection is left untouched. The layout must stay in sync with
-   `backend/app-init/init.sh`.
+    `backend/app-init/init.sh`.
    2. Creates the data directories inside `data/runtime/backend/` (logs, PDFs, fulltexts)
      that the bind mount hides, and hands them to the unprivileged user `logic` runs as.
      Keep this list in sync when new `DATABASE_VOLUME` paths are added in `backend/logic/src/`.
    3. Embeds all reports and intervention, condition, and outcome tags with the
-       configured embedding service, then upserts them into Qdrant using `curl`, `jq`, and
-       `psql`. It writes an idempotence marker under
-      `data/runtime/backend/resources/` and skips re-embedding on later starts unless that
-       marker is removed.
+        configured embedding service, then upserts them into Qdrant using `curl`, `jq`, and
+        `psql`. It writes an idempotence marker under
+       `data/runtime/backend/resources/` and skips re-embedding on later starts unless that
+        marker is removed.
   
   The script lives in [`backend/app-init/`](backend/app-init/).
 
-On Linux, Docker creates missing bind-mount folders as `root`, which the unprivileged
-Qdrant image cannot write to (`logic-init` already takes care of the logic volume).
-Create them upfront if the container fails to start:
-```bash
-mkdir -p data/runtime/qdrant data/runtime/backend data/runtime/embeddings
-sudo chown -R 1000:1000 data/runtime
-```
+- **Testing with Dummy Data.** You can use the files located under `data/seed/examples/` as dummy data to test the system (provided it was already initialized with the default seed data).
 
 # Configuration
 All configuration lives in a single `.env` file in the repository root; every variable is
