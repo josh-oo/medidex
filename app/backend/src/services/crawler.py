@@ -138,7 +138,7 @@ class DoclingService:
         num_pages = doc.page_count
         doc.close()
 
-        timeout = min(num_pages * 10, 120)
+        timeout = max(30, min(num_pages * 10, 120))
 
         async with self.sem:
             try:

@@ -6,6 +6,16 @@ services:
       DOCLING_SERVE_ENABLE_UI: "1"
     expose:
       - 5001
+    # Model loading (layout + table structure) happens at boot and can take
+    # 30-90s on CPU; /health returns 200 immediately, so readiness must be
+    # checked via /ready instead - otherwise `logic` accepts uploads before
+    # docling can actually serve a conversion, and the first request times out.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
     networks:
       - internal_net
 
@@ -38,7 +48,7 @@ services:
 
   qdrant:
     container_name: qdrant
-    image: qdrant/qdrant:v1.17.1-unprivileged
+    image: qdrant/qdrant:v1.19.1-unprivileged
     restart: always
     expose:
       - 6333
@@ -165,6 +175,8 @@ services:
         condition: service_completed_successfully
       keycloak:
         condition: service_started
+      docling:
+        condition: service_healthy
 
   keycloak:
     container_name: keycloak

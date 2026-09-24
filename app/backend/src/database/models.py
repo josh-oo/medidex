@@ -20,8 +20,8 @@ def _current_utc_timestamp() -> str:
 
 
 def _current_utc_datetime() -> datetime.datetime:
-    """Return timezone-naive UTC datetime for timestamp columns."""
-    return datetime.datetime.utcnow()
+    """Return timezone-aware UTC datetime for TIMESTAMPTZ columns."""
+    return datetime.datetime.now(datetime.timezone.utc)
 
 class Report(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "tblReport"
@@ -179,7 +179,7 @@ class Project(SQLModel, table=True, metadata=metadata_resources):
 
     BatchHash: str = Field(primary_key=True)
     BatchDescription: str
-    DateCreated: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    DateCreated: datetime.datetime = Field(default_factory=_current_utc_datetime)
     UploadedBy: Optional[str]
 
 class ProjectAssignees(SQLModel, table=True, metadata=metadata_resources):
