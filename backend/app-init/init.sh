@@ -135,31 +135,41 @@ chown -R "$APP_UID:$APP_GID" "$DATABASE_VOLUME"
 echo "app-init: data volume prepared for uid $APP_UID:$APP_GID"
 
 # ============================================================================
-# 4. SYNTHETIC VECTORSTORE DATA
+# 4. VECTORSTORE SYNC (reports, interventions, conditions, outcomes)
 # ============================================================================
-MARKER="$DATABASE_VOLUME/resources/vectorstore.initialized"
-if [ -f "$MARKER" ]; then
-    echo "app-init: static vectors already initialized; skipping"
-else
-    echo "app-init: waiting for embedding service at $EMBEDDING_URL..."
-    attempt=1
-    until curl -sf "$EMBEDDING_URL/embeddings" \
-        -H 'Content-Type: application/json' \
-        -H "Authorization: Bearer $EMBEDDING_API_KEY" \
-        --data '{"input":["initialization probe"],"model":null}' >/dev/null; do
-        if [ "$attempt" -ge 90 ]; then
-            echo "app-init: ERROR: embedding service is not reachable after 180s" >&2
-            exit 1
-        fi
-        attempt=$((attempt + 1))
-        sleep 2
-    done
+# Reconciles the qdrant collection with the current contents of tblReport,
+# tblIntervention, tblHealthCareCondition and tblOutcome on every run, instead
+# of relying on a one-time "already initialized" marker: rows that aren't
+# embedded yet are added, and points whose row no longer exists in postgres
+# (e.g. deleted directly in the database) are removed. Point ids follow the
+# same deterministic scheme as transform_to_uuid() in
+# backend/logic/src/services/vectorstore.py, so this only ever touches
+# points produced by that scheme (report/tag ids, not e.g. mesh tags) and
+# leaves everything else in the collection untouched.
+echo "app-init: waiting for postgres at $POSTGRES_HOST:$POSTGRES_PORT..."
+attempt=1
+until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB_RESOURCES" >/dev/null 2>&1; do
+    if [ "$attempt" -ge 60 ]; then
+        echo "app-init: ERROR: postgres is not reachable after 120s" >&2
+        exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+done
 
-    REPORT_RECORDS="/tmp/report-records.jsonl"
-    TAG_RECORDS="/tmp/tag-records.jsonl"
-    trap 'rm -f "$REPORT_RECORDS" "$TAG_RECORDS"' EXIT
+REPORT_RECORDS="/tmp/report-records.jsonl"
+TAG_RECORDS="/tmp/tag-records.jsonl"
+ID_RECORD_TSV="/tmp/vectorstore-id-record.tsv"
+DESIRED_IDS="/tmp/vectorstore-desired-ids.txt"
+EXISTING_IDS="/tmp/vectorstore-existing-ids.txt"
+EXISTING_MANAGED_IDS="/tmp/vectorstore-existing-managed-ids.txt"
+MISSING_IDS="/tmp/vectorstore-missing-ids.txt"
+STALE_IDS="/tmp/vectorstore-stale-ids.txt"
+MISSING_RECORDS="/tmp/vectorstore-missing-records.jsonl"
+trap 'rm -f "$REPORT_RECORDS" "$TAG_RECORDS" "$ID_RECORD_TSV" "$DESIRED_IDS" \
+    "$EXISTING_IDS" "$EXISTING_MANAGED_IDS" "$MISSING_IDS" "$STALE_IDS" "$MISSING_RECORDS"' EXIT
 
-    psql_query=$(cat <<'SQL'
+psql_query=$(cat <<'SQL'
 SELECT json_build_object(
     'id', format('00000000-0000-4000-a000-%s', lpad(r."CRGReportID"::text, 12, '0')),
     'text', btrim(coalesce(r."Title", '') || E'\n' || coalesce(r."Abstract", '')),
@@ -176,14 +186,14 @@ SELECT json_build_object(
 ) FROM "tblReport" r ORDER BY r."CRGReportID";
 SQL
 )
-    PGPASSWORD="$POSTGRES_PASSWORD" psql \
-        --host "$POSTGRES_HOST" \
-        --port "$POSTGRES_PORT" \
-        --username "$POSTGRES_USER" \
-        --dbname "$POSTGRES_DB_RESOURCES" \
-        --tuples-only --no-align --command "$psql_query" > "$REPORT_RECORDS"
+PGPASSWORD="$POSTGRES_PASSWORD" psql \
+    --host "$POSTGRES_HOST" \
+    --port "$POSTGRES_PORT" \
+    --username "$POSTGRES_USER" \
+    --dbname "$POSTGRES_DB_RESOURCES" \
+    --tuples-only --no-align --command "$psql_query" > "$REPORT_RECORDS"
 
-    tag_query=$(cat <<'SQL'
+tag_query=$(cat <<'SQL'
 SELECT json_build_object(
     'id', format('00000000-%s-4000-a000-%s', tag, lpad(id::text, 12, '0')),
     'text', description,
@@ -203,12 +213,56 @@ SELECT json_build_object(
 ) tags ORDER BY tag, id;
 SQL
 )
-    PGPASSWORD="$POSTGRES_PASSWORD" psql \
-        --host "$POSTGRES_HOST" \
-        --port "$POSTGRES_PORT" \
-        --username "$POSTGRES_USER" \
-        --dbname "$POSTGRES_DB_RESOURCES" \
-        --tuples-only --no-align --command "$tag_query" > "$TAG_RECORDS"
+PGPASSWORD="$POSTGRES_PASSWORD" psql \
+    --host "$POSTGRES_HOST" \
+    --port "$POSTGRES_PORT" \
+    --username "$POSTGRES_USER" \
+    --dbname "$POSTGRES_DB_RESOURCES" \
+    --tuples-only --no-align --command "$tag_query" > "$TAG_RECORDS"
+
+# Desired = every report/tag row that currently exists in postgres.
+jq -r '.id' "$REPORT_RECORDS" "$TAG_RECORDS" | sort -u > "$DESIRED_IDS"
+
+# Existing = every point currently in qdrant, paginated via scroll.
+echo "app-init: reading existing vectorstore point ids..."
+: > "$EXISTING_IDS"
+offset="null"
+while :; do
+    if [ "$offset" = "null" ]; then
+        body='{"limit":1000,"with_payload":false,"with_vector":false}'
+    else
+        body=$(jq -cn --argjson offset "$offset" '{limit:1000,with_payload:false,with_vector:false,offset:$offset}')
+    fi
+    response=$(curl -sf -X POST "$QDRANT_URL/collections/$COLLECTION/points/scroll" \
+        -H 'Content-Type: application/json' --data "$body")
+    printf '%s' "$response" | jq -r '.result.points[].id' >> "$EXISTING_IDS"
+    offset=$(printf '%s' "$response" | jq -c '.result.next_page_offset')
+    [ "$offset" = "null" ] && break
+done
+# Restrict to ids in the report (tag 0000) / tag (0001-0003) id space this
+# script owns, e.g. never touch mesh tags (tag 1000) or anything else.
+grep -E '^00000000-000[0-3]-4000-a000-' "$EXISTING_IDS" | sort -u > "$EXISTING_MANAGED_IDS"
+
+comm -23 "$DESIRED_IDS" "$EXISTING_MANAGED_IDS" > "$MISSING_IDS"
+comm -13 "$DESIRED_IDS" "$EXISTING_MANAGED_IDS" > "$STALE_IDS"
+missing_count=$(wc -l < "$MISSING_IDS" | tr -d ' ')
+stale_count=$(wc -l < "$STALE_IDS" | tr -d ' ')
+echo "app-init: vectorstore sync: $missing_count missing, $stale_count stale (of $(wc -l < "$DESIRED_IDS" | tr -d ' ') expected points)"
+
+if [ "$missing_count" -gt 0 ]; then
+    echo "app-init: waiting for embedding service at $EMBEDDING_URL..."
+    attempt=1
+    until curl -sf "$EMBEDDING_URL/embeddings" \
+        -H 'Content-Type: application/json' \
+        -H "Authorization: Bearer $EMBEDDING_API_KEY" \
+        --data '{"input":["initialization probe"],"model":null}' >/dev/null; do
+        if [ "$attempt" -ge 90 ]; then
+            echo "app-init: ERROR: embedding service is not reachable after 180s" >&2
+            exit 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
 
     upsert_records() {
         records_file="$1"
@@ -238,11 +292,26 @@ SQL
         done < "$records_file"
     }
 
-    upsert_records "$REPORT_RECORDS"
-    upsert_records "$TAG_RECORDS"
-    printf 'reports=%s\ntags=%s\n' "$(wc -l < "$REPORT_RECORDS")" "$(wc -l < "$TAG_RECORDS")" > "$MARKER"
-    chown "$APP_UID:$APP_GID" "$MARKER"
-    echo "app-init: static vectors embedded and upserted"
+    # Use an ASCII unit separator (not a literal in the JSON) to join id/record
+    # so the join survives arbitrary title/abstract text without re-escaping it.
+    us=$(printf '\037')
+    jq -r --arg us "$us" '[.id, tostring] | join($us)' "$REPORT_RECORDS" "$TAG_RECORDS" > "$ID_RECORD_TSV"
+    awk -v FS="$us" 'NR==FNR{miss[$0]=1;next} ($1 in miss){print $2}' "$MISSING_IDS" "$ID_RECORD_TSV" > "$MISSING_RECORDS"
+
+    upsert_records "$MISSING_RECORDS"
+    echo "app-init: embedded and upserted $missing_count missing point(s)"
+fi
+
+if [ "$stale_count" -gt 0 ]; then
+    echo "app-init: deleting $stale_count stale point(s) from vectorstore"
+    delete_ids_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' "$STALE_IDS")
+    curl -sf -X POST "$QDRANT_URL/collections/$COLLECTION/points/delete?wait=true" \
+        -H 'Content-Type: application/json' \
+        --data "{\"points\": $delete_ids_json}" >/dev/null
+fi
+
+if [ "$missing_count" -eq 0 ] && [ "$stale_count" -eq 0 ]; then
+    echo "app-init: vectorstore already in sync with the database"
 fi
 
 echo "app-init: initialization complete"
