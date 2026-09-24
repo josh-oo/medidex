@@ -16,7 +16,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB_RESOURCES: ${POSTGRES_DB_RESOURCES:-resources}
-      POSTGRES_DB_USERS: ${POSTGRES_DB_USERS:-users}
     volumes:
       - postgres_data:/var/lib/postgresql
       # Runs once, on first start of an empty data volume.
@@ -154,7 +153,6 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-resources}
-      - POSTGRES_DB_USERS=${POSTGRES_DB_USERS:-users}
       - POSTGRES_DB_LANGGRAPH=${POSTGRES_DB_LANGGRAPH:-langgraph_state}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432

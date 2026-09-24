@@ -37,18 +37,16 @@ unchanged. Production deployments can omit the `data/seed/` mount if they provis
 resource schema and data:
 
 - **Postgres.** The services expect three databases — `POSTGRES_DB_RESOURCES` (studies and
-    reports), `POSTGRES_DB_USERS` (backend users) and `POSTGRES_DB_FRONTEND` (frontend,
-    managed by Prisma). The databases are created automatically on the first start; see
+    reports), `POSTGRES_DB_LANGGRAPH` (agent checkpoints) and `POSTGRES_DB_KEYCLOAK` (Keycloak).
+    The databases are created automatically on the first start; see
     [`backend/app-init/postgres-init.sh`](backend/app-init/postgres-init.sh) for details. The demo resource seed
     lives in [`data/seed/`](data/seed/) and is loaded by `app-init` only when the resource
     database is empty. Docker-mounted runtime state lives in `data/runtime/`.
-- **Frontend schema.** The frontend's tables come from its Prisma migrations
-    (`npx prisma migrate deploy` inside `frontend/`), which run automatically before
-    the frontend container starts.
 - **Admin account.** Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` to create an
     approved admin account automatically on frontend startup. The seed is idempotent;
     an existing account with that email is promoted to admin without changing its
-    password. `ADMIN_NAME` is optional and defaults to `Administrator`.
+    password. `ADMIN_NAME` is optional and defaults to `Administrator` (used as the
+    first name; if it has no space, the last name defaults to `User`).
 - **Initialization.** On `docker compose up`, the one-shot `app-init` service prepares
     PostgreSQL, Qdrant, the logic data volume, and the seeded vectors before `logic` starts.
     The initialization chain:

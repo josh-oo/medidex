@@ -63,7 +63,7 @@ if [ -f "$SEED_FILE" ]; then
     echo "app-init: waiting for postgres at $POSTGRES_HOST:$POSTGRES_PORT..."
     attempt=1
     # The postgres container runs backend/app-init/postgres-init.sh (which creates
-    # POSTGRES_DB_RESOURCES/USERS/FRONTEND) before it accepts connections here,
+    # POSTGRES_DB_RESOURCES/LANGGRAPH/KEYCLOAK) before it accepts connections here,
     # so by the time this succeeds the resource database already exists.
     until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB_RESOURCES" >/dev/null 2>&1; do
         if [ "$attempt" -ge 60 ]; then
@@ -444,6 +444,9 @@ if [ -n "${ADMIN_EMAIL:-}" ] && [ -n "${ADMIN_PASSWORD:-}" ]; then
         echo "app-init: creating Keycloak admin account for $ADMIN_EMAIL"
         admin_first_name=$(printf '%s' "$ADMIN_NAME" | awk '{print $1}')
         admin_last_name=$(printf '%s' "$ADMIN_NAME" | awk '{$1=""; sub(/^ /,""); print}')
+        # ADMIN_NAME may be a single word (e.g. the "Administrator" default),
+        # which would otherwise leave lastName empty.
+        [ -n "$admin_last_name" ] || admin_last_name="User"
         create_payload=$(jq -cn \
             --arg username "$ADMIN_EMAIL" --arg email "$ADMIN_EMAIL" \
             --arg firstName "$admin_first_name" --arg lastName "$admin_last_name" \
