@@ -19,8 +19,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
       # Runs once, on first start of an empty data volume.
-      - ./backend/app-init/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh
-      - ${POSTGRES_BACKUPS:-./data/runtime/postgres-backups}:/backups
+      - ./ops/app-init/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh
+      - ${POSTGRES_BACKUPS:-./deploy/data/runtime/postgres-backups}:/backups
     expose:
       - 5432
     ports:
@@ -45,7 +45,7 @@ services:
       - 6334
       - 6335
     volumes:
-      - ./data/runtime/qdrant:/qdrant/storage
+      - ./deploy/data/runtime/qdrant:/qdrant/storage
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -56,8 +56,8 @@ services:
   app-init:
     container_name: app-init
     build:
-      context: ./backend
-      dockerfile: app-init/Dockerfile
+      context: .
+      dockerfile: ops/app-init/Dockerfile
     restart: "no"
     depends_on:
       - qdrant
@@ -92,9 +92,9 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - ADMIN_NAME=${ADMIN_NAME:-Administrator}
     volumes:
-      - ./data/runtime/qdrant:/qdrant/storage
-      - ./data/runtime/backend:/data
-      - ./data/seed:/seed:ro
+      - ./deploy/data/runtime/qdrant:/qdrant/storage
+      - ./deploy/data/runtime/backend:/data
+      - ./deploy/data/seed:/seed:ro
     networks:
       - internal_net
 
@@ -110,7 +110,7 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ./data/runtime/embeddings:/data
+      - ./deploy/data/runtime/embeddings:/data
     pull_policy: always
     networks:
       - internal_net
@@ -118,12 +118,12 @@ services:
   logic:
     container_name: logic
     build:
-      context: ./backend
-      dockerfile: logic/Dockerfile
+      context: .
+      dockerfile: app/backend/Dockerfile
     ports:
       - "8002:8002"
     volumes:
-      - ./data/runtime/backend:/data
+      - ./deploy/data/runtime/backend:/data
     read_only: true
     networks:
       - internal_net
@@ -180,8 +180,8 @@ services:
       - KC_DB_USERNAME=${POSTGRES_USER:-postgres}
       - KC_DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
     volumes:
-      - ./keycloak/realm-medidex.json:/opt/keycloak/data/import/realm-medidex.json:ro
-      - ./keycloak/themes/medidex:/opt/keycloak/themes/medidex:ro
+      - ./deploy/keycloak/realm-medidex.json:/opt/keycloak/data/import/realm-medidex.json:ro
+      - ./deploy/keycloak/themes/medidex:/opt/keycloak/themes/medidex:ro
     ports:
       - "8081:8080"
     networks:
@@ -190,7 +190,7 @@ services:
   frontend:
     container_name: frontend
     build:
-      context: ./frontend
+      context: ./app/frontend
       dockerfile: Dockerfile
       args:
         # The frontend is a pure client-side app now - it talks to Keycloak
