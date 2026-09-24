@@ -132,6 +132,9 @@ services:
       - VECTORSTORE_SERVICE_PORT=${VECTORSTORE_SERVICE_PORT:-6334}
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
       - KEYCLOAK_URL=http://keycloak:8080
+      # Browser-facing, for the Swagger UI /docs "Authorize" redirect - keycloak-js
+      # in the frontend already uses the same host-published address.
+      - KEYCLOAK_PUBLIC_URL=${KEYCLOAK_PUBLIC_URL:-http://localhost:8081}
       - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
       - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
       - POSTGRES_USER=${POSTGRES_USER:-postgres}

@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi import Security, HTTPException, Depends
 from fastapi.responses import Response
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2AuthorizationCodeBearer
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -28,6 +28,11 @@ import hashlib
 load_dotenv()
 
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL")
+# Browser-reachable Keycloak URL, used for the Swagger UI authorization-code
+# redirect (the browser talks to Keycloak directly, not through KEYCLOAK_URL,
+# which is the backend's internal-network address). Falls back to
+# KEYCLOAK_URL for setups where that's already publicly reachable.
+KEYCLOAK_PUBLIC_URL = os.getenv("KEYCLOAK_PUBLIC_URL", KEYCLOAK_URL)
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "medidex")
 KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "medidex-frontend")
 
@@ -40,7 +45,17 @@ POSTGRES_PORT = os.getenv("POSTGRES_PORT")
 router = APIRouter(tags=["auth"])
 
 # auto_error=False: callers may authenticate with an API key instead, see is_verified_api_call.
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
+#
+# This declares the standard OAuth2 authorization-code flow so that Swagger UI's
+# "Authorize" button redirects to Keycloak's own hosted login page instead of
+# collecting a username/password itself. Token verification below is unaffected -
+# it still just decodes whatever bearer token is presented against the realm's
+# JWKS, regardless of how the caller obtained it.
+oauth2_scheme = OAuth2AuthorizationCodeBearer(
+    authorizationUrl=f"{KEYCLOAK_PUBLIC_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/auth",
+    tokenUrl=f"{KEYCLOAK_PUBLIC_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/token",
+    auto_error=False,
+)
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

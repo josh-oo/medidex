@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -6,7 +8,15 @@ from src.api import maintenance
 from src_agent import agent
 
 # Initialize FastAPI
-app = FastAPI(root_path="/backend/api")
+app = FastAPI(
+    root_path="/backend/api",
+    # Lets the /docs "Authorize" button drive Keycloak's authorization-code +
+    # PKCE flow (see src/api/auth.py) without the client id being pasted in by hand.
+    swagger_ui_init_oauth={
+        "clientId": os.getenv("KEYCLOAK_CLIENT_ID", "medidex-frontend"),
+        "usePkceWithAuthorizationCodeGrant": True,
+    },
+)
 
 app.add_middleware(
     CORSMiddleware,
