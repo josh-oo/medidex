@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { StudyDto } from "@/types/apiDTOs";
+import { getReportsByStudyId } from "@/lib/api/studiesApi";
+import { getReportPdf } from "@/lib/api/reportApi";
 
 type ReportListItem = {
   reportId: number;
@@ -59,16 +61,7 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
 
     const fetchReports = async () => {
       try {
-        const response = await fetch(
-          `/api/backend/studies/${studyId}/reports`,
-          { cache: "no-store" }
-        );
-
-        if (!response.ok) {
-          throw new Error("Failed to load reports");
-        }
-
-        const data: ReportListItem[] = await response.json();
+        const data = await getReportsByStudyId(studyId);
         if (!requestActive) return;
         setReports(normalizeReports(data));
       } catch (error) {
@@ -107,14 +100,8 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
     try {
       for (const report of reports) {
         try {
-          const response = await fetch(
-            `/api/backend/reports/${report.reportId}/pdf`,
-            { cache: "no-store" }
-          );
-          if (!response.ok) {
-            throw new Error("Failed to download PDF");
-          }
-          const blob = await response.blob();
+          const buffer = await getReportPdf(report.reportId);
+          const blob = new Blob([buffer], { type: "application/pdf" });
           const url = URL.createObjectURL(blob);
           const link = document.createElement("a");
           link.href = url;
@@ -155,14 +142,8 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
     });
 
     try {
-      const response = await fetch(
-        `/api/backend/reports/${reportId}/pdf`,
-        { cache: "no-store" }
-      );
-      if (!response.ok) {
-        throw new Error("Failed to download PDF");
-      }
-      const blob = await response.blob();
+      const buffer = await getReportPdf(reportId);
+      const blob = new Blob([buffer], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;

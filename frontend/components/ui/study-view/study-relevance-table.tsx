@@ -26,6 +26,8 @@ import { AiEvaluationProgress } from "./ai-evaluation-progress";
 import { AiEvaluationHistoryDialog } from "./ai-evaluation-history-dialog";
 import { useReportStore } from "@/hooks/use-report-store";
 import { useDetailsSheet } from "@/app/context/details-sheet-context";
+import { assignNewStudyToReportByReportId } from "@/lib/api/reportApi";
+import { searchStudies } from "@/lib/api/studiesApi";
 
 interface StudyRelevanceTableProps {
   reportId?: number;
@@ -162,41 +164,15 @@ export function StudyRelevanceTable({
         throw new Error("Select a report before adding a new study.");
       }
 
-      const response = await fetch(`/api/backend/reports/${reportId}/studies`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-        cache: "no-store",
-      });
-
-      let responseBody: unknown = null;
-      const contentType = response.headers.get("Content-Type") ?? "";
-      if (contentType.includes("application/json")) {
-        try {
-          responseBody = await response.json();
-        } catch (error) {
-          console.error("Failed to parse new study response payload", error);
-        }
+      let createdStudy: StudyDto | null = null;
+      try {
+        createdStudy = (await assignNewStudyToReportByReportId(
+          reportId,
+          payload as unknown as StudyDto
+        )) as unknown as StudyDto;
+      } catch (error) {
+        throw new Error("Failed to create study.");
       }
-
-      if (!response.ok) {
-        const errorMessage =
-          responseBody &&
-          typeof responseBody === "object" &&
-          responseBody !== null &&
-          "error" in responseBody &&
-          typeof (responseBody as { error?: string }).error === "string"
-            ? (responseBody as { error: string }).error
-            : "Failed to create study.";
-        throw new Error(errorMessage);
-      }
-
-      const createdStudy =
-        responseBody && typeof responseBody === "object"
-          ? (responseBody as StudyDto)
-          : null;
 
       if (!createdStudy || typeof createdStudy.studyId !== "number") {
         throw new Error("Invalid study response payload.");
@@ -262,16 +238,7 @@ export function StudyRelevanceTable({
     setSubmittedQuery(query);
 
     try {
-      const response = await fetch(
-        `/api/backend/studies?q=${encodeURIComponent(query)}`,
-        { cache: "no-store" }
-      );
-
-      if (!response.ok) {
-        throw new Error("Failed to search studies.");
-      }
-
-      const results = (await response.json()) as StudyDto[];
+      const results = await searchStudies(query);
       setSearchResults(Array.isArray(results) ? results : []);
     } catch (error) {
       setSearchResults(null);

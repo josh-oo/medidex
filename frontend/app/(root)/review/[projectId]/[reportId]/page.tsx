@@ -34,16 +34,19 @@ import {
 import { useReportStore } from "@/hooks/use-report-store";
 import type { StudyDto } from "@/types/apiDTOs";
 import { Calendar, Scale, CircleCheckBig, CircleAlert, TriangleAlert, Users, Info, AlertTriangle } from "lucide-react";
+import { listUsers } from "@/lib/api/adminApi";
+import { getStudyById } from "@/lib/api/studiesApi";
+import {
+  confirmStudyForReportByReportId,
+  unconfirmStudyForReportByReportId,
+  deleteReportById,
+} from "@/lib/api/reportApi";
 
 interface GroupedUserStudy {
   userId: string;
   userName: string;
   studies: Array<{ studyId: number; studyShortName: string }>;
 }
-
-type UsersResponse = {
-  users?: Array<{ id: string; name: string }>;
-};
 
 interface FinalDecisionStudyItem {
   study: StudyDto;
@@ -60,35 +63,17 @@ const formatParticipantCount = (value?: string | null) => {
   return value;
 };
 
-const getStudyConfirmationPath = (reportId: string, studyId: number) =>
-  `/api/backend/reports/${reportId}/studies/${studyId}/confirmation`;
-
 const toggleStudyConfirmation = async (
   reportId: string,
   studyId: number,
   shouldConfirm: boolean
 ) => {
-  const response = await fetch(getStudyConfirmationPath(reportId, studyId), {
-    method: shouldConfirm ? "PUT" : "DELETE",
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-  });
-
-  if (response.ok) {
-    return;
+  const reportIdNumber = Number(reportId);
+  if (shouldConfirm) {
+    await confirmStudyForReportByReportId(reportIdNumber, studyId);
+  } else {
+    await unconfirmStudyForReportByReportId(reportIdNumber, studyId);
   }
-
-  let detail = `Failed to ${shouldConfirm ? "confirm" : "unconfirm"} study`;
-  try {
-    const payload = await response.json();
-    if (payload?.error) {
-      detail = payload.error;
-    }
-  } catch (error) {
-    console.error("Failed to parse confirmation toggle error payload", error);
-  }
-
-  throw new Error(detail);
 };
 
 export default function ReviewDetailsPage() {
@@ -121,13 +106,10 @@ export default function ReviewDetailsPage() {
 
     const loadUsers = async () => {
       try {
-        const response = await fetch("/api/users", { cache: "no-store" });
-        if (!response.ok) return;
-
-        const data = (await response.json()) as UsersResponse;
+        const users = await listUsers();
         const nextMap = new Map<string, string>();
 
-        for (const user of data.users ?? []) {
+        for (const user of users) {
           nextMap.set(user.id, user.name);
         }
 
@@ -271,15 +253,7 @@ export default function ReviewDetailsPage() {
       const entries = await Promise.all(
         missingStudyIds.map(async (studyId) => {
           try {
-            const response = await fetch(`/api/backend/studies/${studyId}`, {
-              cache: "no-store",
-            });
-
-            if (!response.ok) {
-              throw new Error(`Failed to load study ${studyId}`);
-            }
-
-            const data = (await response.json()) as StudyDto;
+            const data = await getStudyById(studyId);
             return [studyId, data] as const;
           } catch (error) {
             console.error(`Failed to resolve study ${studyId}:`, error);
@@ -385,13 +359,7 @@ export default function ReviewDetailsPage() {
     setIsDeletingReport(true);
     setDeleteReportError(null);
     try {
-      const response = await fetch(`/api/backend/reports/${reportIdParam}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to delete report.");
-      }
+      await deleteReportById(Number(reportIdParam));
 
       setIsDeleteDialogOpen(false);
 

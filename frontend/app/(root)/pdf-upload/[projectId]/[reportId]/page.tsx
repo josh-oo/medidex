@@ -26,6 +26,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { deleteReportPdf, getReportPdf, getReportSources, uploadPdf } from "@/lib/api/reportApi";
 
 interface PdfPageProps {
   params: Promise<{
@@ -51,16 +52,12 @@ export default function PdfDetailsPage({ params }: PdfPageProps) {
   const [linksLoading, setLinksLoading] = useState(true);
   const [linksError, setLinksError] = useState<string | null>(null);
 
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfMissing, setPdfMissing] = useState(false);
+
   const handleNotAvailableClick = useCallback(async () => {
     try {
-      const response = await fetch(`/api/backend/reports/${reportId}/pdf`, {
-        method: "POST",
-        cache: "no-store",
-        headers: {
-          "Cache-Control": "no-cache",
-          Pragma: "no-cache",
-        },
-      });
+      await uploadPdf(Number(reportId), null);
       setHasPdf(Number(reportId), true);
       setIframeKey((k) => k + 1);
     } catch (error) {
@@ -70,18 +67,7 @@ export default function PdfDetailsPage({ params }: PdfPageProps) {
 
   const handleDeletePdf = useCallback(async () => {
     try {
-      const response = await fetch(`/api/backend/reports/${reportId}/pdf`, {
-        method: "DELETE",
-        cache: "no-store",
-        headers: {
-          "Cache-Control": "no-cache",
-          Pragma: "no-cache",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(await response.text() || "Failed to delete PDF.");
-      }
+      await deleteReportPdf(Number(reportId));
 
       setHasPdf(Number(reportId), false);
       setIframeKey((k) => k + 1);
@@ -96,10 +82,7 @@ export default function PdfDetailsPage({ params }: PdfPageProps) {
       setLinksError(null);
 
       try {
-        const res = await fetch(`/api/backend/reports/${reportId}/sources`);
-        if (!res.ok) throw new Error("Failed to fetch links");
-
-        const data = await res.json();
+        const data = await getReportSources(Number(reportId));
         setLinks(data);
       } catch (err: any) {
         setLinksError(err.message || "Error fetching links");
@@ -110,6 +93,37 @@ export default function PdfDetailsPage({ params }: PdfPageProps) {
 
     fetchLinks();
   }, [reportId]);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    setPdfMissing(false);
+
+    getReportPdf(Number(reportId))
+      .then((buffer) => {
+        if (cancelled) return;
+        const blob = new Blob([buffer], { type: "application/pdf" });
+        objectUrl = URL.createObjectURL(blob);
+        setPdfUrl(objectUrl);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setPdfUrl(null);
+        if (error?.response?.status === 404) {
+          setPdfMissing(true);
+        } else {
+          console.error("Error fetching report PDF:", error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [reportId, iframeKey]);
 
   const handleUploadSuccess = useCallback(() => {
     setHasPdf(Number(reportId), true);
@@ -207,32 +221,41 @@ export default function PdfDetailsPage({ params }: PdfPageProps) {
         autoStart={false}
         allowedFileExtension=".pdf"
         hint="PDF files only"
-        uploadUrl={`/api/backend/reports/${reportId}/pdf`}
+        onUpload={(file) => uploadPdf(Number(reportId), file)}
       />
       </div>
 
       {/* PDF Preview Section */}
       <div className="mt-6">
-        <object
-          key={iframeKey}
-          data={`/api/backend/reports/${reportId}/pdf`}
-          type="application/pdf"
-          width="100%"
-          height="500px"
-          style={{ border: "1px solid #ccc", borderRadius: "8px" }}
-        >
-          <div className="p-4 text-center border rounded-md">
-            <p className="mb-2">Your browser restricts inline PDF viewing.</p>
-            <a 
-              href={`/api/backend/reports/${reportId}/pdf`} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-primary hover:underline"
-            >
-              Open PDF in a new tab
-            </a>
+        {pdfMissing ? (
+          <div className="flex items-center justify-center rounded-md border p-4 text-center" style={{ minHeight: "500px" }}>
+            <div>
+              <h2 className="mb-2 text-lg font-semibold">PDF Not Found</h2>
+              <p className="text-muted-foreground">The requested report PDF is not available yet.</p>
+            </div>
           </div>
-        </object>
+        ) : pdfUrl ? (
+          <object
+            key={iframeKey}
+            data={pdfUrl}
+            type="application/pdf"
+            width="100%"
+            height="500px"
+            style={{ border: "1px solid #ccc", borderRadius: "8px" }}
+          >
+            <div className="p-4 text-center border rounded-md">
+              <p className="mb-2">Your browser restricts inline PDF viewing.</p>
+              <a
+                href={pdfUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                Open PDF in a new tab
+              </a>
+            </div>
+          </object>
+        ) : null}
       </div>
     </div>
   </div>

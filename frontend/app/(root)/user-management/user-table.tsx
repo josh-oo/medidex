@@ -6,6 +6,7 @@ import { PencilIcon, TrashIcon, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import { UpdateUserDialog } from "./update-user-dialog";
 import { DeleteUserDialog } from "./delete-user-dialog";
+import { approveUser } from "../../../lib/api/adminApi";
 import { toast } from "sonner";
 
 interface Props {
@@ -44,13 +45,7 @@ export const UserTable: React.FC<Props> = (props) => {
   const handleApproveUser = async (userId: string) => {
     setApprovingUserId(userId);
     try {
-      const response = await fetch(`/api/users/${userId}/approve`, {
-        method: "PATCH",
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to approve user");
-      }
+      await approveUser(userId);
 
       setUsers((prev) =>
         prev.map((u) =>

@@ -24,6 +24,13 @@ import {
   OutcomeDto,
   StudyDto,
 } from "@/types/apiDTOs";
+import {
+  getInterventionsForStudy,
+  getConditionsForStudy,
+  getOutcomesForStudy,
+  getDesignForStudy,
+  getPersonsForStudy,
+} from "@/lib/api/studiesApi";
 
 interface StudyDetailsProps {
   study: StudyDto;
@@ -131,20 +138,6 @@ export function StudyAspects({ study }: StudyDetailsProps) {
 
     let isMounted = true;
     const controller = new AbortController();
-    const basePath = `/api/backend/studies/${study.studyId}`;
-
-    async function fetchJson<T>(endpoint: string, label: string): Promise<T> {
-      const response = await fetch(`${basePath}/${endpoint}`, {
-        signal: controller.signal,
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to load ${label}`);
-      }
-
-      return response.json() as Promise<T>;
-    }
 
     const loadAspects = async () => {
       setLoading(true);
@@ -158,20 +151,13 @@ export function StudyAspects({ study }: StudyDetailsProps) {
           designResponse,
           personsResponse,
         ] = await Promise.all([
-          fetchJson<InterventionDto[]>(
-            "interventions",
-            "intervention information"
-          ),
-          fetchJson<ConditionDto[]>(
-            "conditions",
-            "condition information"
-          ),
-          fetchJson<OutcomeDto[]>("outcomes", "outcome information"),
-          fetchJson<Array<{ ID?: number | string; Description?: string }>>(
-            "design",
-            "design information"
-          ),
-          fetchJson<string[]>("persons", "persons information"),
+          getInterventionsForStudy(study.studyId, { signal: controller.signal }),
+          getConditionsForStudy(study.studyId, { signal: controller.signal }),
+          getOutcomesForStudy(study.studyId, { signal: controller.signal }),
+          getDesignForStudy(study.studyId, { signal: controller.signal }) as unknown as Promise<
+            Array<{ ID?: number | string; Description?: string }>
+          >,
+          getPersonsForStudy(study.studyId, { signal: controller.signal }),
         ]);
 
         if (!isMounted) {

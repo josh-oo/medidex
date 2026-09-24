@@ -39,6 +39,7 @@ import { useReportStore } from "@/hooks/use-report-store";
 import { toast } from "sonner";
 import type { AIModel, PromptOverrides, DefaultPrompts } from "@/hooks/use-genai-evaluation-store";
 import { RelevanceStudy } from "@/types/reports";
+import { fetchDefaultPrompts } from "@/lib/api/genaiApi";
 
 const MODEL_OPTIONS: AIModel[] = ["gpt-5.2", "gpt-5", "gpt-5-mini", "gpt-4.1"];
 const EMPTY_PROMPT_OVERRIDES: PromptOverrides = {
@@ -129,11 +130,7 @@ export function AIMatchSettingsDialog({
     useEffect(() => {
       void (async () => {
         try {
-          const response = await fetch("/api/genai/prompts");
-          if (!response.ok) {
-            throw new Error(`Failed to fetch default prompts: ${response.statusText}`);
-          }
-          const data = await response.json();
+          const data = await fetchDefaultPrompts();
           setDefaultPrompts(data);
           setPromptsError(null);
         } catch (error) {

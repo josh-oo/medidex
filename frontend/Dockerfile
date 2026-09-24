@@ -10,14 +10,16 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# keycloak-js runs in the browser, so these must be baked into the client
-# bundle at build time - a runtime env var would be too late.
+# keycloak-js and the backend API client run in the browser, so these must be
+# baked into the client bundle at build time - a runtime env var would be too late.
 ARG NEXT_PUBLIC_KEYCLOAK_URL
 ARG NEXT_PUBLIC_KEYCLOAK_REALM
 ARG NEXT_PUBLIC_KEYCLOAK_CLIENT_ID
+ARG NEXT_PUBLIC_BACKEND_API_URL
 ENV NEXT_PUBLIC_KEYCLOAK_URL=$NEXT_PUBLIC_KEYCLOAK_URL
 ENV NEXT_PUBLIC_KEYCLOAK_REALM=$NEXT_PUBLIC_KEYCLOAK_REALM
 ENV NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=$NEXT_PUBLIC_KEYCLOAK_CLIENT_ID
+ENV NEXT_PUBLIC_BACKEND_API_URL=$NEXT_PUBLIC_BACKEND_API_URL
 
 RUN npm run build
 

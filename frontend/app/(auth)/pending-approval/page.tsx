@@ -4,22 +4,29 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Clock } from "lucide-react";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { getKeycloak, initKeycloak } from "@/lib/client/keycloak";
 
 export default function PendingApprovalPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Poll for approval; the route forces a token refresh so a newly granted
-    // role takes effect immediately instead of waiting for the token to expire.
+    // Poll for approval; forcing a token refresh (updateToken(-1) always
+    // refreshes) so a newly granted role takes effect immediately instead of
+    // waiting for the current token to expire naturally.
     const checkApproval = async () => {
       try {
-        const response = await fetch("/api/auth/approval-status");
-        if (!response.ok) return;
-        const data = await response.json();
+        const authenticated = await initKeycloak({
+          onLoad: "check-sso",
+          checkLoginIframe: false,
+          silentCheckSsoRedirectUri: `${window.location.origin}/silent-check-sso.html`,
+        });
+        if (!authenticated) return;
 
-        if (data.approved) {
+        await getKeycloak().updateToken(-1);
+        const roles: string[] = (getKeycloak().tokenParsed as { roles?: string[] } | undefined)?.roles ?? [];
+
+        if (roles.includes("APPROVED")) {
           router.push("/");
-          router.refresh();
         }
       } catch (error) {
         // Ignore transient errors, try again on the next tick.

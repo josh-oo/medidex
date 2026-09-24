@@ -2,6 +2,7 @@
 
 import { StudyDto } from "@/types/apiDTOs"
 import { createContext, useContext, useState, type ReactNode } from "react"
+import { getStudyById } from "@/lib/api/studiesApi"
 
 
 type ContextType = {
@@ -29,9 +30,7 @@ export function DetailsSheetProvider({ children }: DetailsSheetProviderProps) {
     setLoading(true)
     setStudy(null)
 
-    const res = await fetch(`/api/backend/studies/${studyId}`, { cache: "no-store" })
-    const data = await res.json()
-
+    const data = await getStudyById(studyId)
 
     setStudy(data)
     setLoading(false)

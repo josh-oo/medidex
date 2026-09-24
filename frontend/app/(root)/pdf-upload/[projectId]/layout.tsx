@@ -1,67 +1,66 @@
+"use client";
+
 import axios from "axios";
-import { type ReactNode } from "react";
-import { notFound } from "next/navigation";
-import { adminGuard } from "@/guards/role.guard";
+import { useEffect, useState, type ReactNode } from "react";
+import { useParams } from "next/navigation";
+import { AdminGuard } from "@/components/auth/admin-guard";
 import { ReportColumnClient } from "./components/report-column-client";
 import type { ReportDetailDto } from "@/types/apiDTOs";
-import { getProjectReports as fetchProjectReports } from "@/lib/api/projectApi";
-import { getBackendHeaders } from "@/lib/server/backendHeaders";
+import { getProjectReports } from "@/lib/api/projectApi";
+import { Spinner } from "@/components/ui/spinner";
+import { useAuthStore } from "@/hooks/use-auth";
 
-interface PdfUploadPageProps {
-  children: ReactNode;
-  params: Promise<{
-    projectId: string;
-  }>;
-}
+export default function PdfUploadPage({ children }: { children: ReactNode }) {
+  const { projectId } = useParams<{ projectId: string }>();
+  const isAdmin = useAuthStore((s) => s.user?.isAdmin ?? false);
+  const [reports, setReports] = useState<ReportDetailDto[] | null>(null);
+  const [notFound, setNotFound] = useState(false);
 
-async function loadProjectReports(projectId: string): Promise<ReportDetailDto[]> {
-  const headers = await getBackendHeaders();
+  useEffect(() => {
+    if (!isAdmin) return;
 
-  try {
-    const reports = await fetchProjectReports(projectId, true, { headers });
-    return reports ?? [];
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 404) {
-      notFound();
-    }
+    let cancelled = false;
+    setReports(null);
+    setNotFound(false);
 
-    throw new Error("Failed to load project reports.");
-  }
-}
+    getProjectReports(projectId, true)
+      .then((result) => {
+        if (!cancelled) setReports(result ?? []);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+          setNotFound(true);
+        } else {
+          console.error("Failed to load project reports:", error);
+          setReports([]);
+        }
+      });
 
-export default async function PdfUploadPage({ children, params }: PdfUploadPageProps) {
-  await adminGuard();
-
-  const resolvedParams = await params;
-  const projectId = resolvedParams?.projectId;
-
-  if (!projectId) {
-    notFound();
-  }
-
-  const reports = await loadProjectReports(projectId);
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, isAdmin]);
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-
-      <div className="flex-1 min-h-0 bg-background">
-        <ReportColumnClient projectId={projectId} reports={reports}>
-          {children}
-        </ReportColumnClient>
-      </div>
-    </div>
-  );
-}
-
-function PdfUploadPlaceholder() {
-  return (
-    <div className="h-full flex flex-col items-center justify-center px-8 text-center gap-3">
-      <div className="space-y-2 max-w-md">
-        <h2 className="text-lg font-semibold text-foreground">Select a report</h2>
-        <p className="text-sm text-muted-foreground">
-          Choose a report from the list to view its metadata, attach PDFs, or confirm that uploads are complete.
-        </p>
-      </div>
-    </div>
+    <AdminGuard>
+      {notFound ? (
+        <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+          Project not found.
+        </div>
+      ) : reports === null ? (
+        <div className="flex h-full w-full items-center justify-center">
+          <Spinner className="h-6 w-6" />
+        </div>
+      ) : (
+        <div className="h-full flex flex-col overflow-hidden">
+          <div className="flex-1 min-h-0 bg-background">
+            <ReportColumnClient projectId={projectId} reports={reports}>
+              {children}
+            </ReportColumnClient>
+          </div>
+        </div>
+      )}
+    </AdminGuard>
   );
 }

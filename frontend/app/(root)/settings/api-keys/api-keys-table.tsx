@@ -22,7 +22,7 @@ import {
   DialogTitle,
 } from "../../../../components/ui/dialog";
 import { toast } from "sonner";
-import { createMyApiKey, deleteMyApiKey } from "./server";
+import { createApiKey, deleteApiKey } from "@/lib/api/apiKeysApi";
 
 interface Props {
   initialApiKeys: string[];
@@ -42,7 +42,7 @@ export const ApiKeysTable: React.FC<Props> = ({ initialApiKeys }) => {
   const handleCreate = async () => {
     setIsCreating(true);
     try {
-      const apiKey = await createMyApiKey();
+      const apiKey = await createApiKey();
       const [clientId] = apiKey.split(".");
       setApiKeys((prev) => [...prev, clientId]);
       setCreatedKey(apiKey);
@@ -57,7 +57,7 @@ export const ApiKeysTable: React.FC<Props> = ({ initialApiKeys }) => {
   const handleDelete = async () => {
     if (!keyToDelete) return;
     try {
-      await deleteMyApiKey(keyToDelete);
+      await deleteApiKey(keyToDelete);
       setApiKeys((prev) => prev.filter((id) => id !== keyToDelete));
       toast.success("API key deleted");
     } catch (error) {

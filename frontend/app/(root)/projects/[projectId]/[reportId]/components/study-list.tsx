@@ -1,22 +1,14 @@
+"use client";
+
 import axios from "axios";
-import { notFound } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import { StudyRelevanceTable } from "@/components/ui/study-view/study-relevance-table";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SimilarStudyDto } from "@/types/apiDTOs";
 import type { RelevanceStudy } from "@/types/reports";
 import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
-import { getBackendHeaders } from "@/lib/server/backendHeaders";
 import { ReportChatButtons } from "./ai-actions";
-
-interface StudyListProps {
-  params: {
-    projectId: string;
-    reportId: string;
-  };
-  searchParams: {
-    k?: string;
-  };
-}
 
 const mapResponseToRelevanceStudies = (
   response: SimilarStudyDto[]
@@ -27,30 +19,61 @@ const mapResponseToRelevanceStudies = (
   }));
 };
 
-export default async function StudyList({ params, searchParams }: StudyListProps) {
-
-  const { projectId, reportId } = await params;
-  const { k } = await searchParams;
+export default function StudyList() {
+  const { projectId, reportId } = useParams<{ projectId: string; reportId: string }>();
+  const searchParams = useSearchParams();
+  const k = searchParams.get("k") ?? undefined;
   const source = projectId;
   const reportIdNumber = Number(reportId);
 
-  const headers = await getBackendHeaders();
-  let response: SimilarStudyDto[] = [];
+  const [studies, setStudies] = useState<RelevanceStudy[] | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
-  try {
-    response = await getSimilarStudiesByReportId(reportIdNumber, undefined, {
-      headers,
-      params: { k, source },
-    });
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 404) {
-      notFound();
-    }
+  useEffect(() => {
+    let cancelled = false;
+    setStudies(null);
+    setNotFound(false);
+    setLoadError(false);
 
-    throw error;
+    getSimilarStudiesByReportId(reportIdNumber, undefined, { params: { k, source } })
+      .then((response) => {
+        if (!cancelled) setStudies(mapResponseToRelevanceStudies(response));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+          setNotFound(true);
+        } else {
+          console.error(`Error fetching similar studies for report ${reportIdNumber}:`, error);
+          setLoadError(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reportIdNumber, k, source]);
+
+  if (notFound) {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+        Report not found.
+      </div>
+    );
   }
 
-  const studies = mapResponseToRelevanceStudies(response);
+  if (loadError) {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+        Failed to load studies for this report.
+      </div>
+    );
+  }
+
+  if (studies === null) {
+    return <StudyListSkeleton />;
+  }
 
   return (
     <>

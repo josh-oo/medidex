@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { UserDto } from "../../../types/user/user.dto";
 import { Role } from "../../../enums/role.enum";
-import { updateUser } from "./server";
+import { updateUserRoles } from "../../../lib/api/adminApi";
 import {
   Dialog,
   DialogContent,
@@ -56,7 +56,7 @@ export const UpdateUserDialog: React.FC<Props> = ({
 
     setIsLoading(true);
     try {
-      const updatedUser = await updateUser(user.id, { roles: selectedRoles });
+      const updatedUser = await updateUserRoles(user.id, selectedRoles);
       onUserUpdated(updatedUser);
       onOpenChange(false);
       toast.success("User updated successfully");

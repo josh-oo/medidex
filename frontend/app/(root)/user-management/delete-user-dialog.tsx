@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { UserDto } from "../../../types/user/user.dto";
-import { deleteUser } from "./server";
+import { deleteUser } from "../../../lib/api/adminApi";
 import {
   AlertDialog,
   AlertDialogAction,

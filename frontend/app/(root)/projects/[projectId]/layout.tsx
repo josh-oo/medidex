@@ -1,63 +1,59 @@
-import { Suspense, type ReactNode } from "react";
+"use client";
+
+import { useEffect, useState, type ReactNode } from "react";
 import axios from "axios";
-import { notFound } from "next/navigation";
+import { useParams } from "next/navigation";
 import { ReportDetailDto } from "@/types/apiDTOs";
 import { ReportColumnClient } from "./components/report-column-client";
-import { getProjectReports as fetchProjectReports } from "@/lib/api/projectApi";
-import { getBackendHeaders } from "@/lib/server/backendHeaders";
+import { getProjectReports } from "@/lib/api/projectApi";
 import { Skeleton } from "@/components/ui/skeleton";
 
-interface ReportColumnProps {
-    children: ReactNode;
-    params: Promise<{
-        projectId: string;
-    }>;
-}
+export default function ReportColumn({ children }: { children: ReactNode }) {
+  const { projectId } = useParams<{ projectId: string }>();
+  const [reports, setReports] = useState<ReportDetailDto[] | null>(null);
+  const [notFound, setNotFound] = useState(false);
 
-async function getProjectReports(projectId: string): Promise<ReportDetailDto[]> {
-    const headers = await getBackendHeaders();
+  useEffect(() => {
+    let cancelled = false;
+    setReports(null);
+    setNotFound(false);
 
-    try {
-        const reports = await fetchProjectReports(projectId, false, { headers });
-        return reports ?? [];
-    } catch (error) {
+    getProjectReports(projectId, false)
+      .then((result) => {
+        if (!cancelled) setReports(result ?? []);
+      })
+      .catch((error) => {
+        if (cancelled) return;
         if (axios.isAxiosError(error) && error.response?.status === 404) {
-            notFound();
+          setNotFound(true);
+        } else {
+          console.error("Failed to load project reports:", error);
+          setReports([]);
         }
+      });
 
-        throw new Error("Failed to load project reports.");
-    }
-}
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
-export default async function ReportColumn({ children, params }: ReportColumnProps) {
-    const resolvedParams = await params;
-    const projectId = resolvedParams?.projectId;
-
-    if (!projectId) {
-        notFound();
-    }
-
+  if (notFound) {
     return (
-        <Suspense fallback={<ReportColumnSkeleton />}>
-            <ReportColumnContent projectId={projectId}>{children}</ReportColumnContent>
-        </Suspense>
+      <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+        Project not found.
+      </div>
     );
-}
+  }
 
-async function ReportColumnContent({
-    children,
-    projectId,
-}: {
-    children: ReactNode;
-    projectId: string;
-}) {
-    const reports = await getProjectReports(projectId);
+  if (reports === null) {
+    return <ReportColumnSkeleton />;
+  }
 
-    return (
-        <ReportColumnClient projectId={projectId} reports={reports}>
-            {children}
-        </ReportColumnClient>
-    );
+  return (
+    <ReportColumnClient projectId={projectId} reports={reports}>
+      {children}
+    </ReportColumnClient>
+  );
 }
 
 function ReportColumnSkeleton() {

@@ -28,6 +28,12 @@ import { Search, Calendar, UserPlus, Check, Settings, FileUp, ClipboardCheck, Tr
 import RelativeTime from "@/components/ui/relative-time";
 import type { ProjectDetailsDto, ProjectAssigneeDto } from "@/types/apiDTOs";
 import type { UserDto } from "@/types/user/user.dto";
+import {
+  assignUserToProject,
+  removeUserFromProject,
+  deleteProjectById,
+  streamProjectUpdates,
+} from "@/lib/api/projectApi";
 
 const EMPTY_USERS: UserDto[] = [];
 const MEDIBOT_USER: UserDto = {
@@ -87,12 +93,7 @@ export function ProjectCard({
   }, [project.assignees]);
 
   useEffect(() => {
-    const streamUrl = `/api/backend/projects/${encodeURIComponent(project.projectId)}/stream`;
-    const eventSource = new EventSource(streamUrl);
-
-    const handleMessage = (event: MessageEvent) => {
-      console.log(`Project update received for ${project.projectId}:`, event.data);
-
+    const scheduleRefresh = () => {
       if (refreshTimeoutRef.current !== null) {
         clearTimeout(refreshTimeoutRef.current);
       }
@@ -103,21 +104,23 @@ export function ProjectCard({
       }, 200);
     };
 
-    const handleError = (event: Event) => {
-      console.error(`Project stream error for ${project.projectId}:`, event);
-    };
-
-    eventSource.addEventListener("message", handleMessage);
-    eventSource.addEventListener("error", handleError);
+    const stopStream = streamProjectUpdates(project.projectId, {
+      onEvent: (event) => {
+        console.log(`Project update received for ${project.projectId}:`, event);
+        scheduleRefresh();
+      },
+      onComplete: () => {},
+      onError: (error) => {
+        console.error(`Project stream error for ${project.projectId}:`, error);
+      },
+    });
 
     return () => {
       if (refreshTimeoutRef.current !== null) {
         clearTimeout(refreshTimeoutRef.current);
         refreshTimeoutRef.current = null;
       }
-      eventSource.removeEventListener("message", handleMessage);
-      eventSource.removeEventListener("error", handleError);
-      eventSource.close();
+      stopStream();
     };
   }, [project.projectId, router]);
 
@@ -164,36 +167,13 @@ export function ProjectCard({
         return;
       }
       const isSelected = assigneeIds.includes(normalizedUserId);
-      const endpoint = isSelected
-        ? `/api/backend/projects/${project.projectId}/assignees/${encodeURIComponent(normalizedUserId)}`
-        : `/api/backend/projects/${project.projectId}/assignees`;
-      const requestInit: RequestInit = isSelected
-        ? { method: "DELETE" }
-        : {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(normalizedUserId),
-          };
 
       setPendingAssigneeId(normalizedUserId);
       try {
-        const response = await fetch(endpoint, requestInit);
-        if (!response.ok) {
-          let detail = "Failed to update project assignees.";
-          const bodyText = await response.text();
-          if (bodyText) {
-            try {
-              const data = JSON.parse(bodyText);
-              if (typeof data?.detail === "string") {
-                detail = data.detail;
-              } else {
-                detail = bodyText;
-              }
-            } catch {
-              detail = bodyText;
-            }
-          }
-          throw new Error(detail);
+        if (isSelected) {
+          await removeUserFromProject(project.projectId, normalizedUserId);
+        } else {
+          await assignUserToProject(project.projectId, normalizedUserId);
         }
 
         setAssigneeIds((prev) => {
@@ -223,14 +203,7 @@ export function ProjectCard({
 
     setIsDeleting(true);
     try {
-      const response = await fetch(`/api/backend/projects/${project.projectId}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || "Failed to delete project");
-      }
+      await deleteProjectById(project.projectId);
 
       setIsDeleteDialogOpen(false);
       router.refresh();

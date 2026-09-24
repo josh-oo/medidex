@@ -37,6 +37,8 @@ import {
   hasValidComparisonGroups,
 } from "@/lib/comparisonUtils";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { getSimilarTagsByReportId } from "@/lib/api/reportApi";
+import { getInterventions } from "@/lib/api/interventionsApi";
 import type {
   DurationUnit,
   InterventionDto,
@@ -193,18 +195,11 @@ export function AddStudyDialog({
       setSuggestionError(null);
 
       try {
-        const response = await fetch(
-          `/api/backend/reports/${currentReportId}/similar-studies/tags`,
-          { signal: controller.signal,
-            cache: "no-store",
-           },
+        const data = await getSimilarTagsByReportId(
+          Number(currentReportId),
+          {},
+          { signal: controller.signal },
         );
-
-        if (!response.ok) {
-          throw new Error("Failed to load intervention tags.");
-        }
-
-        const data = await response.json();
         const parsedSuggestions = Array.isArray(data)
           ? data
               .map((entry: { name?: string } | string | null) => {
@@ -247,16 +242,7 @@ export function AddStudyDialog({
 
     const loadAllInterventions = async () => {
       try {
-        const response = await fetch("/api/backend/interventions", {
-          signal: controller.signal,
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to load interventions.");
-        }
-
-        const data: InterventionDto[] = await response.json();
+        const data = await getInterventions({ signal: controller.signal });
         const descriptions = Array.isArray(data)
           ? data
               .map((entry) => entry?.Description)

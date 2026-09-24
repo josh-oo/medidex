@@ -1,5 +1,6 @@
 import apiClient from "./apiClient";
 import { AxiosRequestConfig } from "axios";
+import { getAccessToken } from "@/lib/client/keycloak";
 import type {
   EvaluateRequest,
   StreamEvent,
@@ -33,6 +34,11 @@ export const evaluateStudiesStream = (
 
   const startStream = async () => {
     try {
+      const token = await getAccessToken();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
       const response = await fetch(url, {
         method: "POST",
         headers,

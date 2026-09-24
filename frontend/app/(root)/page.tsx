@@ -1,86 +1,92 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { getProjects, getTasks } from "@/lib/api/projectApi";
-import { getUserNamesByIds } from "@/lib/api/adminApi";
-import { getBackendHeaders } from "@/lib/server/backendHeaders";
+import { getUserNamesByIds, listUsers } from "@/lib/api/adminApi";
 import { ProjectCard } from "./components/project-card";
 import { TaskCard } from "./components/task-card";
-import { getSession } from "../../lib/server/session";
-import { redirect } from "next/navigation";
 import { HomeHero } from "./components/home-hero";
 import { QuickStats } from "./components/quick-stats";
 import { FeaturesShowcase } from "./components/features-showcase";
 import { Button } from "@/components/ui/button";
 import { FileText, Plus } from "lucide-react";
-import type { ProjectTaskDto } from "@/types/apiDTOs";
+import type { ProjectDetailsDto, ProjectTaskDto } from "@/types/apiDTOs";
 import type { UserDto } from "@/types/user/user.dto";
-import { getUsers } from "./user-management/server";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
+import { useAuthStore } from "@/hooks/use-auth";
+import { Spinner } from "@/components/ui/spinner";
 
-async function fetchProjects() {
-  try {
-    const headers = await getBackendHeaders();
-    return await getProjects({ headers });
-  } catch (error) {
-    console.error("Failed to fetch projects:", error);
-    return [];
+export default function Home() {
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.isAdmin ?? false;
+
+  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<ProjectDetailsDto[]>([]);
+  const [tasks, setTasks] = useState<ProjectTaskDto[]>([]);
+  const [ownerNameById, setOwnerNameById] = useState<Map<string, string>>(new Map());
+  const [assignableUsers, setAssignableUsers] = useState<UserDto[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const [projectsResult, tasksResult] = await Promise.all([
+        getProjects().catch((error) => {
+          console.error("Failed to fetch projects:", error);
+          return [] as ProjectDetailsDto[];
+        }),
+        getTasks().catch((error) => {
+          console.error("Failed to fetch tasks:", error);
+          return [] as ProjectTaskDto[];
+        }),
+      ]);
+
+      const ownerIds = Array.from(
+        new Set(
+          tasksResult
+            .map((task) => task.project.owner)
+            .filter((ownerId): ownerId is string => Boolean(ownerId))
+        )
+      );
+      const ownerNames = ownerIds.length
+        ? await getUserNamesByIds(ownerIds).catch((error) => {
+            console.error("Failed to resolve owner names:", error);
+            return new Map<string, string>();
+          })
+        : new Map<string, string>();
+
+      const users = isAdmin
+        ? await listUsers().catch((error) => {
+            console.error("Failed to fetch assignable users:", error);
+            return [] as UserDto[];
+          })
+        : [];
+
+      if (cancelled) return;
+      setProjects(projectsResult);
+      setTasks(tasksResult);
+      setOwnerNameById(ownerNames);
+      setAssignableUsers(users);
+      setLoading(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <Spinner className="h-6 w-6" />
+      </div>
+    );
   }
-}
 
-async function fetchTasks() {
-  try {
-    const headers = await getBackendHeaders();
-    return await getTasks({ headers });
-  } catch (error) {
-    console.error("Failed to fetch tasks:", error);
-    return [];
-  }
-}
-
-async function resolveOwnerNames(tasks: ProjectTaskDto[]) {
-  const ownerIds = Array.from(
-    new Set(
-      tasks
-        .map((task) => task.project.owner)
-        .filter((ownerId): ownerId is string => Boolean(ownerId))
-    )
-  );
-
-  if (ownerIds.length === 0) {
-    return new Map<string, string>();
-  }
-
-  try {
-    return await getUserNamesByIds(ownerIds, { headers: await getBackendHeaders() });
-  } catch (error) {
-    console.error("Failed to resolve owner names:", error);
-    return new Map<string, string>();
-  }
-}
-
-export default async function Home() {
-  const [projects, tasks] = await Promise.all([fetchProjects(), fetchTasks()]);
-  const ownerNameById = await resolveOwnerNames(tasks);
-
-  const session = await getSession();
-
-  if (!session?.user) {
-    return redirect("/login");
-  }
-
-  const isAdmin = session.user.isAdmin ?? false;
   const emptyTaskMessage = isAdmin
     ? "Create a project and assign it to yourself."
     : "Ask an admin to assign you to a project.";
-  let assignableUsers: UserDto[] = [];
 
-  if (isAdmin) {
-    try {
-      assignableUsers = await getUsers();
-    } catch (error) {
-      console.error("Failed to fetch assignable users:", error);
-    }
-  }
-
-  // Calculate stats
   const totalReports = projects.reduce((sum, b) => sum + b.numberReportsTotal, 0);
   const totalEmbedded = projects.reduce((sum, b) => sum + b.numberReportsPreProcessed, 0);
   const totalAssigned = projects.reduce((sum, b) => sum + b.numberReportsReadyForReview, 0);
@@ -93,7 +99,7 @@ export default async function Home() {
       </div>
 
       <div className="p-4 md:px-8 md:py-6 max-w-7xl mx-auto">
-        <HomeHero userName={session.user.name || "there"} />
+        <HomeHero userName={user?.name || "there"} />
 
         <QuickStats
           totalProjects={projects.length}

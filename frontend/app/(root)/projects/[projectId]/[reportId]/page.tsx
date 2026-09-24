@@ -1,20 +1,7 @@
-import StudyList, {StudyListSkeleton, } from "./components/study-list";
-import { Suspense } from "react";
+"use client";
 
-interface ProjectStudyPageProps {
-  params: {
-    projectId: string;
-    reportId: string;
-  };
-  searchParams: {
-    k?: string;
-  };
-}
+import StudyList from "./components/study-list";
 
-export default async function ProjectStudyPage({ params, searchParams }: ProjectStudyPageProps) {
-  return (
-    <Suspense fallback={<StudyListSkeleton />}>
-      <StudyList params={params} searchParams={searchParams} />
-    </Suspense>
-  );
+export default function ProjectStudyPage() {
+  return <StudyList />;
 }

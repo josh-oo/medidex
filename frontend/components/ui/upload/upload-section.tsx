@@ -5,6 +5,9 @@ import { Upload, FileText, X, CheckCircle2, AlertCircle } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { getAccessToken } from "@/lib/client/keycloak";
+
+const DEFAULT_UPLOAD_URL = `${process.env.NEXT_PUBLIC_BACKEND_API_URL}/api/projects`;
 
 interface UploadFile {
   id: string;
@@ -33,6 +36,9 @@ interface UploadSectionProps {
   allowedFileExtension?: string;
   hint?: string;
   uploadUrl?: string;
+  // Takes precedence over uploadUrl when the endpoint needs something other
+  // than a plain "POST FormData" (e.g. the PDF endpoint, which is a PUT).
+  onUpload?: (file: File) => Promise<void>;
 }
 
 export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>(function UploadSection(
@@ -45,7 +51,8 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
     onStateChange,
     allowedFileExtension = ".ris",
     hint = "RIS files only",
-    uploadUrl = "/api/backend/projects"
+    uploadUrl = DEFAULT_UPLOAD_URL,
+    onUpload
   }: UploadSectionProps,
   ref,
 ) {
@@ -118,37 +125,43 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
         });
       }, 200);
 
-      let formData: FormData;
-      try {
-        formData = createFormData(uploadFile.file);
-      } catch (builderError) {
-        const builderMessage =
-          builderError instanceof Error ? builderError.message : "Unable to prepare upload payload.";
-        setCurrentFile((prev) =>
-          prev && prev.id === uploadFile.id
-            ? {
-                ...prev,
-                status: "error",
-                error: builderMessage,
-              }
-            : prev,
-        );
-        return;
-      }
+      if (onUpload) {
+        await onUpload(uploadFile.file);
+      } else {
+        let formData: FormData;
+        try {
+          formData = createFormData(uploadFile.file);
+        } catch (builderError) {
+          const builderMessage =
+            builderError instanceof Error ? builderError.message : "Unable to prepare upload payload.";
+          setCurrentFile((prev) =>
+            prev && prev.id === uploadFile.id
+              ? {
+                  ...prev,
+                  status: "error",
+                  error: builderMessage,
+                }
+              : prev,
+          );
+          return;
+        }
 
-      const response = await fetch(uploadUrl, {
-        method: "POST",
-        body: formData,
-        cache: "no-store",
-        headers: {
-          "Cache-Control": "no-cache",
-          Pragma: "no-cache",
-        },
-      });
+        const token = await getAccessToken();
+        const response = await fetch(uploadUrl, {
+          method: "POST",
+          body: formData,
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
 
-      if (!response.ok) {
-        const errorMessage = await response.text();
-        throw new Error(errorMessage || "Failed to upload file.");
+        if (!response.ok) {
+          const errorMessage = await response.text();
+          throw new Error(errorMessage || "Failed to upload file.");
+        }
       }
 
       if (progressInterval) {
@@ -192,7 +205,7 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
           : prev,
       );
     }
-  }, [createFormData, onUploadSuccess]);
+  }, [createFormData, onUploadSuccess, onUpload, uploadUrl]);
 
   const handleDragOver = (event: React.DragEvent) => {
     event.preventDefault();

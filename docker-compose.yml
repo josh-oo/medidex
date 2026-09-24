@@ -194,20 +194,15 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        # keycloak-js runs in the browser, so it needs Keycloak's
-        # host-published port, not the internal compose hostname below.
+        # The frontend is a pure client-side app now - it talks to Keycloak
+        # and the backend directly from the browser, so both need their
+        # host-published addresses, not the internal compose hostnames.
         - NEXT_PUBLIC_KEYCLOAK_URL=http://localhost:8081
         - NEXT_PUBLIC_KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
         - NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
+        - NEXT_PUBLIC_BACKEND_API_URL=${NEXT_PUBLIC_BACKEND_API_URL:-http://localhost:8002/backend}
     ports:
       - "3000:3000"
-    environment:
-      - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
-      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
-      - KEYCLOAK_INTERNAL_URL=http://keycloak:8080
-      - STAGE=${STAGE:-local}
-      - BACKEND_API_URL=${BACKEND_API_URL:-http://logic:8002/backend}
-      - INACTIVITY_DIALOG=${INACTIVITY_DIALOG:-false}
     depends_on:
       - keycloak
     networks:

@@ -1,46 +1,19 @@
 import { ReportDetailDto, StudyDto } from "@/types/apiDTOs"
 import { create } from "zustand"
-
-const getReportStudyPath = (reportId: number, studyId: number) =>
-    `/api/backend/reports/${reportId}/studies/${studyId}`
+import {
+    assignStudyToReportByReportId,
+    removeStudyFromReportByReportId,
+} from "@/lib/api/reportApi"
 
 const hasStudyById = (studies: StudyDto[] = [], studyId: number) =>
     studies.some((candidate) => candidate.studyId === studyId)
 
-const ensureSuccess = async (response: Response, action: string) => {
-    if (response.ok) {
-        return
-    }
-
-    let detail = `${action} failed with status ${response.status}`
-    try {
-        const payload = await response.json()
-        if (payload?.error) {
-            detail = payload.error
-        }
-    } catch (error) {
-        console.error("Failed to parse error payload", error)
-    }
-
-    throw new Error(detail)
-}
-
 const assignStudyViaApi = async (reportId: number, studyId: number) => {
-    const response = await fetch(getReportStudyPath(reportId, studyId), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-    })
-    await ensureSuccess(response, "Assigning study to report")
+    await assignStudyToReportByReportId(reportId, studyId)
 }
 
 const removeStudyViaApi = async (reportId: number, studyId: number) => {
-    const response = await fetch(getReportStudyPath(reportId, studyId), {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-    })
-    await ensureSuccess(response, "Removing study from report")
+    await removeStudyFromReportByReportId(reportId, studyId)
 }
 
 type ReportState = {

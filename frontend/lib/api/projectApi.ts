@@ -1,5 +1,6 @@
 import apiClient from "./apiClient";
 import { AxiosRequestConfig } from "axios";
+import { getAccessToken } from "@/lib/client/keycloak";
 import {
   ProjectAnnotationsDto,
   ProjectAssigneeDto,
@@ -191,6 +192,11 @@ export const streamProjectUpdates = (
 
   const startStream = async () => {
     try {
+      const token = await getAccessToken();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
       const response = await fetch(url, {
         method: "GET",
         headers,

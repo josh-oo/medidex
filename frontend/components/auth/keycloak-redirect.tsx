@@ -2,7 +2,6 @@
 
 import { useEffect, useRef } from "react";
 import { getKeycloak, initKeycloak } from "@/lib/client/keycloak";
-import { syncSession } from "@/lib/client/syncSession";
 
 export function KeycloakRedirect({ action }: { action: "login" | "register" }) {
   const started = useRef(false);
@@ -16,7 +15,6 @@ export function KeycloakRedirect({ action }: { action: "login" | "register" }) {
     initKeycloak({ pkceMethod: "S256", checkLoginIframe: false })
       .then(async (authenticated) => {
         if (authenticated) {
-          await syncSession(keycloak);
           window.location.href = "/";
           return;
         }

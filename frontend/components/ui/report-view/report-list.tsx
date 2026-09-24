@@ -43,6 +43,12 @@ import { useReportStore } from "@/hooks/use-report-store";
 import { ProjectAnnotationsDto } from "@/types/apiDTOs";
 import { toast } from "sonner";
 import { Abstract } from "./report-abstract";
+import {
+  getReportFlagByReportId,
+  upsertReportFlagByReportId,
+  deleteReportFlagByReportId,
+  getReportPdf,
+} from "@/lib/api/reportApi";
 
 interface ReportListProps {
   baseUrl: string;
@@ -118,18 +124,7 @@ export function ReportList({
 
     const loadExistingFlag = async () => {
       try {
-        const response = await fetch(
-          `/api/backend/reports/${selectedFlagReport.id}/flag`,
-          { cache: "no-store" }
-        );
-
-        if (!response.ok) {
-          throw new Error("Unable to retrieve report flag.");
-        }
-
-        const payload = (await response.json()) as
-          | { message?: string; public?: boolean }
-          | null;
+        const payload = await getReportFlagByReportId(selectedFlagReport.id);
 
         if (cancelled) {
           return;
@@ -188,20 +183,10 @@ export function ReportList({
 
     setIsSubmittingFlag(true);
     try {
-      const response = await fetch(`/api/backend/reports/${selectedFlagReport.id}/flag`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: flagDetails.trim(),
-          public: flagVisibility === "public",
-        }),
+      await upsertReportFlagByReportId(selectedFlagReport.id, {
+        message: flagDetails.trim(),
+        public: flagVisibility === "public",
       });
-
-      if (!response.ok) {
-        throw new Error("Unable to submit report flag.");
-      }
 
       setReportFlag(selectedFlagReport.id, flagDetails.trim());
 
@@ -218,13 +203,7 @@ export function ReportList({
   const handleDeleteFlag = async (reportId: number) => {
     setIsDeletingFlagReportId(reportId);
     try {
-      const response = await fetch(`/api/backend/reports/${reportId}/flag`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        throw new Error("Unable to delete report flag.");
-      }
+      await deleteReportFlagByReportId(reportId);
 
       setReportFlag(reportId, undefined);
       toast.success("Flag deleted.");
@@ -254,16 +233,9 @@ export function ReportList({
       .replace(/[^ -~]/g, "")           // Strip any remaining non-Latin/Unicode characters
       .trim();
 
-    // 2. Pass the sanitized filename to the API
-    const response = await fetch(`/api/backend/reports/${reportId}/pdf?filename=${encodeURIComponent(`${reportId} - ${safeTitle || "report"}.pdf`)}`, {
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      throw new Error("Failed to download PDF");
-    }
-
-    const blob = await response.blob();
+    // 2. Fetch the PDF with auth attached
+    const buffer = await getReportPdf(reportId);
+    const blob = new Blob([buffer], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -279,6 +251,24 @@ export function ReportList({
     toast.error("Could not download PDF. Please try again.");
   }
 };
+
+  const handleOpenReportPdf = async (reportId: number) => {
+    // Open the tab synchronously (still tied to the user gesture) so
+    // browsers don't treat the later navigation as a blocked popup.
+    const newTab = window.open("", "_blank", "noopener,noreferrer");
+    try {
+      const buffer = await getReportPdf(reportId);
+      const blob = new Blob([buffer], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      if (newTab) {
+        newTab.location.href = url;
+      }
+    } catch (error) {
+      console.error("Error opening report PDF:", error);
+      toast.error("Could not open PDF. Please try again.");
+      newTab?.close();
+    }
+  };
 
   return (
     <div className="h-full flex flex-col pt-5">
@@ -376,10 +366,6 @@ export function ReportList({
                   .map(([k, v]) => [k, String(v)])
               ).toString();
               const reportHref = `/${baseUrl}/${projectId}/${report.report.reportId}${params ? `?${params}` : ""}`;
-              const pdfParams = new URLSearchParams({
-                filename: `${report.report.reportId} - ${report.report.title}.pdf`,
-              }).toString();
-              const pdfUrl = `/api/backend/reports/${report.report.reportId}/pdf?${pdfParams}`;
 
               if (!reportHref) {
                 return null;
@@ -443,7 +429,7 @@ export function ReportList({
                               >
                                 <DropdownMenuItem
                                   onSelect={() => {
-                                    window.open(pdfUrl, "_blank", "noopener,noreferrer");
+                                    void handleOpenReportPdf(report.report.reportId);
                                   }}
                                 >
                                   <ExternalLink className="h-4 w-4" />

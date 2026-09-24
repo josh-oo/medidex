@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-// import { evaluateStudiesStream } from "@/lib/api/genaiStreamApi";
+import { getAccessToken } from "@/lib/client/keycloak";
 import type { PromptOverrides, ReportDto, StreamEvent, StudyDto} from "@/types/apiDTOs";
 export type { PromptOverrides, DefaultPrompts } from "@/types/apiDTOs";
 
@@ -182,9 +182,13 @@ export const useGenAIEvaluationStore = create<GenAIEvaluationStore>((set, get) =
 
     (async () => {
       try {
-        const response = await fetch("/api/genai/evaluate/stream", {
+        const token = await getAccessToken();
+        const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_API_URL}/api/evaluate/stream`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({
             report,
             studies,

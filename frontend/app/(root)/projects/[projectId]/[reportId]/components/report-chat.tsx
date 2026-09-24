@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getReportChat, postReportChat, deleteReportChat } from "@/lib/api/reportApi";
 import { LoaderCircle, RefreshCw, Send, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 // import { ReportChatButtons } from "./ai-actions";
@@ -372,16 +373,7 @@ export default function ReportChat({ reportId, open, setOpen}: ReportChatProps) 
     setLoadError(null);
 
     try {
-      const response = await fetch(`/api/backend/reports/${reportId}/chat`, {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-
-      const data = (await response.json()) as unknown;
+      const data = await getReportChat(reportId);
       setPayload(data);
     } catch (fetchError) {
       console.error("Failed to fetch report chat:", fetchError);
@@ -402,20 +394,7 @@ export default function ReportChat({ reportId, open, setOpen}: ReportChatProps) 
     setPendingUserMessage(message);
 
     try {
-      const response = await fetch(`/api/backend/reports/${reportId}/chat`, {
-        method: "POST",
-        cache: "no-store",
-        headers: {
-          "Content-Type": "text/plain",
-        },
-        body: message,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-
-      const data = (await response.json()) as unknown;
+      const data = await postReportChat(reportId, message);
       setPayload(data);
       setMessageInput("");
     } catch (postError) {
@@ -436,14 +415,7 @@ export default function ReportChat({ reportId, open, setOpen}: ReportChatProps) 
     setDeleteError(null);
 
     try {
-      const response = await fetch(`/api/backend/reports/${reportId}/chat`, {
-        method: "DELETE",
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
+      await deleteReportChat(reportId);
 
       setPayload(null);
       setExpandedToolMessages({});
