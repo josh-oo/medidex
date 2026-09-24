@@ -1,5 +1,5 @@
 import { getProjects, getTasks } from "@/lib/api/projectApi";
-import { getUserNamesByIds } from "@/lib/server/keycloakAdmin";
+import { getUserNamesByIds } from "@/lib/api/adminApi";
 import { getBackendHeaders } from "@/lib/server/backendHeaders";
 import { ProjectCard } from "./components/project-card";
 import { TaskCard } from "./components/task-card";
@@ -49,7 +49,7 @@ async function resolveOwnerNames(tasks: ProjectTaskDto[]) {
   }
 
   try {
-    return await getUserNamesByIds(ownerIds);
+    return await getUserNamesByIds(ownerIds, { headers: await getBackendHeaders() });
   } catch (error) {
     console.error("Failed to resolve owner names:", error);
     return new Map<string, string>();

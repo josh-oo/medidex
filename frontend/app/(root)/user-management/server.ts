@@ -3,15 +3,16 @@
 import { adminGuard } from "../../../guards/role.guard";
 import { UpdateUserDto } from "../../../types/user/update-user.dto";
 import { UserDto } from "../../../types/user/user.dto";
-import * as keycloakAdmin from "../../../lib/server/keycloakAdmin";
+import { getBackendHeaders } from "../../../lib/server/backendHeaders";
+import * as adminApi from "../../../lib/api/adminApi";
 
 export async function getUsers(): Promise<UserDto[]> {
   await adminGuard();
-  return keycloakAdmin.listUsers();
+  return adminApi.listUsers({ headers: await getBackendHeaders() });
 }
 
 export async function getUserById(id: string): Promise<UserDto | null> {
-  return keycloakAdmin.getUserById(id);
+  return adminApi.getUserById(id, { headers: await getBackendHeaders() });
 }
 
 export async function updateUser(
@@ -19,15 +20,10 @@ export async function updateUser(
   updateUserDto: UpdateUserDto
 ): Promise<UserDto> {
   await adminGuard();
-  await keycloakAdmin.updateUserRoles(id, updateUserDto.roles);
-  const user = await keycloakAdmin.getUserById(id);
-  if (!user) {
-    throw new Error("User not found after update");
-  }
-  return user;
+  return adminApi.updateUserRoles(id, updateUserDto.roles, { headers: await getBackendHeaders() });
 }
 
 export async function deleteUser(id: string): Promise<void> {
   await adminGuard();
-  await keycloakAdmin.deleteUser(id);
+  await adminApi.deleteUser(id, { headers: await getBackendHeaders() });
 }

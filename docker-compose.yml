@@ -82,6 +82,13 @@ services:
       - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
       - KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID:-medidex-backoffice}
       - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}
+      # Master-realm bootstrap admin (same account the keycloak service itself
+      # is seeded with via KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD). Needed only
+      # to grant medidex-backoffice its own manage-clients/view-clients roles -
+      # a chicken-and-egg step medidex-backoffice can't do for itself before
+      # it has view-clients.
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - ADMIN_NAME=${ADMIN_NAME:-Administrator}
@@ -137,6 +144,13 @@ services:
       - KEYCLOAK_PUBLIC_URL=${KEYCLOAK_PUBLIC_URL:-http://localhost:8081}
       - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
       - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
+      # Service-account credential used by the backend's admin API
+      # (src/api/admin.py) to call the Keycloak Admin REST API - user
+      # management and API-key (client) management. Never exposed to the
+      # frontend; the frontend calls the backend's /admin/* and
+      # /users/me/api_keys routes instead.
+      - KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID:-medidex-backoffice}
+      - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-resources}
@@ -191,8 +205,6 @@ services:
       - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
       - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
       - KEYCLOAK_INTERNAL_URL=http://keycloak:8080
-      - KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID:-medidex-backoffice}
-      - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}
       - STAGE=${STAGE:-local}
       - BACKEND_API_URL=${BACKEND_API_URL:-http://logic:8002/backend}
       - INACTIVITY_DIALOG=${INACTIVITY_DIALOG:-false}

@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api import auth, resources, core, agents, projects
+from src.api import auth, resources, core, agents, projects, admin
 from src.api import maintenance
 from src_agent import agent
 
@@ -27,6 +27,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(projects.router)
 app.include_router(core.router)
 app.include_router(resources.router)

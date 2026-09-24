@@ -1,6 +1,6 @@
 "use client";
 
-import { Users } from "lucide-react";
+import { Users, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeaderUser } from "./header-user";
 import Image from "next/image";
@@ -42,6 +42,22 @@ export function AppHeaderClient({ user }: AppHeaderClientProps) {
         <div className="flex items-center gap-1">
           {/* Navigation buttons */}
           <nav className="flex items-center gap-1 mr-2">
+            {user && (
+              <Button
+                variant={pathname === "/settings/api-keys" ? "secondary" : "ghost"}
+                size="sm"
+                asChild
+                className={cn(
+                  "gap-2",
+                  pathname === "/settings/api-keys" && "bg-secondary"
+                )}
+              >
+                <Link href="/settings/api-keys">
+                  <KeyRound className="h-4 w-4" />
+                  <span className="hidden sm:inline">API Keys</span>
+                </Link>
+              </Button>
+            )}
             {isAdmin && (
               <Button
                 variant={pathname === "/user-management" ? "secondary" : "ghost"}
