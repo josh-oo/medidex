@@ -181,6 +181,7 @@ services:
       - KC_DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
     volumes:
       - ./keycloak/realm-medidex.json:/opt/keycloak/data/import/realm-medidex.json:ro
+      - ./keycloak/themes/medidex:/opt/keycloak/themes/medidex:ro
     ports:
       - "8081:8080"
     networks:

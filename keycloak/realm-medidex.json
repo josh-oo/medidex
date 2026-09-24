@@ -2,6 +2,7 @@
   "realm": "medidex",
   "enabled": true,
   "sslRequired": "none",
+  "loginTheme": "medidex",
   "registrationAllowed": true,
   "registrationEmailAsUsername": true,
   "loginWithEmailAllowed": true,
