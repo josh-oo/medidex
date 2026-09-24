@@ -197,12 +197,12 @@ services:
         # The frontend is a pure client-side app now - it talks to Keycloak
         # and the backend directly from the browser, so both need their
         # host-published addresses, not the internal compose hostnames.
-        - NEXT_PUBLIC_KEYCLOAK_URL=http://localhost:8081
-        - NEXT_PUBLIC_KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
-        - NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
-        - NEXT_PUBLIC_BACKEND_API_URL=${NEXT_PUBLIC_BACKEND_API_URL:-http://localhost:8002/backend}
+        - VITE_KEYCLOAK_URL=http://localhost:8081
+        - VITE_KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
+        - VITE_KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
+        - VITE_BACKEND_API_URL=${VITE_BACKEND_API_URL:-http://localhost:8002/backend}
     ports:
-      - "3000:3000"
+      - "3000:80"
     depends_on:
       - keycloak
     networks:
