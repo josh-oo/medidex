@@ -3,7 +3,6 @@
 import { Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeaderUser } from "./header-user";
-import { Role } from "@/enums/role.enum";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -14,13 +13,13 @@ interface AppHeaderClientProps {
     name: string;
     email: string;
     avatar: string;
-    roles: Role[];
+    isAdmin: boolean;
   } | null;
 }
 
 export function AppHeaderClient({ user }: AppHeaderClientProps) {
   const pathname = usePathname();
-  const isAdmin = user?.roles.includes(Role.ADMIN);
+  const isAdmin = user?.isAdmin;
 
   return (
     <header className="bg-background fixed left-0 right-0 top-0 z-50 flex w-full items-center border-b h-14">

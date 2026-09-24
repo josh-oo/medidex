@@ -314,4 +314,114 @@ if [ "$missing_count" -eq 0 ] && [ "$stale_count" -eq 0 ]; then
     echo "app-init: vectorstore already in sync with the database"
 fi
 
+# ============================================================================
+# 5. KEYCLOAK ADMIN BOOTSTRAP
+# ============================================================================
+# Optional bootstrap account. Set both ADMIN_EMAIL and ADMIN_PASSWORD to
+# create an approved admin in Keycloak on startup (idempotent: safe to run
+# on every app-init run).
+if [ -n "${ADMIN_EMAIL:-}" ] && [ -n "${ADMIN_PASSWORD:-}" ]; then
+    KEYCLOAK_URL="${KEYCLOAK_URL:-http://keycloak:8080}"
+    KEYCLOAK_REALM="${KEYCLOAK_REALM:-medidex}"
+    KEYCLOAK_ADMIN_CLIENT_ID="${KEYCLOAK_ADMIN_CLIENT_ID:-medidex-backoffice}"
+    KEYCLOAK_ADMIN_CLIENT_SECRET="${KEYCLOAK_ADMIN_CLIENT_SECRET:?is not set; must be the medidex-backoffice client secret}"
+    ADMIN_NAME="${ADMIN_NAME:-Administrator}"
+    KC_ADMIN_URL="$KEYCLOAK_URL/admin/realms/$KEYCLOAK_REALM"
+    KC_RESPONSE_BODY="/tmp/kc-admin-response.json"
+
+    # Runs a Keycloak Admin API call. Prints the response body to stdout on
+    # one of the given (space-separated) acceptable status codes, otherwise
+    # prints the status and body to stderr and aborts. Without this, a
+    # non-2xx response from any of these calls previously failed silently
+    # (curl -f + set -e, no diagnostic output).
+    kc_call() {
+        method="$1"; url="$2"; ok_codes="$3"; shift 3
+        status=$(curl -s -o "$KC_RESPONSE_BODY" -w '%{http_code}' -X "$method" "$url" \
+            -H "Authorization: Bearer $kc_token" "$@")
+        case " $ok_codes " in
+            *" $status "*) cat "$KC_RESPONSE_BODY" ;;
+            *)
+                echo "app-init: ERROR: $method $url returned $status" >&2
+                cat "$KC_RESPONSE_BODY" >&2
+                exit 1
+                ;;
+        esac
+    }
+
+    # URL-encodes its single argument (e.g. an email address) for use in a query string.
+    urlencode() {
+        jq -rn --arg v "$1" '$v|@uri'
+    }
+
+    echo "app-init: waiting for keycloak realm '$KEYCLOAK_REALM' at $KEYCLOAK_URL..."
+    attempt=1
+    until curl -sf -o /dev/null "$KEYCLOAK_URL/realms/$KEYCLOAK_REALM"; do
+        if [ "$attempt" -ge 60 ]; then
+            echo "app-init: ERROR: keycloak realm '$KEYCLOAK_REALM' is not reachable after 120s" >&2
+            exit 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    kc_token=$(curl -sf -X POST "$KEYCLOAK_URL/realms/$KEYCLOAK_REALM/protocol/openid-connect/token" \
+        -d "grant_type=client_credentials" \
+        -d "client_id=$KEYCLOAK_ADMIN_CLIENT_ID" \
+        -d "client_secret=$KEYCLOAK_ADMIN_CLIENT_SECRET" | jq -r '.access_token // empty')
+    if [ -z "$kc_token" ]; then
+        echo "app-init: ERROR: could not obtain a Keycloak admin token" >&2
+        exit 1
+    fi
+
+    admin_email_encoded=$(urlencode "$ADMIN_EMAIL")
+    admin_user_id=$(kc_call GET "$KC_ADMIN_URL/users?email=$admin_email_encoded&exact=true" "200" \
+        | jq -r '.[0].id // empty')
+
+    if [ -z "$admin_user_id" ]; then
+        echo "app-init: creating Keycloak admin account for $ADMIN_EMAIL"
+        admin_first_name=$(printf '%s' "$ADMIN_NAME" | awk '{print $1}')
+        admin_last_name=$(printf '%s' "$ADMIN_NAME" | awk '{$1=""; sub(/^ /,""); print}')
+        create_payload=$(jq -cn \
+            --arg username "$ADMIN_EMAIL" --arg email "$ADMIN_EMAIL" \
+            --arg firstName "$admin_first_name" --arg lastName "$admin_last_name" \
+            --arg password "$ADMIN_PASSWORD" \
+            '{username:$username, email:$email, firstName:$firstName, lastName:$lastName,
+              enabled:true, emailVerified:true,
+              credentials:[{type:"password", value:$password, temporary:false}]}')
+        # 409 means a matching user already exists (e.g. left over from an
+        # earlier run) - fall through to the lookups below instead of
+        # treating it as fatal.
+        kc_call POST "$KC_ADMIN_URL/users" "201 409" \
+            -H 'Content-Type: application/json' --data "$create_payload" >/dev/null
+        admin_user_id=$(kc_call GET "$KC_ADMIN_URL/users?email=$admin_email_encoded&exact=true" "200" \
+            | jq -r '.[0].id // empty')
+        if [ -z "$admin_user_id" ]; then
+            # Fall back to a username search in case the email lookup missed
+            # it (e.g. a differently-cased email from an earlier run).
+            admin_user_id=$(kc_call GET "$KC_ADMIN_URL/users?username=$admin_email_encoded&exact=true" "200" \
+                | jq -r '.[0].id // empty')
+        fi
+    else
+        echo "app-init: Keycloak admin account for $ADMIN_EMAIL already exists"
+    fi
+
+    if [ -z "$admin_user_id" ]; then
+        echo "app-init: ERROR: admin user was not created/found in Keycloak" >&2
+        exit 1
+    fi
+
+    admin_role=$(kc_call GET "$KC_ADMIN_URL/roles/ADMIN" "200")
+    kc_call POST "$KC_ADMIN_URL/users/$admin_user_id/role-mappings/realm" "204" \
+        -H 'Content-Type: application/json' --data "[$admin_role]" >/dev/null
+
+    approved_group_id=$(kc_call GET "$KC_ADMIN_URL/groups?search=approved-users" "200" | jq -r '.[0].id // empty')
+    if [ -n "$approved_group_id" ]; then
+        kc_call PUT "$KC_ADMIN_URL/users/$admin_user_id/groups/$approved_group_id" "204" >/dev/null
+    fi
+
+    echo "app-init: Keycloak admin account is ready for $ADMIN_EMAIL"
+else
+    echo "app-init: ADMIN_EMAIL/ADMIN_PASSWORD not set; skipping Keycloak admin bootstrap"
+fi
+
 echo "app-init: initialization complete"

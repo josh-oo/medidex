@@ -1,16 +1,11 @@
 import { forbidden } from "next/navigation";
-import { Role } from "../enums/role.enum";
-import { auth } from "../lib/auth";
-import { headers } from "next/headers";
+import { getSession } from "../lib/server/session";
 
 export async function adminGuard(): Promise<boolean> {
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
+  const session = await getSession();
 
-  const user = session?.user;
   // Check if user is approved AND has admin role
-  if (user?.roles?.includes(Role.ADMIN) && user?.isApproved) {
+  if (session?.user.isAdmin && session?.user.isApproved) {
     return true;
   }
 

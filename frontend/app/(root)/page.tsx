@@ -1,15 +1,13 @@
 import { getProjects, getTasks } from "@/lib/api/projectApi";
-import prisma from "@/lib/db";
+import { getUserNamesByIds } from "@/lib/server/keycloakAdmin";
 import { getBackendHeaders } from "@/lib/server/backendHeaders";
 import { ProjectCard } from "./components/project-card";
 import { TaskCard } from "./components/task-card";
-import { auth } from "../../lib/auth";
-import { headers } from "next/headers";
+import { getSession } from "../../lib/server/session";
 import { redirect } from "next/navigation";
 import { HomeHero } from "./components/home-hero";
 import { QuickStats } from "./components/quick-stats";
 import { FeaturesShowcase } from "./components/features-showcase";
-import { Role } from "@/enums/role.enum";
 import { Button } from "@/components/ui/button";
 import { FileText, Plus } from "lucide-react";
 import type { ProjectTaskDto } from "@/types/apiDTOs";
@@ -51,12 +49,7 @@ async function resolveOwnerNames(tasks: ProjectTaskDto[]) {
   }
 
   try {
-    const owners = await prisma.user.findMany({
-      where: { id: { in: ownerIds } },
-      select: { id: true, name: true },
-    });
-
-    return new Map(owners.map((owner) => [owner.id, owner.name]));
+    return await getUserNamesByIds(ownerIds);
   } catch (error) {
     console.error("Failed to resolve owner names:", error);
     return new Map<string, string>();
@@ -67,15 +60,13 @@ export default async function Home() {
   const [projects, tasks] = await Promise.all([fetchProjects(), fetchTasks()]);
   const ownerNameById = await resolveOwnerNames(tasks);
 
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
+  const session = await getSession();
 
   if (!session?.user) {
     return redirect("/login");
   }
 
-  const isAdmin = session.user.roles?.includes(Role.ADMIN) ?? false;
+  const isAdmin = session.user.isAdmin ?? false;
   const emptyTaskMessage = isAdmin
     ? "Create a project and assign it to yourself."
     : "Ask an admin to assign you to a project.";

@@ -2,7 +2,6 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-COPY prisma ./prisma
 RUN npm ci
 
 # 2. Build the application
@@ -11,10 +10,15 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Generate Prisma Client (required before build)
-# Provide a dummy DATABASE_URL since prisma generate doesn't need a real connection
-ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
-RUN npx prisma generate
+# keycloak-js runs in the browser, so these must be baked into the client
+# bundle at build time - a runtime env var would be too late.
+ARG NEXT_PUBLIC_KEYCLOAK_URL
+ARG NEXT_PUBLIC_KEYCLOAK_REALM
+ARG NEXT_PUBLIC_KEYCLOAK_CLIENT_ID
+ENV NEXT_PUBLIC_KEYCLOAK_URL=$NEXT_PUBLIC_KEYCLOAK_URL
+ENV NEXT_PUBLIC_KEYCLOAK_REALM=$NEXT_PUBLIC_KEYCLOAK_REALM
+ENV NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=$NEXT_PUBLIC_KEYCLOAK_CLIENT_ID
+
 RUN npm run build
 
 # 3. Production runner
@@ -29,18 +33,11 @@ RUN adduser --system --uid 1001 nextjs
 # Copy built assets
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/app/generated ./app/generated
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
-COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/lib ./lib
 COPY --from=builder /app/enums ./enums
-COPY --from=builder /app/scripts ./scripts
-COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
 
 USER nextjs
 
-ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
 CMD ["npm", "run", "start", "--", "-H", "0.0.0.0"]

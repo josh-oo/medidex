@@ -17,7 +17,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB_RESOURCES: ${POSTGRES_DB_RESOURCES:-resources}
       POSTGRES_DB_USERS: ${POSTGRES_DB_USERS:-users}
-      POSTGRES_DB_FRONTEND: ${POSTGRES_DB_FRONTEND:-medidex}
     volumes:
       - postgres_data:/var/lib/postgresql
       # Runs once, on first start of an empty data volume.
@@ -65,6 +64,7 @@ services:
       - qdrant
       - postgres
       - embedding
+      - keycloak
     environment:
       - QDRANT_URL=http://${VECTORSTORE_SERVICE_HOST:-qdrant}:6333
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
@@ -78,6 +78,13 @@ services:
       - POSTGRES_PORT=5432
       - EMBEDDING_MODEL_BASE_URL=http://embedding:80/v1
       - EMBEDDING_MODEL_API_KEY=${EMBEDDING_MODEL_API_KEY:-unused}
+      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
+      - KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID:-medidex-backoffice}
+      - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - ADMIN_NAME=${ADMIN_NAME:-Administrator}
     volumes:
       - ./data/runtime/qdrant:/qdrant/storage
       - ./data/runtime/backend:/data
@@ -109,9 +116,6 @@ services:
       dockerfile: logic/Dockerfile
     ports:
       - "8002:8002"
-    depends_on:
-      app-init:
-        condition: service_completed_successfully
     volumes:
       - ./data/runtime/backend:/data
     read_only: true
@@ -127,8 +131,9 @@ services:
       - VECTORSTORE_SERVICE_HOST=${VECTORSTORE_SERVICE_HOST:-qdrant}
       - VECTORSTORE_SERVICE_PORT=${VECTORSTORE_SERVICE_PORT:-6334}
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
-      - JWT_SECRET=${JWT_SECRET}
-      - JWKS_URL=http://frontend:3000/api/auth/jwks
+      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
+      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-resources}
@@ -140,24 +145,56 @@ services:
       - DOCLING_URL=${DOCLING_URL:-http://docling:5001}
       - DEBUG=${DEBUG:-false}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      app-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_started
+
+  keycloak:
+    container_name: keycloak
+    image: keycloak/keycloak:26.7
+    command: start-dev --import-realm
+    depends_on:
+      - postgres
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN:-admin}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB_KEYCLOAK:-keycloak}
+      - KC_DB_USERNAME=${POSTGRES_USER:-postgres}
+      - KC_DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./keycloak/realm-medidex.json:/opt/keycloak/data/import/realm-medidex.json:ro
+    ports:
+      - "8081:8080"
+    networks:
+      - internal_net
 
   frontend:
     container_name: frontend
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # keycloak-js runs in the browser, so it needs Keycloak's
+        # host-published port, not the internal compose hostname below.
+        - NEXT_PUBLIC_KEYCLOAK_URL=http://localhost:8081
+        - NEXT_PUBLIC_KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
+        - NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
     ports:
       - "3000:3000"
     environment:
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
-      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3000}
-      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
-      - ADMIN_NAME=${ADMIN_NAME:-Administrator}
+      - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
+      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
+      - KEYCLOAK_INTERNAL_URL=http://keycloak:8080
+      - KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID:-medidex-backoffice}
+      - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}
       - STAGE=${STAGE:-local}
       - BACKEND_API_URL=${BACKEND_API_URL:-http://logic:8002/backend}
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB_FRONTEND:-medidex}?schema=public
       - INACTIVITY_DIALOG=${INACTIVITY_DIALOG:-false}
+    depends_on:
+      - keycloak
     networks:
       - internal_net
       #- public_net

@@ -1,11 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { headers } from "next/headers";
-import { auth } from "../../../lib/auth";
+import { NextResponse } from "next/server";
+import { getSession } from "@/lib/server/session";
 
-export async function GET(request: NextRequest) {
-  const requestHeaders = await headers();
-  const token = await auth.api.getToken({
-    headers: requestHeaders,
-  });
-  return NextResponse.json(token);
+export async function GET() {
+  const session = await getSession();
+  return NextResponse.json({ access_token: session?.accessToken ?? null });
 }

@@ -4,25 +4,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Clock } from "lucide-react";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { authClient } from "@/lib/auth-client";
 
 export default function PendingApprovalPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Poll session to check if user has been logged out (approved)
+    // Poll for approval; the route forces a token refresh so a newly granted
+    // role takes effect immediately instead of waiting for the token to expire.
     const checkApproval = async () => {
       try {
-        const session = await authClient.getSession();
-        
-        // If session is null/undefined, user was logged out (approved)
-        if (!session?.data) {
-          router.push("/login");
-          return;
+        const response = await fetch("/api/auth/approval-status");
+        if (!response.ok) return;
+        const data = await response.json();
+
+        if (data.approved) {
+          router.push("/");
+          router.refresh();
         }
       } catch (error) {
-        // Error getting session likely means user was logged out
-        router.push("/login");
+        // Ignore transient errors, try again on the next tick.
       }
     };
 

@@ -11,8 +11,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { authClient } from "@/lib/auth-client";
-import { useRouter } from "next/navigation";
+import { getKeycloak } from "@/lib/client/keycloak";
+import { clearSession } from "@/lib/client/syncSession";
 
 function getInitials(name: string) {
   const names = name.split(" ");
@@ -31,12 +31,14 @@ export function HeaderUser({
     avatar: string;
   };
 }) {
-  const router = useRouter();
   const initials = getInitials(user.name);
 
   const handleLogout = async () => {
-    await authClient.signOut();
-    router.push("/login");
+    // Clear our own cookies first, then let keycloak-js redirect the browser
+    // to Keycloak's own logout endpoint to end the SSO session there too -
+    // otherwise logging in again would silently re-authenticate.
+    await clearSession();
+    getKeycloak().logout({ redirectUri: `${window.location.origin}/login` });
   };
 
   return (

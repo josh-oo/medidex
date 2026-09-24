@@ -1,10 +1,8 @@
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/lib/db";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
-import { Role } from "@/enums/role.enum";
+import { getSession } from "@/lib/server/session";
+import { approveUser } from "@/lib/server/keycloakAdmin";
 
 export async function PATCH(
   _request: NextRequest,
@@ -12,14 +10,8 @@ export async function PATCH(
 ) {
   const { userId } = await params;
 
-  // Check if user is admin
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
-
-  const isAdmin = session?.user?.roles?.includes(Role.ADMIN);
-
-  if (!isAdmin) {
+  const session = await getSession();
+  if (!session?.user?.isAdmin) {
     return NextResponse.json(
       { error: "Unauthorized" },
       { status: 403 }
@@ -27,17 +19,8 @@ export async function PATCH(
   }
 
   try {
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: { isApproved: true },
-    });
-
-    // Delete all sessions for this user to force re-login with updated approval status
-    await prisma.session.deleteMany({
-      where: { userId: userId }
-    });
-
-    return NextResponse.json({ success: true, user: updatedUser });
+    await approveUser(userId);
+    return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error approving user:", error);
     return NextResponse.json(

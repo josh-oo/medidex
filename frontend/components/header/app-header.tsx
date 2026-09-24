@@ -1,30 +1,19 @@
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
-import { Role } from "@/enums/role.enum";
+import { getSession } from "@/lib/server/session";
 import { AppHeaderClient } from "./app-header-client";
 
 export async function AppHeader() {
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
+  const session = await getSession();
 
   const sessionUser = session?.user;
-
-  const roles: Role[] = sessionUser?.roles
-    ? Array.isArray(sessionUser.roles)
-      ? sessionUser.roles
-      : [sessionUser.roles]
-    : [];
 
   const user = sessionUser
     ? {
         name: sessionUser.name || "User",
         email: sessionUser.email || "",
-        avatar: sessionUser.image || "",
-        roles,
+        avatar: "",
+        isAdmin: sessionUser.isAdmin,
       }
     : null;
 
   return <AppHeaderClient user={user} />;
 }
-
