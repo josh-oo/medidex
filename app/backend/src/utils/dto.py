@@ -104,6 +104,21 @@ def report_flag_to_dto(flag) -> ReportFlag:
         createdAt=flag.date_created.isoformat(),
     )
 
+def reports_to_dto(reports) -> List[Report]:
+    result = []
+    for report in reports:
+        result.append(Report(
+            reportId=report.id,
+            year=report.year,
+            title=report.title,
+            abstract=report.abstract,
+            trialId=report.trial_registration_id,
+            authors=report.authors.split("//") if report.authors else [],
+            createdAt=report.date_entered,
+            updatedAt=report.date_edited,
+        ))
+    return result
+
 def studies_to_dto(studies):
     result = []
     for study in studies:

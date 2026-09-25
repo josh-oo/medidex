@@ -9,9 +9,11 @@ one process; this module has no idea it's being mounted into anything.
 
 from mcp.server import MCPServer
 from mcp.server.auth.settings import AuthSettings
+from mcp.server.subscriptions import InMemorySubscriptionBus
 from pydantic import AnyHttpUrl
 
 from .auth import KeycloakMCPTokenVerifier, MCP_RESOURCE_URL
+from . import live_updates
 from . import tools
 from . import resources
 from src.utils.keycloak import KEYCLOAK_PUBLIC_URL, KEYCLOAK_REALM
@@ -20,13 +22,22 @@ MCP_STREAMABLE_HTTP_PATH = "/mcp"
 
 
 def create_server() -> MCPServer:
+    # Own bus instance (rather than the server's default) so live_updates'
+    # lifespan task can publish to the exact same object passed to
+    # subscriptions= below, without reaching into MCPServer's private state.
+    subscriptions = InMemorySubscriptionBus()
+
     server = MCPServer(
         name="Medidex",
         instructions=(
             "Search and retrieve clinical study and report records from Medidex, "
-            "including which reports are already linked to a study."
+            "including which reports are already linked to a study. Also exposes "
+            "project management: reviewing projects and tasks, and (admin-only) "
+            "creating projects and assigning/removing review tasks."
         ),
         token_verifier=KeycloakMCPTokenVerifier(),
+        subscriptions=subscriptions,
+        lifespan=live_updates.lifespan(subscriptions),
         auth=AuthSettings(
             # Must be the browser/host-reachable Keycloak URL (same one used for
             # the Swagger UI's OAuth redirect in fastapi_app/auth.py), not KEYCLOAK_URL

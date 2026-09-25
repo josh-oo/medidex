@@ -140,6 +140,21 @@ class StudyRepository:
             return result[study_id]
         return []
 
+    async def get_linked_reports(self, study_id: int) -> List[Report]:
+        """Full Report entities linked to a study - the inverse of
+        ReportRepository.get_linked_studies(). Unlike
+        get_study_reports_by_study_id() above (a dict-row projection built
+        for the bulk/field-filtered REST and agent-tool callers), this
+        returns real ORM Report objects for callers - like mcp_server's
+        resources - that just want the whole record.
+        """
+        stmt = (
+            select(Report)
+            .join(StudyReport, StudyReport.report_id == Report.id)
+            .where(StudyReport.study_id == study_id)
+        )
+        return (await self.db.execute(stmt)).scalars().all()
+
     async def get_study_persons(self, study_ids: Optional[List[int]] = None, cutoff: Optional[str] = None, normalize_names: bool = True) -> Dict[int, List[str]]:
         stmt = (
             select(StudyReport.study_id.label("study_id"), Report.authors)

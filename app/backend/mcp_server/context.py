@@ -38,6 +38,22 @@ def current_user_id() -> str:
     return access_token.subject
 
 
+def require_admin() -> None:
+    """Raise ValueError (the MCP tool/resource error convention) unless the
+    caller's token carries Keycloak's ADMIN realm role - same check as the
+    REST API's is_admin dependency (fastapi_app/auth.py), applied to the
+    medidex-mcp client's own token (KeycloakMCPTokenVerifier already decodes
+    it and keeps the raw claims on AccessToken.claims) instead of re-decoding
+    it here.
+    """
+    access_token = get_access_token()
+    if access_token is None:
+        raise ValueError("Not authenticated")
+    roles = (access_token.claims or {}).get("roles", [])
+    if "ADMIN" not in roles:
+        raise ValueError("Not allowed: admin role required")
+
+
 @asynccontextmanager
 async def request_context(user_id: Optional[str]) -> AsyncIterator[RequestContext]:
     async with _session_scope() as db:

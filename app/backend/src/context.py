@@ -29,6 +29,7 @@ from .services.embedding import EmbeddingService, embedding_service
 from .services.linkage import LinkageService
 from .services.llm import LanguageModelService
 from .services.maintenance import MaintenanceService
+from .services.project import ProjectResourceService
 from .services.pubsub import ProjectPubSubService
 from .services.report import DocumentService, ReportService
 from .services.study import StudyResourceService
@@ -162,3 +163,11 @@ class RequestContext:
     @cached_property
     def study_service(self) -> StudyResourceService:
         return StudyResourceService(study_repo=self.study_repo)
+
+    @cached_property
+    def project_service(self) -> ProjectResourceService:
+        return ProjectResourceService(
+            project_repo=self.project_repo,
+            report_repo=self.report_repo,
+            vectorstore_service=self.vectorstore_service,
+        )

@@ -2,18 +2,13 @@
 from fastapi import APIRouter, Request
 from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks, Body, Form
 from fastapi.responses import Response, StreamingResponse
-from typing import Dict, List, Optional, Any, Tuple, Set
+from typing import Dict, List, Any, Tuple, Set
 import json
 import logging
-import io
 
-import httpx
-
-from src.utils.trial_registration_id import extract_trial_id
-from src.utils.ris_parser import parse_file
+from src.utils.ris_parser import parse_file, RisParseError
 from src.utils.logger import setup_logging
 
-import hashlib
 import asyncio
 
 from .auth import is_verified_api_call, is_admin
@@ -23,11 +18,9 @@ from .deps import get_context
 
 from src.database.repositories.study import DuplicateShortNameError
 
-from src.database.models import Report as DbReport, Project as DbProject
+from src.database.models import Project as DbProject
 
 from src.services.agent import AutomationService
-
-from src.database.sessions import AsyncSessionLocal
 
 from src.background.wrapper import (
     run_process_report_background,
@@ -43,137 +36,8 @@ logger = logging.getLogger(__name__)
 
 # Limit concurrent bot processing across reports
 agent_process_semaphore = asyncio.Semaphore(10)
-pdf_semaphore = asyncio.Semaphore(1)
-write_semaphore = asyncio.Semaphore(1)
-vectorstore_semaphore = asyncio.Semaphore(8)
 
 project_id_path = Path(..., description="The projects's id")
-
-class _InMemoryPdfUpload:
-    def __init__(self, content: bytes, filename: str = "autosearch.pdf"):
-        self._buffer = io.BytesIO(content)
-        self.filename = filename
-        self.content_type = "application/pdf"
-
-    async def read(self) -> bytes:
-        self._buffer.seek(0)
-        return self._buffer.read()
-
-
-def _looks_like_pdf(content: bytes, content_type: str) -> bool:
-    if not content:
-        return False
-    if content.startswith(b"%PDF-"):
-        return True
-    return "application/pdf" in (content_type or "").lower()
-
-
-async def _download_pdf_bytes(client: httpx.AsyncClient, url: str) -> Optional[bytes]:
-    try:
-        response = await client.get(url)
-        response.raise_for_status()
-    except Exception:
-        return None
-
-    payload = response.content
-    if _looks_like_pdf(payload, response.headers.get("content-type", "")):
-        return payload
-    return None
-
-import traceback
-
-async def process_report_pdf(
-    client,
-    report : DbReport,
-    open_alex_service,
-) -> None:
-    #async with pdf_semaphore:
-
-    if report.report_number > 0: #if report already has pdf
-        return None
-
-    try:
-        links = await open_alex_service.get_pdf_links_by_doi(report.doi)
-
-        for link in links:
-            print("Link: ", link)
-            payload = await _download_pdf_bytes(client, link)
-            if payload is None:
-                continue
-
-            upload_file = _InMemoryPdfUpload(payload)
-            print("Success download: ", report.id,flush=True)
-            #await document_service.upload_pdf(report.id, upload_file)
-            #print("Success upload: ", report.id,flush=True)
-            return upload_file
-
-    except Exception as exc:
-        #print(f"Upload failed: {report_id} Exc {exc}")
-        print(f"Upload failed: {report.id} Exc {exc}\n{traceback.format_exc()}",flush=True)
-        logger.warning(
-            "Auto PDF processing failed for report %s in project %s: %s",
-            report.id,
-            exc,
-        )
-    return None
-
-async def process_report(reports : List[DbReport], project_id : str, ctx: RequestContext) -> None:
-    timeout = httpx.Timeout(30.0, connect=10.0)
-
-    async def load_pdf(report, client):
-        async with write_semaphore:
-            async with AsyncSessionLocal() as write_session:
-                write_ctx = RequestContext(db=write_session, user_id=ctx.user_id)
-                project = await write_ctx.project_repo.get_project_by_id(project_id)
-                if not project: #if project already deleted
-                    return
-                pdf_file = await process_report_pdf(client, report, write_ctx.open_alex_service)
-                if pdf_file:
-                    print("Start upload: ", report.id,flush=True)
-                    await write_ctx.document_service.upload_pdf(report.id, pdf_file)
-                print("Start Set auto searched: ", report.id,flush=True)
-                await write_ctx.project_repo.set_report_auto_searched_pdf(report.id)
-                await write_session.commit()
-                await ctx.pubsub_service.publish_project_update(project_id)
-
-    async def prepare_vectorstore(report):
-        async with vectorstore_semaphore:
-            async with AsyncSessionLocal() as session:
-                project = await RequestContext(db=session, user_id=ctx.user_id).project_repo.get_project_by_id(project_id)
-                if not project: #if project already deleted
-                    return
-                await ctx.vectorstore_service.add_report_to_vectorstore(report)
-                await ctx.pubsub_service.publish_project_update(project_id)
-
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
-        load_pdf_tasks = [load_pdf(report, client) for report in reports]
-        prepare_vectorstore_tasks = [prepare_vectorstore(report) for report in reports]
-        await asyncio.gather(*prepare_vectorstore_tasks + load_pdf_tasks)
-
-        # Finalize with a new session
-        async with AsyncSessionLocal() as session:
-            finalize_ctx = RequestContext(db=session, user_id=ctx.user_id)
-            await finalize_project_upload(project_id, finalize_ctx.project_repo, ctx.vectorstore_service, ctx.maintenance_service, ctx.pubsub_service)
-
-async def finalize_project_upload(project_id : str, project_repo, vectorstore, maintenance_service, pubsub_service):
-    """
-    Finalize a project upload by checking if all reports have been processed.
-    Updates project status and notifies subscribers when complete.
-    """
-    # Get all reports in the project
-    report_ids = await project_repo.get_project_associated_report_ids(project_id)
-
-    if not report_ids:
-        #Project not available
-        await maintenance_service.vectorstore_clean_up()
-        return
-
-    score_pairs = await vectorstore.calculate_score_pairs(report_ids)
-    await project_repo.insert_project_scores(score_pairs)
-
-    #print("Project finalized")
-    # Notify all subscribers that project is complete
-    await pubsub_service.publish_project_update(project_id)
 
 
 async def get_project_by_id(project_id: str, ctx: RequestContext = Depends(get_context)) -> DbProject:
@@ -183,19 +47,7 @@ async def get_project_by_id(project_id: str, ctx: RequestContext = Depends(get_c
     return project
 
 async def get_vectorized_and_ready_report_ids(project_id, ctx: RequestContext) -> Tuple[Set[int], Set[int], Set[int]]:
-
-    report_ids = await ctx.project_repo.get_project_associated_report_ids(project_id)
-    if not report_ids:
-        return set(), set(), set()
-
-    # Run database query first, then vectorstore query to avoid concurrent session usage
-    reports_with_pdf = await ctx.report_repo.get_pdf_availabilities(report_ids)
-    reports_with_embedding = await ctx.vectorstore_service.reports_exist(report_ids)
-
-    embedded_reports = set(reports_with_embedding)
-    pdf_ready_reports = set(reports_with_pdf)
-    ready_reports = embedded_reports & pdf_ready_reports
-    return embedded_reports, pdf_ready_reports, ready_reports
+    return await ctx.project_service.get_vectorized_and_ready_report_ids(project_id)
 
 async def get_project_report_status(project_id, ctx: RequestContext) -> Dict[int, Dict[str, bool]]:
 
@@ -278,44 +130,7 @@ async def get_project_stats(
     project: DbProject = Depends(get_project_by_id),
     ctx: RequestContext = Depends(get_context),
 ) -> ProjectDetails:
-
-    report_ids = await ctx.project_repo.get_project_associated_report_ids(project.id)
-    auto_searched_pdf_count = await ctx.project_repo.get_auto_searched_pdf_count_for_project(project.id)
-    confirmed_report_count = await ctx.project_repo.get_confirmed_report_count_for_project(project.id)
-
-    embedded_reports, reports_with_pdf, ready_reports = await get_vectorized_and_ready_report_ids(project.id, ctx)
-
-    assignees = await ctx.project_repo.get_project_assignees(project.id)
-    assignee_ids = [user_id for user_id, _ in assignees if user_id]
-
-    ready_for_review_count = 0
-    if assignee_ids:
-        completion_map = await ctx.project_repo.get_report_completion_by_users(project.id)
-        assignee_set = set(assignee_ids)
-        ready_for_review_count = sum(
-            1 for report_id in report_ids
-            if assignee_set.issubset(completion_map.get(report_id, set()))
-        )
-
-    assignee_payload = [
-        ProjectAssignee(userId=user_id, numberReportsLinked=linked_count)
-        for user_id, linked_count in assignees
-    ]
-
-    return ProjectDetails(
-        projectId=project.id,
-        name=project.description,
-        createdAt=project.date_created,
-        numberReportsTotal=len(report_ids),
-        numberReportsPreProcessed=len(embedded_reports),
-        numberReportsReadyForProcessing=len(ready_reports),
-        numberReportsWithPdf=len(reports_with_pdf),
-        numberReportsReadyForReview=ready_for_review_count,
-        numberReportsAutoSearchedPdf=auto_searched_pdf_count,
-        numberReportsConfirmed=confirmed_report_count,
-        owner=project.uploaded_by,
-        assignees=assignee_payload,
-    )
+    return await ctx.project_service.get_project_stats(project)
 
 async def start_automation(
     project_id: str,
@@ -369,104 +184,17 @@ async def start_automation(
 
 @router.get("/tasks",dependencies=[Depends(is_verified_api_call)], summary="Get pending review tasks for the authenticated user.", description="Returns all projects the user is assigned to along with their personal study-link counts.")
 async def get_user_tasks(ctx: RequestContext = Depends(get_context)) -> List[ProjectTask]:
-    if not ctx.user_id:
-        return []
-
-    projects = await ctx.project_repo.get_assigned_projects()
-    if not projects:
-        return []
-
-    user_link_counts = await ctx.project_repo.get_user_link_counts_by_project()
-
-    # Pre-fetch all report IDs sequentially to avoid concurrent database access
-    #project_report_ids = {}
-    #for project in projects:
-    #    report_ids = await project_repo.get_project_associated_report_ids(project.id)
-    #    project_report_ids[project.id] = report_ids or set()
-
-    # Now run vectorstore queries concurrently (no database session conflicts)
-    progress_tasks = [
-        get_vectorized_and_ready_report_ids(project.id, ctx)
-        for project in projects
-    ]
-    progress_results = await asyncio.gather(*progress_tasks)
-
-    tasks: List[ProjectTask] = []
-    for project, (_,_, ready_for_processing) in zip(projects, progress_results):
-        project_payload = Project(
-            projectId=project.id,
-            name=project.description,
-            owner=project.uploaded_by or "",
-            createdAt=project.date_created,
-            numberReportsReadyForProcessing=len(ready_for_processing),
-        )
-        tasks.append(
-            ProjectTask(
-                project=project_payload,
-                numberReportsProcessed=user_link_counts.get(project.id, 0),
-            )
-        )
-
-    return tasks
+    return await ctx.project_service.get_user_tasks()
 
 @router.post("/projects", dependencies=[Depends(is_admin)], summary="Upload a project (batch of new reports that need to be assigned to studies) (usually in the .ris file format)", status_code=201)
 async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), ctx: RequestContext = Depends(get_context)):
 
-    entries = await parse_file(file)
+    try:
+        entries = await parse_file(file)
+    except RisParseError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    reports = []
-    fingerprint_string = ""
-    for entry in entries:
-        title = entry.get('primary_title', None)
-        if not title:
-            title = entry.get('title', "")
-
-        authors = entry.get('authors', [])
-        abstract = entry.get('abstract', None)
-        report_number = int(entry.get('research_notes', -1))
-
-        trial_ids = extract_trial_id(title=title, abstract=abstract, authors=authors)
-        if len(trial_ids) == 1:
-            trial_ids = trial_ids[0]
-        else:
-            trial_ids = None
-
-        authors_str = "//".join(authors)
-
-        safe_title = title.replace("\n", " ")
-
-        try:
-            safe_abstract = abstract.replace("\n", " ") if abstract is not None else ""
-        except AttributeError as e:
-            print(f"UPLOAD FILE: Error replacing in abstract for entry: {entry}\nException: {e}")
-            safe_abstract = str(abstract) if abstract is not None else ""
-
-        report = DbReport(
-            title=safe_title,
-            abstract=safe_abstract,
-            authors=authors_str,
-            report_number=report_number,
-            journal=entry.get('secondary_title', None),
-            year=int(entry.get('year', None)),
-            volume= entry.get('volume', None),
-            issue=entry.get('note', None),
-            pages=entry.get('start_page', None),
-            language=entry.get('language', None),
-            publisher=entry.get('publisher', None),
-            city=entry.get('place_published', None),
-            doi=entry.get('doi', None),
-            trial_registration_id=trial_ids,
-        )
-
-        fingerprint_string += "|".join([
-            safe_title or "",
-            safe_abstract or "",
-            authors_str or "",
-        ])
-
-        reports.append(report)
-
-    project_id = hashlib.sha256(fingerprint_string.encode()).hexdigest()
+    project_id, reports = ctx.project_service.build_reports_from_entries(entries)
 
     reports = await ctx.project_repo.add_new_project(project_id,projectName,reports)
     if reports is None:
@@ -475,7 +203,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     #for report in reports:
     #    print("Report provcess appended")
     report_ids = [report.id for report in reports]
-    background_tasks.add_task(run_process_report_background, project_id, report_ids, ctx.user_id, process_report)
+    background_tasks.add_task(run_process_report_background, project_id, report_ids, ctx.user_id)
 
     await ctx.pubsub_service.publish_project_update(project_id)
 
@@ -487,20 +215,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
 
 @router.get("/projects", dependencies=[Depends(is_admin)], summary="Get an overview of all current projects.", description="For each project the current progress of embedding calculation and the number of already assigned reports is returned")
 async def get_available_projects(ctx: RequestContext = Depends(get_context)) -> List[ProjectDetails]:
-    # Get all projects
-    projects = await ctx.project_repo.get_all_projects()
-
-    # Process all projects in parallel
-    tasks = [
-        get_project_stats(
-            project=project,
-            ctx=ctx,
-        )
-        for project in projects
-    ]
-    project_responses = await asyncio.gather(*tasks)
-
-    return project_responses
+    return await ctx.project_service.get_all_project_stats()
 
 @router.get("/projects/{project_id}", dependencies=[Depends(is_admin)], summary="Get a specific project by id.",description="Returns details and progress information for a single project identified by project id.")
 async def get_project_stats_by_id(project_stats : Project = Depends(get_project_stats)) -> Project:
