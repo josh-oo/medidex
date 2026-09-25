@@ -1,0 +1,278 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  --md-background: oklch(1 0 0);
+  --md-foreground: oklch(0.145 0 0);
+  --md-card: oklch(1 0 0);
+  --md-muted: oklch(0.97 0 0);
+  --md-muted-foreground: oklch(0.556 0 0);
+  --md-primary: oklch(0.603 0.2347 26.99);
+  --md-primary-foreground: oklch(0.985 0 0);
+  --md-destructive: oklch(0.577 0.245 27.325);
+  --md-destructive-foreground: oklch(1 0 0);
+  --md-border: oklch(0.922 0 0);
+  --md-input: oklch(0.922 0 0);
+  --md-ring: oklch(0.708 0 0);
+  --md-radius: 0rem;
+  --md-shadow: 0 1px 3px 0px rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+html.pf-v5-theme-dark {
+  --md-background: oklch(0.145 0 0);
+  --md-foreground: oklch(0.985 0 0);
+  --md-card: oklch(0.205 0 0);
+  --md-muted: oklch(0.269 0 0);
+  --md-muted-foreground: oklch(0.708 0 0);
+  --md-primary: oklch(0.922 0 0);
+  --md-primary-foreground: oklch(0.205 0 0);
+  --md-destructive: oklch(0.704 0.191 22.216);
+  --md-destructive-foreground: oklch(0.985 0 0);
+  --md-border: oklch(0.275 0 0);
+  --md-input: oklch(0.325 0 0);
+  --md-ring: oklch(0.556 0 0);
+}
+
+html,
+body#keycloak-bg {
+  background: var(--md-muted);
+  color: var(--md-foreground);
+  font-family: "IBM Plex Sans", ui-sans-serif, sans-serif, system-ui;
+}
+
+body#keycloak-bg *:not(i) {
+  font-family: inherit;
+}
+
+body#keycloak-bg * {
+  box-sizing: border-box;
+}
+
+/* ----- outer page shell ----- */
+.pf-v5-c-login.medidex-login {
+  display: flex;
+  min-height: 100svh;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: transparent;
+}
+
+@media (min-width: 768px) {
+  .pf-v5-c-login.medidex-login {
+    padding: 2.5rem;
+  }
+}
+
+/* ----- card ----- */
+.pf-v5-c-login__container.medidex-card {
+  width: 100%;
+  max-width: 26rem;
+  display: block;
+  column-gap: 0;
+  row-gap: 0;
+  padding-inline-start: 0;
+  padding-inline-end: 0;
+  background: var(--md-card);
+  color: var(--md-foreground);
+  border: 1px solid var(--md-border);
+  border-radius: var(--md-radius);
+  box-shadow: var(--md-shadow);
+  overflow: hidden;
+}
+
+/* the brand/title bar rendered by keycloak.v2 is replaced by our own heading below */
+#kc-header {
+  display: none;
+}
+
+.medidex-logo {
+  width: 9rem;
+  height: 4rem;
+  margin: 0 auto 1rem;
+  background-image: url("../img/login_logo_mark.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+html.pf-v5-theme-dark .medidex-logo {
+  filter: brightness(0.9) grayscale(0.15);
+}
+
+/* ----- main content ----- */
+.pf-v5-c-login__main {
+  padding: 1.5rem;
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .pf-v5-c-login__main {
+    padding: 2rem;
+  }
+}
+
+.pf-v5-c-login__main-header {
+  display: block;
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.pf-v5-c-login__main-header .pf-v5-c-title#kc-page-title,
+h1#kc-page-title.pf-v5-c-title {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 700;
+  color: var(--md-foreground);
+}
+
+.medidex-subtitle {
+  margin: 0.5rem 0 0;
+  color: var(--md-muted-foreground);
+  font-size: 0.875rem;
+}
+
+/* ----- form fields ----- */
+.pf-v5-c-form__group {
+  margin-bottom: 1rem;
+}
+
+.pf-v5-c-form__label-text {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--md-foreground);
+}
+
+.pf-v5-c-form-control,
+.pf-v5-c-form-control input,
+input.pf-v5-c-form-control {
+  border-radius: var(--md-radius);
+}
+
+span.pf-v5-c-form-control {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  border: 1px solid var(--md-input);
+  background: var(--md-background);
+  padding: 0;
+}
+
+span.pf-v5-c-form-control input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--md-foreground);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+span.pf-v5-c-form-control:focus-within {
+  outline: 2px solid var(--md-ring);
+  outline-offset: -1px;
+}
+
+span.pf-v5-c-form-control.pf-m-error {
+  border-color: var(--md-destructive);
+}
+
+.pf-v5-c-input-group {
+  display: flex;
+  border: 1px solid var(--md-input);
+  background: var(--md-background);
+}
+
+.pf-v5-c-input-group span.pf-v5-c-form-control {
+  border: none;
+}
+
+.pf-v5-c-input-group:focus-within {
+  outline: 2px solid var(--md-ring);
+  outline-offset: -1px;
+}
+
+.pf-v5-c-button.pf-m-control {
+  border: none;
+  background: transparent;
+  color: var(--md-muted-foreground);
+  border-radius: var(--md-radius);
+}
+
+/* forgot password / helper links */
+.pf-v5-c-form__group-label {
+  display: flex;
+  align-items: center;
+}
+
+.pf-v5-c-helper-text__item-text a,
+#kc-form-options a,
+#kc-registration a,
+.medidex-footer-tos a {
+  color: var(--md-foreground);
+  text-decoration: none;
+}
+
+.pf-v5-c-helper-text__item-text a:hover,
+#kc-form-options a:hover,
+#kc-registration a:hover,
+.medidex-footer-tos a:hover {
+  text-decoration: underline;
+}
+
+.pf-v5-c-helper-text__item-text.kc-feedback-text {
+  color: var(--md-destructive);
+}
+
+/* ----- buttons ----- */
+.pf-v5-c-button.pf-m-primary {
+  background: var(--md-primary);
+  color: var(--md-primary-foreground);
+  border: none;
+  border-radius: var(--md-radius);
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.pf-v5-c-button.pf-m-primary:hover {
+  opacity: 0.9;
+}
+
+/* ----- alert / error banner ----- */
+.pf-v5-c-alert {
+  border-radius: var(--md-radius);
+  padding: 0.75rem;
+  font-size: 0.875rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.pf-v5-c-alert.pf-m-danger {
+  background: color-mix(in oklab, var(--md-destructive) 10%, transparent);
+  color: var(--md-destructive);
+}
+
+/* ----- footer band inside the card (sign up / login switch link, ToS) ----- */
+.pf-v5-c-login__main-footer,
+#kc-registration-container,
+#kc-form-options {
+  text-align: center;
+}
+
+#kc-registration,
+#kc-form-options {
+  font-size: 0.875rem;
+  color: var(--md-muted-foreground);
+  margin-top: 1rem;
+}
+
+.medidex-footer-tos {
+  margin: 1rem 0 0;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--md-muted-foreground);
+}

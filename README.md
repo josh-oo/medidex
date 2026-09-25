@@ -33,41 +33,49 @@ Install *docker* if you have not already: [Windows](https://docs.docker.com/desk
 The repository ships a deterministic synthetic study/report dataset for local deployments.
 On first startup, `app-init` creates the resource tables used by the study/report adapters
 when absent and loads 100 studies with an uneven set of 210 linked reports. Existing resource data is left
-unchanged. Production deployments can omit the `data/seed/` mount if they provision their own
+unchanged. Production deployments can omit the `deploy/data/seed/` mount if they provision their own
 resource schema and data:
 
 - **Postgres.** The services expect three databases — `POSTGRES_DB_RESOURCES` (studies and
-    reports), `POSTGRES_DB_USERS` (backend users) and `POSTGRES_DB_FRONTEND` (frontend,
-    managed by Prisma). The databases are created automatically on the first start; see
-    [`backend/app-init/postgres-init.sh`](backend/app-init/postgres-init.sh) for details. The demo resource seed
-    lives in [`data/seed/`](data/seed/) and is loaded by `app-init` only when the resource
-    database is empty. Docker-mounted runtime state lives in `data/runtime/`.
-- **Frontend schema.** The frontend's tables come from its Prisma migrations
-    (`npx prisma migrate deploy` inside `frontend/`), which run automatically before
-    the frontend container starts.
+    reports), `POSTGRES_DB_LANGGRAPH` (agent checkpoints) and `POSTGRES_DB_KEYCLOAK` (Keycloak).
+    The databases are created automatically on the first start; see
+    [`ops/app-init/postgres-init.sh`](ops/app-init/postgres-init.sh) for details. The demo resource seed
+    lives in [`deploy/data/seed/`](deploy/data/seed/) and is loaded by `app-init` only when the resource
+    database is empty. Docker-mounted runtime state lives in `deploy/data/runtime/`.
+- **Resource schema.** The demo seed creates its tables directly under the schema
+    `app/backend/src/database/models.py` expects. If you instead point `POSTGRES_DB_RESOURCES`
+    at a real database that uses different table/column names, [`deploy/data/seed/views.sql`](deploy/data/seed/views.sql)
+    is an optional adapter you can enable via [`deploy/data/seed/schema-adapter.conf`](deploy/data/seed/schema-adapter.conf)
+    — see [`deploy/data/seed/README.md`](deploy/data/seed/README.md#schema-direct-vs-adapted) for how.
 - **Admin account.** Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` to create an
     approved admin account automatically on frontend startup. The seed is idempotent;
     an existing account with that email is promoted to admin without changing its
-    password. `ADMIN_NAME` is optional and defaults to `Administrator`.
+    password. `ADMIN_NAME` is optional and defaults to `Administrator` (used as the
+    first name; if it has no space, the last name defaults to `User`).
 - **Initialization.** On `docker compose up`, the one-shot `app-init` service prepares
     PostgreSQL, Qdrant, the logic data volume, and the seeded vectors before `logic` starts.
     The initialization chain:
   1. Creates the Qdrant collection if it doesn't exist yet (with `EMBEDDING_MODEL_DIM`
      dimensions, cosine distance and the required payload indices). Idempotent: an existing
      collection is left untouched. The layout must stay in sync with
-    `backend/app-init/init.sh`.
-   2. Creates the data directories inside `data/runtime/backend/` (logs, PDFs, fulltexts)
+    `ops/app-init/init.sh`.
+   2. Loads `deploy/data/seed/synthetic_seed.sql` if the resource database is empty (see
+     "Data and databases" above), then — only if `APPLY_SCHEMA_VIEWS=true` in
+     [`deploy/data/seed/schema-adapter.conf`](deploy/data/seed/schema-adapter.conf) — applies
+     the optional [`views.sql`](deploy/data/seed/views.sql) schema adapter described in
+     [`deploy/data/seed/README.md`](deploy/data/seed/README.md#schema-direct-vs-adapted).
+   3. Creates the data directories inside `deploy/data/runtime/backend/` (logs, PDFs, fulltexts)
      that the bind mount hides, and hands them to the unprivileged user `logic` runs as.
-     Keep this list in sync when new `DATABASE_VOLUME` paths are added in `backend/logic/src/`.
-   3. Embeds all reports and intervention, condition, and outcome tags with the
+     Keep this list in sync when new `DATABASE_VOLUME` paths are added in `app/backend/src/`.
+   4. Embeds all reports and intervention, condition, and outcome tags with the
         configured embedding service, then upserts them into Qdrant using `curl`, `jq`, and
         `psql`. It writes an idempotence marker under
-       `data/runtime/backend/resources/` and skips re-embedding on later starts unless that
+       `deploy/data/runtime/backend/resources/` and skips re-embedding on later starts unless that
         marker is removed.
   
-  The script lives in [`backend/app-init/`](backend/app-init/).
+  The script lives in [`ops/app-init/`](ops/app-init/).
 
-- **Testing with Dummy Data.** You can use the files located under `data/seed/examples/` as dummy data to test the system (provided it was already initialized with the default seed data).
+- **Testing with Dummy Data.** You can use the files located under `deploy/data/seed/examples/` as dummy data to test the system (provided it was already initialized with the default seed data).
 
 # Configuration
 All configuration lives in a single `.env` file in the repository root; every variable is
@@ -80,7 +88,7 @@ The application is divided into multiple services to facilitate hosting it on di
 machines later.
 
 ## frontend
-The Next.js user interface, maintained in the `frontend/` directory of this repository.
+The Vite + React user interface, maintained in the `app/frontend/` directory of this repository.
 The original frontend code can be found in the [MaxiMittel/medidex repository](https://github.com/MaxiMittel/medidex).
 
 ## logic
@@ -94,7 +102,7 @@ exposes an OpenAI-compatible API, which the logic service reaches through
 `EMBEDDING_MODEL_BASE_URL`. The model is selected with `EMBEDDING_MODEL_ID` and
 `EMBEDDING_MODEL_REVISION` and defaults to [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3)
 (1024 dimensions, 8192 token context); it is downloaded from the HuggingFace Hub on first
-start and cached in `data/runtime/embeddings/`.
+start and cached in `deploy/data/runtime/embeddings/`.
 
 `EMBEDDING_MAX_BATCH_TOKENS` (default 2048) caps the tokens per batch and is the main
 driver of this container's memory use: on a stock Docker Desktop VM (~8 GB) bge-m3 is
@@ -109,7 +117,7 @@ sense to move it to a GPU machine later.
 
 ## tools
 This service hosts routines like searching for unindexed reports in the backend to add them to
-the index properly. It is not part of `docker compose up`; the scripts in `backend/tools`
+the index properly. It is not part of `docker compose up`; the scripts in `ops/tools`
 are run on demand and use `BACKEND_API_URL` / `BACKEND_API_KEY` to talk to the logic service.
 
 ## qdrant / postgres / redis / docling

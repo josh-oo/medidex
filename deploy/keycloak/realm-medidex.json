@@ -1,0 +1,101 @@
+{
+  "realm": "medidex",
+  "enabled": true,
+  "sslRequired": "none",
+  "loginTheme": "medidex",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "verifyEmail": false,
+  "editUsernameAllowed": false,
+  "defaultGroups": ["/base-users"],
+  "roles": {
+    "realm": [
+      { "name": "USER", "description": "Base application access." },
+      { "name": "ADMIN", "description": "Full administrative access." },
+      { "name": "APPROVED", "description": "Account has been approved by an admin. Granted only via the approved-users group." }
+    ]
+  },
+  "groups": [
+    {
+      "name": "base-users",
+      "path": "/base-users",
+      "realmRoles": ["USER"]
+    },
+    {
+      "name": "approved-users",
+      "path": "/approved-users",
+      "realmRoles": ["APPROVED"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "medidex-frontend",
+      "name": "Medidex Frontend",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "redirectUris": ["http://localhost:3000/*", "http://localhost:8002/*"],
+      "webOrigins": ["+"],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:3000/*",
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "flat-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "audience-medidex-frontend",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "medidex-frontend",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "medidex-backoffice",
+      "name": "Medidex Backoffice (Admin API service account)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "dev_only_backoffice_client_secret_change_me",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-medidex-backoffice",
+      "enabled": true,
+      "serviceAccountClientId": "medidex-backoffice",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users", "query-groups", "view-realm", "manage-clients", "view-clients"]
+      }
+    }
+  ]
+}

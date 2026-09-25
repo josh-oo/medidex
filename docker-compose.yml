@@ -6,6 +6,16 @@ services:
       DOCLING_SERVE_ENABLE_UI: "1"
     expose:
       - 5001
+    # Model loading (layout + table structure) happens at boot and can take
+    # 30-90s on CPU; /health returns 200 immediately, so readiness must be
+    # checked via /ready instead - otherwise `logic` accepts uploads before
+    # docling can actually serve a conversion, and the first request times out.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
     networks:
       - internal_net
 
@@ -16,13 +26,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB_RESOURCES: ${POSTGRES_DB_RESOURCES:-resources}
-      POSTGRES_DB_USERS: ${POSTGRES_DB_USERS:-users}
-      POSTGRES_DB_FRONTEND: ${POSTGRES_DB_FRONTEND:-medidex}
     volumes:
       - postgres_data:/var/lib/postgresql
       # Runs once, on first start of an empty data volume.
-      - ./backend/app-init/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh
-      - ${POSTGRES_BACKUPS:-./data/runtime/postgres-backups}:/backups
+      - ./ops/app-init/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh
+      - ${POSTGRES_BACKUPS:-./deploy/data/runtime/postgres-backups}:/backups
     expose:
       - 5432
     ports:
@@ -40,14 +48,14 @@ services:
 
   qdrant:
     container_name: qdrant
-    image: qdrant/qdrant:v1.17.1-unprivileged
+    image: qdrant/qdrant:v1.19.1-unprivileged
     restart: always
     expose:
       - 6333
       - 6334
       - 6335
     volumes:
-      - ./data/runtime/qdrant:/qdrant/storage
+      - ./deploy/data/runtime/qdrant:/qdrant/storage
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -58,13 +66,14 @@ services:
   app-init:
     container_name: app-init
     build:
-      context: ./backend
-      dockerfile: app-init/Dockerfile
+      context: .
+      dockerfile: ops/app-init/Dockerfile
     restart: "no"
     depends_on:
       - qdrant
       - postgres
       - embedding
+      - keycloak
     environment:
       - QDRANT_URL=http://${VECTORSTORE_SERVICE_HOST:-qdrant}:6333
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
@@ -78,10 +87,24 @@ services:
       - POSTGRES_PORT=5432
       - EMBEDDING_MODEL_BASE_URL=http://embedding:80/v1
       - EMBEDDING_MODEL_API_KEY=${EMBEDDING_MODEL_API_KEY:-unused}
+      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
+      - KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID:-medidex-backoffice}
+      - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}
+      # Master-realm bootstrap admin (same account the keycloak service itself
+      # is seeded with via KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD). Needed only
+      # to grant medidex-backoffice its own manage-clients/view-clients roles -
+      # a chicken-and-egg step medidex-backoffice can't do for itself before
+      # it has view-clients.
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - ADMIN_NAME=${ADMIN_NAME:-Administrator}
     volumes:
-      - ./data/runtime/qdrant:/qdrant/storage
-      - ./data/runtime/backend:/data
-      - ./data/seed:/seed:ro
+      - ./deploy/data/runtime/qdrant:/qdrant/storage
+      - ./deploy/data/runtime/backend:/data
+      - ./deploy/data/seed:/seed:ro
     networks:
       - internal_net
 
@@ -97,7 +120,7 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ./data/runtime/embeddings:/data
+      - ./deploy/data/runtime/embeddings:/data
     pull_policy: always
     networks:
       - internal_net
@@ -105,15 +128,12 @@ services:
   logic:
     container_name: logic
     build:
-      context: ./backend
-      dockerfile: logic/Dockerfile
+      context: .
+      dockerfile: app/backend/Dockerfile
     ports:
       - "8002:8002"
-    depends_on:
-      app-init:
-        condition: service_completed_successfully
     volumes:
-      - ./data/runtime/backend:/data
+      - ./deploy/data/runtime/backend:/data
     read_only: true
     networks:
       - internal_net
@@ -127,12 +147,22 @@ services:
       - VECTORSTORE_SERVICE_HOST=${VECTORSTORE_SERVICE_HOST:-qdrant}
       - VECTORSTORE_SERVICE_PORT=${VECTORSTORE_SERVICE_PORT:-6334}
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
-      - JWT_SECRET=${JWT_SECRET}
-      - JWKS_URL=http://frontend:3000/api/auth/jwks
+      - KEYCLOAK_URL=http://keycloak:8080
+      # Browser-facing, for the Swagger UI /docs "Authorize" redirect - keycloak-js
+      # in the frontend already uses the same host-published address.
+      - KEYCLOAK_PUBLIC_URL=${KEYCLOAK_PUBLIC_URL:-http://localhost:8081}
+      - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
+      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
+      # Service-account credential used by the backend's admin API
+      # (src/api/admin.py) to call the Keycloak Admin REST API - user
+      # management and API-key (client) management. Never exposed to the
+      # frontend; the frontend calls the backend's /admin/* and
+      # /users/me/api_keys routes instead.
+      - KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID:-medidex-backoffice}
+      - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-resources}
-      - POSTGRES_DB_USERS=${POSTGRES_DB_USERS:-users}
       - POSTGRES_DB_LANGGRAPH=${POSTGRES_DB_LANGGRAPH:-langgraph_state}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -140,24 +170,52 @@ services:
       - DOCLING_URL=${DOCLING_URL:-http://docling:5001}
       - DEBUG=${DEBUG:-false}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      app-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_started
+      docling:
+        condition: service_healthy
+
+  keycloak:
+    container_name: keycloak
+    image: keycloak/keycloak:26.7
+    command: start-dev --import-realm
+    depends_on:
+      - postgres
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN:-admin}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB_KEYCLOAK:-keycloak}
+      - KC_DB_USERNAME=${POSTGRES_USER:-postgres}
+      - KC_DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./deploy/keycloak/realm-medidex.json:/opt/keycloak/data/import/realm-medidex.json:ro
+      - ./deploy/keycloak/themes/medidex:/opt/keycloak/themes/medidex:ro
+    ports:
+      - "8081:8080"
+    networks:
+      - internal_net
 
   frontend:
     container_name: frontend
     build:
-      context: ./frontend
+      context: ./app/frontend
       dockerfile: Dockerfile
+      args:
+        # The frontend is a pure client-side app now - it talks to Keycloak
+        # and the backend directly from the browser, so both need their
+        # host-published addresses, not the internal compose hostnames.
+        - VITE_KEYCLOAK_URL=http://localhost:8081
+        - VITE_KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
+        - VITE_KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
+        - VITE_BACKEND_API_URL=${VITE_BACKEND_API_URL:-http://localhost:8002/backend}
     ports:
-      - "3000:3000"
-    environment:
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
-      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3000}
-      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
-      - ADMIN_NAME=${ADMIN_NAME:-Administrator}
-      - STAGE=${STAGE:-local}
-      - BACKEND_API_URL=${BACKEND_API_URL:-http://logic:8002/backend}
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB_FRONTEND:-medidex}?schema=public
-      - INACTIVITY_DIALOG=${INACTIVITY_DIALOG:-false}
+      - "3000:80"
+    depends_on:
+      - keycloak
     networks:
       - internal_net
       #- public_net
