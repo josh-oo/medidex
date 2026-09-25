@@ -42,6 +42,11 @@ resource schema and data:
     [`ops/app-init/postgres-init.sh`](ops/app-init/postgres-init.sh) for details. The demo resource seed
     lives in [`deploy/data/seed/`](deploy/data/seed/) and is loaded by `app-init` only when the resource
     database is empty. Docker-mounted runtime state lives in `deploy/data/runtime/`.
+- **Resource schema.** The demo seed creates its tables directly under the schema
+    `app/backend/src/database/models.py` expects. If you instead point `POSTGRES_DB_RESOURCES`
+    at a real database that uses different table/column names, [`deploy/data/seed/views.sql`](deploy/data/seed/views.sql)
+    is an optional adapter you can enable via [`deploy/data/seed/schema-adapter.conf`](deploy/data/seed/schema-adapter.conf)
+    — see [`deploy/data/seed/README.md`](deploy/data/seed/README.md#schema-direct-vs-adapted) for how.
 - **Admin account.** Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` to create an
     approved admin account automatically on frontend startup. The seed is idempotent;
     an existing account with that email is promoted to admin without changing its
@@ -54,10 +59,15 @@ resource schema and data:
      dimensions, cosine distance and the required payload indices). Idempotent: an existing
      collection is left untouched. The layout must stay in sync with
     `ops/app-init/init.sh`.
-   2. Creates the data directories inside `deploy/data/runtime/backend/` (logs, PDFs, fulltexts)
+   2. Loads `deploy/data/seed/synthetic_seed.sql` if the resource database is empty (see
+     "Data and databases" above), then — only if `APPLY_SCHEMA_VIEWS=true` in
+     [`deploy/data/seed/schema-adapter.conf`](deploy/data/seed/schema-adapter.conf) — applies
+     the optional [`views.sql`](deploy/data/seed/views.sql) schema adapter described in
+     [`deploy/data/seed/README.md`](deploy/data/seed/README.md#schema-direct-vs-adapted).
+   3. Creates the data directories inside `deploy/data/runtime/backend/` (logs, PDFs, fulltexts)
      that the bind mount hides, and hands them to the unprivileged user `logic` runs as.
      Keep this list in sync when new `DATABASE_VOLUME` paths are added in `app/backend/src/`.
-   3. Embeds all reports and intervention, condition, and outcome tags with the
+   4. Embeds all reports and intervention, condition, and outcome tags with the
         configured embedding service, then upserts them into Qdrant using `curl`, `jq`, and
         `psql`. It writes an idempotence marker under
        `deploy/data/runtime/backend/resources/` and skips re-embedding on later starts unless that

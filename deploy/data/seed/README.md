@@ -24,3 +24,29 @@ study and intentionally present on only a subset of reports.
 The SQL creates the study/report/aspect tables when they are absent and leaves an existing
 resource schema unchanged. Every data row is explicit and uses `ON CONFLICT DO NOTHING`,
 so repeated startup is idempotent.
+
+## Schema: direct vs. adapted
+
+`synthetic_seed.sql` creates its tables (`report`, `study`, `study_report`, ...) directly
+under the generic snake_case names `app/backend/src/database/models.py` expects — this
+dataset is ours end to end, so there's no domain-specific naming to translate.
+
+`views.sql` is a separate, **optional** adapter for the case where `POSTGRES_DB_RESOURCES`
+instead points at a real physical schema that uses different table/column names — e.g. a
+Cochrane-style CRG/CENTRAL database (`tblReport`, `tblStudy`, ...; see
+[`ops/tools/scripts/prepare_database.py`](../../../ops/tools/scripts/prepare_database.py)
+for the tool that produces one from an `.mdb` export). It creates views named after the
+application's schema that re-expose that other schema's data, so the application never has
+to know about it. It is not tied to `synthetic_seed.sql` and does not run against it.
+
+It is disabled by default. To enable it:
+
+1. Edit `views.sql` so its `CREATE VIEW` statements reference your actual physical
+   table/column names (the file documents each mapping; adjust as needed).
+2. Set `APPLY_SCHEMA_VIEWS=true` in [`schema-adapter.conf`](schema-adapter.conf) (read by
+   `ops/app-init/init.sh` on every `app-init` run).
+3. Don't mount `synthetic_seed.sql` for that database — it's demo data and isn't meant to
+   be loaded on top of a real physical schema.
+
+See `ops/app-init/init.sh` (section "2b. CONVENTIONAL-NAMING VIEWS") for exactly how the
+flag is read and applied.

@@ -79,7 +79,7 @@ if [ -f "$SEED_FILE" ]; then
         --username "$POSTGRES_USER" \
         --dbname "$POSTGRES_DB_RESOURCES" \
         --tuples-only --no-align \
-        --command "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tblStudy')")
+        --command "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'study')")
     resource_data_exists="no"
     if [ "$resource_table_exists" = "t" ]; then
         resource_data_exists=$(PGPASSWORD="$POSTGRES_PASSWORD" psql \
@@ -88,7 +88,7 @@ if [ -f "$SEED_FILE" ]; then
             --username "$POSTGRES_USER" \
             --dbname "$POSTGRES_DB_RESOURCES" \
             --tuples-only --no-align \
-            --command 'SELECT EXISTS (SELECT 1 FROM "tblStudy")')
+            --command 'SELECT EXISTS (SELECT 1 FROM "study")')
         [ "$resource_data_exists" = "t" ] && resource_data_exists="yes" || resource_data_exists="no"
     fi
     if [ "$resource_data_exists" = "yes" ]; then
@@ -105,6 +105,41 @@ if [ -f "$SEED_FILE" ]; then
     fi
 else
     echo "app-init: synthetic seed file not mounted; skipping demo data"
+fi
+
+# ============================================================================
+# 2b. CONVENTIONAL-NAMING VIEWS (optional schema adapter)
+# ============================================================================
+# Only needed when the resources database uses a physical schema that
+# doesn't already match the application's (e.g. an imported Cochrane-style
+# CRG/CENTRAL database) -- the bundled synthetic_seed.sql demo data creates
+# its tables directly under the schema the application expects, so this is
+# off by default. Toggle it via deploy/data/seed/schema-adapter.conf.
+# See deploy/data/seed/views.sql for what the adapter does and why.
+SCHEMA_ADAPTER_CONFIG="/seed/schema-adapter.conf"
+APPLY_SCHEMA_VIEWS=false
+if [ -f "$SCHEMA_ADAPTER_CONFIG" ]; then
+    # shellcheck disable=SC1090
+    . "$SCHEMA_ADAPTER_CONFIG"
+fi
+
+VIEWS_FILE="/seed/views.sql"
+if [ "$APPLY_SCHEMA_VIEWS" = "true" ]; then
+    if [ -f "$VIEWS_FILE" ]; then
+        echo "app-init: APPLY_SCHEMA_VIEWS=true; applying conventional-naming views"
+        PGPASSWORD="$POSTGRES_PASSWORD" psql \
+            --host "$POSTGRES_HOST" \
+            --port "$POSTGRES_PORT" \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB_RESOURCES" \
+            --set ON_ERROR_STOP=1 \
+            --file "$VIEWS_FILE"
+    else
+        echo "app-init: APPLY_SCHEMA_VIEWS=true but views.sql not mounted; skipping view setup" >&2
+        exit 1
+    fi
+else
+    echo "app-init: APPLY_SCHEMA_VIEWS is not 'true'; skipping conventional-naming views"
 fi
 
 # ============================================================================
@@ -137,9 +172,9 @@ echo "app-init: data volume prepared for uid $APP_UID:$APP_GID"
 # ============================================================================
 # 4. VECTORSTORE SYNC (reports, interventions, conditions, outcomes)
 # ============================================================================
-# Reconciles the qdrant collection with the current contents of tblReport,
-# tblIntervention, tblHealthCareCondition and tblOutcome on every run, instead
-# of relying on a one-time "already initialized" marker: rows that aren't
+# Reconciles the qdrant collection with the current contents of report,
+# intervention, condition and outcome on every run, instead of relying on a
+# one-time "already initialized" marker: rows that aren't
 # embedded yet are added, and points whose row no longer exists in postgres
 # (e.g. deleted directly in the database) are removed. Point ids follow the
 # same deterministic scheme as transform_to_uuid() in
@@ -171,19 +206,19 @@ trap 'rm -f "$REPORT_RECORDS" "$TAG_RECORDS" "$ID_RECORD_TSV" "$DESIRED_IDS" \
 
 psql_query=$(cat <<'SQL'
 SELECT json_build_object(
-    'id', format('00000000-0000-4000-a000-%s', lpad(r."CRGReportID"::text, 12, '0')),
-    'text', btrim(coalesce(r."Title", '') || E'\n' || coalesce(r."Abstract", '')),
+    'id', format('00000000-0000-4000-a000-%s', lpad(r."id"::text, 12, '0')),
+    'text', btrim(coalesce(r."title", '') || E'\n' || coalesce(r."abstract", '')),
     'payload', json_build_object(
         'is_report', true,
-        'belongs_to_study', coalesce((SELECT json_agg(sr."CRGStudyID") FROM "tblStudyReport" sr WHERE sr."CRGReportID" = r."CRGReportID"), '[]'::json),
-        'report_id', r."CRGReportID",
-        'date_entered', r."Dateentered",
-        'authors', coalesce((SELECT json_agg(trim(author)) FROM unnest(string_to_array(coalesce(r."Authors", ''), '//')) author WHERE trim(author) <> ''), '[]'::json),
-        'title', r."Title",
-        'abstract', r."Abstract",
-        'belongs_to_trial_id', EXISTS (SELECT 1 FROM "tblStudyReport" sr WHERE sr."CRGReportID" = r."CRGReportID")
+        'belongs_to_study', coalesce((SELECT json_agg(sr."study_id") FROM "study_report" sr WHERE sr."report_id" = r."id"), '[]'::json),
+        'report_id', r."id",
+        'date_entered', r."date_entered",
+        'authors', coalesce((SELECT json_agg(trim(author)) FROM unnest(string_to_array(coalesce(r."authors", ''), '//')) author WHERE trim(author) <> ''), '[]'::json),
+        'title', r."title",
+        'abstract', r."abstract",
+        'belongs_to_trial_id', EXISTS (SELECT 1 FROM "study_report" sr WHERE sr."report_id" = r."id")
     )
-) FROM "tblReport" r ORDER BY r."CRGReportID";
+) FROM "report" r ORDER BY r."id";
 SQL
 )
 PGPASSWORD="$POSTGRES_PASSWORD" psql \
@@ -205,11 +240,11 @@ SELECT json_build_object(
         'is_report', false
     )
 ) FROM (
-    SELECT "InterventionID" AS id, "InterventionDescription" AS description, 'interventions' AS source, '0001' AS tag FROM "tblIntervention"
+    SELECT "id", "description", 'interventions' AS source, '0001' AS tag FROM "intervention"
     UNION ALL
-    SELECT "HealthCareConditionID", "HealthCareConditionDescription", 'conditions', '0002' FROM "tblHealthCareCondition"
+    SELECT "id", "description", 'conditions', '0002' FROM "condition"
     UNION ALL
-    SELECT "OutcomeID", "OutcomeDescription", 'outcomes', '0003' FROM "tblOutcome"
+    SELECT "id", "description", 'outcomes', '0003' FROM "outcome"
 ) tags ORDER BY tag, id;
 SQL
 )

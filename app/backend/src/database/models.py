@@ -11,16 +11,22 @@ import datetime
 """
 Resources
 
-These models map onto conventional-naming SQL views (deploy/data/seed/views.sql),
-not the physical tables directly. The physical schema keeps its original
-CRG/CENTRAL-specific table and column names; the views re-expose that same
-data under the generic names used here, so this module -- and everything
-built on top of it -- never has to know about the domain-specific schema.
+These models map onto tables named directly after the generic names used
+here (report, study, ...). The bundled demo data (deploy/data/seed/
+synthetic_seed.sql) creates its tables under these exact names.
+
+If the resources database is instead pointed at a physical schema that uses
+different table/column names (e.g. a Cochrane-style CRG/CENTRAL database),
+deploy/data/seed/views.sql provides an optional adapter: views with these
+same names re-expose that other schema's data so this module -- and
+everything built on top of it -- never has to know about it. See
+ops/app-init/init.sh and deploy/data/seed/schema-adapter.conf for how to
+enable it.
 
 Report and Study only expose the columns the application actually reads or
-writes; the physical tblReport/tblStudy tables have several more (CENTRAL*
+writes; a CRG/CENTRAL-style physical schema has several more (CENTRAL*
 submission tracking, UDef* legacy fields, ...) that nothing here uses -- see
-views.sql for the full physical column list those two views leave out.
+views.sql for the full physical column list those two views would leave out.
 """
 
 metadata_resources = MetaData()
