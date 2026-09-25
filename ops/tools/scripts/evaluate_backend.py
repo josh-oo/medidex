@@ -135,7 +135,7 @@ async def evaluate_with_cutoff_async(cutoff):
     async with httpx.AsyncClient(headers=headers, timeout=timeout, limits=limits) as client:
         response =  await client.get(f"{BACKEND_API}/reports", params={"date_from": cutoff, "date_to": cutoff})
         response.raise_for_status()
-        current_report_ids = [item['CRGReportID'] for item in response.json()]
+        current_report_ids = [item['id'] for item in response.json()]
 
         pbar = tqdm(total=len(current_report_ids))
 
@@ -194,7 +194,7 @@ async def evaluate_with_cutoff_async_(cutoff):
     async with httpx.AsyncClient(headers=headers, timeout=timeout, limits=limits) as client:
 
         response =  await client.get(f"{BACKEND_API}/reports", params={"date_from": cutoff, "date_to": cutoff})
-        current_report_ids = [item['CRGReportID'] for item in response.json()]
+        current_report_ids = [item['id'] for item in response.json()]
 
         ranks = []
         scores = []

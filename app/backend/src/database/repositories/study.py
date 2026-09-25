@@ -29,7 +29,7 @@ def load_trial_id_mapping():
         return {}
     with open(file_path, "r") as json_file:
         return json.load(json_file)
-    
+
 trial_id_mapping = load_trial_id_mapping()
 
 class StudyRepository:
@@ -57,23 +57,23 @@ class StudyRepository:
 
     async def add_study(self, short_name : str, study_status: str, countries : List[str], duration : str, number_of_participants : int, comparison : str) -> Study:
         #TODO add more sophisticated checks
-        
+
         try:
             new_study = Study(
-                ShortName=short_name,
-                StatusofStudy=study_status,
-                Countries="//".join(countries),
-                Duration=duration,
-                NumberParticipants=str(number_of_participants),
-                Comparison=comparison
+                short_name=short_name,
+                status=study_status,
+                countries="//".join(countries),
+                duration=duration,
+                number_participants=str(number_of_participants),
+                comparison=comparison
             )
 
             self.db.add(new_study)
             await self.db.flush()
 
             study_added_entry = StudyAdded(
-                CRGStudyID=new_study.CRGStudyID,
-                CreatedBy=self.user_id,
+                study_id=new_study.id,
+                created_by=self.user_id,
             )
             self.db.add(study_added_entry)
 
@@ -84,10 +84,10 @@ class StudyRepository:
 
         except IntegrityError as e:
             diag = getattr(getattr(e.orig, "__cause__", None), "diag", None)
-            if getattr(diag, "constraint_name", None) == "uq_tblstudy_shortname":
-                raise DuplicateShortNameError("ShortName already exists")
+            if getattr(diag, "constraint_name", None) == "uq_study_short_name":
+                raise DuplicateShortNameError("short_name already exists")
             raise
-    
+
     async def search_studies(self, trial_ids : Optional[List[str]] = None, number_of_participants : Optional[List[int]] = None, authors : Optional[List[str]] = None):
         study_ids = []
         return await self.get_studies(study_ids=study_ids)
@@ -95,35 +95,35 @@ class StudyRepository:
     async def get_studies(self, study_ids: Optional[List[int]] = None) -> List[Study]:
         stmt = select(Study)
         if study_ids:
-            stmt = stmt.where(Study.CRGStudyID.in_(study_ids))
+            stmt = stmt.where(Study.id.in_(study_ids))
         result = (await self.db.execute(stmt)).scalars().all()
-        
+
         #await asyncio.gather(*[log_event(-1, Event(event_type=f"study::{study_id}::visited", timestamp=datetime.now(timezone.utc).isoformat()), self.user_id) for study_id in study_ids])
         return result
-    
+
     async def get_study_by_id(self, study_id: int) -> Study:
         return await self.db.get(Study, study_id)
-        
+
     async def search_study_by_shortname(self, shortname: str, cutoff: Optional[str] = None) -> Study:
-        stmt = select(Study).where(Study.ShortName.ilike(f"%{shortname}%"))
+        stmt = select(Study).where(Study.short_name.ilike(f"%{shortname}%"))
         if cutoff:
-            stmt = stmt.where(Study.DateEntered < cutoff)
+            stmt = stmt.where(Study.date_entered < cutoff)
         result = (await self.db.execute(stmt)).scalar_one_or_none()
         return result
-    
+
     async def get_study_reports_by_study_ids(self, study_ids: Optional[List[int]], cutoff: Optional[str] = None, fields: Optional[List[str]] = None) -> Dict[int, List[Report]]:
         select_fields, field_names = self.process_fields(fields)
 
         stmt = (
-            select(StudyReport.CRGStudyID, *select_fields)
-            .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
+            select(StudyReport.study_id, *select_fields)
+            .join(Report, Report.id == StudyReport.report_id)
         )
 
         if study_ids:
-            stmt = stmt.where(StudyReport.CRGStudyID.in_(study_ids))
+            stmt = stmt.where(StudyReport.study_id.in_(study_ids))
 
         if cutoff:
-            stmt = stmt.where(Report.Dateentered < cutoff)
+            stmt = stmt.where(Report.date_entered < cutoff)
 
         rows = (await self.db.execute(stmt)).all()
 
@@ -139,18 +139,18 @@ class StudyRepository:
         if study_id in result:
             return result[study_id]
         return []
-    
+
     async def get_study_persons(self, study_ids: Optional[List[int]] = None, cutoff: Optional[str] = None, normalize_names: bool = True) -> Dict[int, List[str]]:
         stmt = (
-            select(StudyReport.CRGStudyID.label("StudyID"), Report.Authors)
-            .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
+            select(StudyReport.study_id.label("study_id"), Report.authors)
+            .join(Report, Report.id == StudyReport.report_id)
         )
 
         if cutoff:
-            stmt = stmt.where(Report.Dateentered < cutoff)
+            stmt = stmt.where(Report.date_entered < cutoff)
 
         if study_ids is not None:
-            stmt = stmt.where(StudyReport.CRGStudyID.in_(study_ids))
+            stmt = stmt.where(StudyReport.study_id.in_(study_ids))
 
         rows = (await self.db.execute(stmt)).all()
 
@@ -167,13 +167,13 @@ class StudyRepository:
             final_result[key] = current_authors + authors
 
         return final_result
-    
+
     async def get_study_persons_single(self, study_id : int, cutoff: Optional[str] = None, normalize_names: bool = True) -> List[str]:
         result = await self.get_study_persons(study_ids=[study_id], cutoff=cutoff, normalize_names=normalize_names)
         if study_id in result:
             return result[study_id]
         return []
-    
+
     async def get_study_id_by_trial_ids(self, trial_ids: List[str], cutoff: Optional[str] = None) -> Dict[str, List[int]]:
         trial_ids_norm = [trial_id.replace("/", "-") for trial_id in trial_ids]
         result_map = {}
@@ -185,29 +185,29 @@ class StudyRepository:
             alternative_ids = [current_id.replace("/", "-") for current_id in alternative_ids]
 
             # Build dynamic LIKE conditions for Authors
-            authors_filter = func.replace(Report.Authors, "/", "-").like(f"%{alternative_ids[0]}%")
+            authors_filter = func.replace(Report.authors, "/", "-").like(f"%{alternative_ids[0]}%")
             for current_id in alternative_ids[1:]:
-                authors_filter = authors_filter | func.replace(Report.Authors, "/", "-").like(f"%{current_id}%")
+                authors_filter = authors_filter | func.replace(Report.authors, "/", "-").like(f"%{current_id}%")
 
-            trial_filter = func.replace(Report.TrialRegistrationID, "/", "-").in_(alternative_ids)
+            trial_filter = func.replace(Report.trial_registration_id, "/", "-").in_(alternative_ids)
 
-            stmt_study = select(Study.CRGStudyID, text("'study' as source")).where(
-                (Study.ShortName.in_(alternative_ids)) |
-                (Study.TrialRegistrationID.in_(alternative_ids))
+            stmt_study = select(Study.id, text("'study' as source")).where(
+                (Study.short_name.in_(alternative_ids)) |
+                (Study.trial_registration_id.in_(alternative_ids))
             )
 
             stmt_reports = (
-                select(StudyReport.CRGStudyID, text("'report' as source"))
-                .join(Report, Report.CRGReportID == StudyReport.CRGReportID)
+                select(StudyReport.study_id, text("'report' as source"))
+                .join(Report, Report.id == StudyReport.report_id)
                 .where(authors_filter | trial_filter)
             )
 
             if cutoff is not None:
-                stmt_study = stmt_study.where(Study.DateEntered < cutoff)
-                stmt_reports = stmt_reports.where(Report.Dateentered < cutoff)
+                stmt_study = stmt_study.where(Study.date_entered < cutoff)
+                stmt_reports = stmt_reports.where(Report.date_entered < cutoff)
 
             combined_stmt = stmt_study.union_all(stmt_reports)
-            rows = (await self.db.execute(combined_stmt)).all()  # [(CRGStudyID, source), ...]
+            rows = (await self.db.execute(combined_stmt)).all()  # [(study_id, source), ...]
 
             # Sort: 'study' source first, then 'report'
             sorted_rows = sorted(rows, key=lambda x: 0 if x[1] == 'study' else 1)
@@ -230,33 +230,33 @@ class StudyRepository:
         return None
 
     async def get_study_date_by_id(self, study_id: int) -> str:
-        stmt = select(Study.DateEntered).where(Study.CRGStudyID == study_id)
+        stmt = select(Study.date_entered).where(Study.id == study_id)
         return (await self.db.execute(stmt)).scalar_one_or_none()
-    
+
     # Study Aspects
-    
+
     async def _get_study_aspect(self, stmt):
         rows = (await self.db.execute(stmt)).all()  # -> [(StudyID, ID, Description), ...]
 
         # --- Group results by StudyID ---
         final_result: Dict[int, List[Dict[str, Any]]] = {}
-        for study_id, intervention_id, description in rows:
-            item = {"ID": intervention_id, "Description": description}
+        for study_id, aspect_id, description in rows:
+            item = {"ID": aspect_id, "Description": description}
             final_result.setdefault(study_id, []).append(item)
 
         return final_result
-    
+
     async def get_study_interventions(self, study_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
         if not study_ids:
             return {}
         stmt = (
             select(
-                StudyIntervention.CRGStudyID.label("StudyID"),
-                StudyIntervention.InterventionID.label("ID"),
-                Intervention.InterventionDescription.label("Description"),
+                StudyIntervention.study_id.label("study_id"),
+                StudyIntervention.intervention_id.label("id"),
+                Intervention.description.label("description"),
             )
-            .join(Intervention, Intervention.InterventionID == StudyIntervention.InterventionID)
-            .where(StudyIntervention.CRGStudyID.in_(study_ids))
+            .join(Intervention, Intervention.id == StudyIntervention.intervention_id)
+            .where(StudyIntervention.study_id.in_(study_ids))
         )
 
         return await self._get_study_aspect(stmt)
@@ -266,18 +266,18 @@ class StudyRepository:
         if study_id in result.keys():
             return result[study_id]
         return []
-    
+
     async def get_study_conditions(self, study_ids: List[int]):
         if not study_ids:
             return {}
         stmt = (
             select(
-                StudyCondition.CRGStudyID.label("StudyID"),
-                StudyCondition.HealthCareConditionID.label("ID"),
-                Condition.HealthCareConditionDescription.label("Description"),
+                StudyCondition.study_id.label("study_id"),
+                StudyCondition.condition_id.label("id"),
+                Condition.description.label("description"),
             )
-            .join(Condition, Condition.HealthCareConditionID == StudyCondition.HealthCareConditionID)
-            .where(StudyCondition.CRGStudyID.in_(study_ids))
+            .join(Condition, Condition.id == StudyCondition.condition_id)
+            .where(StudyCondition.study_id.in_(study_ids))
         )
 
         return await self._get_study_aspect(stmt)
@@ -287,18 +287,18 @@ class StudyRepository:
         if study_id in result.keys():
             return result[study_id]
         return []
-    
+
     async def get_study_outcomes(self, study_ids: List[int]):
         if not study_ids:
             return {}
         stmt = (
             select(
-                StudyOutcome.CRGStudyID.label("StudyID"),
-                StudyOutcome.OutcomeID.label("ID"),
-                Outcome.OutcomeDescription.label("Description"),
+                StudyOutcome.study_id.label("study_id"),
+                StudyOutcome.outcome_id.label("id"),
+                Outcome.description.label("description"),
             )
-            .join(Outcome, Outcome.OutcomeID == StudyOutcome.OutcomeID)
-            .where(StudyOutcome.CRGStudyID.in_(study_ids))
+            .join(Outcome, Outcome.id == StudyOutcome.outcome_id)
+            .where(StudyOutcome.study_id.in_(study_ids))
         )
 
         return await self._get_study_aspect(stmt)
@@ -314,12 +314,12 @@ class StudyRepository:
             return {}
         stmt = (
             select(
-                StudyParticipant.CRGStudyID.label("StudyID"),
-                StudyParticipant.ParticipantsID.label("ID"),
-                Participant.ParticipantDescription.label("Description"),
+                StudyParticipant.study_id.label("study_id"),
+                StudyParticipant.participant_id.label("id"),
+                Participant.description.label("description"),
                 )
-            .join(Participant, Participant.ParticipantsID == StudyParticipant.ParticipantsID)
-            .where(StudyParticipant.CRGStudyID.in_(study_ids))
+            .join(Participant, Participant.id == StudyParticipant.participant_id)
+            .where(StudyParticipant.study_id.in_(study_ids))
         )
 
         return await self._get_study_aspect(stmt)
@@ -329,18 +329,18 @@ class StudyRepository:
         if study_id in result.keys():
             return result[study_id]
         return []
-    
+
     async def get_study_design(self, study_ids: List[int]) -> Dict[int, List[str]]:
         if not study_ids:
             return {}
         stmt = (
             select(
-                StudyDesign.CRGStudyID.label("StudyID"),
-                StudyDesign.DesignID.label("ID"),
-                Design.DesignDescription.label("Description"),
+                StudyDesign.study_id.label("study_id"),
+                StudyDesign.design_id.label("id"),
+                Design.description.label("description"),
                 )
-            .join(Design, Design.DesignID == StudyDesign.DesignID)
-            .where(StudyDesign.CRGStudyID.in_(study_ids))
+            .join(Design, Design.id == StudyDesign.design_id)
+            .where(StudyDesign.study_id.in_(study_ids))
         )
 
         return await self._get_study_aspect(stmt)
@@ -350,7 +350,7 @@ class StudyRepository:
         if study_id in result.keys():
             return result[study_id]
         return []
-    
+
     async def get_all_studies_connected_to_trial_id(self):
         # Define the reusable regex pattern block for PostgreSQL (~ operator)
         regex_conditions = [
@@ -387,41 +387,41 @@ class StudyRepository:
         def build_regex_block(col):
             return " OR ".join([cond.format(col=col) for cond in regex_conditions])
 
-        # --- Query 1: studies with trial IDs in ShortName ---
+        # --- Query 1: studies with trial IDs in short_name ---
         query_studies = text(f"""
-            SELECT "CRGStudyID"
-            FROM "tblStudy"
-            WHERE {build_regex_block('"ShortName"')}
+            SELECT "id"
+            FROM "study"
+            WHERE {build_regex_block('"short_name"')}
         """)
         result_studies = (await self.db.execute(query_studies)).fetchall()
         all_studies = [row[0] for row in result_studies]
 
-        # --- Query 2: reports with single-trial studies in Authors field ---
+        # --- Query 2: reports with single-trial studies in authors field ---
         query_reports = text(f"""
-            SELECT sr."CRGStudyID"
-            FROM "tblReport" r
-            JOIN "tblStudyReport" sr ON r."CRGReportID" = sr."CRGReportID"
-            WHERE r."Authors" NOT LIKE '%//%'
-            AND sr."CRGReportID" IN (
-                SELECT "CRGReportID"
-                FROM "tblStudyReport"
-                GROUP BY "CRGReportID"
-                HAVING COUNT(DISTINCT "CRGStudyID") = 1
+            SELECT sr."study_id"
+            FROM "report" r
+            JOIN "study_report" sr ON r."id" = sr."report_id"
+            WHERE r."authors" NOT LIKE '%//%'
+            AND sr."report_id" IN (
+                SELECT "report_id"
+                FROM "study_report"
+                GROUP BY "report_id"
+                HAVING COUNT(DISTINCT "study_id") = 1
             )
-            AND {build_regex_block('r."Authors"')}
+            AND {build_regex_block('r."authors"')}
         """)
         result_reports = (await self.db.execute(query_reports)).fetchall()
         all_reports = [row[0] for row in result_reports]
 
         return all_studies + all_reports
-    
+
     async def get_study_acronyms(self) -> List[str]:
-        stmt = select(Study.ShortName)
+        stmt = select(Study.short_name)
         rows = (await self.db.execute(stmt)).all()
 
         acronyms = []
         for (short_name,) in rows:
-            # Exclude if more than 2 digits in the ShortName
+            # Exclude if more than 2 digits in the short_name
             if len(re.findall(r"\d", short_name)) > 2:
                 continue
             acronyms.append(short_name)

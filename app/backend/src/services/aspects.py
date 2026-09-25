@@ -52,13 +52,13 @@ class TagScoringService:
             
         if aspect == TagCategories.interventions:
             result = await self.aspect_repo.get_all_interventions(all_ids)
-            name_mapping = {item.InterventionID: item.InterventionDescription for item in result}
+            name_mapping = {item.id: item.description for item in result}
         elif aspect == TagCategories.conditions:
             result = await self.aspect_repo.get_all_conditions(all_ids)
-            name_mapping = {item.HealthCareConditionID: item.HealthCareConditionDescription for item in result}
+            name_mapping = {item.id: item.description for item in result}
         elif aspect == TagCategories.outcomes:
             result = await self.aspect_repo.get_all_outcomes(all_ids)
-            name_mapping = {item.OutcomeID: item.OutcomeDescription for item in result}
+            name_mapping = {item.id: item.description for item in result}
 
         for item in tag_scores:
             item['name'] = name_mapping[item['id']].strip()

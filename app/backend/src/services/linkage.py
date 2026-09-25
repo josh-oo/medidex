@@ -60,8 +60,8 @@ class LinkageService:
                 number_of_participants=study.numberParticipants,
                 comparison=study.comparison,
             )
-            await self.report_repo.link_study(report_id, new_study.CRGStudyID, user_id=user_id)
-            await self.vectorstore.link_report_to_study_id(report_id, new_study.CRGStudyID, user_id)
+            await self.report_repo.link_study(report_id, new_study.id, user_id=user_id)
+            await self.vectorstore.link_report_to_study_id(report_id, new_study.id, user_id)
             await self.report_repo.commit()
             return new_study
         except:

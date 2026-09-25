@@ -138,18 +138,18 @@ async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentCont
         return_details=False
     )
 
-    study_id = response['CRGStudyID'][visited_candidate_studies]
+    study_id = response['id'][visited_candidate_studies]
 
     response = await runtime.context.study_repo.get_study_by_id(study_id=study_id)
 
     result = {
-        "studyId": response.CRGStudyID,
-        "shortName": response.ShortName,
-        "trialId": response.TrialistContactDetails,
-        "numberParticipants": response.NumberParticipants,
-        "countries": response.Countries.split("//"),
-        "duration": response.Duration,
-        "comparison": response.Comparison,
+        "studyId": response.id,
+        "shortName": response.short_name,
+        "trialId": response.trialist_contact_details,
+        "numberParticipants": response.number_participants,
+        "countries": response.countries.split("//"),
+        "duration": response.duration,
+        "comparison": response.comparison,
     }
 
     runtime.context.visited_candidate_studies += 1
@@ -203,10 +203,10 @@ async def fetch_report_abstract(
     """
     response = await runtime.context.report_repo.get_report_by_id(report_id)
 
-    if response.Abstract is None:
+    if response.abstract is None:
         return "No abstract available"
 
-    return response.Abstract
+    return response.abstract
 
 @tool
 async def fetch_reports_linked_to_study(
@@ -232,8 +232,8 @@ async def fetch_reports_linked_to_study(
 
     return [
         {
-            "reportId": item["CRGReportID"],
-            "title": item["Title"],
+            "reportId": item["id"],
+            "title": item["title"],
         }
         for item in response
     ]
@@ -296,13 +296,13 @@ async def fetch_study_by_shortname(
         raise ValueError(f"No study found with shortname '{short_name}'")
 
     return {
-        "studyId": response.CRGStudyID,
-        "shortName": response.ShortName,
-        "trialId": response.TrialRegistrationID,
-        "numberParticipants": response.NumberParticipants,
-        "countries": response.Countries.split("//"),
-        "duration": response.Duration,
-        "comparison": response.Comparison,
+        "studyId": response.id,
+        "shortName": response.short_name,
+        "trialId": response.trial_registration_id,
+        "numberParticipants": response.number_participants,
+        "countries": response.countries.split("//"),
+        "duration": response.duration,
+        "comparison": response.comparison,
     }
 
 @tool
@@ -387,10 +387,10 @@ class BaseAgentService:
         if report is None:
             raise ValueError(f"Report {report_id} not found")
 
-        authors = [author.strip() for author in (report.Authors or "").split("//") if author.strip()]
+        authors = [author.strip() for author in (report.authors or "").split("//") if author.strip()]
         return (
-            f"Title: {report.Title or 'No title available'}\n"
-            f"Abstract: {report.Abstract or 'No abstract available'}\n"
+            f"Title: {report.title or 'No title available'}\n"
+            f"Abstract: {report.abstract or 'No abstract available'}\n"
             f"Authors: {', '.join(authors)}"
         )
 

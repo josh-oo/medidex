@@ -91,7 +91,7 @@ async def check_report_access(
         raise HTTPException(status_code=401, detail="Authenticated user required")
 
     assigned_projects = await project_repo.get_assigned_projects()
-    assigned_project_ids = {project.BatchHash for project in assigned_projects}
+    assigned_project_ids = {project.id for project in assigned_projects}
     if project_id not in assigned_project_ids:
         raise HTTPException(
             status_code=403,

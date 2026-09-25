@@ -12,36 +12,36 @@ class AspectRepository:
     async def get_all_interventions(self, ids: List[int]) -> List[Intervention]:
         stmt = select(Intervention)
         if ids:
-            stmt = stmt.where(Intervention.InterventionID.in_(ids))
+            stmt = stmt.where(Intervention.id.in_(ids))
         return (await self.db.execute(stmt)).scalars().all()
 
     async def get_all_conditions(self, ids: List[int]) -> List[Condition]:
         stmt = select(Condition)
         if ids:
-            stmt = stmt.where(Condition.HealthCareConditionID.in_(ids))
+            stmt = stmt.where(Condition.id.in_(ids))
         return (await self.db.execute(stmt)).scalars().all()
 
     async def get_all_outcomes(self, ids: List[int]) -> List[Outcome]:
         stmt = select(Outcome)
         if ids:
-            stmt = stmt.where(Outcome.OutcomeID.in_(ids))
+            stmt = stmt.where(Outcome.id.in_(ids))
         return (await self.db.execute(stmt)).scalars().all()
-    
+
     async def get_all_designs(self, ids: List[int]) -> List[Design]:
         stmt = select(Design)
         if ids:
-            stmt = stmt.where(Design.DesignID.in_(ids))
+            stmt = stmt.where(Design.id.in_(ids))
         return (await self.db.execute(stmt)).all()
-    
+
     async def get_all_participants(self, ids: List[int]) -> List[Participant]:
         stmt = select(Participant)
         if ids:
-            stmt = stmt.where(Participant.ParticipantsID.in_(ids))
+            stmt = stmt.where(Participant.id.in_(ids))
         return (await self.db.execute(stmt)).all()
-    
-    async def get_all_countries(self, prefix: Optional[str]) -> List[str]:    
+
+    async def get_all_countries(self, prefix: Optional[str]) -> List[str]:
         # Get all non-null Countries values
-        stmt = select(Study.Countries).where(Study.Countries.isnot(None))
+        stmt = select(Study.countries).where(Study.countries.isnot(None))
         rows = (await self.db.execute(stmt)).scalars().all()
         
         # Split by '//' and collect all unique countries

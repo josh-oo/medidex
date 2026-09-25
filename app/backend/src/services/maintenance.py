@@ -19,7 +19,7 @@ class MaintenanceService:
         )
 
         all_report_ids_vectorstore = set(all_report_ids_vectorstore)
-        all_report_ids_db = set([item.CRGReportID for item in all_report_ids_db])
+        all_report_ids_db = set([item.id for item in all_report_ids_db])
 
         # Find orphan IDs (in vectorstore but not in database)
         orphan_ids =  all_report_ids_vectorstore - all_report_ids_db

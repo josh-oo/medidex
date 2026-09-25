@@ -86,7 +86,7 @@ def create_test_set(path, cutoff, model_id, only_single_report_studies=False):
                     continue
                 candidate_study_id = ground_truth[0]
                 #check if the study only has one report
-                response = session.get(BACKEND_API + f"/studies/reports", params={'study_ids': [candidate_study_id], 'fields': ['CRGReportID']})
+                response = session.get(BACKEND_API + f"/studies/reports", params={'study_ids': [candidate_study_id], 'fields': ['id']})
                 if len(response.json()[str(candidate_study_id)]) != 1:
                     if scroll_offset is None:
                         break
@@ -126,9 +126,9 @@ def create_test_set(path, cutoff, model_id, only_single_report_studies=False):
             response = session.post(BACKEND_API + f"/processing/analyze_embedding",json=payload, params=params) 
 
             item['input'] = {}
-            item['input']['title'] = report['Title']
-            item['input']['abstract'] = report['Abstract']
-            item['input']['authors'] = [author.strip() for author in report['Authors'].split("//")]
+            item['input']['title'] = report['title']
+            item['input']['abstract'] = report['abstract']
+            item['input']['authors'] = [author.strip() for author in report['authors'].split("//")]
             item['raw_output'] = response.json()
             item['label'] = ground_truth_filtered
 
@@ -203,7 +203,7 @@ async def create_author_reranking(cutoff):
     async with httpx.AsyncClient(headers={'X-API-Key': BACKEND_API_KEY}, timeout=timeout, limits=limits) as client:
 
         response = await client.get(f"{BACKEND_API}/reports", params={"date_to": cutoff})
-        current_report_ids = [(item['CRGReportID'], item['Authors']) for item in response.json()]
+        current_report_ids = [(item['id'], item['authors']) for item in response.json()]
 
         pbar = tqdm(total=len(current_report_ids))
 

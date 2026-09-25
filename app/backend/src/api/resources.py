@@ -78,8 +78,8 @@ def load_trial_id_mapping():
         return json.load(json_file)
 
 cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
-study_ids_query =  Query(None, description="List of CRGStudyIDs (used to filter your results)")
-study_id_path = Path(..., description="CRGStudyID")
+study_ids_query =  Query(None, description="List of study IDs (used to filter your results)")
+study_id_path = Path(..., description="Study ID")
 report_ids_query = Query(None, description="List of ReportIDs (used to filter your results)")
 report_id_path = Path(..., description="ReportID")
 
@@ -119,19 +119,19 @@ async def get_study_reports_by_id(study_id : int = study_id_path,  cutoff: str =
     result = []
     for db_report in db_reports:
         result.append(Report(
-            reportId=db_report['CRGReportID'],
-            year=db_report['Year'],
-            title=db_report['Title'],
-            abstract=db_report['Abstract'],
-            trialId=db_report['TrialRegistrationID'],
-            authors=db_report['Authors'].split("//"),
-            createdAt=db_report['Dateentered'],
-            updatedAt=db_report['DateEdited'],
+            reportId=db_report['id'],
+            year=db_report['year'],
+            title=db_report['title'],
+            abstract=db_report['abstract'],
+            trialId=db_report['trial_registration_id'],
+            authors=db_report['authors'].split("//"),
+            createdAt=db_report['date_entered'],
+            updatedAt=db_report['date_edited'],
         ))
     return result
 
 
-@router.get("/studies/{trial_id}/study_id", summary="Get the CRGStudyID given a matching trial registration id")
+@router.get("/studies/{trial_id}/study_id", summary="Get the study ID given a matching trial registration id")
 async def get_study_id_by_trial_id(trial_id: str = Path(..., description="A regular trial id (e.g. ACTRN12605000202662, NCT00034892)"), cutoff: str = cutoff_query, study_repo : StudyRepository = Depends(get_study_repo)) -> List[int]:
     result = await study_repo.get_study_id_by_trial_id(trial_id, cutoff)
     if result is None:
@@ -174,7 +174,7 @@ async def get_study_persons_single(study_id : int = study_id_path, cutoff: str =
 
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
 async def get_study_by_id_legacy(study: DbStudy = Depends(get_study_by_id), user_id = Depends(get_user_id)) -> Study:
-    await post_report_event(-1, Event(event_type=f"study::{study.CRGStudyID}::visted", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
+    await post_report_event(-1, Event(event_type=f"study::{study.id}::visted", timestamp=datetime.now(timezone.utc).isoformat()), user_id)
     return studies_to_dto([study])[0]
 
 
@@ -220,7 +220,7 @@ async def delete_report(
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        if project.UploadedBy != str(user_id):
+        if project.uploaded_by != str(user_id):
             raise HTTPException(status_code=403, detail="Only the project owner can delete reports from this project")
 
         deleted = await report_repo.delete_report(report_id)
@@ -296,7 +296,7 @@ async def get_report_fulltext_links(report_id: int = report_id_path, report_repo
     report = await report_repo.get_report_by_id(report_id)
     if report is None:
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
-    doi = report.DOI
+    doi = report.doi
     if not doi:
         return ReportSources(doi="", links=[])
     service = OpenAlexService()

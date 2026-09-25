@@ -97,13 +97,13 @@ async def process_report_pdf(
 ) -> None:
     #async with pdf_semaphore:
 
-    if report.ReportNumber > 0: #if report already has pdf
+    if report.report_number > 0: #if report already has pdf
         return None
-    
+
     try:
         service = OpenAlexService()
-        links = await service.get_pdf_links_by_doi(report.DOI)
-        
+        links = await service.get_pdf_links_by_doi(report.doi)
+
         for link in links:
             print("Link: ", link)
             payload = await _download_pdf_bytes(client, link)
@@ -111,17 +111,17 @@ async def process_report_pdf(
                 continue
 
             upload_file = _InMemoryPdfUpload(payload)
-            print("Success download: ", report.CRGReportID,flush=True)
-            #await document_service.upload_pdf(report.CRGReportID, upload_file)
-            #print("Success upload: ", report.CRGReportID,flush=True)
+            print("Success download: ", report.id,flush=True)
+            #await document_service.upload_pdf(report.id, upload_file)
+            #print("Success upload: ", report.id,flush=True)
             return upload_file
 
     except Exception as exc:
         #print(f"Upload failed: {report_id} Exc {exc}")
-        print(f"Upload failed: {report.CRGReportID} Exc {exc}\n{traceback.format_exc()}",flush=True)
+        print(f"Upload failed: {report.id} Exc {exc}\n{traceback.format_exc()}",flush=True)
         logger.warning(
             "Auto PDF processing failed for report %s in project %s: %s",
-            report.CRGReportID,
+            report.id,
             exc,
         )
     return None
@@ -140,10 +140,10 @@ async def process_report(reports : List[DbReport], project_id : str, vectorstore
                     return
                 pdf_file = await process_report_pdf(client, report, document_service)
                 if pdf_file:
-                    print("Start upload: ", report.CRGReportID,flush=True)
-                    await document_service.upload_pdf(report.CRGReportID, pdf_file)
-                print("Start Set auto searched: ", report.CRGReportID,flush=True)
-                await project_repo.set_report_auto_searched_pdf(report.CRGReportID)
+                    print("Start upload: ", report.id,flush=True)
+                    await document_service.upload_pdf(report.id, pdf_file)
+                print("Start Set auto searched: ", report.id,flush=True)
+                await project_repo.set_report_auto_searched_pdf(report.id)
                 await write_session.commit()
                 await pubsub_service.publish_project_update(project_id)
 
@@ -304,18 +304,18 @@ async def get_project_stats(
     project_repo: ProjectRepository = Depends(get_project_repo),
 ) -> ProjectDetails:
     
-    report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
-    auto_searched_pdf_count = await project_repo.get_auto_searched_pdf_count_for_project(project.BatchHash)
-    confirmed_report_count = await project_repo.get_confirmed_report_count_for_project(project.BatchHash)
+    report_ids = await project_repo.get_project_associated_report_ids(project.id)
+    auto_searched_pdf_count = await project_repo.get_auto_searched_pdf_count_for_project(project.id)
+    confirmed_report_count = await project_repo.get_confirmed_report_count_for_project(project.id)
 
-    embedded_reports, reports_with_pdf, ready_reports = await get_vectorized_and_ready_report_ids(project.BatchHash, project_repo, report_repo, vectorstore)
+    embedded_reports, reports_with_pdf, ready_reports = await get_vectorized_and_ready_report_ids(project.id, project_repo, report_repo, vectorstore)
 
-    assignees = await project_repo.get_project_assignees(project.BatchHash)
+    assignees = await project_repo.get_project_assignees(project.id)
     assignee_ids = [user_id for user_id, _ in assignees if user_id]
 
     ready_for_review_count = 0
     if assignee_ids:
-        completion_map = await project_repo.get_report_completion_by_users(project.BatchHash)
+        completion_map = await project_repo.get_report_completion_by_users(project.id)
         assignee_set = set(assignee_ids)
         ready_for_review_count = sum(
             1 for report_id in report_ids
@@ -328,9 +328,9 @@ async def get_project_stats(
     ]
 
     return ProjectDetails(
-        projectId=project.BatchHash,
-        name=project.BatchDescription,
-        createdAt=project.DateCreated,
+        projectId=project.id,
+        name=project.description,
+        createdAt=project.date_created,
         numberReportsTotal=len(report_ids),
         numberReportsPreProcessed=len(embedded_reports),
         numberReportsReadyForProcessing=len(ready_reports),
@@ -338,7 +338,7 @@ async def get_project_stats(
         numberReportsReadyForReview=ready_for_review_count,
         numberReportsAutoSearchedPdf=auto_searched_pdf_count,
         numberReportsConfirmed=confirmed_report_count,
-        owner=project.UploadedBy,
+        owner=project.uploaded_by,
         assignees=assignee_payload,
     )
 
@@ -412,12 +412,12 @@ async def get_user_tasks(project_repo: ProjectRepository = Depends(get_project_r
     # Pre-fetch all report IDs sequentially to avoid concurrent database access
     #project_report_ids = {}
     #for project in projects:
-    #    report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
-    #    project_report_ids[project.BatchHash] = report_ids or set()
+    #    report_ids = await project_repo.get_project_associated_report_ids(project.id)
+    #    project_report_ids[project.id] = report_ids or set()
 
     # Now run vectorstore queries concurrently (no database session conflicts)
     progress_tasks = [
-        get_vectorized_and_ready_report_ids(project.BatchHash, project_repo, report_repo, vectorstore)
+        get_vectorized_and_ready_report_ids(project.id, project_repo, report_repo, vectorstore)
         for project in projects
     ]
     progress_results = await asyncio.gather(*progress_tasks)
@@ -425,16 +425,16 @@ async def get_user_tasks(project_repo: ProjectRepository = Depends(get_project_r
     tasks: List[ProjectTask] = []
     for project, (_,_, ready_for_processing) in zip(projects, progress_results):
         project_payload = Project(
-            projectId=project.BatchHash,
-            name=project.BatchDescription,
-            owner=project.UploadedBy or "",
-            createdAt=project.DateCreated,
+            projectId=project.id,
+            name=project.description,
+            owner=project.uploaded_by or "",
+            createdAt=project.date_created,
             numberReportsReadyForProcessing=len(ready_for_processing),
         )
         tasks.append(
             ProjectTask(
                 project=project_payload,
-                numberReportsProcessed=user_link_counts.get(project.BatchHash, 0),
+                numberReportsProcessed=user_link_counts.get(project.id, 0),
             )
         )
 
@@ -473,25 +473,25 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
             safe_abstract = str(abstract) if abstract is not None else ""
 
         report = DbReport(
-            Title=safe_title,
-            Abstract=safe_abstract,
-            Authors=authors_str,
-            ReportNumber=report_number,
-            Journal=entry.get('secondary_title', None),
-            Year=int(entry.get('year', None)),
-            Volume= entry.get('volume', None),
-            Issue=entry.get('note', None),
-            Pages=entry.get('start_page', None),
-            Language=entry.get('language', None),
-            Publisher=entry.get('publisher', None),
-            City=entry.get('place_published', None),
-            DOI=entry.get('doi', None),
-            TrialRegistrationID=trial_ids,
-            CopyStatus= "Copy Obtained" if report_number != 0 else "Seeking Source",
-            TypeofReportID=0, #TODO ask alessandro
-            PublicationTypeID=1, #TODO ask alessandro
-            #TODO Dupstring missing
-            #OriginalTitle: Optional[str] TODO
+            title=safe_title,
+            abstract=safe_abstract,
+            authors=authors_str,
+            report_number=report_number,
+            journal=entry.get('secondary_title', None),
+            year=int(entry.get('year', None)),
+            volume= entry.get('volume', None),
+            issue=entry.get('note', None),
+            pages=entry.get('start_page', None),
+            language=entry.get('language', None),
+            publisher=entry.get('publisher', None),
+            city=entry.get('place_published', None),
+            doi=entry.get('doi', None),
+            trial_registration_id=trial_ids,
+            copy_status= "Copy Obtained" if report_number != 0 else "Seeking Source",
+            report_type_id=0, #TODO ask alessandro
+            publication_type_id=1, #TODO ask alessandro
+            #TODO dup_string missing
+            #original_title: Optional[str] TODO
         )
 
         fingerprint_string += "|".join([
@@ -510,7 +510,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     # schedule background tasks
     #for report in reports:
     #    print("Report provcess appended")
-    report_ids = [report.CRGReportID for report in reports]
+    report_ids = [report.id for report in reports]
     background_tasks.add_task(run_process_report_background, project_id, report_ids, user_id, process_report)
     
     await pubsub_service.publish_project_update(project_id)
@@ -649,27 +649,27 @@ async def get_project_reports(
 
     result = []
     for report in reports:
-        if report.CRGReportID not in ready_report_ids:
+        if report.id not in ready_report_ids:
             continue
-        authors = report.Authors.split("//") if report.Authors else []
+        authors = report.authors.split("//") if report.authors else []
         linked_studies = []
-        if report.CRGReportID in all_linked_studies.keys():
-            linked_studies = studies_to_dto(all_linked_studies[report.CRGReportID])
+        if report.id in all_linked_studies.keys():
+            linked_studies = studies_to_dto(all_linked_studies[report.id])
 
         result.append(
             BatchedReport(
                 report=Report(
-                    reportId=report.CRGReportID,
-                    year=report.Year,
-                    title=report.Title,
-                    abstract=report.Abstract,
+                    reportId=report.id,
+                    year=report.year,
+                    title=report.title,
+                    abstract=report.abstract,
                     authors=authors,
-                    trialId=report.TrialRegistrationID,
-                    createdAt=report.Dateentered,
-                    updatedAt=report.DateEdited
+                    trialId=report.trial_registration_id,
+                    createdAt=report.date_entered,
+                    updatedAt=report.date_edited
                 ),
-                hasPdf=report.CRGReportID in reports_with_pdf,
-                flag=report_flags.get(report.CRGReportID).Message if report.CRGReportID in report_flags else None,
+                hasPdf=report.id in reports_with_pdf,
+                flag=report_flags.get(report.id).message if report.id in report_flags else None,
                 assignedStudies=linked_studies,
             )
         )
@@ -678,17 +678,17 @@ async def get_project_reports(
 @router.get( "/projects/{project_id}/annotations",dependencies=[Depends(is_admin)],summary="Get reports annotated by all assigned users in a project.")
 async def get_project_annotations(project: DbProject = Depends(get_project_by_id), project_repo: ProjectRepository = Depends(get_project_repo)) -> Dict[int, Dict[str, List[Dict[str, Any]]]]:
     
-    report_ids = await project_repo.get_project_associated_report_ids(project.BatchHash)
-    
+    report_ids = await project_repo.get_project_associated_report_ids(project.id)
+
     if not report_ids:
         return {}
 
-    assignees = await project_repo.get_project_assignees(project.BatchHash)
+    assignees = await project_repo.get_project_assignees(project.id)
     assignee_ids = {user_id for user_id, _ in assignees if user_id}
     if not assignee_ids:
         return {}
 
-    completion_map = await project_repo.get_report_completion_by_users(project.BatchHash)
+    completion_map = await project_repo.get_report_completion_by_users(project.id)
     annotated_report_ids = [
         report_id
         for report_id in report_ids
@@ -699,7 +699,7 @@ async def get_project_annotations(project: DbProject = Depends(get_project_by_id
         return {}
 
     return await project_repo.get_project_annotations_by_assignees(
-        project.BatchHash,
+        project.id,
         assignee_ids,
         annotated_report_ids,
     )

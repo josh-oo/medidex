@@ -16,50 +16,50 @@ class ReportRepository:
 
     async def commit(self):
         return await self.db.commit()
-    
+
     async def rollback(self):
         return await self.db.rollback()
 
     async def _remove_orphaned_studies(self, affected_study_ids : set) -> List[int]:
         """
         Helper function to remove orphaned studies.
-        
+
         Args:
             affected_study_ids: Set of study IDs that were affected by link deletions
             session: The database session
-            
+
         Returns:
             List of study IDs that were deleted
         """
         if not affected_study_ids:
             return []
-        
+
         # Get studies that were added by users (tracked in StudyAdded)
-        stmt = select(StudyAdded.CRGStudyID).where(StudyAdded.CRGStudyID.in_(affected_study_ids))
+        stmt = select(StudyAdded.study_id).where(StudyAdded.study_id.in_(affected_study_ids))
         newly_added_studies = set((await self.db.execute(stmt)).scalars().all())
-        
+
         if not newly_added_studies:
             return []
-        
+
         # Check which of these studies still have remaining links
-        stmt = select(StudyReport.CRGStudyID).where(StudyReport.CRGStudyID.in_(newly_added_studies))
+        stmt = select(StudyReport.study_id).where(StudyReport.study_id.in_(newly_added_studies))
         still_linked = set((await self.db.execute(stmt)).scalars().all())
-        
+
         # Orphaned studies are those with no remaining links
         orphaned_studies = newly_added_studies - still_linked
-        
+
         if not orphaned_studies:
             return []
-        
+
         orphan_list = list(orphaned_studies)
         # Delete orphaned studies (cascades to StudyAdded)
         await self.db.execute(
-            delete(Study).where(Study.CRGStudyID.in_(orphan_list))
+            delete(Study).where(Study.id.in_(orphan_list))
         )
-        
+
         await self.db.flush()
         return orphan_list
-    
+
     async def link_study(self, report_id: int, study_id: int, user_id : str = None) -> Dict[str, Any]:
         """
         Append a single study link to a report without touching existing links.
@@ -80,24 +80,24 @@ class ReportRepository:
         # Avoid duplicate links
         existing_stmt = (
             select(StudyReport)
-            .where(StudyReport.CRGReportID == report_id)
-            .where(StudyReport.CRGStudyID == study_id)
+            .where(StudyReport.report_id == report_id)
+            .where(StudyReport.study_id == study_id)
         )
         link = (await self.db.execute(existing_stmt)).scalar_one_or_none()
 
         if not link:
             # Create new link and track creator
-            link = StudyReport(CRGReportID=report_id, CRGStudyID=study_id)
+            link = StudyReport(report_id=report_id, study_id=study_id)
             self.db.add(link)
             await self.db.flush()
 
         self.db.add(StudyReportAdded(
-            StudyReportID=link.StudyReportID,
-            CreatedBy=user_id
+            study_report_id=link.id,
+            created_by=user_id
         ))
 
         await self.db.flush()
-        
+
     async def unlink_study(self, report_id: int, study_id: int = None, user_id : str = None) -> Dict[str, Any]:
         """
         Internal implementation to delete links between a report and studies.
@@ -106,7 +106,7 @@ class ReportRepository:
         """
         if user_id is None:
             user_id = self.user_id
-            
+
         # Validate report exists
         report = await self.db.get(Report, report_id)
         if not report:
@@ -114,62 +114,62 @@ class ReportRepository:
 
         # Build query joining StudyReport with StudyReportAdded
         stmt = (
-            select(StudyReport, StudyReportAdded.CreatedBy)
-            .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
-            .where(StudyReport.CRGReportID == report_id)
+            select(StudyReport, StudyReportAdded.created_by)
+            .outerjoin(StudyReportAdded, StudyReport.id == StudyReportAdded.study_report_id)
+            .where(StudyReport.report_id == report_id)
         )
-        
-        if study_id is not None:
-            stmt = stmt.where(StudyReport.CRGStudyID == study_id)
 
-        # If user is provided, filter by CreatedBy
+        if study_id is not None:
+            stmt = stmt.where(StudyReport.study_id == study_id)
+
+        # If user is provided, filter by created_by
         if user_id:
-            stmt = stmt.where(StudyReportAdded.CreatedBy == user_id)
+            stmt = stmt.where(StudyReportAdded.created_by == user_id)
 
         # Fetch all matching links
         rows = (await self.db.execute(stmt)).all()
 
         deleted_links: List[Dict[str, int]] = [
-            {"CRGReportID": sr.CRGReportID, "CRGStudyID": sr.CRGStudyID}
+            {"report_id": sr.report_id, "study_id": sr.study_id}
             for sr, _ in rows
         ]
         deleted_orphans = []
 
         # Bulk delete matching links
         if rows:
-            study_report_ids = [sr.StudyReportID for sr, _ in rows]
+            study_report_ids = [sr.id for sr, _ in rows]
             await self.db.execute(
-                delete(StudyReport).where(StudyReport.StudyReportID.in_(study_report_ids))
+                delete(StudyReport).where(StudyReport.id.in_(study_report_ids))
             )
             # Check if some of the affected studies are now orphans and delete them
-            affected_studies = {item['CRGStudyID'] for item in deleted_links}
+            affected_studies = {item['study_id'] for item in deleted_links}
             deleted_orphans = await self._remove_orphaned_studies(affected_studies)
 
         await self.db.flush()
-        
+
     async def get_linked_studies(self, report_id : int, date_from : Optional[str] = None, date_to : Optional[str] = None):
         report = await self.db.get(Report, report_id)
         if not report:
             return None
-        
+
         stmt = (
             select(Study)
-            .join(StudyReport, StudyReport.CRGStudyID == Study.CRGStudyID)
-            .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
-            .where(StudyReport.CRGReportID == report_id)
+            .join(StudyReport, StudyReport.study_id == Study.id)
+            .outerjoin(StudyReportAdded, StudyReport.id == StudyReportAdded.study_report_id)
+            .where(StudyReport.report_id == report_id)
         )
-        
-        # If user is provided, filter by CreatedBy
+
+        # If user is provided, filter by created_by
         if self.user_id:
-            stmt = stmt.where((StudyReportAdded.CreatedBy == self.user_id) | (StudyReportAdded.CreatedBy.is_(None)))
-        
+            stmt = stmt.where((StudyReportAdded.created_by == self.user_id) | (StudyReportAdded.created_by.is_(None)))
+
         if date_from:
-            stmt = stmt.where(Study.DateEntered >= date_from)
+            stmt = stmt.where(Study.date_entered >= date_from)
         if date_to:
-            stmt = stmt.where(Study.DateEntered <= date_to)
-        
+            stmt = stmt.where(Study.date_entered <= date_to)
+
         return (await self.db.execute(stmt)).scalars().all()
-    
+
     async def get_linked_studies_for_reports(
         self,
         report_ids: List[int],
@@ -182,25 +182,25 @@ class ReportRepository:
             return {}
 
         # Filter out non-existent reports to keep results consistent with get_linked_studies()
-        existing_stmt = select(Report.CRGReportID).where(Report.CRGReportID.in_(report_ids))
+        existing_stmt = select(Report.id).where(Report.id.in_(report_ids))
         existing_ids = set((await self.db.execute(existing_stmt)).scalars().all())
         if not existing_ids:
             return {}
 
         stmt = (
-            select(StudyReport.CRGReportID, Study)
-            .join(Study, Study.CRGStudyID == StudyReport.CRGStudyID)
-            .outerjoin(StudyReportAdded, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
-            .where(StudyReport.CRGReportID.in_(existing_ids))
+            select(StudyReport.report_id, Study)
+            .join(Study, Study.id == StudyReport.study_id)
+            .outerjoin(StudyReportAdded, StudyReport.id == StudyReportAdded.study_report_id)
+            .where(StudyReport.report_id.in_(existing_ids))
         )
 
         if self.user_id:
-            stmt = stmt.where((StudyReportAdded.CreatedBy == self.user_id) | (StudyReportAdded.CreatedBy.is_(None)))
+            stmt = stmt.where((StudyReportAdded.created_by == self.user_id) | (StudyReportAdded.created_by.is_(None)))
 
         if date_from:
-            stmt = stmt.where(Study.DateEntered >= date_from)
+            stmt = stmt.where(Study.date_entered >= date_from)
         if date_to:
-            stmt = stmt.where(Study.DateEntered <= date_to)
+            stmt = stmt.where(Study.date_entered <= date_to)
 
         rows = (await self.db.execute(stmt)).all()
 
@@ -215,23 +215,23 @@ class ReportRepository:
                 ordered_result[rid] = studies_by_report[rid]
 
         return ordered_result
-    
+
     async def get_all_reports(self, report_ids : Optional[List[int]] = None, date_from : Optional[str] = None, date_to: Optional[str] = None) -> List[Report]:
-        stmt = select(Report).where((Report.Title.isnot(None)) | (Report.Abstract.isnot(None)))
+        stmt = select(Report).where((Report.title.isnot(None)) | (Report.abstract.isnot(None)))
         if report_ids:
-            stmt = stmt.where(Report.CRGReportID.in_(report_ids))
-        # Dateentered filtering (string compare works with ISO-like 'YYYY-MM-DD HH:MM:SS')
+            stmt = stmt.where(Report.id.in_(report_ids))
+        # date_entered filtering (string compare works with ISO-like 'YYYY-MM-DD HH:MM:SS')
         if date_from:
-            stmt = stmt.where(Report.Dateentered >= date_from)
+            stmt = stmt.where(Report.date_entered >= date_from)
         if date_to:
-            stmt = stmt.where(Report.Dateentered <= date_to)
+            stmt = stmt.where(Report.date_entered <= date_to)
         return (await self.db.execute(stmt)).scalars().all()
-    
+
     async def get_report_by_id(self, report_id: int) -> Report:
         return await self.db.get(Report, report_id)
 
     async def delete_report(self, report_id: int) -> bool:
-        stmt = delete(Report).where(Report.CRGReportID == report_id)
+        stmt = delete(Report).where(Report.id == report_id)
         result = await self.db.execute(stmt)
         await self.db.flush()
         return bool(result.rowcount)
@@ -239,8 +239,8 @@ class ReportRepository:
     async def get_report_flag(self, report_id: int) -> Optional[ReportFlag]:
         stmt = (
             select(ReportFlag)
-            .where(ReportFlag.CRGReportID == report_id)
-            .where(ReportFlag.CreatedBy == self.user_id)
+            .where(ReportFlag.report_id == report_id)
+            .where(ReportFlag.created_by == self.user_id)
         )
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
@@ -252,30 +252,30 @@ class ReportRepository:
 
         stmt = (
             select(ReportFlag)
-            .where(ReportFlag.CRGReportID == report_id)
-            .where(ReportFlag.CreatedBy == self.user_id)
+            .where(ReportFlag.report_id == report_id)
+            .where(ReportFlag.created_by == self.user_id)
         )
         report_flag = (await self.db.execute(stmt)).scalar_one_or_none()
 
         if report_flag is None:
             report_flag = ReportFlag(
-                CRGReportID=report_id,
-                CreatedBy=self.user_id,
-                Message=message,
-                Public=public,
+                report_id=report_id,
+                created_by=self.user_id,
+                message=message,
+                public=public,
             )
             self.db.add(report_flag)
         else:
-            report_flag.Message = message
-            report_flag.Public = public
+            report_flag.message = message
+            report_flag.public = public
 
         return report_flag
 
     async def delete_report_flag(self, report_id: int) -> bool:
         stmt = (
             delete(ReportFlag)
-            .where(ReportFlag.CRGReportID == report_id)
-            .where(ReportFlag.CreatedBy == self.user_id)
+            .where(ReportFlag.report_id == report_id)
+            .where(ReportFlag.created_by == self.user_id)
         )
         result = await self.db.execute(stmt)
         await self.db.flush()
@@ -288,29 +288,29 @@ class ReportRepository:
 
         stmt = (
             select(ReportFlag)
-            .where(ReportFlag.CRGReportID.in_(report_ids))
-            .where(ReportFlag.CreatedBy == self.user_id)
+            .where(ReportFlag.report_id.in_(report_ids))
+            .where(ReportFlag.created_by == self.user_id)
         )
         flags = (await self.db.execute(stmt)).scalars().all()
-        return {flag.CRGReportID: flag for flag in flags}
+        return {flag.report_id: flag for flag in flags}
 
     async def set_study_report_confirmation(self, report_id: int, study_id: int, confirmed: bool) -> bool:
         """
         Set confirmation state for a report-study link tracked in StudyReportAdded.
-        The StudyReportAdded row is resolved through tblStudyReport by report/study ids.
+        The StudyReportAdded row is resolved through the study_report view by report/study ids.
         """
         stmt = (
             select(StudyReportAdded)
-            .join(StudyReport, StudyReport.StudyReportID == StudyReportAdded.StudyReportID)
-            .where(StudyReport.CRGReportID == report_id)
-            .where(StudyReport.CRGStudyID == study_id)
+            .join(StudyReport, StudyReport.id == StudyReportAdded.study_report_id)
+            .where(StudyReport.report_id == report_id)
+            .where(StudyReport.study_id == study_id)
         )
         study_report_added = (await self.db.execute(stmt)).scalar_one_or_none()
 
         if not study_report_added:
             return False
 
-        study_report_added.Confirmed = confirmed
+        study_report_added.confirmed = confirmed
         await self.db.flush()
         return True
 
@@ -321,21 +321,21 @@ class ReportRepository:
             return []
 
         # Get all ReportAdded entries for the given report_ids
-        report_added_stmt = select(ReportAdded.CRGReportID, ReportAdded.AutoSearchedPdf).where(ReportAdded.CRGReportID.in_(report_ids))
+        report_added_stmt = select(ReportAdded.report_id, ReportAdded.auto_searched_pdf).where(ReportAdded.report_id.in_(report_ids))
         report_added_rows = (await self.db.execute(report_added_stmt)).all()
         report_added_map = {rid: auto for rid, auto in report_added_rows}
 
-        # Get all reports (with ReportNumber) for the given report_ids
-        report_stmt = select(Report.CRGReportID, Report.ReportNumber).where(Report.CRGReportID.in_(report_ids)).where(Report.ReportNumber >= 0)
+        # Get all reports (with report_number) for the given report_ids
+        report_stmt = select(Report.id, Report.report_number).where(Report.id.in_(report_ids)).where(Report.report_number >= 0)
         report_rows = (await self.db.execute(report_stmt)).all()
 
         result = []
         for report_id, report_number in report_rows:
-            # If there is a ReportAdded entry, require AutoSearchedPdf == True
+            # If there is a ReportAdded entry, require auto_searched_pdf == True
             if report_id in report_added_map:
                 if not report_added_map[report_id]:
                     continue
-            # If there is no ReportAdded entry, ignore AutoSearchedPdf
+            # If there is no ReportAdded entry, ignore auto_searched_pdf
             if report_number == 0:
                 result.append(report_id)
                 continue
@@ -344,7 +344,7 @@ class ReportRepository:
             if os.path.exists(txt_path):
                 result.append(report_id)
         return result
-    
+
     async def get_pdf_numbers_by_report_id(self, report_id: int) -> int:
         """
         Returns the PDF report number for a given report ID.
@@ -352,10 +352,10 @@ class ReportRepository:
         report = await self.db.get(Report, report_id)
         if not report:
             return None
-        if report.ReportNumber is None:
-            return -1   # report found, but ReportNumber is NULL
-        return report.ReportNumber
-    
+        if report.report_number is None:
+            return -1   # report found, but report_number is NULL
+        return report.report_number
+
     async def assign_pdf_numbers_for_report_id(self, report_id: int) -> int:
         """
         Assigns a unique PDF report number to the given report if it does not already have one.
@@ -365,29 +365,29 @@ class ReportRepository:
         if not report:
             return None  # Report not found
 
-        if report.ReportNumber is not None and report.ReportNumber > 0:
-            return report.ReportNumber  # Already assigned
+        if report.report_number is not None and report.report_number > 0:
+            return report.report_number  # Already assigned
 
-        # Find the current max ReportNumber
+        # Find the current max report_number
         stmt = (
-            select(Report.ReportNumber)
-            .where(Report.ReportNumber.isnot(None))
-            .order_by(Report.ReportNumber.desc())
+            select(Report.report_number)
+            .where(Report.report_number.isnot(None))
+            .order_by(Report.report_number.desc())
         )
         max_number = (await self.db.execute(stmt)).scalars().first()
         next_number = (max_number or 0) + 1
 
-        report.ReportNumber = next_number
+        report.report_number = next_number
         await self.db.flush()
         return next_number
 
     async def save_report_metadata_field(self, report_id: int, field: str, value: Any):
-        stmt = select(FulltextExtractions).where(FulltextExtractions.CRGReportID == report_id)
+        stmt = select(FulltextExtractions).where(FulltextExtractions.report_id == report_id)
         extraction = (await self.db.execute(stmt)).scalar_one_or_none()
         if not extraction:
             # Optionally create a new record if not found
             data = {}
-            extraction = FulltextExtractions(CRGReportID=report_id, data=data)
+            extraction = FulltextExtractions(report_id=report_id, data=data)
             self.db.add(extraction)
         else:
             data = extraction.data or {}
@@ -396,9 +396,9 @@ class ReportRepository:
         await self.db.flush()
 
     async def load_report_metadata(self, report_id : int):
-        stmt = select(FulltextExtractions).where(FulltextExtractions.CRGReportID == report_id)
+        stmt = select(FulltextExtractions).where(FulltextExtractions.report_id == report_id)
         existing = (await self.db.execute(stmt)).scalar_one_or_none()
-        
+
         if existing:
             return existing.data
         return None

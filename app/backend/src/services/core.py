@@ -67,7 +67,7 @@ class StudySimilaritySearchService:
                         debug_map[item] = debug_map.get(item, []) + [info]
 
         if len(found_study_ids.keys()) == 0:
-            return {'CRGStudyID': [] , 'Relevance' : []}
+            return {'id': [] , 'Relevance' : []}
         all_studies = await self.study_repo.get_studies(list(found_study_ids.keys()))
         #list of dicts to dict of lists:
 
@@ -79,26 +79,26 @@ class StudySimilaritySearchService:
 
         for i in range(0, len(all_studies)):
             item = all_studies[i].dict()
-            item['Relevance'] = found_study_ids[item['CRGStudyID']]
+            item['Relevance'] = found_study_ids[item['id']]
             all_studies[i] = item
 
         result = {}
         for study in all_studies:
-            for key, value in study.items(): 
+            for key, value in study.items():
                 result.setdefault(key, []).append(value)
 
-        order = ['CRGStudyID', 'Relevance', 'ShortName', 'NumberParticipants', 'Duration', 'Comparison', 'Countries', 'DateEntered', 'DateEdited', 'StatusofStudy', 'ISRCTN']
+        order = ['id', 'Relevance', 'short_name', 'number_participants', 'duration', 'comparison', 'countries', 'date_entered', 'date_edited', 'status', 'isrctn']
         reordered = {key: result[key] for key in order}
 
         if return_details:
-            reordered['details'] = [list({d['source_id']: d for d in debug_map[key]}.values()) for key in reordered['CRGStudyID']]
+            reordered['details'] = [list({d['source_id']: d for d in debug_map[key]}.values()) for key in reordered['id']]
 
         sorted_indices = sorted(range(len(reordered['Relevance'])), key=lambda i: reordered['Relevance'][i], reverse=True)
         for k in reordered:
             reordered[k] = [reordered[k][i] for i in sorted_indices]
 
         # Add this right before "return reordered"
-        for study_id, relevance in zip(reordered['CRGStudyID'], reordered['Relevance']):
+        for study_id, relevance in zip(reordered['id'], reordered['Relevance']):
             if isinstance(relevance, float) and math.isnan(relevance):
                 print(f"CRITICAL: NaN detected for Study ID {study_id}")
                 # Optionally look into debug_map for this ID to see the source
@@ -113,30 +113,30 @@ class StudySimilaritySearchService:
 
         report = await self.report_service.get_report(report_id)
 
-        authors = [item.strip() for item in report.Authors.split("//")]
+        authors = [item.strip() for item in report.authors.split("//")]
         trial_ids = await self.report_service.get_trial_ids(report_id, include_fulltext=True)
 
-        query = self.vectorstore.build_recommandation_based_on_report_id(report.CRGReportID, negative_reports)
-        
+        query = self.vectorstore.build_recommandation_based_on_report_id(report.id, negative_reports)
+
 
         result = await self.get_similar_study_by_query(query,cutoff,k,negative_studies, trial_ids, authors, return_details=return_details)
 
         # Check if there are any similar items in the same project which are more similar than already retrieved existing studies
         if result.get('Relevance'):
             min_score = min(result['Relevance'])
-            project_studies = await self.project_repo.get_similar_report_studies(report.CRGReportID, min_score)
-            
+            project_studies = await self.project_repo.get_similar_report_studies(report.id, min_score)
+
             # Create a map of existing study IDs to their positions and scores
             existing_study_map = {}
-            for idx, study_id in enumerate(result.get('CRGStudyID', [])):
+            for idx, study_id in enumerate(result.get('id', [])):
                 existing_study_map[study_id] = {
                     'index': idx,
                     'score': result['Relevance'][idx]
                 }
-            
+
             for study, score in project_studies:
                 study_dict = study.dict()
-                study_id = study_dict.get('CRGStudyID')
+                study_id = study_dict.get('id')
                 
                 # If study already exists, update with higher score
                 if study_id in existing_study_map:
@@ -204,7 +204,7 @@ class RelatedTagSearchService:
         
         #similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, TagCategories.default, cutoff, k, None, None, False)
         similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, cutoff, k, None, None, False)
-        predicted_studies = similar_studies['CRGStudyID']
+        predicted_studies = similar_studies['id']
 
         vectors = await self.vectorstore.get_vectors_by_report_id(report_id)
         

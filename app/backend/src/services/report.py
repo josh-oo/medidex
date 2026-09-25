@@ -76,7 +76,7 @@ class DocumentService:
     
     async def is_trial_registration(self, report_id: int) -> bool:
         report = await self.report_repo.get_report_by_id(report_id)
-        authors = report.Authors.split("//")
+        authors = report.authors.split("//")
         if len(authors) != 1:
             return False
         trial_ids = extract_trial_id(None, None,authors)
@@ -171,7 +171,7 @@ class DocumentService:
             text = ""
         elif await self.is_trial_registration(report_id):
             report = await self.report_repo.get_report_by_id(report_id)
-            text = await self.crawler_service.get_html_for_trial_id(report.Authors)
+            text = await self.crawler_service.get_html_for_trial_id(report.authors)
         else:
             text = await self.docling_service.parse_pdf(await self.get_path(report_id))
             #pages = await self.get_pages()
@@ -201,7 +201,7 @@ class DocumentService:
 
         deleted_pdf = False
         deleted_fulltext = False
-        previous_report_number = report.ReportNumber
+        previous_report_number = report.report_number
         if previous_report_number is not None and previous_report_number > 0:
             pdf_name = str(previous_report_number).zfill(5) + ".pdf"
             pdf_path = os.path.join(PDF_PATH, pdf_name)
@@ -215,7 +215,7 @@ class DocumentService:
 
         # Clear derived artifacts and reset report number so future uploads are re-assigned cleanly.
         await asyncio.to_thread(self.delete_fulltext, report_id)
-        report.ReportNumber = -1
+        report.report_number = -1
         await self.report_repo.db.flush()
         await self.report_repo.db.commit()
 
@@ -232,10 +232,10 @@ class DocumentService:
     async def upload_pdf(self, report_id: int, file):
 
         if file is None:
-            # Set ReportNumber to 0 and stop
+            # Set report_number to 0 and stop
             report = await self.report_repo.get_report_by_id(report_id)
             if report:
-                report.ReportNumber = 0
+                report.report_number = 0
                 await self.report_repo.db.flush()
             return {"report_id": report_id, "file_path": None, "size_bytes": 0}
 
@@ -299,8 +299,8 @@ class ReportService:
             except:
                 pass
         
-        authors = [item.strip() for item in report.Authors.split("//")]
-        all_ids = extract_trial_id(report.Title, report.Abstract, authors)
+        authors = [item.strip() for item in report.authors.split("//")]
+        all_ids = extract_trial_id(report.title, report.abstract, authors)
         return all_ids
     
     async def get_study_acronyms(self, report_id: int, include_fulltext : bool) -> List[str]:
@@ -323,8 +323,8 @@ class ReportService:
                 pass
         
         acronyms = []
-        acronyms.extend(_get_study_acronyms(report.Title))
-        acronyms.extend(_get_study_acronyms(report.Abstract))
+        acronyms.extend(_get_study_acronyms(report.title))
+        acronyms.extend(_get_study_acronyms(report.abstract))
         return acronyms
         
     
@@ -341,7 +341,7 @@ class ReportService:
 
         async def _extract_pico():
             report = await self.get_report(report_id)
-            return await self.llm_service.extract_pico(report.Title, report.Abstract, fulltext)
+            return await self.llm_service.extract_pico(report.title, report.abstract, fulltext)
 
         trial_ids_task = self.get_trial_ids(report_id, include_fulltext=not is_abstract)
         study_acronyms_task = self.get_study_acronyms(report_id, include_fulltext=not is_abstract)

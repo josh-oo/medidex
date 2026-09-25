@@ -90,40 +90,34 @@ class BatchedReport(BaseModel):
 def tags_to_dto(tags) -> List[Tag]:
     result = []
     for tag in tags:
-        name = None
-        tag_id = None
         tag_data = tag if isinstance(tag, Mapping) else tag.model_dump()
-        for key, value in tag_data.items():
-            if "ID" in key:
-                tag_id = str(value)
-            elif "Description" in key:
-                name = value
-        result.append(Tag(id=tag_id,keyword=name))
+        tag_id = tag_data.get("id")
+        result.append(Tag(id=str(tag_id) if tag_id is not None else None, keyword=tag_data.get("description")))
     return result
 
 def report_flag_to_dto(flag) -> ReportFlag:
     return ReportFlag(
-        reportId=flag.CRGReportID,
-        createdBy=flag.CreatedBy,
-        message=flag.Message,
-        public=flag.Public,
-        createdAt=flag.DateCreated.isoformat(),
+        reportId=flag.report_id,
+        createdBy=flag.created_by,
+        message=flag.message,
+        public=flag.public,
+        createdAt=flag.date_created.isoformat(),
     )
 
 def studies_to_dto(studies):
     result = []
     for study in studies:
         output_study = Study(
-            studyId=study.CRGStudyID,
-            shortName=study.ShortName,
-            numberParticipants=study.NumberParticipants,
-            duration=study.Duration,
-            comparison=study.Comparison,
-            countries=study.Countries.split("//"),
-            createdAt=study.DateEntered,
-            updatedAt=study.DateEdited,
-            status=study.StatusofStudy,
-            trialId=study.ISRCTN,
+            studyId=study.id,
+            shortName=study.short_name,
+            numberParticipants=study.number_participants,
+            duration=study.duration,
+            comparison=study.comparison,
+            countries=study.countries.split("//"),
+            createdAt=study.date_entered,
+            updatedAt=study.date_edited,
+            status=study.status,
+            trialId=study.isrctn,
         )
         result.append(output_study)
     return result
@@ -132,16 +126,16 @@ def similar_studies_to_dto(studies):
     results = []
     for i in range(0, len(studies['Relevance'])):
         study = Study(
-            studyId=studies['CRGStudyID'][i],
-            shortName=studies['ShortName'][i],
-            numberParticipants=studies['NumberParticipants'][i],
-            duration=studies['Duration'][i],
-            comparison=studies['Comparison'][i],
-            countries=studies['Countries'][i].split("//"),
-            createdAt=studies['DateEntered'][i],
-            updatedAt=studies['DateEdited'][i],
-            status=studies['StatusofStudy'][i],
-            trialId=studies['ISRCTN'][i],
+            studyId=studies['id'][i],
+            shortName=studies['short_name'][i],
+            numberParticipants=studies['number_participants'][i],
+            duration=studies['duration'][i],
+            comparison=studies['comparison'][i],
+            countries=studies['countries'][i].split("//"),
+            createdAt=studies['date_entered'][i],
+            updatedAt=studies['date_edited'][i],
+            status=studies['status'][i],
+            trialId=studies['isrctn'][i],
         )
         results.append(SimilarStudy(relevance=studies['Relevance'][i], study=study))
     return results

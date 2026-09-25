@@ -240,9 +240,9 @@ class VectorstoreService():
     )
 
     async def add_report_to_vectorstore(self, report):
-        title = report.Title
-        abstract = report.Abstract
-        authors = [item.strip() for item in report.Authors.split("//")]
+        title = report.title
+        abstract = report.abstract
+        authors = [item.strip() for item in report.authors.split("//")]
 
         text_to_process = []
         if title:
@@ -253,11 +253,11 @@ class VectorstoreService():
     
         vector = await self.embedding_service.embed(text_to_process)
 
-        new_id = transform_to_uuid(report.CRGReportID)
+        new_id = transform_to_uuid(report.id)
         payload = {
             'title': title,
             'abstract': abstract,
-            'source_id': report.CRGReportID,
+            'source_id': report.id,
             'authors': authors,
             'date_entered': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             'belongs_to_study': [],

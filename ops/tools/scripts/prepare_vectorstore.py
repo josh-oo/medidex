@@ -145,23 +145,23 @@ def load_mesh_tag_data(file_path):
 
 async def fetch_report_mapping(client, report_item, all_trial_studies):
     """Parallel worker for fetching study mappings from backend."""
-    resp = await client.get(f"{BACKEND_API}/reports/{report_item['CRGReportID']}/studies")
+    resp = await client.get(f"{BACKEND_API}/reports/{report_item['id']}/studies")
     study_data = resp.json() if resp.status_code == 200 else []
     study_ids = [s['studyId'] for s in study_data]
-    
-    clean_authors = [a.strip() for a in report_item['Authors'].split("//") if a.strip()]
+
+    clean_authors = [a.strip() for a in report_item['authors'].split("//") if a.strip()]
     belongs_to_trial_id = all(s in all_trial_studies for s in study_ids) if study_ids else False
-    
-    return transform_to_uuid(report_item['CRGReportID']), {
-        "text": f"{report_item['Title'] or ''} \n {report_item['Abstract'] or ''}".strip(),
+
+    return transform_to_uuid(report_item['id']), {
+        "text": f"{report_item['title'] or ''} \n {report_item['abstract'] or ''}".strip(),
         "metadata": {
             "is_report": True,
             "belongs_to_study": study_ids,
-            "report_id": report_item['CRGReportID'],
-            "date_entered": report_item['Dateentered'],
+            "report_id": report_item['id'],
+            "date_entered": report_item['date_entered'],
             "authors": clean_authors,
-            "title": report_item['Title'],
-            "abstract": report_item['Abstract'],
+            "title": report_item['title'],
+            "abstract": report_item['abstract'],
             "belongs_to_trial_id": belongs_to_trial_id
         }
     }
