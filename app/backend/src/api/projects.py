@@ -487,11 +487,6 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
             city=entry.get('place_published', None),
             doi=entry.get('doi', None),
             trial_registration_id=trial_ids,
-            copy_status= "Copy Obtained" if report_number != 0 else "Seeking Source",
-            report_type_id=0, #TODO ask alessandro
-            publication_type_id=1, #TODO ask alessandro
-            #TODO dup_string missing
-            #original_title: Optional[str] TODO
         )
 
         fingerprint_string += "|".join([

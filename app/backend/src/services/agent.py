@@ -145,7 +145,7 @@ async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentCont
     result = {
         "studyId": response.id,
         "shortName": response.short_name,
-        "trialId": response.trialist_contact_details,
+        "trialId": response.trial_registration_id,
         "numberParticipants": response.number_participants,
         "countries": response.countries.split("//"),
         "duration": response.duration,

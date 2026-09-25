@@ -4,6 +4,7 @@ from sqlalchemy import Index
 from sqlalchemy import Column
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import UniqueConstraint
+from sqlalchemy import FetchedValue
 from typing import Optional, Dict, Any
 import datetime
 
@@ -15,6 +16,11 @@ not the physical tables directly. The physical schema keeps its original
 CRG/CENTRAL-specific table and column names; the views re-expose that same
 data under the generic names used here, so this module -- and everything
 built on top of it -- never has to know about the domain-specific schema.
+
+Report and Study only expose the columns the application actually reads or
+writes; the physical tblReport/tblStudy tables have several more (CENTRAL*
+submission tracking, UDef* legacy fields, ...) that nothing here uses -- see
+views.sql for the full physical column list those two views leave out.
 """
 
 metadata_resources = MetaData()
@@ -32,12 +38,9 @@ def _current_utc_datetime() -> datetime.datetime:
 class Report(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "report"
 
-    central_report_id: Optional[int]
     id: int = Field(primary_key=True)
     report_number: int = -1
     title: str
-    notes: Optional[str]
-    original_title: Optional[str]
     authors: str
     journal: Optional[str]
     year: int
@@ -46,29 +49,12 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
     pages: Optional[str]
     language: Optional[str]
     abstract: Optional[str]
-    central_submission_status: Optional[int]
-    copy_status: Optional[str]
-    date_to_central: Optional[str]
     date_entered: str = Field(default_factory=_current_utc_timestamp)
     date_edited: Optional[str] = Field(default_factory=_current_utc_timestamp)
-    editors: Optional[str]
     publisher: Optional[str]
     city: Optional[str]
-    dup_string: Optional[str]
-    report_type_id: Optional[int]
-    publication_type_id: int
-    edition: Optional[str]
-    medium: Optional[str]
-    study_design: Optional[str]
     doi: Optional[str]
-    udef_3: Optional[str]
-    isbn: Optional[str]
-    udef_5: Optional[str]
-    pmid: Optional[str]
     trial_registration_id: Optional[str]
-    udef_9: Optional[float]
-    udef_10: Optional[float]
-    udef_8: Optional[float]
 
     __table_args__ = (
         Index('idx_report_date_entered', 'date_entered'),  # For date filtering
@@ -79,25 +65,17 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
 class Study(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "study"
 
-    central_study_id: Optional[int] = 0
     id: int = Field(primary_key=True)
     short_name: str
     status: str
     trialist_contact_details: Optional[str]
-    central_submission_status: Optional[str]
-    notes: Optional[str]
     date_entered: str = Field(default_factory=_current_utc_timestamp)
     date_edited: Optional[str] = Field(default_factory=_current_utc_timestamp)
-    date_to_central: Optional[str]
-    search_tagged: Optional[int]
     number_participants: Optional[str]
     countries: Optional[str]
     duration: Optional[str]
-    udef_4: Optional[str]
     comparison: Optional[str]
-    isrctn: Optional[str]
-    udef_6: Optional[str]
-    trial_registration_id: Optional[str]
+    trial_registration_id: Optional[str] = Field(default=None, sa_column_kwargs={"server_default": FetchedValue()})
 
     __table_args__ = (
         Index('idx_study_date_entered', 'date_entered'),  # For cutoff filtering
@@ -273,12 +251,3 @@ class ReportFlag(SQLModel, table=True, metadata=metadata_resources):
     __table_args__ = (
         Index('idx_report_flag_created_by', 'created_by'),
     )
-
-class AnalyticsEvent(SQLModel, table=True, metadata=metadata_resources):
-    __tablename__ = "analytics_event"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    date_created: datetime.datetime
-    created_by: str
-    type: str
-    related_report_id: Optional[int]

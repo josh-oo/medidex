@@ -158,7 +158,7 @@ async def similarity_search_studies_by_id(
     return studies
 
 @router.get("/reports/{report_id}/similar-studies/tags", dependencies=[Depends(is_verified_api_call), Depends(check_report_access)], summary="")
-async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(..., description="The number of related studies considered for retrieving relevant tags."), related_tag_service : RelatedTagSearchService = Depends(get_related_tag_service)):
+async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(10, description="The number of related studies considered for retrieving relevant tags."), related_tag_service : RelatedTagSearchService = Depends(get_related_tag_service)):
     if aspect not in [TagCategories.interventions, TagCategories.conditions, TagCategories.outcomes]:
          raise HTTPException(status_code=501, detail="Not implemented")
     return await related_tag_service.search_related_tags_by_report_id(report_id, aspect, k, cutoff)

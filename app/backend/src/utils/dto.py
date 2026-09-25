@@ -117,7 +117,7 @@ def studies_to_dto(studies):
             createdAt=study.date_entered,
             updatedAt=study.date_edited,
             status=study.status,
-            trialId=study.isrctn,
+            trialId=study.trial_registration_id,
         )
         result.append(output_study)
     return result
@@ -135,7 +135,7 @@ def similar_studies_to_dto(studies):
             createdAt=studies['date_entered'][i],
             updatedAt=studies['date_edited'][i],
             status=studies['status'][i],
-            trialId=studies['isrctn'][i],
+            trialId=studies['trial_registration_id'][i],
         )
         results.append(SimilarStudy(relevance=studies['Relevance'][i], study=study))
     return results

@@ -87,7 +87,7 @@ class StudySimilaritySearchService:
             for key, value in study.items():
                 result.setdefault(key, []).append(value)
 
-        order = ['id', 'Relevance', 'short_name', 'number_participants', 'duration', 'comparison', 'countries', 'date_entered', 'date_edited', 'status', 'isrctn']
+        order = ['id', 'Relevance', 'short_name', 'number_participants', 'duration', 'comparison', 'countries', 'date_entered', 'date_edited', 'status', 'trial_registration_id']
         reordered = {key: result[key] for key in order}
 
         if return_details:
