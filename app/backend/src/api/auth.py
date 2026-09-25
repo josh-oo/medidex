@@ -82,21 +82,30 @@ async def get_jwk_set(force_refresh: bool = False):
         # Otherwise, let the exception propagate
         raise
 
-async def verify_token(token):
-    """Verify a Keycloak-issued access token and return its decoded claims."""
+async def verify_token(token, keycloak_openid_client: Optional[KeycloakOpenID] = None):
+    """Verify a Keycloak-issued access token and return its decoded claims.
+
+    `keycloak_openid_client` defaults to the module-level client (bound to
+    KEYCLOAK_CLIENT_ID / medidex-frontend). Callers validating tokens issued to a
+    different client - e.g. the MCP server's own KeycloakOpenID instance in
+    mcp_server/auth.py - pass their own, since python-keycloak's a_decode_token
+    checks aud/azp against whichever client the instance was constructed with.
+    """
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
+
+    client = keycloak_openid_client or keycloak_openid
 
     try:
         key_set = await get_jwk_set(force_refresh=False)
         try:
-            decoded = await keycloak_openid.a_decode_token(token, key=key_set)
+            decoded = await client.a_decode_token(token, key=key_set)
         except JWTExpired:
             raise
         except Exception:
             # Signing key may have rotated; refresh once and retry
             key_set = await get_jwk_set(force_refresh=True)
-            decoded = await keycloak_openid.a_decode_token(token, key=key_set)
+            decoded = await client.a_decode_token(token, key=key_set)
         return decoded
     except JWTExpired:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")

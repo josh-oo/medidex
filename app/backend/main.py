@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api import auth, resources, core, agents, projects, admin
 from src.api import maintenance
 from agent import agent as agent_service
+from mcp_server import server as mcp_server
 
 # Initialize FastAPI
 app = FastAPI(
@@ -34,3 +35,5 @@ app.include_router(resources.router)
 app.include_router(maintenance.router)
 app.include_router(agent_service.router) #TODO remove this later
 app.include_router(agents.router)
+
+mcp_server.mount(app, mcp_server.build_mcp_server())

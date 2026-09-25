@@ -160,6 +160,11 @@ services:
       # /users/me/api_keys routes instead.
       - KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID:-medidex-backoffice}
       - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}
+      # Public client + canonical resource URL for the MCP server
+      # (app/backend/mcp_server/) - see .env.example for how these relate to
+      # keycloak/realm-medidex.json's audience mappers.
+      - KEYCLOAK_MCP_CLIENT_ID=${KEYCLOAK_MCP_CLIENT_ID:-medidex-mcp}
+      - MCP_RESOURCE_URL=${MCP_RESOURCE_URL:-http://localhost:8002/backend/api/mcp}
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-resources}

@@ -9,6 +9,7 @@ rispy==0.10.0
 nbib==0.3.2
 python-keycloak==7.1.1
 jwcrypto==1.6.1
+mcp==2.2.0
 pydantic[email]==2.13.5
 nameparser==2.3.0
 PyMuPDF==1.28.2
