@@ -8,19 +8,18 @@ import os
 import time
 
 import httpx
-from jwcrypto import jwk
 from jwcrypto.jwt import JWTExpired
-from keycloak import KeycloakOpenID
+
+from src.utils.keycloak import (
+    KEYCLOAK_URL,
+    KEYCLOAK_PUBLIC_URL,
+    KEYCLOAK_REALM,
+    create_keycloak_openid,
+    decode_access_token,
+)
 
 load_dotenv()
 
-KEYCLOAK_URL = os.getenv("KEYCLOAK_URL")
-# Browser-reachable Keycloak URL, used for the Swagger UI authorization-code
-# redirect (the browser talks to Keycloak directly, not through KEYCLOAK_URL,
-# which is the backend's internal-network address). Falls back to
-# KEYCLOAK_URL for setups where that's already publicly reachable.
-KEYCLOAK_PUBLIC_URL = os.getenv("KEYCLOAK_PUBLIC_URL", KEYCLOAK_URL)
-KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "medidex")
 KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "medidex-frontend")
 
 router = APIRouter(tags=["auth"])
@@ -41,76 +40,27 @@ oauth2_scheme = OAuth2AuthorizationCodeBearer(
 # that transparent even though a key is really a Keycloak client's credentials.
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-if not KEYCLOAK_URL:
-    raise RuntimeError("KEYCLOAK_URL must be set")
-
 """
 Authentication
 
 Identity, roles ("USER"/"ADMIN") and account approval ("APPROVED") are all
 managed by Keycloak (realm: KEYCLOAK_REALM). Access tokens are validated
-locally against the realm's public key(s).
+locally against the realm's public key(s) - the actual JWKS fetch/decode
+logic lives in ../utils/keycloak.py so it can be reused outside this
+FastAPI-specific presentation tier (see mcp_server/auth.py).
 """
 
-keycloak_openid = KeycloakOpenID(
-    server_url=KEYCLOAK_URL,
-    client_id=KEYCLOAK_CLIENT_ID,
-    realm_name=KEYCLOAK_REALM,
-)
+keycloak_openid = create_keycloak_openid(KEYCLOAK_CLIENT_ID)
 
-# Cache of the realm's signing key(s) - reload on failure or kid mismatch
-_jwk_set_cache = None
-
-async def get_jwk_set(force_refresh: bool = False):
-    """Fetch and cache the realm's JWK set. Reloads on failure or when forced."""
-    global _jwk_set_cache
-
-    if _jwk_set_cache and not force_refresh:
-        return _jwk_set_cache
-
-    try:
-        certs = await keycloak_openid.a_certs()
-        key_set = jwk.JWKSet()
-        for cert in certs["keys"]:
-            key_set.add(jwk.JWK(**cert))
-        _jwk_set_cache = key_set
-        return _jwk_set_cache
-    except Exception:
-        # If cache exists, return it even if refresh failed
-        if _jwk_set_cache:
-            return _jwk_set_cache
-        # Otherwise, let the exception propagate
-        raise
-
-async def verify_token(token, keycloak_openid_client: Optional[KeycloakOpenID] = None):
-    """Verify a Keycloak-issued access token and return its decoded claims.
-
-    `keycloak_openid_client` defaults to the module-level client (bound to
-    KEYCLOAK_CLIENT_ID / medidex-frontend). Callers validating tokens issued to a
-    different client - e.g. the MCP server's own KeycloakOpenID instance in
-    mcp_server/auth.py - pass their own, since python-keycloak's a_decode_token
-    checks aud/azp against whichever client the instance was constructed with.
-    """
+async def verify_token(token):
+    """Verify a Keycloak-issued access token and return its decoded claims."""
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    client = keycloak_openid_client or keycloak_openid
-
     try:
-        key_set = await get_jwk_set(force_refresh=False)
-        try:
-            decoded = await client.a_decode_token(token, key=key_set)
-        except JWTExpired:
-            raise
-        except Exception:
-            # Signing key may have rotated; refresh once and retry
-            key_set = await get_jwk_set(force_refresh=True)
-            decoded = await client.a_decode_token(token, key=key_set)
-        return decoded
+        return await decode_access_token(token, keycloak_openid)
     except JWTExpired:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
-    except HTTPException:
-        raise
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token. Please log in again.")
 

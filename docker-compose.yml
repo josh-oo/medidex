@@ -154,7 +154,7 @@ services:
       - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
       - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
       # Service-account credential used by the backend's admin API
-      # (src/api/admin.py) to call the Keycloak Admin REST API - user
+      # (fastapi_app/admin.py) to call the Keycloak Admin REST API - user
       # management and API-key (client) management. Never exposed to the
       # frontend; the frontend calls the backend's /admin/* and
       # /users/me/api_keys routes instead.

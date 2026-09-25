@@ -183,3 +183,13 @@ class OpenAlexService:
         except:
             pass
         return set(urls)
+
+# Singletons: DoclingService's and OpenAlexService's semaphores are meant to
+# cap concurrent calls to their respective backends process-wide (CrawlerService
+# is stateless but kept consistent with the same pattern). A new instance per
+# call site - `OpenAlexService()` in fastapi_app/resources.py and fastapi_app/projects.py,
+# the old FastAPI Depends(get_document_service) factory - gives each caller its
+# own semaphore instead, so the cap never actually applies across concurrent use.
+crawler_service = CrawlerService()
+docling_service = DoclingService()
+open_alex_service = OpenAlexService()

@@ -70,3 +70,10 @@ class EmbeddingService:
                 "status": "unhealthy",
                 "message": f"subservice unreachable: {str(e)}"
             }
+
+# Singleton: the semaphore inside EmbeddingService is meant to cap concurrent
+# requests to the embedding backend process-wide. Constructing a new instance
+# per request (as the old FastAPI Depends(get_embedding_service) factory did)
+# gives each request its own semaphore instead, so the cap never actually
+# applies across concurrent requests.
+embedding_service = EmbeddingService()

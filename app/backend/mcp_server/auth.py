@@ -1,21 +1,20 @@
 """Keycloak-backed token verification for the MCP resource server.
 
-Reuses the JWKS cache and decode/retry logic already in src/api/auth.py (the
-REST API's own Keycloak integration) instead of re-implementing JWT handling.
-This verifier differs only in which Keycloak client - and therefore which
-token audience - it checks tokens against: REST API tokens are scoped to
+Reuses the framework-agnostic JWKS cache and decode/retry logic in
+src/utils/keycloak.py - not fastapi_app/auth.py, which is the REST API's FastAPI
+presentation tier (Security/Depends dependencies, HTTPException translation)
+and stays a REST-only concern. This verifier differs from the REST API's own
+token verification only in which Keycloak client - and therefore which token
+audience - it checks tokens against: REST API tokens are scoped to
 medidex-frontend, MCP tokens are scoped to medidex-mcp (see
 deploy/keycloak/realm-medidex.json).
 """
 
 import os
 
-from fastapi import HTTPException
-from keycloak import KeycloakOpenID
-
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 
-from src.api.auth import KEYCLOAK_URL, KEYCLOAK_REALM, verify_token as verify_keycloak_token
+from src.utils.keycloak import create_keycloak_openid, decode_access_token
 
 KEYCLOAK_MCP_CLIENT_ID = os.getenv("KEYCLOAK_MCP_CLIENT_ID", "medidex-mcp")
 MCP_RESOURCE_URL = os.getenv("MCP_RESOURCE_URL")
@@ -23,23 +22,22 @@ MCP_RESOURCE_URL = os.getenv("MCP_RESOURCE_URL")
 if not MCP_RESOURCE_URL:
     raise RuntimeError("MCP_RESOURCE_URL must be set")
 
-# Separate KeycloakOpenID instance so python-keycloak's own aud/azp check in
+# Own KeycloakOpenID instance so python-keycloak's own aud/azp check in
 # a_decode_token() validates against the MCP client's id, not the frontend's.
-# JWKS itself is realm-level and shared via the cache in src/api/auth.py.
-_mcp_keycloak_openid = KeycloakOpenID(
-    server_url=KEYCLOAK_URL,
-    client_id=KEYCLOAK_MCP_CLIENT_ID,
-    realm_name=KEYCLOAK_REALM,
-)
+# JWKS itself is realm-level and shared via the cache in src/utils/keycloak.py.
+_mcp_keycloak_openid = create_keycloak_openid(KEYCLOAK_MCP_CLIENT_ID)
 
 
 class KeycloakMCPTokenVerifier(TokenVerifier):
     """Validates bearer tokens issued to the medidex-mcp Keycloak client."""
 
     async def verify_token(self, token: str) -> AccessToken | None:
+        if not token:
+            return None
+
         try:
-            decoded = await verify_keycloak_token(token, keycloak_openid_client=_mcp_keycloak_openid)
-        except HTTPException:
+            decoded = await decode_access_token(token, _mcp_keycloak_openid)
+        except Exception:
             return None
 
         if "APPROVED" not in decoded.get("roles", []):

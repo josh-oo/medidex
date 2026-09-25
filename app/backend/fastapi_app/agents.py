@@ -1,11 +1,53 @@
-from fastapi import APIRouter, Body, Depends
-from fastapi.responses import StreamingResponse
-from ..services import get_agent_service, get_question_answering_service, AutomationService, QuestionAnsweringService
+from typing import Any, Optional
 
+from fastapi import APIRouter, Body, Depends, Query
+from fastapi.responses import StreamingResponse
+
+from src.context import RequestContext
+from src.services.agent import AutomationService, QuestionAnsweringService
+from src.utils.llm.agent import get_checkpointer
 
 from .auth import is_verified_api_call
+from .deps import get_context
 
 router = APIRouter(tags=["agents"], dependencies=[Depends(is_verified_api_call)])
+
+cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
+
+async def get_agent_service(
+    ctx : RequestContext = Depends(get_context),
+    model: str = Query("gpt-5-nano", description="LLM model name to use for study prediction"),
+    checkpointer: Any = Depends(get_checkpointer),
+    cutoff: Optional[str] = cutoff_query,
+) -> AutomationService:
+    await checkpointer.setup()
+    return AutomationService(
+        user_id=ctx.user_id,
+        report_repo=ctx.report_repo,
+        study_repo=ctx.study_repo,
+        document_service=ctx.document_service,
+        study_similarity_service=ctx.study_similarity_service,
+        checkpointer=checkpointer,
+        model=model,
+        cutoff=cutoff,
+    )
+
+async def get_question_answering_service(
+    ctx : RequestContext = Depends(get_context),
+    model: str = Query("gpt-5-nano", description="LLM model name to use for report question answering"),
+    checkpointer: Any = Depends(get_checkpointer),
+) -> QuestionAnsweringService:
+    await checkpointer.setup()
+    return QuestionAnsweringService(
+        user_id=ctx.user_id,
+        report_repo=ctx.report_repo,
+        study_repo=ctx.study_repo,
+        document_service=ctx.document_service,
+        study_similarity_service=ctx.study_similarity_service,
+        checkpointer=checkpointer,
+        model=model,
+        cutoff=None,
+    )
 
 @router.get("/reports/{report_id}/chat", summary="Get the current chat history for a given report.")
 async def chat_history(report_id : int, agent_service: QuestionAnsweringService = Depends(get_question_answering_service)):
