@@ -151,6 +151,17 @@ class ProjectRepository:
         print("Set auto searched: ", report_added,flush=True)
         #await self.db.commit()
 
+    async def is_project_assignee(self, project_id: str) -> bool:
+        if not self.user_id:
+            return False
+
+        stmt = select(ProjectAssignees).where(
+            (ProjectAssignees.project_id == project_id)
+            & (ProjectAssignees.assignee == self.user_id)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
     async def get_assigned_projects(self) -> List[Project]:
         if not self.user_id:
             return []

@@ -4,7 +4,7 @@ import { useParams, Outlet } from "react-router-dom";
 import { AdminGuard } from "@/components/auth/admin-guard";
 import { ReportColumnClient } from "./components/report-column-client";
 import type { ProjectAnnotationsDto, ReportDetailDto } from "@/types/apiDTOs";
-import { getAnnotations, getProjectReports } from "@/lib/api/projectApi";
+import { getAnnotations, getProjectReportsReview } from "@/lib/api/projectApi";
 import { ReviewAnnotationsProvider } from "./components/review-annotations-context";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuthStore } from "@/hooks/use-auth";
@@ -30,17 +30,12 @@ export default function AnnotationsReviewPage() {
     (async () => {
       try {
         const [reports, annotations] = await Promise.all([
-          getProjectReports(projectId, false),
+          getProjectReportsReview(projectId),
           getAnnotations(projectId),
         ]);
 
-        const annotatedReportIds = new Set(Object.keys(annotations ?? {}));
-        const filteredReports = (reports ?? []).filter((report) =>
-          annotatedReportIds.has(String(report.report.reportId))
-        );
-
         if (!cancelled) {
-          setData({ reports: filteredReports, annotations: annotations ?? {} });
+          setData({ reports: reports ?? [], annotations: annotations ?? {} });
         }
       } catch (error) {
         if (cancelled) return;

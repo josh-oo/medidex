@@ -48,6 +48,39 @@ export interface ReportDetailDto {
   assignedStudies: StudyDto[];
 }
 
+// `any` (the default/absent) means "don't filter on this dimension". `only` keeps just the
+// reports matching this dimension (e.g. processed: "only" -> only processed reports); `exclude`
+// keeps everything else (processed: "exclude" -> only unprocessed reports). Different fields
+// combine as an AND, so e.g. { newStudy: "only", flagged: "exclude" } can be requested together.
+// Readiness (still-processing reports) isn't one of these - it's decided by which endpoint you
+// call (getProjectReports vs getProjectReportsIntake), not a filter field, since normal users
+// must never be able to request unready reports at all.
+export type FilterMode = "any" | "only" | "exclude";
+
+export interface ReportFiltersState {
+  processed?: FilterMode;
+  withPdf?: FilterMode;
+  flagged?: FilterMode;
+  newStudy?: FilterMode;
+  consensus?: FilterMode;
+  reviewed?: FilterMode;
+}
+
+// One filter dimension in the report list's filter bar, rendered as a single dropdown button
+// (labelled `label` while its mode is "any", or the matching option label once set) offering
+// all 3 FilterMode states - Any / onlyLabel / excludeLabel - independently of every other
+// dimension's own dropdown.
+export interface ReportFilterDimension {
+  field: keyof ReportFiltersState;
+  label: string;
+  onlyLabel: string;
+  excludeLabel: string;
+}
+
+export interface GetProjectReportsParams extends ReportFiltersState {
+  search?: string;
+}
+
 export interface SimilarTagDto {
   id: string;
   name: string;

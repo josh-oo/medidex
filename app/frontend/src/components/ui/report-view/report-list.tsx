@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import {
   FileText,
   Calendar,
+  ChevronDown,
   Users,
   Download,
   ExternalLink,
@@ -36,9 +37,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
-import { filterReports, ReportFilterType } from "@/lib/filterUtils";
 import { useReportStore } from "@/hooks/use-report-store";
-import { ProjectAnnotationsDto } from "@/types/apiDTOs";
+import { FilterMode, GetProjectReportsParams, ReportDetailDto, ReportFilterDimension, ReportFiltersState } from "@/types/apiDTOs";
 import { toast } from "sonner";
 import { Abstract } from "./report-abstract";
 import {
@@ -48,23 +48,54 @@ import {
   getReportPdf,
 } from "@/lib/api/reportApi";
 
+function reportFilterMode(filters: ReportFiltersState, field: keyof ReportFiltersState): FilterMode {
+  return filters[field] ?? "any";
+}
+
+// Each dimension's 3 states (Any/Only/Exclude) are independent of every other dimension's -
+// setting one never touches another field.
+function setReportFilterMode(
+  filters: ReportFiltersState,
+  field: keyof ReportFiltersState,
+  mode: FilterMode
+): ReportFiltersState {
+  if (mode === "any") {
+    const next = { ...filters };
+    delete next[field];
+    return next;
+  }
+  return { ...filters, [field]: mode };
+}
+
 interface ReportListProps {
   baseUrl: string;
   editMode: boolean;
-  filterOptions?: { value: string; label: string }[];
+  filterDimensions?: ReportFilterDimension[];
   queryParams?: Record<string, string | number | boolean | undefined>;
-  annotations?: ProjectAnnotationsDto;
+  // Which endpoint backs this view (getProjectReports / getProjectReportsIntake /
+  // getProjectReportsReview) - each bakes in its own readiness/scope rules server-side, so
+  // this component never needs to know or override those.
+  fetchReports: (
+    projectId: string,
+    filters: GetProjectReportsParams
+  ) => Promise<ReportDetailDto[]>;
+  // The parent layout's own initial, unfiltered fetch (same endpoint as `fetchReports` with no
+  // filters/search) - used only to seed the very first render so the list doesn't flash empty
+  // while that same data is re-fetched below; every filter/search change after that always goes
+  // through fetchReports, never falls back to a cached snapshot.
+  initialReports: ReportDetailDto[];
 }
 
 export function ReportList({
   baseUrl,
-  queryParams = { }, 
+  queryParams = { },
   editMode,
-  filterOptions = [],
-  annotations = { },
+  filterDimensions = [],
+  fetchReports,
+  initialReports,
 }: ReportListProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [assignmentFilter, setAssignmentFilter] = useState<ReportFilterType>("all");
+  const [filters, setFilters] = useState<ReportFiltersState>({});
   const [flagDialogOpen, setFlagDialogOpen] = useState(false);
   const [selectedFlagReport, setSelectedFlagReport] = useState<{ id: number; title: string } | null>(null);
   const [flagDetails, setFlagDetails] = useState("");
@@ -109,9 +140,67 @@ export function ReportList({
 
   const reportsDict = useReportStore((state) => state.reports);
   const setReportFlag = useReportStore((state) => state.setFlag);
-  const reportsList = useMemo(() => Object.values(reportsDict), [reportsDict]);
+  // Only for the "X of Y" hint below - the parent layout's initial, unfiltered load for this
+  // view, not the list actually rendered (see the fetch effect further down).
+  const initialReportsCount = useMemo(() => Object.keys(reportsDict).length, [reportsDict]);
 
-  const filteredReports = filterReports(reportsList, annotations, searchQuery, assignmentFilter);
+  // Seeded from the parent layout's own initial fetch so the list doesn't flash empty while
+  // the (functionally identical) fetch below is still in flight.
+  const [filteredReports, setFilteredReports] = useState<ReportDetailDto[]>(initialReports);
+  const [isLoading, setIsLoading] = useState(false);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // Only the free-text search is debounced (it fires on every keystroke); a filter chip click
+  // is already a single, deliberate action, so it fetches immediately below instead of also
+  // waiting out a debounce window on top of the network round trip.
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(handle);
+  }, [searchQuery]);
+
+  // A project switch swaps in the new project's own initial data right away, same as on
+  // first mount, rather than showing the previous project's reports until the fetch below
+  // (also triggered by the projectId change) resolves.
+  useEffect(() => {
+    setFilteredReports(initialReports);
+  }, [projectId, initialReports]);
+
+  // Always the single source of truth for what's rendered - no separate "use the client store's
+  // snapshot when no filter is active" path, so clearing a filter/search always re-fetches
+  // from the server instead of silently falling back to a possibly-stale local cache.
+  useEffect(() => {
+    if (!projectId) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+
+    fetchReports(projectId, {
+      search: debouncedSearch || undefined,
+      ...filters,
+    })
+      .then((result) => {
+        if (!cancelled) setFilteredReports(result);
+      })
+      .catch((error) => {
+        console.error("Error fetching reports:", error);
+        if (!cancelled) setFilteredReports([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, debouncedSearch, filters, fetchReports]);
+
+  const patchFilteredReportFlag = (reportId: number, flag: string | undefined) => {
+    setFilteredReports((prev) =>
+      prev.map((r) => (r.report.reportId === reportId ? { ...r, flag } : r))
+    );
+  };
 
   useEffect(() => {
     if (!flagDialogOpen || !selectedFlagReport) {
@@ -187,6 +276,7 @@ export function ReportList({
       });
 
       setReportFlag(selectedFlagReport.id, flagDetails.trim());
+      patchFilteredReportFlag(selectedFlagReport.id, flagDetails.trim());
 
       toast.success("Flag saved.");
       handleFlagDialogChange(false);
@@ -204,6 +294,7 @@ export function ReportList({
       await deleteReportFlagByReportId(reportId);
 
       setReportFlag(reportId, undefined);
+      patchFilteredReportFlag(reportId, undefined);
       toast.success("Flag deleted.");
 
       if (selectedFlagReport?.id === reportId) {
@@ -276,8 +367,9 @@ export function ReportList({
           <h2 className="text-xl font-semibold">Reports</h2>
           <span className="text-sm text-muted-foreground">
             ({filteredReports.length})
-            {searchQuery && ` of ${reportsList.length}`}
+            {searchQuery && ` of ${initialReportsCount}`}
           </span>
+          {isLoading && <Spinner className="h-3.5 w-3.5 text-muted-foreground" />}
         </div>
 
         <div className="mt-4 space-y-3">
@@ -303,32 +395,53 @@ export function ReportList({
               )}
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                Filter:
-              </span>
-              <div className="flex gap-1">
-                <Button
-                  key="all"
-                  variant={assignmentFilter === "all" ? "default" : "outline"}
-                  size="sm"
-                  className="h-7 text-xs px-3"
-                  onClick={() => setAssignmentFilter("all" as ReportFilterType)}
-                >
-                  {"All"}
-                </Button>
-                {filterOptions.map((filter) => (
-                  <Button
-                    key={filter.value}
-                    variant={assignmentFilter === filter.value ? "default" : "outline"}
-                    size="sm"
-                    className="h-7 text-xs px-3"
-                    onClick={() => setAssignmentFilter(filter.value as ReportFilterType)}
-                  >
-                    {filter.label}
-                  </Button>
-                ))}
-              </div>
+            <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+              {filterDimensions.map((dimension) => {
+                const mode = reportFilterMode(filters, dimension.field);
+                const currentLabel =
+                  mode === "only"
+                    ? dimension.onlyLabel
+                    : mode === "exclude"
+                    ? dimension.excludeLabel
+                    : dimension.label;
+                return (
+                  <DropdownMenu key={dimension.field}>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant={mode === "any" ? "outline" : "default"}
+                        size="sm"
+                        className="h-7 gap-1 text-xs px-3"
+                      >
+                        {currentLabel}
+                        <ChevronDown className="h-3 w-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setFilters((prev) => setReportFilterMode(prev, dimension.field, "any"))
+                        }
+                      >
+                        Any
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setFilters((prev) => setReportFilterMode(prev, dimension.field, "only"))
+                        }
+                      >
+                        {dimension.onlyLabel}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setFilters((prev) => setReportFilterMode(prev, dimension.field, "exclude"))
+                        }
+                      >
+                        {dimension.excludeLabel}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                );
+              })}
             </div>
           </div>
         </div>

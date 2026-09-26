@@ -4,7 +4,7 @@ import { useParams, Outlet } from "react-router-dom";
 import { AdminGuard } from "@/components/auth/admin-guard";
 import { ReportColumnClient } from "./components/report-column-client";
 import type { ReportDetailDto } from "@/types/apiDTOs";
-import { getProjectReports } from "@/lib/api/projectApi";
+import { getProjectReportsIntake } from "@/lib/api/projectApi";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuthStore } from "@/hooks/use-auth";
 
@@ -21,7 +21,7 @@ export default function PdfUploadPage() {
     setReports(null);
     setNotFound(false);
 
-    getProjectReports(projectId, true)
+    getProjectReportsIntake(projectId)
       .then((result) => {
         if (!cancelled) setReports(result ?? []);
       })

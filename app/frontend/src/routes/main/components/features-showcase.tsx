@@ -48,7 +48,7 @@ const features: Feature[] = [
     image: "/images/showcase/empty.png",
     highlights: [
       "Search reports by title, author, or content",
-      "Filter by All, Assigned, or Unassigned status",
+      "Filter by All, Processed, or Unprocessed status",
       "View report details including year and authors",
       "Download individual reports as PDFs",
     ],

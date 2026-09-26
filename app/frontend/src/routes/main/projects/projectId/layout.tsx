@@ -16,7 +16,7 @@ export default function ReportColumn() {
     setReports(null);
     setNotFound(false);
 
-    getProjectReports(projectId, false)
+    getProjectReports(projectId)
       .then((result) => {
         if (!cancelled) setReports(result ?? []);
       })

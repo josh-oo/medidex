@@ -2,6 +2,7 @@ import apiClient from "./apiClient";
 import { AxiosRequestConfig } from "axios";
 import { getAccessToken } from "@/lib/client/keycloak";
 import {
+  GetProjectReportsParams,
   ProjectAnnotationsDto,
   ProjectAssigneeDto,
   ProjectDetailsDto,
@@ -82,17 +83,25 @@ export const deleteProjectById = (
     });
 }
 
-//get all report details for a project
+// Three endpoints, one per view, each with only the filter dimensions relevant to it - see
+// ReportFiltersState. Readiness is baked into which endpoint you call, not a filter param:
+// only /reports/intake (admin-only) ever returns still-processing reports.
+
+//get all fully-processed report details for a project - the normal curation view, available
+//to any project assignee (not just admins).
 export const getProjectReports = (
   projectId: string,
-  raw: boolean = false,
+  filters?: GetProjectReportsParams,
   config?: AxiosRequestConfig
 ): Promise<ReportDetailDto[]> => {
   const requestConfig: AxiosRequestConfig = {
     ...config,
     params: {
       ...config?.params,
-      raw: raw,
+      search: filters?.search || undefined,
+      processed: filters?.processed,
+      flagged: filters?.flagged,
+      new_study: filters?.newStudy,
     },
   };
 
@@ -103,6 +112,60 @@ export const getProjectReports = (
     })
     .catch(error => {
       console.error(`Error fetching reports for project ${projectId}:`, error);
+      throw error;
+    });
+}
+
+//get incoming reports for a project, including still-processing ones - the admin intake view.
+export const getProjectReportsIntake = (
+  projectId: string,
+  filters?: GetProjectReportsParams,
+  config?: AxiosRequestConfig
+): Promise<ReportDetailDto[]> => {
+  const requestConfig: AxiosRequestConfig = {
+    ...config,
+    params: {
+      ...config?.params,
+      search: filters?.search || undefined,
+      with_pdf: filters?.withPdf,
+    },
+  };
+
+  return apiClient
+    .get<ReportDetailDto[]>(`/projects/${projectId}/reports/intake`, requestConfig)
+    .then(response => {
+      return response.data;
+    })
+    .catch(error => {
+      console.error(`Error fetching intake reports for project ${projectId}:`, error);
+      throw error;
+    });
+}
+
+//get fully-annotated reports for a project - the admin annotator-review view. Always
+//restricted server-side to reports every assignee has completed annotating.
+export const getProjectReportsReview = (
+  projectId: string,
+  filters?: GetProjectReportsParams,
+  config?: AxiosRequestConfig
+): Promise<ReportDetailDto[]> => {
+  const requestConfig: AxiosRequestConfig = {
+    ...config,
+    params: {
+      ...config?.params,
+      search: filters?.search || undefined,
+      consensus: filters?.consensus,
+      reviewed: filters?.reviewed,
+    },
+  };
+
+  return apiClient
+    .get<ReportDetailDto[]>(`/projects/${projectId}/reports/review`, requestConfig)
+    .then(response => {
+      return response.data;
+    })
+    .catch(error => {
+      console.error(`Error fetching review reports for project ${projectId}:`, error);
       throw error;
     });
 }
