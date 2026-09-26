@@ -41,30 +41,57 @@ fired with a bare asyncio.create_task() instead (see _fire_and_forget()) -
 process_report() opens its own DB session(s) independently of the tool
 call's own request_context(), so it keeps running after this tool returns.
 
-list_projects and list_tasks duplicate the `projects` and `tasks` resources
-(mcp_server/resources.py) as tools. Not the general policy (a plain fetch by
-a known id stays resource-only, see resources.py's own docstring) - but
-these two are the only *discovery* entry points ("what projects exist" has
-no id to fetch by), and MCP resource support is inconsistent across clients
-in practice (several only surface `tools/*`, never calling `resources/list`
-at all), so without a tool form a client like that has no way to ever learn
-a project id exists to act on. The underlying reads are cheap and
-side-effect-free, so the duplication costs little.
+list_projects, list_tasks, and the whole "Study/report/project lookup tools"
+section further down duplicate resources.py's resources as tools, because
+MCP resource support is inconsistent across clients in practice: several
+clients only ever surface `tools/*`, never calling `resources/list` at all,
+and even ones that do generally can't fill in a *template* resource's URI
+parameters (medidex://studies/{study_id} and friends) - Claude included, as
+of writing. Without a tool form, a client like that has no way to ever reach
+these lookups, whether by discovery (list_projects/list_tasks - "what
+projects exist" has no id to fetch by in the first place) or by id (the
+lookup tools further down). The underlying reads are cheap and
+side-effect-free, so the duplication costs little; resources.py keeps its
+own definitions too, for clients that do support resources/templates, and
+for the `project` resource's subscribability (see resources.py's own
+docstring), which the tool form doesn't replicate.
 """
 
 import asyncio
-from typing import Annotated, List, Set
+from typing import Annotated, Any, Dict, List, Set
 
 from mcp.server import MCPServer
-from mcp.server.mcpserver import AcceptedElicitation, Context, Elicit, ElicitationResult, Resolve
+from mcp.types import ToolAnnotations
+from typing import Annotated
+
 from pydantic import BaseModel, Field
+
+from mcp.server.mcpserver import (
+    AcceptedElicitation,
+    Context,
+    Elicit,
+    ElicitationResult,
+    Resolve,
+)
+from mcp.server.mcpserver.exceptions import ToolError
 
 from src.background.wrapper import run_process_report_background
 from src.services.project import ProjectResourceService
-from src.utils.dto import Project, ProjectAssignee, ProjectDetails, ProjectTask, Study, studies_to_dto
-from src.utils.ris_parser import parse_file
+from src.utils.dto import (
+    Project,
+    ProjectAssignee,
+    ProjectDetails,
+    ProjectTask,
+    Report,
+    Study,
+    Tag,
+    reports_to_dto,
+    studies_to_dto,
+    tags_to_dto,
+)
+from src.utils.ris_parser import RisParseError, parse_file
 
-from .context import current_user_id, request_context, require_admin
+from .context import current_user_id, request_context, require_admin, require_report_access
 
 # Fire-and-forget background jobs (see _fire_and_forget()) need a strong
 # reference kept somewhere until they finish, or asyncio may garbage-collect
@@ -93,61 +120,30 @@ class _InMemoryUpload:
 
 
 class ConfirmAction(BaseModel):
-    confirm: bool = Field(description="Set to true to confirm this action. Anything else cancels it.")
-
-
-def _client_supports_elicitation(mcp_ctx: Context) -> bool:
-    """Mirrors the capability check the SDK's own resolver machinery runs
-    before honoring an Elicit marker (mcp.server.mcpserver.resolve._require_capability,
-    form-mode branch): True unless the client declared elicitation support
-    but only in url mode, or didn't declare it at all.
-    """
-    capabilities = mcp_ctx.client_capabilities
-    elicitation = capabilities.elicitation if capabilities is not None else None
-    return elicitation is not None and (elicitation.form is not None or elicitation.url is None)
-
-
-async def _confirm_delete_project(project_id: str, confirm: bool, mcp_ctx: Context) -> ConfirmAction | Elicit[ConfirmAction]:
-    """Resolver for delete_project's `confirmation` parameter - runs before the
-    tool body. require_admin() here means a non-admin is rejected without ever
-    being asked to confirm.
-    """
-    require_admin()
-    if confirm:
-        return ConfirmAction(confirm=True)
-    if not _client_supports_elicitation(mcp_ctx):
-        raise ValueError(
-            "This client doesn't support confirmation prompts. Confirm with the user yourself, "
-            "then call this tool again with confirm=True."
-        )
-    return Elicit(
-        f"Delete project '{project_id}' and all its reports and embeddings? This cannot be undone.",
-        ConfirmAction,
+    confirm: bool = Field(
+        description="Confirm this destructive action."
     )
 
 
-async def _confirm_remove_project_task(
-    project_id: str, assignee_user_id: str, confirm: bool, mcp_ctx: Context
+async def _confirm_delete_project(
+    project_id: str,
+    ctx: Context,
 ) -> ConfirmAction | Elicit[ConfirmAction]:
-    """Resolver for remove_project_task's `confirmation` parameter - see
-    _confirm_delete_project.
-    """
     require_admin()
-    if confirm:
-        return ConfirmAction(confirm=True)
-    if not _client_supports_elicitation(mcp_ctx):
-        raise ValueError(
-            "This client doesn't support confirmation prompts. Confirm with the user yourself, "
-            "then call this tool again with confirm=True."
+
+    capabilities = ctx.client_capabilities
+    if capabilities is None or capabilities.elicitation is None:
+        raise ToolError(
+            "This client did not declare the MCP 'elicitation' capability, so "
+            "delete_project cannot ask for confirmation before deleting. "
+            f"(client capabilities: {capabilities!r})"
         )
+
     return Elicit(
-        f"Remove {assignee_user_id}'s assignment from project '{project_id}'?",
+        f"Delete project '{project_id}' and all its reports and embeddings? "
+        "This cannot be undone.",
         ConfirmAction,
     )
-
-
-def _confirmed(confirmation: ElicitationResult[ConfirmAction]) -> bool:
-    return isinstance(confirmation, AcceptedElicitation) and confirmation.data.confirm
 
 
 def register(server: MCPServer) -> None:
@@ -155,43 +151,258 @@ def register(server: MCPServer) -> None:
     Search tools
     """
 
-    @server.tool()
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Search Study by Short Name",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
     async def search_study_by_short_name(short_name: str) -> Study:
         """Search for a clinical study by its short name (acronym, trial registration id, or "first author + year" label). Returns the single best match."""
         async with request_context(current_user_id()) as ctx:
             study = await ctx.study_repo.search_study_by_shortname(short_name)
             if study is None:
-                raise ValueError(f"No study found with shortname '{short_name}'")
+                raise ToolError(f"No study found with shortname '{short_name}'")
             return studies_to_dto([study])[0]
 
-    @server.tool()
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Search Study IDs by Trial ID",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
     async def search_study_ids_by_trial_id(trial_id: str) -> List[int]:
         """Search for study ids by trial registration id (e.g. NCT00034892, ACTRN12605000202662)."""
         async with request_context(current_user_id()) as ctx:
             result = await ctx.study_repo.get_study_id_by_trial_id(trial_id)
             if result is None:
-                raise ValueError(f"Trial {trial_id} not found")
+                raise ToolError(f"Trial {trial_id} not found")
             return result
+
+    """
+    Study/report/project lookup tools
+
+    Tool-form duplicates of resources.py's per-id study/report/project resources
+    (medidex://studies/{study_id}, medidex://reports/{report_id}, .../projects/{project_id},
+    ...). Beyond list_projects/list_tasks's own rationale (parameterless discovery
+    entry points), these hit a harder gap: they're *template* resources, and most
+    MCP clients - Claude included - can't fill in a template's URI parameters at
+    all, so a client like that can't reach these resources no matter how it's
+    asked (see resources.py's own module docstring). The resources stay defined
+    there too, for clients that do support templates.
+
+    report-pdf is deliberately not duplicated here: a whole PDF as inline tool
+    output floods the model's context with a binary blob it can't read as text,
+    which isn't a good fit for a tool result either way.
+    """
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Get Study",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
+    async def get_study(study_id: int) -> Study:
+        """Full details for a study by its numeric id. Tool form of the `study` resource, for clients that don't support MCP resource templates."""
+        async with request_context(current_user_id()) as ctx:
+            study = await ctx.study_repo.get_study_by_id(study_id)
+            if study is None:
+                raise ToolError(f"Study {study_id} not found")
+            return studies_to_dto([study])[0]
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Get Study Reports",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
+    async def get_study_reports(study_id: int) -> List[Report]:
+        """All reports already linked to a study (the "studification" result for that study). Tool form of the `study-reports` resource."""
+        async with request_context(current_user_id()) as ctx:
+            reports = await ctx.study_repo.get_linked_reports(study_id)
+            return reports_to_dto(reports)
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Get Study Interventions",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
+    async def get_study_interventions(study_id: int) -> List[Tag]:
+        """Interventions for a specific study (e.g. 'Placebo', 'Group Therapy', ...). Tool form of the `study-interventions` resource."""
+        async with request_context(current_user_id()) as ctx:
+            result = await ctx.study_repo.get_study_interventions_single(study_id)
+            return tags_to_dto(result)
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Get Study Conditions",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
+    async def get_study_conditions(study_id: int) -> List[Tag]:
+        """The health conditions of participants in a specific study (e.g. 'COVID-19', 'Diabetes', ...). Tool form of the `study-conditions` resource."""
+        async with request_context(current_user_id()) as ctx:
+            result = await ctx.study_repo.get_study_conditions_single(study_id)
+            return tags_to_dto(result)
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Get Study Outcomes",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
+    async def get_study_outcomes(study_id: int) -> List[Tag]:
+        """Outcomes for a specific study (e.g. 'Mortality', 'Hospitalization', ...). Tool form of the `study-outcomes` resource."""
+        async with request_context(current_user_id()) as ctx:
+            result = await ctx.study_repo.get_study_outcomes_single(study_id)
+            return tags_to_dto(result)
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Get Study Participants",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
+    async def get_study_participants(study_id: int) -> List[Dict[str, Any]]:
+        """Participant description for a specific study (e.g. Male, Female, Adult, Child, ...). Tool form of the `study-participants` resource."""
+        async with request_context(current_user_id()) as ctx:
+            return await ctx.study_repo.get_study_participants_single(study_id)
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Get Study Design",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
+    async def get_study_design(study_id: int) -> List[Dict[str, Any]]:
+        """The study design of the corresponding study ('Randomized Controlled Trial', 'Controlled Clinical Trial'). Tool form of the `study-design` resource."""
+        async with request_context(current_user_id()) as ctx:
+            return await ctx.study_repo.get_study_design_single(study_id)
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Get Study Persons",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
+    async def get_study_persons(study_id: int) -> List[str]:
+        """All persons (usually only authors) associated with a specific study. Tool form of the `study-persons` resource."""
+        async with request_context(current_user_id()) as ctx:
+            # Matches the REST endpoint's own default (Query(False)), not
+            # the repository method's own default of True.
+            return await ctx.study_repo.get_study_persons_single(study_id=study_id, normalize_names=False)
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Get Report",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
+    async def get_report(report_id: int) -> Report:
+        """Full details (including abstract) for a single report by its numeric id. Tool form of the `report` resource."""
+        async with request_context(current_user_id()) as ctx:
+            await require_report_access(report_id, ctx)
+            db_report = await ctx.report_repo.get_report_by_id(report_id)
+            if db_report is None:
+                raise ToolError(f"Report {report_id} not found")
+            return reports_to_dto([db_report])[0]
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Get Report Studies",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
+    async def get_report_studies(report_id: int) -> List[Study]:
+        """The studies linked to a specific report. Tool form of the `report-studies` resource."""
+        async with request_context(current_user_id()) as ctx:
+            await require_report_access(report_id, ctx)
+            result = await ctx.report_repo.get_linked_studies(report_id)
+            return studies_to_dto(result)
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Get Project",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
+    async def get_project(project_id: str) -> ProjectDetails:
+        """Details and progress for a single project. Admin only. Tool form of the `project` resource - unlike the resource, this snapshot isn't subscribable; poll it or use the resource form for live updates."""
+        require_admin()
+        async with request_context(current_user_id()) as ctx:
+            project = await ctx.project_repo.get_project_by_id(project_id)
+            if project is None:
+                raise ToolError(f"Project {project_id} not found")
+            return await ctx.project_service.get_project_stats(project)
 
     """
     Project management tools
     """
 
-    @server.tool()
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Create Project",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        )
+    )
     async def create_project(project_name: str, file_content: str, filename: str = "reports.ris") -> Project:
         """Create a new project (a batch of new reports awaiting study assignment) from a bibliography file's contents (.ris, .cgi, or .nbib format - selected by `filename`'s extension). Admin only. Kicks off background PDF search and embedding for the new reports, same as the web app; poll the `project` resource (or subscribe to it) to track progress."""
         require_admin()
         async with request_context(current_user_id()) as ctx:
             upload = _InMemoryUpload(file_content.encode("utf-8"), filename)
-            # RisParseError (src/utils/ris_parser.py) is already a ValueError,
-            # this module's own error convention - no translation needed.
-            entries = await parse_file(upload)
+            try:
+                entries = await parse_file(upload)
+            except RisParseError as exc:
+                raise ToolError(str(exc)) from exc
 
             project_id, reports = ProjectResourceService.build_reports_from_entries(entries)
 
             saved_reports = await ctx.project_repo.add_new_project(project_id, project_name, reports)
             if saved_reports is None:
-                raise ValueError("Project already exists")
+                raise ToolError("Project already exists")
 
             report_ids = [report.id for report in saved_reports]
             _fire_and_forget(run_process_report_background(project_id, report_ids, ctx.user_id))
@@ -207,81 +418,89 @@ def register(server: MCPServer) -> None:
                 numberReportsReadyForProcessing=0,
             )
 
-    @server.tool()
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="List Projects",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
     async def list_projects() -> List[ProjectDetails]:
         """List all current projects, with embedding/assignment progress for each. Admin only. Tool form of the `projects` resource, for clients that don't support MCP resources."""
         require_admin()
         async with request_context(current_user_id()) as ctx:
             return await ctx.project_service.get_all_project_stats()
 
-    @server.tool()
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="List My Tasks",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+    )
     async def list_tasks() -> List[ProjectTask]:
         """List the authenticated user's pending review tasks: every project they're assigned to, with their personal study-link counts. Tool form of the `tasks` resource, for clients that don't support MCP resources."""
         async with request_context(current_user_id()) as ctx:
             return await ctx.project_service.get_user_tasks()
 
-    @server.tool()
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Assign Project Task",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        )
+    )
     async def assign_project_task(project_id: str, assignee_user_id: str) -> ProjectAssignee:
         """Assign a user to a project, giving them a review task: they can link that project's reports to studies, and the project shows up in their `tasks` resource. Admin only."""
         require_admin()
         async with request_context(current_user_id()) as ctx:
             project = await ctx.project_repo.get_project_by_id(project_id)
             if project is None:
-                raise ValueError(f"Project {project_id} not found")
+                raise ToolError(f"Project {project_id} not found")
 
             try:
                 created = await ctx.project_repo.add_project_assignee(project_id, assignee_user_id)
             except (ValueError, PermissionError) as exc:
-                raise ValueError(str(exc)) from exc
+                raise ToolError(str(exc)) from exc
 
             if not created:
-                raise ValueError(f"{assignee_user_id} is already assigned to project {project_id}")
+                raise ToolError(f"{assignee_user_id} is already assigned to project {project_id}")
 
             await ctx.pubsub_service.publish_project_update(project_id)
             return ProjectAssignee(userId=assignee_user_id, numberReportsLinked=0)
 
-    @server.tool()
-    async def delete_project(
-        project_id: str,
-        confirmation: Annotated[ElicitationResult[ConfirmAction], Resolve(_confirm_delete_project)],
-        confirm: bool = False,
-    ) -> None:
-        """Delete a project and all its associated reports, including their calculated embedding vectors. Admin only. Irreversible - asks the caller to confirm before deleting anything, or (if the client doesn't support confirmation prompts) requires confirm=True after you've confirmed with the user yourself."""
-        if not _confirmed(confirmation):
-            raise ValueError("Not confirmed - no changes were made.")
+    @server.tool(
+        annotations=ToolAnnotations(
+            title="Delete Project",
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=False,
+        )
+    )
+    async def delete_project(project_id: str, confirmation: Annotated[ElicitationResult[ConfirmAction],Resolve(_confirm_delete_project),],) -> None:
+        match confirmation:
+            case AcceptedElicitation(data=ConfirmAction(confirm=True)):
+                pass
+            case AcceptedElicitation():
+                raise ToolError("Not confirmed - no changes were made.")
+            case _:
+                raise ToolError("Not confirmed - no changes were made.")
 
         async with request_context(current_user_id()) as ctx:
             project = await ctx.project_repo.get_project_by_id(project_id)
             if project is None:
-                raise ValueError(f"Project {project_id} not found")
+                raise ToolError(f"Project {project_id} not found")
 
-            report_ids = await ctx.project_repo.get_project_associated_report_ids(project_id)
+            report_ids = await ctx.project_repo.get_project_associated_report_ids(
+                project_id
+            )
             await ctx.project_repo.delete_project(project_id)
             await ctx.vectorstore_service.delete_vectors_by_report_ids(report_ids)
-            await ctx.pubsub_service.publish_project_update(project_id)
-
-    @server.tool()
-    async def remove_project_task(
-        project_id: str,
-        assignee_user_id: str,
-        confirmation: Annotated[ElicitationResult[ConfirmAction], Resolve(_confirm_remove_project_task)],
-        confirm: bool = False,
-    ) -> None:
-        """Remove a user's assignment from a project. Admin only. Asks the caller to confirm before removing it, or (if the client doesn't support confirmation prompts) requires confirm=True after you've confirmed with the user yourself."""
-        if not _confirmed(confirmation):
-            raise ValueError("Not confirmed - no changes were made.")
-
-        async with request_context(current_user_id()) as ctx:
-            project = await ctx.project_repo.get_project_by_id(project_id)
-            if project is None:
-                raise ValueError(f"Project {project_id} not found")
-
-            try:
-                removed = await ctx.project_repo.remove_project_assignee(project_id, assignee_user_id)
-            except (ValueError, PermissionError) as exc:
-                raise ValueError(str(exc)) from exc
-
-            if not removed:
-                raise ValueError(f"{assignee_user_id} is not assigned to project {project_id}")
-
             await ctx.pubsub_service.publish_project_update(project_id)

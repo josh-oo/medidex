@@ -7,18 +7,23 @@ place allowed to know that fastapi_app and mcp_server are being combined into
 one process; this module has no idea it's being mounted into anything.
 """
 
+import base64
+from pathlib import Path
+
 from mcp.server import MCPServer
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.subscriptions import InMemorySubscriptionBus
+from mcp.types import Icon
 from pydantic import AnyHttpUrl
 
 from .auth import KeycloakMCPTokenVerifier, MCP_RESOURCE_URL
 from . import live_updates
 from . import tools
-from . import resources
 from src.utils.keycloak import KEYCLOAK_PUBLIC_URL, KEYCLOAK_REALM
 
 MCP_STREAMABLE_HTTP_PATH = "/mcp"
+
+FAVICON_B64 = base64.b64encode((Path(__file__).parent / "favicon.ico").read_bytes()).decode()
 
 
 def create_server() -> MCPServer:
@@ -29,6 +34,7 @@ def create_server() -> MCPServer:
 
     server = MCPServer(
         name="Medidex",
+        icons=[Icon(src=f"data:image/x-icon;base64,{FAVICON_B64}")],
         instructions=(
             "Search and retrieve clinical study and report records from Medidex, "
             "including which reports are already linked to a study. Also exposes "
@@ -57,5 +63,4 @@ def create_server() -> MCPServer:
         ),
     )
     tools.register(server)
-    resources.register(server)
     return server
