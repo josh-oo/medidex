@@ -129,13 +129,18 @@ class ProjectResourceService:
         return tasks
 
     @staticmethod
-    def build_reports_from_entries(entries: List[dict]) -> Tuple[str, List[DbReport]]:
+    def build_reports_from_entries(entries: List[dict]) -> Tuple[str, List[DbReport], List[Optional[str]]]:
         """Turn parsed bibliography entries (src/utils/ris_parser.py's parse_file()
         output) into unsaved Report rows plus the project id derived from their
         fingerprint - the same deterministic hash a re-upload of the same file
-        must reproduce, so add_new_project() can detect it as a duplicate.
+        must reproduce, so add_new_project() can detect it as a duplicate. Also returns
+        a parallel list of best-effort trial ids (one per report, order-matched) for
+        add_new_project() to seed each report's ReportAdded.trial_registration_id with -
+        this is an unconfirmed guess, so it never lands on Report itself (see that
+        field's comment in models.py).
         """
         reports: List[DbReport] = []
+        trial_ids_by_report: List[Optional[str]] = []
         fingerprint_string = ""
 
         for entry in entries:
@@ -169,13 +174,13 @@ class ProjectResourceService:
                 publisher=entry.get('publisher', None),
                 city=entry.get('place_published', None),
                 doi=entry.get('doi', None),
-                trial_registration_id=trial_id,
             ))
+            trial_ids_by_report.append(trial_id)
 
             fingerprint_string += "|".join([safe_title or "", safe_abstract or "", authors_str or ""])
 
         project_id = hashlib.sha256(fingerprint_string.encode()).hexdigest()
-        return project_id, reports
+        return project_id, reports, trial_ids_by_report
 
     async def get_project_annotations(
         self, project_id: str
@@ -295,12 +300,14 @@ class ProjectResourceService:
 
         all_linked_studies = await self.report_repo.get_linked_studies_for_reports(page_ids)
         report_flags = await self.report_repo.get_report_flags_for_reports(page_ids)
+        preliminary_trial_ids = await self.report_repo.get_preliminary_trial_ids_for_reports(page_ids)
         items = [
             ProjectReport(
                 **reports_to_dto([report])[0].model_dump(),
                 hasPdf=report.id in reports_with_pdf,
                 flag=report_flags.get(report.id).message if report.id in report_flags else None,
                 assignedStudies=studies_to_dto(all_linked_studies.get(report.id, [])),
+                preliminaryTrialId=preliminary_trial_ids.get(report.id),
             )
             for report in page_rows
         ]

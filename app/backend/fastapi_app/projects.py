@@ -73,9 +73,9 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     except RisParseError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    project_id, reports = ctx.project_service.build_reports_from_entries(entries)
+    project_id, reports, trial_ids = ctx.project_service.build_reports_from_entries(entries)
 
-    reports = await ctx.project_repo.add_new_project(project_id,projectName,reports)
+    reports = await ctx.project_repo.add_new_project(project_id,projectName,reports,trial_ids)
     if reports is None:
         raise HTTPException(status_code=409, detail="Project already exists")
     # schedule background tasks

@@ -41,6 +41,11 @@ export interface ProjectReportDto extends ReportDto {
   hasPdf: boolean | undefined;
   flag?: string;
   assignedStudies?: StudyDto[];
+  // The unconfirmed .ris-upload/fulltext guess (report_added.trial_registration_id) -
+  // distinct from trialId above, which only ever holds a reviewer-confirmed value.
+  // Optional for the same reason flag/assignedStudies are: IntakeReportDto doesn't carry
+  // it either, but still needs to satisfy this shape (see this interface's comment).
+  preliminaryTrialId?: string | null;
 }
 
 export interface ProjectReportPageDto {

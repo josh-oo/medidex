@@ -398,9 +398,9 @@ def register(server: MCPServer) -> None:
             except RisParseError as exc:
                 raise ToolError(str(exc)) from exc
 
-            project_id, reports = ProjectResourceService.build_reports_from_entries(entries)
+            project_id, reports, trial_ids = ProjectResourceService.build_reports_from_entries(entries)
 
-            saved_reports = await ctx.project_repo.add_new_project(project_id, project_name, reports)
+            saved_reports = await ctx.project_repo.add_new_project(project_id, project_name, reports, trial_ids)
             if saved_reports is None:
                 raise ToolError("Project already exists")
 

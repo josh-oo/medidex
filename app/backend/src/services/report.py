@@ -306,6 +306,8 @@ class ReportService:
         if include_fulltext and use_cache:
             try:
                 await self.report_repo.save_report_metadata_field(report_id, "trial_id", trial_ids)
+                if trial_ids and len(trial_ids) == 1:
+                    await self.report_repo.set_trial_registration_id_if_empty(report_id, trial_ids[0])
                 await self.report_repo.commit()
             except:
                 await self.report_repo.rollback()

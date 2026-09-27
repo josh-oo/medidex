@@ -145,6 +145,11 @@ class ProjectReport(Report):
     hasPdf: Optional[bool]
     flag: Optional[str]
     assignedStudies: List[Study] = Field(default_factory=list)
+    # The unconfirmed .ris-upload/fulltext guess (report_added.trial_registration_id) -
+    # distinct from this Report's own trialId, which only ever holds a reviewer-confirmed
+    # value. Lets the frontend prefill a trial-id search with a best guess even before
+    # anyone has confirmed it.
+    preliminaryTrialId: Optional[str] = None
 
 class ProjectReportPage(BaseModel):
     items: List[ProjectReport]

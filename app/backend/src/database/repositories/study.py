@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
 
-from ..models import Report, Study, StudyAdded, StudyReport
+from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport
 from ..models import StudyIntervention, Intervention, StudyCondition, Condition, StudyOutcome, Outcome, StudyDesign, Design, StudyParticipant, Participant
 
 from ...utils.postprocessing import normalize_author_names
@@ -78,15 +78,18 @@ class StudyRepository:
 
     async def search_studies(self, query: str, limit: int, offset: int) -> Tuple[List[Study], bool]:
         """Free-text search across a study's own name/trial ID plus its linked reports'
-        authors/trial ID and interventions. Returns (page, has_more) - one extra id beyond
-        the page is fetched so has_more can be determined without a separate count query,
-        same convention as StudySimilaritySearchService.get_similar_studies_by_id.
+        authors/trial ID - both the confirmed Report.trial_registration_id and the
+        unconfirmed report_added.trial_registration_id guess (see their comments in
+        models.py) - and interventions. Returns (page, has_more) - one extra id beyond
+        the page is fetched so has_more can be determined without a separate count
+        query, same convention as StudySimilaritySearchService.get_similar_studies_by_id.
         """
         pattern = f"%{query}%"
         id_stmt = (
             select(Study.id, Study.short_name)
             .outerjoin(StudyReport, StudyReport.study_id == Study.id)
             .outerjoin(Report, Report.id == StudyReport.report_id)
+            .outerjoin(ReportAdded, ReportAdded.report_id == StudyReport.report_id)
             .outerjoin(StudyIntervention, StudyIntervention.study_id == Study.id)
             .outerjoin(Intervention, Intervention.id == StudyIntervention.intervention_id)
             .where(
@@ -94,6 +97,7 @@ class StudyRepository:
                 | Study.trial_registration_id.ilike(pattern)
                 | Report.authors.ilike(pattern)
                 | Report.trial_registration_id.ilike(pattern)
+                | ReportAdded.trial_registration_id.ilike(pattern)
                 | Intervention.description.ilike(pattern)
             )
             .distinct()
@@ -216,7 +220,10 @@ class StudyRepository:
             for current_id in alternative_ids[1:]:
                 authors_filter = authors_filter | func.replace(Report.authors, "/", "-").like(f"%{current_id}%")
 
-            trial_filter = func.replace(Report.trial_registration_id, "/", "-").in_(alternative_ids)
+            trial_filter = (
+                func.replace(Report.trial_registration_id, "/", "-").in_(alternative_ids)
+                | func.replace(ReportAdded.trial_registration_id, "/", "-").in_(alternative_ids)
+            )
 
             stmt_study = select(Study.id, text("'study' as source")).where(
                 (Study.short_name.in_(alternative_ids)) |
@@ -226,6 +233,7 @@ class StudyRepository:
             stmt_reports = (
                 select(StudyReport.study_id, text("'report' as source"))
                 .join(Report, Report.id == StudyReport.report_id)
+                .outerjoin(ReportAdded, ReportAdded.report_id == Report.id)
                 .where(authors_filter | trial_filter)
             )
 

@@ -26,7 +26,7 @@ class ProjectRepository:
         self.db = db
         self.user_id = str(user_id)
 
-    async def add_new_project(self, project_id : str, batch_description : str, reports : List[Report]):
+    async def add_new_project(self, project_id : str, batch_description : str, reports : List[Report], trial_ids : Optional[List[Optional[str]]] = None):
         try:
             new_project = Project(
                 id=project_id,
@@ -39,10 +39,15 @@ class ProjectRepository:
             self.db.add_all(reports)
             await self.db.flush()  # Flush once to get all IDs
 
-            # Create all ReportAdded entries
+            # Create all ReportAdded entries - trial_ids (parallel to reports, from
+            # ProjectResourceService.build_reports_from_entries's .ris-upload parse)
+            # lands here rather than on Report itself, since it's an unconfirmed,
+            # project-scoped guess - see ReportAdded.trial_registration_id in models.py.
+            if trial_ids is None:
+                trial_ids = [None] * len(reports)
             report_added_entries = [
-                ReportAdded(report_id=report.id, project_id=project_id)
-                for report in reports
+                ReportAdded(report_id=report.id, project_id=project_id, trial_registration_id=trial_id)
+                for report, trial_id in zip(reports, trial_ids)
             ]
             self.db.add_all(report_added_entries)
 

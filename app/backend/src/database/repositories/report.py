@@ -72,6 +72,36 @@ class ReportRepository:
         rows = (await self.db.execute(stmt)).all()
         return {report_id: (links or []) for report_id, links in rows}
 
+    async def get_preliminary_trial_ids_for_reports(self, report_ids: List[int]) -> Dict[int, Optional[str]]:
+        """Bulk read of the unconfirmed report_added.trial_registration_id guess (see its
+        comment in models.py) for a page of reports - same shape/purpose as
+        get_fulltext_links_for_reports, for ProjectReport.preliminaryTrialId.
+        """
+        report_ids = report_ids or []
+        if not report_ids:
+            return {}
+
+        stmt = (
+            select(ReportAdded.report_id, ReportAdded.trial_registration_id)
+            .where(ReportAdded.report_id.in_(report_ids))
+        )
+        rows = (await self.db.execute(stmt)).all()
+        return {report_id: trial_id for report_id, trial_id in rows}
+
+    async def set_trial_registration_id_if_empty(self, report_id: int, trial_id: str) -> None:
+        """Persists a fulltext-parsed trial id guess to report_added (see its
+        trial_registration_id comment in models.py) - never overwrites an existing value,
+        from either this or the .ris-upload guess (ProjectRepository.add_new_project),
+        since this is a best-effort guess for a researcher to confirm, not authoritative
+        data. A report with no report_added row (no current project association) has
+        nowhere to record this and is silently skipped.
+        """
+        report_added = await self.db.get(ReportAdded, report_id)
+        if report_added is None or report_added.trial_registration_id:
+            return
+        report_added.trial_registration_id = trial_id
+        await self.db.flush()
+
     async def get_readiness_sets(self, report_ids: List[int]) -> Tuple[Set[int], Set[int]]:
         """Plain SQL read of the embedded/has_pdf columns for the given reports -
         replaces what used to be a live Qdrant retrieve + per-file filesystem stat call

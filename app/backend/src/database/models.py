@@ -60,6 +60,8 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
     publisher: Optional[str]
     city: Optional[str]
     doi: Optional[str]
+    # Confirmed trial registration id - only set once a reviewer has confirmed it, unlike
+    # ReportAdded.trial_registration_id below (the unconfirmed .ris-upload/fulltext guess).
     trial_registration_id: Optional[str]
 
     __table_args__ = (
@@ -220,11 +222,18 @@ class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
         default=None,
         sa_column=Column(JSONB, nullable=True),
     )
+    # Best-effort, UNCONFIRMED trial registration id guess for this report - parsed from
+    # the .ris upload (src/services/project.py's build_reports_from_entries) or from the
+    # report's fulltext (ReportService.get_trial_ids). Report.trial_registration_id above
+    # is the confirmed counterpart; this one is never written there automatically - a
+    # reviewer has to confirm a guess before it counts as authoritative.
+    trial_registration_id: Optional[str] = Field(default=None)
 
     __table_args__ = (
         Index('idx_report_added_project_report', 'project_id', 'report_id'),
         Index('idx_report_added_embedded', 'embedded'),  # For readiness filtering
         Index('idx_report_added_has_pdf', 'has_pdf'),  # For readiness/with_pdf filtering
+        Index('idx_report_added_trial_id', 'trial_registration_id'),  # For trial ID searches
     )
 
 class ProjectInnerScore(SQLModel, table=True, metadata=metadata_resources):

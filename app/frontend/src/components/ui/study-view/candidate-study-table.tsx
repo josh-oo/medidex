@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback} from "react";
+import { useState, useMemo, useCallback, useEffect} from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -253,6 +253,22 @@ export function CandidateStudyTable({
     setSearchNextCursor(null);
     setSearchError(null);
   }, []);
+
+  // Prefill the explicit search with the report's trial id - the confirmed one if a
+  // reviewer has set it, otherwise the unconfirmed .ris-upload/fulltext guess - so a
+  // trial-registered study surfaces at the top immediately instead of the researcher
+  // having to find and retype the id themselves. Re-runs whenever the selected report
+  // (or its trial id, once it's loaded) changes; clears the search for reports with no
+  // trial id of either kind.
+  useEffect(() => {
+    const trialId = currentReport?.trialId ?? currentReport?.preliminaryTrialId ?? null;
+    if (trialId && trialId.trim().length >= MIN_SEARCH_QUERY_LENGTH) {
+      setSearchQuery(trialId);
+      void runSearch(trialId);
+    } else {
+      clearSearch();
+    }
+  }, [reportId, currentReport?.trialId, currentReport?.preliminaryTrialId, runSearch, clearSearch]);
 
   const handleAIBadgeClick = (studyId: number, studyName: string) => {
     setSelectedAIStudy({ studyId, studyName });

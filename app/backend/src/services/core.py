@@ -25,7 +25,7 @@ class StudySimilaritySearchService:
         if not self.user_id:
             self.user_id = "user"
 
-    async def get_similar_study_by_query(self, query : Any, cutoff: str, limit: int, negative_studies: List[int], trial_ids: List[str], authors:List[str], return_details: bool):
+    async def get_similar_study_by_query(self, query : Any, cutoff: str, limit: int, negative_studies: List[int], authors:List[str], return_details: bool):
 
         #Convert TagCategories:
 
@@ -35,37 +35,19 @@ class StudySimilaritySearchService:
 
         return_details= return_details or self.debug
 
+        blacklist = negative_studies
+        reranked_results = await self.vectorstore.search_similar_studies(query, limit, cutoff, blacklist, False)
 
-        if len(trial_ids) > 0:
-            response = await self.study_repo.get_study_id_by_trial_ids(trial_ids, cutoff)
-            penalty = 0.00
-            if response:
-                for trial_id in trial_ids:
-                    study_ids = response[trial_id]
-                    for study_id in study_ids:
-                        if study_id in negative_studies:
-                            continue
-                        found_study_ids[study_id] = 1.00 - penalty
-                        debug_map[study_id] = [{"source_id":trial_id}]
-                        penalty += 0.01
-
-        remaining = limit - len(found_study_ids.keys())
-        if remaining > 0:
-
-            blacklist = list(found_study_ids.keys()) + negative_studies
-            exclude_trial_related_studies = len(found_study_ids.keys()) > 0
-            reranked_results = await self.vectorstore.search_similar_studies(query, remaining, cutoff, blacklist, exclude_trial_related_studies)
-
-            for result in reranked_results:
-                for hit in result.hits:
-                    candidates = hit.payload['belongs_to_study']
-                    for item in candidates:
-                        #item = int(item) #TODO remove later
-                        if item not in found_study_ids:
-                            found_study_ids[item] = hit.score
-                        info = dict(hit.payload)
-                        info['score'] = hit.score
-                        debug_map[item] = debug_map.get(item, []) + [info]
+        for result in reranked_results:
+            for hit in result.hits:
+                candidates = hit.payload['belongs_to_study']
+                for item in candidates:
+                    #item = int(item) #TODO remove later
+                    if item not in found_study_ids:
+                        found_study_ids[item] = hit.score
+                    info = dict(hit.payload)
+                    info['score'] = hit.score
+                    debug_map[item] = debug_map.get(item, []) + [info]
 
         if len(found_study_ids.keys()) == 0:
             return []
@@ -98,11 +80,13 @@ class StudySimilaritySearchService:
     async def get_similar_studies_by_id(self, report_id : int, cutoff: str, limit: int, offset: int, negative_studies: List[int], negative_reports: List[int], return_details: bool):
         """Returns (page, has_more): `page` is the [offset, offset + limit) slice of the
         relevance-ranked candidate pool, `has_more` says whether a further page exists.
-        The candidate pool has no stable id ordering to page by (it's assembled from
-        exact trial-id matches, vectorstore hits and project studies, then re-sorted by
-        score), so pagination is offset-based rather than keyset-based like ProjectReportPage -
-        see src/utils/pagination.py. One extra candidate beyond the page (`pool_target`)
-        is fetched/kept so has_more can be determined without a separate count query.
+        Purely semantic (vectorstore hits plus project studies, then re-sorted by score) -
+        trial-id matches are surfaced separately, via the explicit study search
+        (StudyRepository.search_studies), not mixed into this ranking. The candidate pool
+        has no stable id ordering to page by, so pagination is offset-based rather than
+        keyset-based like ProjectReportPage - see src/utils/pagination.py. One extra
+        candidate beyond the page (`pool_target`) is fetched/kept so has_more can be
+        determined without a separate count query.
         """
 
         if not negative_studies:
@@ -111,12 +95,11 @@ class StudySimilaritySearchService:
         report = await self.report_service.get_report(report_id)
 
         authors = [item.strip() for item in report.authors.split("//")]
-        trial_ids = await self.report_service.get_trial_ids(report_id, include_fulltext=True)
 
         query = self.vectorstore.build_recommandation_based_on_report_id(report.id, negative_reports)
 
         pool_target = offset + limit + 1
-        rows = await self.get_similar_study_by_query(query,cutoff,pool_target,negative_studies, trial_ids, authors, return_details=return_details)
+        rows = await self.get_similar_study_by_query(query,cutoff,pool_target,negative_studies, authors, return_details=return_details)
 
         # Check if there are any similar items in the same project which are more similar than already retrieved existing studies
         if rows:
