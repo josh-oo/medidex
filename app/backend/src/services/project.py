@@ -1,11 +1,24 @@
 import asyncio
 import hashlib
-from typing import Any, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ..database.models import Project as DbProject, Report as DbReport
 from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
-from ..utils.dto import Project, ProjectAssignee, ProjectDetails, ProjectTask
+from ..utils.dto import (
+    BatchedReport,
+    FilterMode,
+    Project,
+    ProjectAssignee,
+    ProjectDetails,
+    ProjectTask,
+    Report as ReportDTO,
+    ReportPage,
+    filter_mode_to_bool,
+    matches_filter,
+    studies_to_dto,
+)
+from ..utils.pagination import decode_cursor, encode_cursor
 from ..utils.trial_registration_id import extract_trial_id
 from .vectorstore import VectorstoreService
 
@@ -15,7 +28,10 @@ class ProjectResourceService:
     and the MCP server (mcp_server/resources.py, mcp_server/tools.py) - a project's
     stats/task view is assembled from several repos plus the vectorstore, and project
     creation parses an uploaded bibliography file into report rows, so both live here
-    instead of being duplicated per presentation head.
+    instead of being duplicated per presentation head. Also owns the project's
+    paginated report list views (the normal/intake/review pages that used to live in
+    fastapi_app/projects.py as REST-only helpers) for the same reason - none of it
+    needs FastAPI, so both heads can query the same project the same way.
     """
 
     def __init__(self, project_repo: ProjectRepository, report_repo: ReportRepository, vectorstore_service: VectorstoreService):
@@ -158,3 +174,199 @@ class ProjectResourceService:
 
         project_id = hashlib.sha256(fingerprint_string.encode()).hexdigest()
         return project_id, reports
+
+    async def get_project_annotations(
+        self, project_id: str
+    ) -> Dict[int, Dict[str, List[Dict[str, Any]]]]:
+        report_ids = await self.project_repo.get_project_associated_report_ids(project_id)
+        if not report_ids:
+            return {}
+
+        assignees = await self.project_repo.get_project_assignees(project_id)
+        assignee_ids = {user_id for user_id, _ in assignees if user_id}
+        if not assignee_ids:
+            return {}
+
+        completion_map = await self.project_repo.get_report_completion_by_users(project_id)
+        annotated_report_ids = [
+            report_id
+            for report_id in report_ids
+            if assignee_ids.issubset(completion_map.get(report_id, set()))
+        ]
+
+        if not annotated_report_ids:
+            return {}
+
+        return await self.project_repo.get_project_annotations_by_assignees(
+            project_id,
+            assignee_ids,
+            annotated_report_ids,
+        )
+
+    async def get_project_report_status(self, project_id: str) -> Dict[int, Dict[str, bool]]:
+        report_ids = await self.project_repo.get_project_associated_report_ids(project_id)
+        if not report_ids:
+            return {}
+
+        embedded_reports, pdf_ready_reports, _ = await self.get_vectorized_and_ready_report_ids(project_id)
+
+        return {
+            report_id: {
+                "embedded": report_id in embedded_reports,
+                "pdf": report_id in pdf_ready_reports,
+            }
+            for report_id in report_ids
+        }
+
+    async def review_candidate_report_ids(
+        self,
+        project_id: str,
+        consensus: FilterMode,
+        reviewed: FilterMode,
+    ) -> Set[int]:
+        """The review view's id-narrowing step: fully-annotated report ids (every project
+        assignee has completed annotating), optionally further narrowed by consensus/reviewed.
+        Bounded by the project's annotation rows (get_project_annotations already returns a
+        compact per-report structure, no report bodies) - feeds into
+        query_project_reports_page's restrict_to_ids rather than filtering an already-hydrated
+        list.
+        """
+        annotations = await self.get_project_annotations(project_id)
+
+        def _annotated_studies(report_id: int) -> List[Dict[str, Any]]:
+            return annotations.get(report_id, {}).get("studies", [])
+
+        candidate_ids = set(annotations.keys())
+
+        if consensus is not FilterMode.any:
+            # Fewer than two annotators can't disagree, so treat that as consensus too.
+            candidate_ids = {
+                report_id for report_id in candidate_ids
+                if matches_filter(
+                    len(_annotated_studies(report_id)) < 2
+                    or len({s["studyId"] for s in _annotated_studies(report_id)}) == 1,
+                    consensus,
+                )
+            }
+
+        if reviewed is not FilterMode.any:
+            candidate_ids = {
+                report_id for report_id in candidate_ids
+                if matches_filter(any(s["confirmed"] for s in _annotated_studies(report_id)), reviewed)
+            }
+
+        return candidate_ids
+
+    async def hydrate_report_page(self, page_rows: List[DbReport], limit: int) -> ReportPage:
+        """Turns a page of plain Report rows - as ReportRepository.query_project_reports_page
+        returns them, including its +1 lookahead row - into the DTO shape, fetching linked
+        studies/flags/pdf-readiness only for this page.
+        """
+        has_more = len(page_rows) > limit
+        page_rows = page_rows[:limit]
+        page_ids = [report.id for report in page_rows]
+
+        all_linked_studies = await self.report_repo.get_linked_studies_for_reports(page_ids)
+        report_flags = await self.report_repo.get_report_flags_for_reports(page_ids)
+        _, reports_with_pdf = await self.report_repo.get_readiness_sets(page_ids)
+
+        items = []
+        for report in page_rows:
+            authors = report.authors.split("//") if report.authors else []
+            linked_studies = studies_to_dto(all_linked_studies.get(report.id, []))
+            items.append(
+                BatchedReport(
+                    report=ReportDTO(
+                        reportId=report.id,
+                        year=report.year,
+                        title=report.title,
+                        abstract=report.abstract,
+                        authors=authors,
+                        trialId=report.trial_registration_id,
+                        createdAt=report.date_entered,
+                        updatedAt=report.date_edited,
+                    ),
+                    hasPdf=report.id in reports_with_pdf,
+                    flag=report_flags.get(report.id).message if report.id in report_flags else None,
+                    assignedStudies=linked_studies,
+                )
+            )
+
+        next_cursor = encode_cursor(page_ids[-1]) if has_more and page_ids else None
+        return ReportPage(items=items, nextCursor=next_cursor)
+
+    async def get_reports_page(
+        self,
+        project_id: str,
+        *,
+        search: Optional[str] = None,
+        processed: FilterMode = FilterMode.any,
+        flagged: FilterMode = FilterMode.any,
+        new_study: FilterMode = FilterMode.any,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+    ) -> ReportPage:
+        """The normal curation view: never includes reports that are still being
+        processed (not yet embedded/PDF-ready) - see get_intake_reports_page for that.
+        """
+        cursor_id = decode_cursor(cursor) if cursor else None
+        page_rows = await self.report_repo.query_project_reports_page(
+            project_id,
+            require_ready=True,
+            search=search,
+            processed=filter_mode_to_bool(processed),
+            flagged=filter_mode_to_bool(flagged),
+            new_study=filter_mode_to_bool(new_study),
+            cursor_id=cursor_id,
+            limit=limit,
+        )
+        return await self.hydrate_report_page(page_rows, limit)
+
+    async def get_intake_reports_page(
+        self,
+        project_id: str,
+        *,
+        search: Optional[str] = None,
+        with_pdf: FilterMode = FilterMode.any,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+    ) -> ReportPage:
+        """The admin intake view: unlike get_reports_page, always includes reports that
+        have been auto-searched for a PDF but aren't fully processed yet, so an admin (or
+        an MCP client) can watch reports as they arrive.
+        """
+        cursor_id = decode_cursor(cursor) if cursor else None
+        page_rows = await self.report_repo.query_project_reports_page(
+            project_id,
+            require_ready=False,
+            with_pdf=filter_mode_to_bool(with_pdf),
+            search=search,
+            cursor_id=cursor_id,
+            limit=limit,
+        )
+        return await self.hydrate_report_page(page_rows, limit)
+
+    async def get_review_reports_page(
+        self,
+        project_id: str,
+        *,
+        search: Optional[str] = None,
+        consensus: FilterMode = FilterMode.any,
+        reviewed: FilterMode = FilterMode.any,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+    ) -> ReportPage:
+        """The admin annotator-review view: always restricted to reports every project
+        assignee has completed annotating, regardless of search/filter.
+        """
+        cursor_id = decode_cursor(cursor) if cursor else None
+        restrict_to_ids = await self.review_candidate_report_ids(project_id, consensus, reviewed)
+        page_rows = await self.report_repo.query_project_reports_page(
+            project_id,
+            require_ready=True,
+            search=search,
+            restrict_to_ids=restrict_to_ids,
+            cursor_id=cursor_id,
+            limit=limit,
+        )
+        return await self.hydrate_report_page(page_rows, limit)

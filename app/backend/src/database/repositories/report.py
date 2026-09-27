@@ -291,17 +291,19 @@ class ReportRepository:
         limit: int = 50,
     ) -> List[Report]:
         """One filtered, sorted, keyset-paginated SQL query for a project's report list -
-        the callers in fastapi_app/projects.py used to fetch every report (+ every linked
-        study, + every flag) in the project and filter/sort/slice that in Python; this
-        does the equivalent filtering/ordering in the database and only ever returns up
-        to `limit` + 1 rows (the extra row is a cheap "is there a next page" probe, so the
-        caller never needs a separate COUNT).
+        its callers (ProjectResourceService's get_reports_page/get_intake_reports_page/
+        get_review_reports_page, src/services/project.py) used to fetch every report
+        (+ every linked study, + every flag) in the project and filter/sort/slice that
+        in Python; this does the equivalent filtering/ordering in the database and only
+        ever returns up to `limit` + 1 rows (the extra row is a cheap "is there a next
+        page" probe, so the caller never needs a separate COUNT).
 
         `require_ready`/`with_pdf` read report_added.embedded/report_added.has_pdf directly
         (see models.py) instead of calling Qdrant or stat()-ing the filesystem per report.
         `processed`/`flagged`/`new_study` are None ("any", no filter), True ("only") or
-        False ("exclude") - the FilterMode -> bool translation happens in fastapi_app,
-        which owns that REST-facing enum; this layer only knows plain booleans.
+        False ("exclude") - the FilterMode -> bool translation happens in
+        ProjectResourceService (src/services/project.py), which owns that enum
+        (src/utils/dto.py); this layer only knows plain booleans.
         `restrict_to_ids`, when given, narrows to that id set - used by the review
         endpoint's consensus/reviewed/fully-annotated filters, which need annotation rows
         this method has no reason to know about.

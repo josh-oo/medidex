@@ -9,15 +9,18 @@ it.
 
 import asyncio
 import io
+import json
 import logging
 from typing import List, Optional
 
 import httpx
 
 from ..context import RequestContext
+from ..database.repositories.study import DuplicateShortNameError
 from ..database.sessions import AsyncSessionLocal
 from ..database.models import Report as DbReport
 from ..services.agent import AutomationService
+from ..utils.dto import StudyCreate
 from ..utils.llm.agent import get_checkpointer
 
 logger = logging.getLogger(__name__)
@@ -26,6 +29,10 @@ logger = logging.getLogger(__name__)
 # reports; per-process, so shared across every project being processed at once.
 _write_semaphore = asyncio.Semaphore(1)
 _vectorstore_semaphore = asyncio.Semaphore(8)
+
+# Bounds concurrent bot report-matching (+ study creation/linking) across every
+# project being automated at once.
+_agent_process_semaphore = asyncio.Semaphore(10)
 
 
 class _InMemoryPdfUpload:
@@ -168,11 +175,120 @@ async def run_process_report_background(
 
 
 
+async def _process_report_with_agent(
+    project_id: str,
+    report_id: int,
+    ctx: RequestContext,
+    agent_service: AutomationService,
+) -> None:
+    async with _agent_process_semaphore:
+        prediction = await agent_service.report_matching(report_id)
+
+        if hasattr(prediction, "model_dump"):
+            prediction_data = prediction.model_dump()
+        elif isinstance(prediction, dict):
+            prediction_data = prediction
+        else:
+            prediction_data = {}
+
+        predicted_study_id = prediction_data.get("studyId")
+
+        if predicted_study_id is not None:
+            await ctx.linkage_service.link_existing_study_to_report(report_id, int(predicted_study_id), "bot")
+        else:
+            suggested_study = prediction_data.get("newStudySuggestion", prediction_data)
+
+            countries = suggested_study.get("countries")
+            if not isinstance(countries, list):
+                countries = []
+
+            short_name = suggested_study.get("shortName")
+            status = suggested_study.get("status") or "Planned"
+            number_participants = suggested_study.get("numberParticipants")
+
+            duration = suggested_study.get("duration")
+            if not duration:
+                duration_value = suggested_study.get("durationValue")
+                duration_unit = suggested_study.get("durationUnit")
+                if duration_value is not None and duration_unit:
+                    duration = f"{duration_value} {duration_unit}"
+
+            comparison = suggested_study.get("comparison")
+            if isinstance(comparison, list):
+                comparison = json.dumps(comparison)
+
+            study_payload = StudyCreate(
+                shortName=short_name or f"bot-{report_id}",
+                status=status,
+                countries=countries,
+                numberParticipants=str(number_participants),
+                duration=duration,
+                comparison=comparison,
+                trialId=suggested_study.get("trialId"),
+            )
+            for appendix in ['a', 'b', 'c', 'd', 'f']:
+                try:
+                    await ctx.linkage_service.create_study_and_link_to_report(report_id, study_payload, "bot")
+                    break
+                except DuplicateShortNameError:
+                    study_payload.shortName = study_payload.shortName + appendix  # if the name is already taken try the next name
+
+        await ctx.pubsub_service.publish_project_update(project_id)
+        logger.info("Agent processing completed for report %s in project %s", report_id, project_id)
+
+
+async def _run_automation(
+    project_id: str,
+    ctx: RequestContext,
+    agent_service: AutomationService,
+) -> None:
+    """Repeatedly matches the bot against every ready (embedded + PDF-ready), not-yet
+    bot-processed report in a project, waiting on project pubsub updates between passes,
+    until every report has been handled.
+    """
+    pubsub = await ctx.pubsub_service.subscribe_to_project(project_id)
+    try:
+        while True:
+            report_ids = await ctx.project_repo.get_project_associated_report_ids(project_id)
+            if not report_ids:
+                return
+
+            report_status = await ctx.project_service.get_project_report_status(project_id)
+            completion_map = await ctx.project_repo.get_report_completion_by_users(project_id)
+            bot_processed_report_ids = {
+                report_id
+                for report_id, completed_by_users in completion_map.items()
+                if "bot" in completed_by_users
+            }
+
+            if len(bot_processed_report_ids.intersection(set(report_ids))) >= len(report_ids):
+                logger.info("Automation completed for project %s", project_id)
+                return
+
+            ready_report_ids = [
+                report_id
+                for report_id in report_ids
+                if report_status.get(report_id, {}).get("embedded", False)
+                and report_status.get(report_id, {}).get("pdf", False)
+                and report_id not in bot_processed_report_ids
+            ]
+
+            if not ready_report_ids:
+                await ctx.pubsub_service.get_next_project_update(pubsub)
+                continue
+
+            await asyncio.gather(*(
+                _process_report_with_agent(project_id, report_id, ctx, agent_service)
+                for report_id in ready_report_ids
+            ))
+    finally:
+        await ctx.pubsub_service.unsubscribe_from_project(project_id, pubsub)
+
+
 async def run_start_automation_background(
     project_id: str,
     user_id: str,
     model: str,
-    start_automation,
 ) -> None:
     async with AsyncSessionLocal() as db:
         ctx = RequestContext(db=db, user_id=user_id)
@@ -187,5 +303,5 @@ async def run_start_automation_background(
                 checkpointer=checkpointer,
                 model=model,
             )
-            await start_automation(project_id, ctx, agent_service)
+            await _run_automation(project_id, ctx, agent_service)
             break

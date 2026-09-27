@@ -1,6 +1,41 @@
 from pydantic import BaseModel, Field
 from typing import Mapping, Optional, List
 from datetime import datetime
+from enum import Enum
+
+
+class FilterMode(str, Enum):
+    """How one filter dimension (e.g. "processed") should narrow a report list.
+
+    `any` (the default) means "don't filter on this dimension at all" - it's not one of the
+    two categories, it's an explicit no-op. `only` keeps just the reports matching this
+    dimension, `exclude` keeps everything else. This replaces the older, less intuitive
+    "two booleans that both default true, and setting exactly one to false narrows things
+    down" pairing - the equivalent of "only" used to require knowing to leave the *other*
+    field at its default rather than being a single, self-contained choice. Shared by every
+    head that filters a report list (fastapi_app/projects.py's Query params, and any MCP
+    tool with the same tri-state filter needs).
+    """
+    any = "any"
+    only = "only"
+    exclude = "exclude"
+
+
+def matches_filter(value: bool, mode: FilterMode) -> bool:
+    if mode is FilterMode.any:
+        return True
+    if mode is FilterMode.only:
+        return value
+    return not value
+
+
+def filter_mode_to_bool(mode: FilterMode) -> Optional[bool]:
+    """None = "any" (no filter) - what ReportRepository.query_project_reports_page's
+    plain-bool filter params expect; that layer doesn't know about this enum."""
+    if mode is FilterMode.any:
+        return None
+    return mode is FilterMode.only
+
 
 class Study(BaseModel):
     studyId: int

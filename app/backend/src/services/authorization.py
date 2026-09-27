@@ -4,7 +4,7 @@ so non-FastAPI callers (mcp_server/) don't need to depend on FastAPI or on
 fastapi_app/core.py's presentation-tier dependency function.
 """
 
-from typing import Optional
+from typing import List, Optional
 
 from ..database.repositories.report import ReportRepository
 from ..database.repositories.project import ProjectRepository
@@ -20,6 +20,10 @@ class AuthenticationRequiredError(Exception):
 
 class ReportAccessDeniedError(Exception):
     """The authenticated user isn't assigned to the report's project."""
+
+
+class ProjectAccessDeniedError(Exception):
+    """The caller isn't an admin and isn't assigned to this project."""
 
 
 async def get_authorized_project_id(
@@ -49,3 +53,19 @@ async def get_authorized_project_id(
         raise ReportAccessDeniedError("You can only access reports in projects assigned to you")
 
     return project_id
+
+
+async def check_project_access(
+    project_id: str,
+    roles: List[str],
+    project_repo: ProjectRepository,
+) -> None:
+    """Admins can access any project; everyone else must be an assignee of this
+    one - the one place that grants access based on per-project membership
+    rather than a global role, so a normal user's own projects work without
+    making every project world-readable to every approved user.
+    """
+    if "ADMIN" in roles:
+        return
+    if not await project_repo.is_project_assignee(project_id):
+        raise ProjectAccessDeniedError(f"Not assigned to project {project_id}")
