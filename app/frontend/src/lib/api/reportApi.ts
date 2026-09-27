@@ -1,6 +1,6 @@
 import apiClient from "./apiClient";
 import { AxiosRequestConfig } from "axios";
-import { ReportChatDto, ReportSourcesDto, SimilarTagDto, SimilarStudyDto, GetSimilarStudiesParams, GetSimilarTagsParams, StudyDto} from "../../types/apiDTOs";
+import { ReportChatDto, ReportSourcesDto, SimilarTagDto, SimilarStudyPageDto, GetSimilarStudiesParams, GetSimilarTagsParams, StudyDto} from "../../types/apiDTOs";
 import { serializeParams } from "./helpers";    
 
 export interface ReportFlagDto {
@@ -17,14 +17,14 @@ export const getSimilarStudiesByReportId = (
   reportId: number,
   params: GetSimilarStudiesParams = {},
   config?: AxiosRequestConfig
-): Promise<SimilarStudyDto[]> => { 
+): Promise<SimilarStudyPageDto> => {
   const path = `/reports/${reportId}/similar-studies`;
   const { params: configParams, ...restConfig } = config ?? {};
   const requestParams = {
     ...(configParams ?? {}),
     ...params,
   };
-  return apiClient.get<SimilarStudyDto[]>(path, {
+  return apiClient.get<SimilarStudyPageDto>(path, {
       ...restConfig,
       params: requestParams,
       paramsSerializer: { serialize: serializeParams }

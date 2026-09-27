@@ -52,7 +52,6 @@ export function ReportColumnClient({ children, reports, projectId }: ReportColum
         >
           <ReportList
             baseUrl="projects"
-            queryParams={{ k: 10 }}
             editMode={true}
             filterDimensions={reportFilterDimensions}
             fetchReports={getProjectReports}

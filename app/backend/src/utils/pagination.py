@@ -1,6 +1,9 @@
-"""Opaque keyset-pagination cursors for report list pages (ReportPage.nextCursor) -
-framework-agnostic so every head that paginates a project's reports (the REST API,
-and any MCP tool doing the same) can mint and consume the same cursor values.
+"""Opaque pagination cursors, shared across every list endpoint that pages results -
+framework-agnostic so every head (the REST API, and any MCP tool doing the same) can
+mint and consume the same cursor values. The encoded integer means whatever the caller
+needs it to: a keyset cursor (the last row id, e.g. ReportPage.nextCursor) for results
+ordered by a stable id, or a plain offset for results ordered by something else (e.g.
+SimilarStudyPage.nextCursor, which pages a relevance-ranked list).
 """
 
 import base64
@@ -10,8 +13,8 @@ class InvalidCursorError(ValueError):
     """A pagination cursor couldn't be decoded."""
 
 
-def encode_cursor(report_id: int) -> str:
-    return base64.urlsafe_b64encode(str(report_id).encode()).decode()
+def encode_cursor(position: int) -> str:
+    return base64.urlsafe_b64encode(str(position).encode()).decode()
 
 
 def decode_cursor(cursor: str) -> int:

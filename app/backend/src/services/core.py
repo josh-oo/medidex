@@ -24,8 +24,8 @@ class StudySimilaritySearchService:
         if not self.user_id:
             self.user_id = "user"
 
-    async def get_similar_study_by_query(self, query : Any, cutoff: str, k: int, negative_studies: List[int], trial_ids: List[str], authors:List[str], return_details: bool):
-    
+    async def get_similar_study_by_query(self, query : Any, cutoff: str, limit: int, negative_studies: List[int], trial_ids: List[str], authors:List[str], return_details: bool):
+
         #Convert TagCategories:
 
         found_study_ids = {}
@@ -33,8 +33,8 @@ class StudySimilaritySearchService:
         debug_map = {}
 
         return_details= return_details or self.debug
-        
-        
+
+
         if len(trial_ids) > 0:
             response = await self.study_repo.get_study_id_by_trial_ids(trial_ids, cutoff)
             penalty = 0.00
@@ -48,12 +48,12 @@ class StudySimilaritySearchService:
                         debug_map[study_id] = [{"source_id":trial_id}]
                         penalty += 0.01
 
-        k = k - len(found_study_ids.keys())
-        if k > 0:
+        remaining = limit - len(found_study_ids.keys())
+        if remaining > 0:
 
             blacklist = list(found_study_ids.keys()) + negative_studies
             exclude_trial_related_studies = len(found_study_ids.keys()) > 0
-            reranked_results = await self.vectorstore.search_similar_studies(query, k, cutoff, blacklist, exclude_trial_related_studies)
+            reranked_results = await self.vectorstore.search_similar_studies(query, remaining, cutoff, blacklist, exclude_trial_related_studies)
 
             for result in reranked_results:
                 for hit in result.hits:
@@ -106,7 +106,15 @@ class StudySimilaritySearchService:
 
         return reordered
 
-    async def get_similar_studies_by_id(self, report_id : int, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], return_details: bool):
+    async def get_similar_studies_by_id(self, report_id : int, cutoff: str, limit: int, offset: int, negative_studies: List[int], negative_reports: List[int], return_details: bool):
+        """Returns (page, has_more): `page` is the [offset, offset + limit) slice of the
+        relevance-ranked candidate pool, `has_more` says whether a further page exists.
+        The candidate pool has no stable id ordering to page by (it's assembled from
+        exact trial-id matches, vectorstore hits and project studies, then re-sorted by
+        score), so pagination is offset-based rather than keyset-based like ReportPage -
+        see src/utils/pagination.py. One extra candidate beyond the page (`pool_target`)
+        is fetched/kept so has_more can be determined without a separate count query.
+        """
 
         if not negative_studies:
             negative_studies = []
@@ -118,8 +126,8 @@ class StudySimilaritySearchService:
 
         query = self.vectorstore.build_recommandation_based_on_report_id(report.id, negative_reports)
 
-
-        result = await self.get_similar_study_by_query(query,cutoff,k,negative_studies, trial_ids, authors, return_details=return_details)
+        pool_target = offset + limit + 1
+        result = await self.get_similar_study_by_query(query,cutoff,pool_target,negative_studies, trial_ids, authors, return_details=return_details)
 
         # Check if there are any similar items in the same project which are more similar than already retrieved existing studies
         if result.get('Relevance'):
@@ -168,13 +176,15 @@ class StudySimilaritySearchService:
                 for key in result.keys():
                     result[key] = [result[key][i] for i in sorted_indices]
 
-                # Truncate to k results if we have more
-                if len(result['Relevance']) > k:
+                # Truncate to the pool target (one more than the page) if we have more
+                if len(result['Relevance']) > pool_target:
                     for key in result.keys():
-                        result[key] = result[key][:k]
+                        result[key] = result[key][:pool_target]
 
-        return result
-    
+        has_more = len(result.get('Relevance', [])) > offset + limit
+        page = {key: values[offset:offset + limit] for key, values in result.items()}
+        return page, has_more
+
 
 class RelatedTagSearchService:
 
@@ -203,7 +213,7 @@ class RelatedTagSearchService:
     async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : str):
         
         #similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, TagCategories.default, cutoff, k, None, None, False)
-        similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, cutoff, k, None, None, False)
+        similar_studies, _has_more = await self.study_similarity_service.get_similar_studies_by_id(report_id, cutoff, k, 0, None, None, False)
         predicted_studies = similar_studies['id']
 
         vectors = await self.vectorstore.get_vectors_by_report_id(report_id)

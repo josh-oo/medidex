@@ -62,6 +62,10 @@ class SimilarStudy(BaseModel):
     relevance: float
     study: Study
 
+class SimilarStudyPage(BaseModel):
+    items: List[SimilarStudy]
+    nextCursor: Optional[str] = None
+
 class Tag(BaseModel):
     id: str
     keyword: str

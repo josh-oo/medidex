@@ -105,10 +105,16 @@ export interface SimilarStudyDto {
   study: StudyDto;
 }
 
+export interface SimilarStudyPageDto {
+  items: SimilarStudyDto[];
+  nextCursor: string | null;
+}
+
 export interface GetSimilarStudiesParams {
   aspect?: string;
   cutoff?: string;
-  k?: number;
+  limit?: number;
+  cursor?: string;
   return_details?: boolean;
 }
 

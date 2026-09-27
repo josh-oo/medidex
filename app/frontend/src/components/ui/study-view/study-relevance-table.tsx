@@ -32,6 +32,9 @@ import { searchStudies } from "@/lib/api/studiesApi";
 interface StudyRelevanceTableProps {
   reportId?: number;
   studies: RelevanceStudy[];
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 // The backend rejects shorter queries.
@@ -42,6 +45,9 @@ const MAX_VISIBLE_SEARCH_RESULTS = 25;
 export function StudyRelevanceTable({
   reportId,
   studies,
+  hasMore = false,
+  isLoadingMore = false,
+  onLoadMore,
 }: StudyRelevanceTableProps) {
 
   const [resolvedStudies, setResolvedStudies] = useState<RelevanceStudy[]>(() => [...studies]);
@@ -480,7 +486,9 @@ export function StudyRelevanceTable({
                 ))}
 
                 {/* Load More Button */}
-                <LoadMoreStudiesButton />
+                {hasMore && (
+                  <LoadMoreStudiesButton onClick={onLoadMore} loading={isLoadingMore} />
+                )}
               </>
             )}
           </div>

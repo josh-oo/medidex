@@ -24,7 +24,8 @@ from src.services.authorization import (
     ReportAccessDeniedError,
 )
 
-from src.utils.dto import StudyCreate, Study, Tag, SimilarStudy, studies_to_dto, similar_studies_to_dto
+from src.utils.dto import StudyCreate, Study, Tag, SimilarStudyPage, studies_to_dto, similar_studies_to_dto
+from src.utils.pagination import encode_cursor, decode_cursor, InvalidCursorError
 from datetime import datetime
 
 load_dotenv()
@@ -102,13 +103,14 @@ async def similar_tags(tag_category: TagCategories =Path(..., description="The t
 async def similarity_search_studies_by_id(
     report_id: int,
     cutoff: str = Query(None),
-    k: int = Query(10),
+    limit: int = Query(10, ge=1, description="Maximum number of results to return per page."),
+    cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
     source: str = Query(None),
     negative_studies: List[int] = Query(None),
     negative_reports: List[int] = Query(None),
     return_details: bool = False,
     ctx: RequestContext = Depends(get_context),
-) -> List[SimilarStudy]:
+) -> SimilarStudyPage:
     _,_, ready_report_ids = await get_vectorized_and_ready_report_ids(
         [report_id], ctx.report_repo
     )
@@ -120,16 +122,23 @@ async def similarity_search_studies_by_id(
         if project_id != source:
             raise HTTPException(status_code=404, detail="Report not found in project")
 
-    result = await ctx.study_similarity_service.get_similar_studies_by_id(
+    try:
+        offset = decode_cursor(cursor) if cursor else 0
+    except InvalidCursorError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    result, has_more = await ctx.study_similarity_service.get_similar_studies_by_id(
         report_id,
         cutoff,
-        k,
+        limit,
+        offset,
         negative_studies,
         negative_reports,
         return_details,
     )
     studies = similar_studies_to_dto(result)
-    return studies
+    next_cursor = encode_cursor(offset + limit) if has_more else None
+    return SimilarStudyPage(items=studies, nextCursor=next_cursor)
 
 @router.get("/reports/{report_id}/similar-studies/tags", dependencies=[Depends(is_verified_api_call), Depends(check_report_access)], summary="")
 async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(10, description="The number of related studies considered for retrieving relevant tags."), ctx: RequestContext = Depends(get_context)):

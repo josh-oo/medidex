@@ -1,12 +1,15 @@
 import axios from "axios";
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import { toast } from "sonner";
 import { StudyRelevanceTable } from "@/components/ui/study-view/study-relevance-table";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SimilarStudyDto } from "@/types/apiDTOs";
 import type { RelevanceStudy } from "@/types/reports";
 import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
 import { ReportChatButtons } from "./ai-actions";
+
+const PAGE_SIZE = 10;
 
 const mapResponseToRelevanceStudies = (
   response: SimilarStudyDto[]
@@ -22,24 +25,27 @@ export default function StudyList() {
     projectId: string;
     reportId: string;
   };
-  const [searchParams] = useSearchParams();
-  const k = searchParams.get("k") ?? undefined;
   const source = projectId;
   const reportIdNumber = Number(reportId);
 
   const [studies, setStudies] = useState<RelevanceStudy[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setStudies(null);
+    setNextCursor(null);
     setNotFound(false);
     setLoadError(false);
 
-    getSimilarStudiesByReportId(reportIdNumber, undefined, { params: { k, source } })
+    getSimilarStudiesByReportId(reportIdNumber, undefined, { params: { limit: PAGE_SIZE, source } })
       .then((response) => {
-        if (!cancelled) setStudies(mapResponseToRelevanceStudies(response));
+        if (cancelled) return;
+        setStudies(mapResponseToRelevanceStudies(response.items));
+        setNextCursor(response.nextCursor);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -54,7 +60,27 @@ export default function StudyList() {
     return () => {
       cancelled = true;
     };
-  }, [reportIdNumber, k, source]);
+  }, [reportIdNumber, source]);
+
+  const handleLoadMore = () => {
+    if (!nextCursor || isLoadingMore) return;
+
+    setIsLoadingMore(true);
+    getSimilarStudiesByReportId(reportIdNumber, undefined, {
+      params: { limit: PAGE_SIZE, cursor: nextCursor, source },
+    })
+      .then((response) => {
+        setStudies((prev) => [...(prev ?? []), ...mapResponseToRelevanceStudies(response.items)]);
+        setNextCursor(response.nextCursor);
+      })
+      .catch((error) => {
+        console.error(`Error loading more studies for report ${reportIdNumber}:`, error);
+        toast.error("Failed to load more studies");
+      })
+      .finally(() => {
+        setIsLoadingMore(false);
+      });
+  };
 
   if (notFound) {
     return (
@@ -81,6 +107,9 @@ export default function StudyList() {
       <StudyRelevanceTable
         reportId={reportIdNumber}
         studies={studies}
+        hasMore={nextCursor !== null}
+        isLoadingMore={isLoadingMore}
+        onLoadMore={handleLoadMore}
       />
       <ReportChatButtons reportId={reportIdNumber} studies={studies}/>
     </>
