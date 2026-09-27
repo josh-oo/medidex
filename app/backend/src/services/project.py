@@ -28,12 +28,10 @@ class ProjectResourceService:
         if not report_ids:
             return set(), set(), set()
 
-        # Run database query first, then vectorstore query to avoid concurrent session usage
-        reports_with_pdf = await self.report_repo.get_pdf_availabilities(report_ids)
-        reports_with_embedding = await self.vectorstore_service.reports_exist(report_ids)
-
-        embedded_reports = set(reports_with_embedding)
-        pdf_ready_reports = set(reports_with_pdf)
+        # report.embedded/report.has_pdf are denormalized mirrors of Qdrant/filesystem
+        # state (see models.py) kept in sync by the app itself, so this is now a plain SQL
+        # read instead of a live Qdrant retrieve + a filesystem stat per report.
+        embedded_reports, pdf_ready_reports = await self.report_repo.get_readiness_sets(report_ids)
         ready_reports = embedded_reports & pdf_ready_reports
         return embedded_reports, pdf_ready_reports, ready_reports
 

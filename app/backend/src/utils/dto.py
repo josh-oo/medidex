@@ -87,6 +87,10 @@ class BatchedReport(BaseModel):
     flag: Optional[str]
     assignedStudies: List[Study] = Field(default_factory=list)
 
+class ReportPage(BaseModel):
+    items: List[BatchedReport]
+    nextCursor: Optional[str] = None
+
 def tags_to_dto(tags) -> List[Tag]:
     result = []
     for tag in tags:

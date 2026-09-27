@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
 import { useReportStore } from "@/hooks/use-report-store";
-import { FilterMode, GetProjectReportsParams, ReportDetailDto, ReportFilterDimension, ReportFiltersState } from "@/types/apiDTOs";
+import { FilterMode, GetProjectReportsParams, ReportDetailDto, ReportFilterDimension, ReportFiltersState, ReportPageDto } from "@/types/apiDTOs";
 import { toast } from "sonner";
 import { Abstract } from "./report-abstract";
 import {
@@ -78,7 +78,7 @@ interface ReportListProps {
   fetchReports: (
     projectId: string,
     filters: GetProjectReportsParams
-  ) => Promise<ReportDetailDto[]>;
+  ) => Promise<ReportPageDto>;
   // The parent layout's own initial, unfiltered fetch (same endpoint as `fetchReports` with no
   // filters/search) - used only to seed the very first render so the list doesn't flash empty
   // while that same data is re-fetched below; every filter/search change after that always goes
@@ -138,17 +138,19 @@ export function ReportList({
   const storeResults = useGenAIEvaluationStore((state) => state.results);
   const runningEvaluations = useGenAIEvaluationStore((state) => state.runningEvaluations);
 
-  const reportsDict = useReportStore((state) => state.reports);
   const setReportFlag = useReportStore((state) => state.setFlag);
-  // Only for the "X of Y" hint below - the parent layout's initial, unfiltered load for this
-  // view, not the list actually rendered (see the fetch effect further down).
-  const initialReportsCount = useMemo(() => Object.keys(reportsDict).length, [reportsDict]);
+  const addReports = useReportStore((state) => state.addReports);
 
   // Seeded from the parent layout's own initial fetch so the list doesn't flash empty while
   // the (functionally identical) fetch below is still in flight.
   const [filteredReports, setFilteredReports] = useState<ReportDetailDto[]>(initialReports);
   const [isLoading, setIsLoading] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  // Cursor for the next page of the *current* search/filter combination - reset to null
+  // whenever that combination changes, since a cursor from one filter set is meaningless
+  // against another.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // Only the free-text search is debounced (it fires on every keystroke); a filter chip click
   // is already a single, deliberate action, so it fetches immediately below instead of also
@@ -158,21 +160,31 @@ export function ReportList({
     return () => clearTimeout(handle);
   }, [searchQuery]);
 
+  // Guards against a slow handleLoadMore response landing after a newer filter/search/project
+  // fetch has already replaced the list it was appending to - every effect/handler below that
+  // starts a fetch bumps this first and checks it's still current before applying the result.
+  const requestIdRef = useRef(0);
+
   // A project switch swaps in the new project's own initial data right away, same as on
   // first mount, rather than showing the previous project's reports until the fetch below
   // (also triggered by the projectId change) resolves.
   useEffect(() => {
+    requestIdRef.current += 1;
     setFilteredReports(initialReports);
+    setNextCursor(null);
   }, [projectId, initialReports]);
 
   // Always the single source of truth for what's rendered - no separate "use the client store's
   // snapshot when no filter is active" path, so clearing a filter/search always re-fetches
-  // from the server instead of silently falling back to a possibly-stale local cache.
+  // from the server instead of silently falling back to a possibly-stale local cache. Always
+  // fetches the first page - a filter/search change starts pagination over, it never resumes
+  // from wherever the previous combination's cursor left off.
   useEffect(() => {
     if (!projectId) {
       return;
     }
 
+    const requestId = ++requestIdRef.current;
     let cancelled = false;
     setIsLoading(true);
 
@@ -181,11 +193,17 @@ export function ReportList({
       ...filters,
     })
       .then((result) => {
-        if (!cancelled) setFilteredReports(result);
+        if (cancelled || requestIdRef.current !== requestId) return;
+        setFilteredReports(result.items);
+        setNextCursor(result.nextCursor);
+        addReports(result.items);
       })
       .catch((error) => {
         console.error("Error fetching reports:", error);
-        if (!cancelled) setFilteredReports([]);
+        if (!cancelled && requestIdRef.current === requestId) {
+          setFilteredReports([]);
+          setNextCursor(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -194,7 +212,38 @@ export function ReportList({
     return () => {
       cancelled = true;
     };
-  }, [projectId, debouncedSearch, filters, fetchReports]);
+  }, [projectId, debouncedSearch, filters, fetchReports, addReports]);
+
+  const handleLoadMore = () => {
+    if (!projectId || !nextCursor || isLoadingMore) {
+      return;
+    }
+
+    const requestId = requestIdRef.current;
+    setIsLoadingMore(true);
+
+    fetchReports(projectId, {
+      search: debouncedSearch || undefined,
+      ...filters,
+      cursor: nextCursor,
+    })
+      .then((result) => {
+        // A filter/search/project change since this request started means the list it would
+        // append to no longer belongs to the current view - drop it rather than corrupt the
+        // new list with reports (and a cursor) from a stale filter combination.
+        if (requestIdRef.current !== requestId) return;
+        setFilteredReports((prev) => [...prev, ...result.items]);
+        setNextCursor(result.nextCursor);
+        addReports(result.items);
+      })
+      .catch((error) => {
+        console.error("Error fetching more reports:", error);
+        toast.error("Could not load more reports. Please try again.");
+      })
+      .finally(() => {
+        setIsLoadingMore(false);
+      });
+  };
 
   const patchFilteredReportFlag = (reportId: number, flag: string | undefined) => {
     setFilteredReports((prev) =>
@@ -366,8 +415,7 @@ export function ReportList({
           <FileText className="h-6 w-6 text-primary" />
           <h2 className="text-xl font-semibold">Reports</h2>
           <span className="text-sm text-muted-foreground">
-            ({filteredReports.length})
-            {searchQuery && ` of ${initialReportsCount}`}
+            ({filteredReports.length}{nextCursor ? "+" : ""})
           </span>
           {isLoading && <Spinner className="h-3.5 w-3.5 text-muted-foreground" />}
         </div>
@@ -631,6 +679,21 @@ export function ReportList({
                 </div>
               );
             })
+          )}
+
+          {nextCursor && (
+            <div className="flex justify-center pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleLoadMore}
+                disabled={isLoadingMore || isLoading}
+              >
+                {isLoadingMore && <Spinner className="h-3.5 w-3.5" />}
+                Load more
+              </Button>
+            </div>
           )}
         </div>
       </ScrollArea>

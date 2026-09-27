@@ -170,10 +170,17 @@ CREATE TABLE IF NOT EXISTS "fulltext_extraction" (
 CREATE TABLE IF NOT EXISTS "report_added" (
     "report_id" integer PRIMARY KEY REFERENCES "report" ("id") ON DELETE CASCADE,
     "project_id" text NOT NULL REFERENCES "project" ("id") ON DELETE CASCADE,
-    "auto_searched_pdf" boolean NOT NULL DEFAULT false
+    "auto_searched_pdf" boolean NOT NULL DEFAULT false,
+    -- Denormalized mirrors of Qdrant vector existence / fulltext file existence on disk,
+    -- scoped to the project association (not "report") since they're only meaningful for
+    -- its lifetime - see app/backend/src/database/models.py's ReportAdded model.
+    "embedded" boolean NOT NULL DEFAULT false,
+    "has_pdf" boolean NOT NULL DEFAULT false
 );
 CREATE INDEX IF NOT EXISTS "idx_report_added_project_report"
     ON "report_added" ("project_id", "report_id");
+CREATE INDEX IF NOT EXISTS "idx_report_added_embedded" ON "report_added" ("embedded");
+CREATE INDEX IF NOT EXISTS "idx_report_added_has_pdf" ON "report_added" ("has_pdf");
 CREATE TABLE IF NOT EXISTS "project_inner_score" (
     "report_id" integer NOT NULL REFERENCES "report" ("id") ON DELETE CASCADE,
     "other_id" integer NOT NULL REFERENCES "report" ("id") ON DELETE CASCADE,

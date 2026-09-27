@@ -4,6 +4,7 @@ from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, Backg
 from fastapi.responses import Response, StreamingResponse
 from typing import Dict, List, Any, Tuple, Set, Optional
 from enum import Enum
+import base64
 import json
 import logging
 
@@ -19,7 +20,7 @@ from .deps import get_context
 
 from src.database.repositories.study import DuplicateShortNameError
 
-from src.database.models import Project as DbProject
+from src.database.models import Project as DbProject, Report as DbReport
 
 from src.services.agent import AutomationService
 
@@ -28,7 +29,7 @@ from src.background.wrapper import (
     run_start_automation_background,
 )
 
-from src.utils.dto import Report, StudyCreate,BatchedReport, Project, ProjectAssignee, ProjectDetails, ProjectTask, studies_to_dto
+from src.utils.dto import Report, StudyCreate,BatchedReport, Project, ProjectAssignee, ProjectDetails, ProjectTask, ReportPage, studies_to_dto
 
 router = APIRouter(tags=["projects"])
 
@@ -370,42 +371,92 @@ def _matches_filter(value: bool, mode: FilterMode) -> bool:
     return not value
 
 
-async def _list_project_reports(
+def _filter_mode_to_bool(mode: FilterMode) -> Optional[bool]:
+    """None = "any" (no filter) - what query_project_reports_page's plain-bool filter
+    params expect; that layer doesn't know about this REST-facing enum."""
+    if mode is FilterMode.any:
+        return None
+    return mode is FilterMode.only
+
+
+async def _review_candidate_report_ids(
     project_id: str,
     ctx: RequestContext,
-    *,
-    allow_unready: bool,
-    search: Optional[str] = None,
-    processed: FilterMode = FilterMode.any,
-    with_pdf: FilterMode = FilterMode.any,
-    flagged: FilterMode = FilterMode.any,
-    new_study: FilterMode = FilterMode.any,
-    consensus: FilterMode = FilterMode.any,
-    reviewed: FilterMode = FilterMode.any,
-    only_fully_annotated: bool = False,
-) -> List[BatchedReport]:
-    report_ids = await ctx.project_repo.get_project_associated_report_ids(project_id)
-    _, reports_with_pdf, ready_report_ids = await get_vectorized_and_ready_report_ids(project_id, ctx)
-    # ready_report_ids is always a subset of auto_searched_report_ids: a report can't be fully
-    # processed before its PDF auto-search has run.
-    auto_searched_report_ids = await ctx.project_repo.get_auto_searched_pdf_for_project(project_id)
+    consensus: FilterMode,
+    reviewed: FilterMode,
+) -> Set[int]:
+    """The review endpoint's id-narrowing step: fully-annotated report ids (every project
+    assignee has completed annotating), optionally further narrowed by consensus/reviewed.
+    Bounded by the project's annotation rows (_get_project_annotations already returns a
+    compact per-report structure, no report bodies) - feeds into
+    query_project_reports_page's restrict_to_ids rather than filtering an already-hydrated
+    list, but doesn't itself need to become a SQL query since it was never the "fetch
+    every report" cost this endpoint used to have.
+    """
+    annotations = await _get_project_annotations(project_id, ctx)
 
-    reports = await ctx.report_repo.get_all_reports(report_ids)
-    all_linked_studies = await ctx.report_repo.get_linked_studies_for_reports(report_ids)
-    report_flags = await ctx.report_repo.get_report_flags_for_reports(report_ids)
+    def _annotated_studies(report_id: int) -> List[Dict[str, Any]]:
+        return annotations.get(report_id, {}).get("studies", [])
 
-    result = []
-    for report in reports:
-        if report.id not in auto_searched_report_ids:
-            continue
-        if report.id not in ready_report_ids and not allow_unready:
-            continue
+    candidate_ids = set(annotations.keys())
+
+    if consensus is not FilterMode.any:
+        # Fewer than two annotators can't disagree, so treat that as consensus too.
+        candidate_ids = {
+            report_id for report_id in candidate_ids
+            if _matches_filter(
+                len(_annotated_studies(report_id)) < 2
+                or len({s["studyId"] for s in _annotated_studies(report_id)}) == 1,
+                consensus,
+            )
+        }
+
+    if reviewed is not FilterMode.any:
+        candidate_ids = {
+            report_id for report_id in candidate_ids
+            if _matches_filter(any(s["confirmed"] for s in _annotated_studies(report_id)), reviewed)
+        }
+
+    return candidate_ids
+
+
+_search_query = Query(None, description="Filter reports by title, abstract or report id (case-insensitive substring match).")
+_cursor_query = Query(None, description="Opaque cursor from a previous response's nextCursor; omit to fetch the first page.")
+_limit_query = Query(50, ge=1, le=200, description="Maximum number of reports to return in this page.")
+
+
+def _encode_cursor(report_id: int) -> str:
+    return base64.urlsafe_b64encode(str(report_id).encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> int:
+    try:
+        return int(base64.urlsafe_b64decode(cursor.encode()).decode())
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+
+
+async def _hydrate_report_page(ctx: RequestContext, page_rows: List[DbReport], limit: int) -> ReportPage:
+    """Turns a page of plain Report rows - as ReportRepository.query_project_reports_page
+    returns them, including its +1 lookahead row - into the DTO shape, fetching linked
+    studies/flags/pdf-readiness only for this page. The three endpoints below used to
+    fetch every report (+ every linked study, + every flag) in the whole project on every
+    request and filter/sort/slice that in Python; the SQL query now does the
+    filtering/sorting/paging, so this only ever touches up to `limit` reports.
+    """
+    has_more = len(page_rows) > limit
+    page_rows = page_rows[:limit]
+    page_ids = [report.id for report in page_rows]
+
+    all_linked_studies = await ctx.report_repo.get_linked_studies_for_reports(page_ids)
+    report_flags = await ctx.report_repo.get_report_flags_for_reports(page_ids)
+    _, reports_with_pdf = await ctx.report_repo.get_readiness_sets(page_ids)
+
+    items = []
+    for report in page_rows:
         authors = report.authors.split("//") if report.authors else []
-        linked_studies = []
-        if report.id in all_linked_studies.keys():
-            linked_studies = studies_to_dto(all_linked_studies[report.id])
-
-        result.append(
+        linked_studies = studies_to_dto(all_linked_studies.get(report.id, []))
+        items.append(
             BatchedReport(
                 report=Report(
                     reportId=report.id,
@@ -415,7 +466,7 @@ async def _list_project_reports(
                     authors=authors,
                     trialId=report.trial_registration_id,
                     createdAt=report.date_entered,
-                    updatedAt=report.date_edited
+                    updatedAt=report.date_edited,
                 ),
                 hasPdf=report.id in reports_with_pdf,
                 flag=report_flags.get(report.id).message if report.id in report_flags else None,
@@ -423,67 +474,8 @@ async def _list_project_reports(
             )
         )
 
-    if search and search.strip():
-        query = search.strip().lower()
-        result = [
-            r for r in result
-            if query in (r.report.title or "").lower()
-            or query in (r.report.abstract or "").lower()
-            or query in str(r.report.reportId)
-        ]
-
-    result = [r for r in result if _matches_filter(len(r.assignedStudies) > 0, processed)]
-    result = [r for r in result if _matches_filter(bool(r.hasPdf), with_pdf)]
-    result = [r for r in result if _matches_filter(bool(r.flag and r.flag.strip()), flagged)]
-    result = [
-        r for r in result
-        if _matches_filter(
-            bool(
-                r.report.createdAt and any(
-                    study.createdAt and study.createdAt > r.report.createdAt
-                    for study in r.assignedStudies
-                )
-            ),
-            new_study,
-        )
-    ]
-
-    # consensus/reviewed both default to "any" (no-op) on the common, unfiltered request, and
-    # only_fully_annotated is only ever true for the review endpoint - skip the extra
-    # annotations query entirely unless one of them actually needs it.
-    if consensus is not FilterMode.any or reviewed is not FilterMode.any or only_fully_annotated:
-        annotations = await _get_project_annotations(project_id, ctx)
-
-        def _annotated_studies(report_id: int) -> List[Dict[str, Any]]:
-            return annotations.get(report_id, {}).get("studies", [])
-
-        if only_fully_annotated:
-            result = [r for r in result if r.report.reportId in annotations]
-
-        if consensus is not FilterMode.any:
-            # Fewer than two annotators can't disagree, so treat that as consensus too.
-            result = [
-                r for r in result
-                if _matches_filter(
-                    len(_annotated_studies(r.report.reportId)) < 2
-                    or len({s["studyId"] for s in _annotated_studies(r.report.reportId)}) == 1,
-                    consensus,
-                )
-            ]
-
-        if reviewed is not FilterMode.any:
-            result = [
-                r for r in result
-                if _matches_filter(
-                    any(s["confirmed"] for s in _annotated_studies(r.report.reportId)),
-                    reviewed,
-                )
-            ]
-
-    return result
-
-
-_search_query = Query(None, description="Filter reports by title, abstract or report id (case-insensitive substring match).")
+    next_cursor = _encode_cursor(page_ids[-1]) if has_more and page_ids else None
+    return ReportPage(items=items, nextCursor=next_cursor)
 
 
 @router.get(
@@ -500,16 +492,21 @@ async def get_project_reports(
     processed: FilterMode = Query(FilterMode.any, description="Only/exclude reports that have at least one linked study."),
     flagged: FilterMode = Query(FilterMode.any, description="Only/exclude flagged reports."),
     new_study: FilterMode = Query(FilterMode.any, description="Only/exclude reports where a linked study was created after the report itself."),
-) -> List[BatchedReport]:
-    return await _list_project_reports(
+    cursor: Optional[str] = _cursor_query,
+    limit: int = _limit_query,
+) -> ReportPage:
+    cursor_id = _decode_cursor(cursor) if cursor else None
+    page_rows = await ctx.report_repo.query_project_reports_page(
         project_id,
-        ctx,
-        allow_unready=False,
+        require_ready=True,
         search=search,
-        processed=processed,
-        flagged=flagged,
-        new_study=new_study,
+        processed=_filter_mode_to_bool(processed),
+        flagged=_filter_mode_to_bool(flagged),
+        new_study=_filter_mode_to_bool(new_study),
+        cursor_id=cursor_id,
+        limit=limit,
     )
+    return await _hydrate_report_page(ctx, page_rows, limit)
 
 
 @router.get(
@@ -524,14 +521,19 @@ async def get_project_reports_intake(
     ctx: RequestContext = Depends(get_context),
     search: Optional[str] = _search_query,
     with_pdf: FilterMode = Query(FilterMode.any, description="Only/exclude reports that have a PDF available."),
-) -> List[BatchedReport]:
-    return await _list_project_reports(
+    cursor: Optional[str] = _cursor_query,
+    limit: int = _limit_query,
+) -> ReportPage:
+    cursor_id = _decode_cursor(cursor) if cursor else None
+    page_rows = await ctx.report_repo.query_project_reports_page(
         project_id,
-        ctx,
-        allow_unready=True,
+        require_ready=False,
+        with_pdf=_filter_mode_to_bool(with_pdf),
         search=search,
-        with_pdf=with_pdf,
+        cursor_id=cursor_id,
+        limit=limit,
     )
+    return await _hydrate_report_page(ctx, page_rows, limit)
 
 
 @router.get(
@@ -548,16 +550,20 @@ async def get_project_reports_review(
     search: Optional[str] = _search_query,
     consensus: FilterMode = Query(FilterMode.any, description="Only/exclude reports where annotators agree on the linked study."),
     reviewed: FilterMode = Query(FilterMode.any, description="Only/exclude reports where an annotator has confirmed their annotation."),
-) -> List[BatchedReport]:
-    return await _list_project_reports(
+    cursor: Optional[str] = _cursor_query,
+    limit: int = _limit_query,
+) -> ReportPage:
+    cursor_id = _decode_cursor(cursor) if cursor else None
+    restrict_to_ids = await _review_candidate_report_ids(project_id, ctx, consensus, reviewed)
+    page_rows = await ctx.report_repo.query_project_reports_page(
         project_id,
-        ctx,
-        allow_unready=False,
+        require_ready=True,
         search=search,
-        consensus=consensus,
-        reviewed=reviewed,
-        only_fully_annotated=True,
+        restrict_to_ids=restrict_to_ids,
+        cursor_id=cursor_id,
+        limit=limit,
     )
+    return await _hydrate_report_page(ctx, page_rows, limit)
 
 @router.get( "/projects/{project_id}/annotations",dependencies=[Depends(is_admin)],summary="Get reports annotated by all assigned users in a project.")
 async def get_project_annotations(project: DbProject = Depends(get_project_by_id), ctx: RequestContext = Depends(get_context)) -> Dict[int, Dict[str, List[Dict[str, Any]]]]:

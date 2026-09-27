@@ -19,6 +19,7 @@ const removeStudyViaApi = async (reportId: number, studyId: number) => {
 type ReportState = {
     reports: Record<number, ReportDetailDto>
     setReports: (reports: ReportDetailDto[]) => void
+    addReports: (reports: ReportDetailDto[]) => void
     getReport: (reportId: number) => ReportDetailDto
     addAssignedStudy: (reportId: number, study: StudyDto) => Promise<void>
     syncAssignedStudy: (reportId: number, study: StudyDto) => void
@@ -34,6 +35,32 @@ export const useReportStore = create<ReportState>((set, get) => ({
         reports: Object.fromEntries(
             reports.map((r) => [r.report.reportId, r]),
         ),
+    }),
+
+    // Merges pages into the existing set instead of replacing it, so loading further pages
+    // (or a filtered/search fetch that only covers a subset) never drops reports the store
+    // already knows about - unlike setReports, which is only for a full reset (e.g. project
+    // switch). Only ADDS reports the store doesn't already have; never overwrites an
+    // existing entry. Without that, a slow filter/search fetch that started before a local
+    // mutation (flag/study assignment) but resolves after it would clobber that mutation
+    // back to the stale pre-mutation snapshot it fetched - the report's own dedicated
+    // actions (setFlag/syncAssignedStudy/removeAssignedStudy/setHasPdf) are always the
+    // source of truth for a report already in the store.
+    addReports: (reports) => set((state) => {
+        const additions = Object.fromEntries(
+            reports
+                .filter((r) => !(r.report.reportId in state.reports))
+                .map((r) => [r.report.reportId, r]),
+        );
+        if (Object.keys(additions).length === 0) {
+            return state;
+        }
+        return {
+            reports: {
+                ...state.reports,
+                ...additions,
+            },
+        };
     }),
 
     getReport: (reportId) => {

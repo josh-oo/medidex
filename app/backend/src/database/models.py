@@ -199,9 +199,21 @@ class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
     report_id: int = Field(primary_key=True, foreign_key="report.id", ondelete="CASCADE")
     project_id: str = Field(foreign_key="project.id", ondelete="CASCADE")
     auto_searched_pdf: bool = Field(default=False, nullable=False)
+    # Denormalized mirrors of external state (Qdrant vector existence / fulltext file
+    # existence on disk), scoped here rather than on Report because they're only
+    # meaningful for the lifetime of this report's project association: cascading away
+    # with this row when the project is deleted is the wanted behavior, not a gap to work
+    # around - Report itself shouldn't carry project-scoped, temporary metadata. Kept in
+    # sync at every write site that changes the underlying state - see
+    # ReportRepository.set_embedded()/recompute_has_pdf() and their callers - rather than
+    # computed on read.
+    embedded: bool = Field(default=False, nullable=False)
+    has_pdf: bool = Field(default=False, nullable=False)
 
     __table_args__ = (
         Index('idx_report_added_project_report', 'project_id', 'report_id'),
+        Index('idx_report_added_embedded', 'embedded'),  # For readiness filtering
+        Index('idx_report_added_has_pdf', 'has_pdf'),  # For readiness/with_pdf filtering
     )
 
 class ProjectInnerScore(SQLModel, table=True, metadata=metadata_resources):

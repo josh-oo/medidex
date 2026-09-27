@@ -16,6 +16,7 @@ from ..models import (
     StudyReportAdded,
     ProjectAssignees,
 )
+from .report import ReportRepository
 from typing import Any, Dict, List, Set, Tuple, Optional
 
 
@@ -151,6 +152,13 @@ class ProjectRepository:
         print("Set auto searched: ", report_added,flush=True)
         #await self.db.commit()
 
+        # auto_searched_pdf gates report.has_pdf's eligibility (see
+        # ReportRepository._compute_has_pdf) - a fulltext file may already exist and just
+        # been waiting on this flag, so re-derive it now instead of leaving it stale until
+        # something else happens to touch this report's PDF/fulltext state. Same session,
+        # different repo class - both just wrap self.db.
+        await ReportRepository(db=self.db, user_id=self.user_id).recompute_has_pdf(report_id)
+
     async def is_project_assignee(self, project_id: str) -> bool:
         if not self.user_id:
             return False
@@ -200,15 +208,6 @@ class ProjectRepository:
         )
         result = await self.db.execute(stmt)
         return int(result.scalar_one() or 0)
-
-    async def get_auto_searched_pdf_for_project(self, project_id: str) -> List[int]:
-        stmt = (
-            select(ReportAdded.report_id)
-            .where(ReportAdded.project_id == project_id)
-            .where(ReportAdded.auto_searched_pdf.is_(True))
-        )
-        result = await self.db.execute(stmt)
-        return result.scalars().all()
 
     async def get_user_link_counts_by_project(self) -> Dict[str, int]:
         if not self.user_id:

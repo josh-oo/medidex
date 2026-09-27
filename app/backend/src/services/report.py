@@ -185,6 +185,7 @@ class DocumentService:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
         await asyncio.to_thread(_write_file, txt_path, text)
+        await self.report_repo.recompute_has_pdf(report_id)
 
         return text
     
@@ -216,6 +217,7 @@ class DocumentService:
         # Clear derived artifacts and reset report number so future uploads are re-assigned cleanly.
         await asyncio.to_thread(self.delete_fulltext, report_id)
         report.report_number = -1
+        await self.report_repo.recompute_has_pdf(report_id)
         await self.report_repo.db.flush()
         await self.report_repo.db.commit()
 
@@ -236,6 +238,7 @@ class DocumentService:
             report = await self.report_repo.get_report_by_id(report_id)
             if report:
                 report.report_number = 0
+                await self.report_repo.recompute_has_pdf(report_id)
                 await self.report_repo.db.flush()
             return {"report_id": report_id, "file_path": None, "size_bytes": 0}
 

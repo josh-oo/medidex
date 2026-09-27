@@ -8,8 +8,6 @@ import logging
 
 from src.utils.logger import setup_logging
 
-import asyncio
-
 import enum
 from .auth import is_verified_api_call, is_admin
 
@@ -18,7 +16,6 @@ from .deps import get_context
 
 from src.database.repositories.study import DuplicateShortNameError
 from src.database import ReportRepository
-from src.services.vectorstore import VectorstoreService
 
 from src.services.authorization import (
     get_authorized_project_id,
@@ -56,19 +53,19 @@ class TagCategories(str, enum.Enum):
 async def get_vectorized_and_ready_report_ids(
     report_ids: List[int],
     report_repo: ReportRepository,
-    vectorstore: VectorstoreService,
 ) -> Tuple[Set[int], Set[int], Set[int]]:
+    """Reads report_added.embedded/report_added.has_pdf directly (see models.py) instead
+    of calling Qdrant/the filesystem live - mirrors
+    ProjectResourceService.get_vectorized_and_ready_report_ids, which this used to
+    duplicate with its own live Qdrant/filesystem calls; keeping both call this same
+    ReportRepository.get_readiness_sets() primitive is what keeps them from being able to
+    disagree about a report's readiness.
+    """
     if not report_ids:
         return set(), set(), set()
 
-    reports_with_embedding, reports_with_pdf = await asyncio.gather(
-        vectorstore.reports_exist(report_ids),
-        report_repo.get_pdf_availabilities(report_ids),
-    )
-    embedded_reports = set(reports_with_embedding)
-    pdf_ready_reports = set(reports_with_pdf)
-
-    ready_report_ids =  embedded_reports & pdf_ready_reports
+    embedded_reports, pdf_ready_reports = await report_repo.get_readiness_sets(report_ids)
+    ready_report_ids = embedded_reports & pdf_ready_reports
     return embedded_reports, pdf_ready_reports, ready_report_ids
 
 async def check_report_access(
@@ -113,7 +110,7 @@ async def similarity_search_studies_by_id(
     ctx: RequestContext = Depends(get_context),
 ) -> List[SimilarStudy]:
     _,_, ready_report_ids = await get_vectorized_and_ready_report_ids(
-        [report_id], ctx.report_repo, ctx.vectorstore_service
+        [report_id], ctx.report_repo
     )
     if report_id not in ready_report_ids and not cutoff:
         raise HTTPException(status_code=409, detail="Report is not ready for processing")

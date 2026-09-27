@@ -18,7 +18,7 @@ export default function ReportColumn() {
 
     getProjectReports(projectId)
       .then((result) => {
-        if (!cancelled) setReports(result ?? []);
+        if (!cancelled) setReports(result?.items ?? []);
       })
       .catch((error) => {
         if (cancelled) return;

@@ -1,8 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import String, cast, func, or_
 from sqlmodel import select, delete
 
 from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions, ReportFlag
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set, Tuple
 
 import os
 
@@ -19,6 +20,42 @@ class ReportRepository:
 
     async def rollback(self):
         return await self.db.rollback()
+
+    async def set_embedded(self, report_id: int, value: bool) -> None:
+        """Mirrors Qdrant vector existence for one report - call right after the caller
+        itself upserts/deletes that report's point (see report_added.embedded's comment
+        in models.py for why this is denormalized, and why it lives on the project
+        association rather than on Report itself). A report with no report_added row (no
+        current project association) has nowhere to record this and is silently skipped -
+        this state is only ever meaningful for the lifetime of that association. Commits
+        on its own: every call site either has no other pending change worth grouping
+        this with, or the pending change is fine to land at the same time - see the call
+        sites themselves for why.
+        """
+        report_added = await self.db.get(ReportAdded, report_id)
+        if report_added is None:
+            return
+        report_added.embedded = value
+        await self.db.commit()
+
+    async def get_readiness_sets(self, report_ids: List[int]) -> Tuple[Set[int], Set[int]]:
+        """Plain SQL read of the embedded/has_pdf columns for the given reports -
+        replaces what used to be a live Qdrant retrieve + per-file filesystem stat call
+        on every read (see ProjectResourceService.get_vectorized_and_ready_report_ids).
+        A report with no report_added row never appears in either returned set.
+        """
+        report_ids = report_ids or []
+        if not report_ids:
+            return set(), set()
+
+        stmt = (
+            select(ReportAdded.report_id, ReportAdded.embedded, ReportAdded.has_pdf)
+            .where(ReportAdded.report_id.in_(report_ids))
+        )
+        rows = (await self.db.execute(stmt)).all()
+        embedded = {report_id for report_id, is_embedded, _ in rows if is_embedded}
+        has_pdf = {report_id for report_id, _, pdf_ready in rows if pdf_ready}
+        return embedded, has_pdf
 
     async def _remove_orphaned_studies(self, affected_study_ids : set) -> List[int]:
         """
@@ -227,6 +264,115 @@ class ReportRepository:
             stmt = stmt.where(Report.date_entered <= date_to)
         return (await self.db.execute(stmt)).scalars().all()
 
+    def _user_scoped_linked_study_query(self, base_query):
+        """Same "created by this user, or unattributed" scoping
+        get_linked_studies_for_reports() applies - the processed/new_study filters below
+        must agree with that method's own scoping, since both describe the same
+        "does this report have a study link this user can see" concept for the same list.
+        """
+        if not self.user_id:
+            return base_query
+        return base_query.where(
+            or_(StudyReportAdded.created_by == self.user_id, StudyReportAdded.created_by.is_(None))
+        )
+
+    async def query_project_reports_page(
+        self,
+        project_id: str,
+        *,
+        require_ready: bool,
+        with_pdf: Optional[bool] = None,
+        search: Optional[str] = None,
+        processed: Optional[bool] = None,
+        flagged: Optional[bool] = None,
+        new_study: Optional[bool] = None,
+        restrict_to_ids: Optional[Set[int]] = None,
+        cursor_id: Optional[int] = None,
+        limit: int = 50,
+    ) -> List[Report]:
+        """One filtered, sorted, keyset-paginated SQL query for a project's report list -
+        the callers in fastapi_app/projects.py used to fetch every report (+ every linked
+        study, + every flag) in the project and filter/sort/slice that in Python; this
+        does the equivalent filtering/ordering in the database and only ever returns up
+        to `limit` + 1 rows (the extra row is a cheap "is there a next page" probe, so the
+        caller never needs a separate COUNT).
+
+        `require_ready`/`with_pdf` read report_added.embedded/report_added.has_pdf directly
+        (see models.py) instead of calling Qdrant or stat()-ing the filesystem per report.
+        `processed`/`flagged`/`new_study` are None ("any", no filter), True ("only") or
+        False ("exclude") - the FilterMode -> bool translation happens in fastapi_app,
+        which owns that REST-facing enum; this layer only knows plain booleans.
+        `restrict_to_ids`, when given, narrows to that id set - used by the review
+        endpoint's consensus/reviewed/fully-annotated filters, which need annotation rows
+        this method has no reason to know about.
+        """
+        search = search.strip() if search else None
+
+        stmt = (
+            select(Report)
+            .join(ReportAdded, ReportAdded.report_id == Report.id)
+            .where(ReportAdded.project_id == project_id)
+            .where(ReportAdded.auto_searched_pdf.is_(True))
+            .where((Report.title.isnot(None)) | (Report.abstract.isnot(None)))
+        )
+
+        if require_ready:
+            stmt = stmt.where(ReportAdded.embedded.is_(True)).where(ReportAdded.has_pdf.is_(True))
+
+        if with_pdf is not None:
+            stmt = stmt.where(ReportAdded.has_pdf.is_(with_pdf))
+
+        if restrict_to_ids is not None:
+            stmt = stmt.where(Report.id.in_(restrict_to_ids))
+
+        if cursor_id is not None:
+            stmt = stmt.where(Report.id > cursor_id)
+
+        if search:
+            # Escape LIKE metacharacters so a literal "%" or "_" in the search term is
+            # matched literally (the substring match this replaces was plain Python
+            # `in`, which had no wildcard semantics at all).
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            stmt = stmt.where(
+                Report.title.ilike(pattern, escape="\\")
+                | Report.abstract.ilike(pattern, escape="\\")
+                | cast(Report.id, String).ilike(pattern, escape="\\")
+            )
+
+        if processed is not None:
+            processed_exists = self._user_scoped_linked_study_query(
+                select(StudyReport.report_id)
+                .select_from(StudyReport)
+                .outerjoin(StudyReportAdded, StudyReportAdded.study_report_id == StudyReport.id)
+                .where(StudyReport.report_id == Report.id)
+            ).exists()
+            stmt = stmt.where(processed_exists if processed else ~processed_exists)
+
+        if new_study is not None:
+            new_study_exists = self._user_scoped_linked_study_query(
+                select(StudyReport.report_id)
+                .select_from(StudyReport)
+                .outerjoin(StudyReportAdded, StudyReportAdded.study_report_id == StudyReport.id)
+                .join(Study, Study.id == StudyReport.study_id)
+                .where(StudyReport.report_id == Report.id)
+                .where(Study.date_entered > Report.date_entered)
+            ).exists()
+            stmt = stmt.where(new_study_exists if new_study else ~new_study_exists)
+
+        if flagged is not None:
+            flagged_exists = (
+                select(ReportFlag.report_id)
+                .where(ReportFlag.report_id == Report.id)
+                .where(ReportFlag.created_by == self.user_id)
+                .where(func.length(func.trim(ReportFlag.message)) > 0)
+            ).exists()
+            stmt = stmt.where(flagged_exists if flagged else ~flagged_exists)
+
+        stmt = stmt.order_by(Report.id).limit(limit + 1)
+
+        return (await self.db.execute(stmt)).scalars().all()
+
     async def get_report_by_id(self, report_id: int) -> Report:
         return await self.db.get(Report, report_id)
 
@@ -344,6 +490,46 @@ class ReportRepository:
             if os.path.exists(txt_path):
                 result.append(report_id)
         return result
+
+    def _compute_has_pdf(self, report: Report, report_added: ReportAdded) -> bool:
+        """Single-report version of get_pdf_availabilities()'s rules - kept in sync with
+        that method's logic since both express the same "does this report have a usable
+        PDF/fulltext" rule, just for different callers (a live filter there, a value to
+        persist here). Unlike get_pdf_availabilities, always has a report_added row to
+        check (see recompute_has_pdf), so - unlike that method - always requires
+        auto_searched_pdf rather than treating "no report_added row" as an ignore case.
+        The auto_searched_pdf gate is checked first, matching get_pdf_availabilities'
+        order: report_number == 0 does NOT bypass it there, only the fulltext-file check.
+        """
+        if not report_added.auto_searched_pdf:
+            return False
+        if report.report_number is None or report.report_number < 0:
+            return False
+        if report.report_number == 0:
+            return True
+
+        txt_name = str(report.id).zfill(5) + ".txt"
+        txt_path = os.path.join(FULLTEXT_PATH, txt_name)
+        return os.path.exists(txt_path)
+
+    async def recompute_has_pdf(self, report_id: int) -> bool:
+        """Re-derives and persists report_added.has_pdf for one report - call after
+        anything that could change its outcome (fulltext written/removed, report_number
+        changed, or the project's auto_searched_pdf flag flipped). A report with no
+        report_added row (no current project association) has nowhere to record this and
+        is silently skipped. Commits on its own - see set_embedded()'s docstring for why
+        that's the right tradeoff at these call sites.
+        """
+        report_added = await self.db.get(ReportAdded, report_id)
+        if report_added is None:
+            return False
+        report = await self.db.get(Report, report_id)
+        if report is None:
+            return False
+        value = self._compute_has_pdf(report, report_added)
+        report_added.has_pdf = value
+        await self.db.commit()
+        return value
 
     async def get_pdf_numbers_by_report_id(self, report_id: int) -> int:
         """

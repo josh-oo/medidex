@@ -7,7 +7,7 @@ import {
   ProjectAssigneeDto,
   ProjectDetailsDto,
   ProjectTaskDto,
-  ReportDetailDto,
+  ReportPageDto,
   StreamCallbacks,
   StreamEvent,
 } from "../../types/apiDTOs";
@@ -93,7 +93,7 @@ export const getProjectReports = (
   projectId: string,
   filters?: GetProjectReportsParams,
   config?: AxiosRequestConfig
-): Promise<ReportDetailDto[]> => {
+): Promise<ReportPageDto> => {
   const requestConfig: AxiosRequestConfig = {
     ...config,
     params: {
@@ -102,11 +102,13 @@ export const getProjectReports = (
       processed: filters?.processed,
       flagged: filters?.flagged,
       new_study: filters?.newStudy,
+      cursor: filters?.cursor,
+      limit: filters?.limit,
     },
   };
 
   return apiClient
-    .get<ReportDetailDto[]>(`/projects/${projectId}/reports`, requestConfig)
+    .get<ReportPageDto>(`/projects/${projectId}/reports`, requestConfig)
     .then(response => {
       return response.data;
     })
@@ -121,18 +123,20 @@ export const getProjectReportsIntake = (
   projectId: string,
   filters?: GetProjectReportsParams,
   config?: AxiosRequestConfig
-): Promise<ReportDetailDto[]> => {
+): Promise<ReportPageDto> => {
   const requestConfig: AxiosRequestConfig = {
     ...config,
     params: {
       ...config?.params,
       search: filters?.search || undefined,
       with_pdf: filters?.withPdf,
+      cursor: filters?.cursor,
+      limit: filters?.limit,
     },
   };
 
   return apiClient
-    .get<ReportDetailDto[]>(`/projects/${projectId}/reports/intake`, requestConfig)
+    .get<ReportPageDto>(`/projects/${projectId}/reports/intake`, requestConfig)
     .then(response => {
       return response.data;
     })
@@ -148,7 +152,7 @@ export const getProjectReportsReview = (
   projectId: string,
   filters?: GetProjectReportsParams,
   config?: AxiosRequestConfig
-): Promise<ReportDetailDto[]> => {
+): Promise<ReportPageDto> => {
   const requestConfig: AxiosRequestConfig = {
     ...config,
     params: {
@@ -156,11 +160,13 @@ export const getProjectReportsReview = (
       search: filters?.search || undefined,
       consensus: filters?.consensus,
       reviewed: filters?.reviewed,
+      cursor: filters?.cursor,
+      limit: filters?.limit,
     },
   };
 
   return apiClient
-    .get<ReportDetailDto[]>(`/projects/${projectId}/reports/review`, requestConfig)
+    .get<ReportPageDto>(`/projects/${projectId}/reports/review`, requestConfig)
     .then(response => {
       return response.data;
     })

@@ -23,7 +23,7 @@ export default function PdfUploadPage() {
 
     getProjectReportsIntake(projectId)
       .then((result) => {
-        if (!cancelled) setReports(result ?? []);
+        if (!cancelled) setReports(result?.items ?? []);
       })
       .catch((error) => {
         if (cancelled) return;

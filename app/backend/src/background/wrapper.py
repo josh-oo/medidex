@@ -122,10 +122,18 @@ async def process_report(reports: List[DbReport], project_id: str, ctx: RequestC
     async def prepare_vectorstore(report):
         async with _vectorstore_semaphore:
             async with AsyncSessionLocal() as session:
-                project = await RequestContext(db=session, user_id=ctx.user_id).project_repo.get_project_by_id(project_id)
+                write_ctx = RequestContext(db=session, user_id=ctx.user_id)
+                project = await write_ctx.project_repo.get_project_by_id(project_id)
                 if not project:  # project already deleted
                     return
                 await ctx.vectorstore_service.add_report_to_vectorstore(report)
+                # Keep report_added.embedded in sync (see its comment in models.py) -
+                # written through this call's own session/write_ctx, not the outer
+                # request-scoped ctx, since several of these run concurrently via
+                # asyncio.gather() below and a single AsyncSession isn't safe to share
+                # across concurrently-running coroutines.
+                await write_ctx.report_repo.set_embedded(report.id, True)
+                await session.commit()
                 await ctx.pubsub_service.publish_project_update(project_id)
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:

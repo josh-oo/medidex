@@ -29,13 +29,13 @@ export default function AnnotationsReviewPage() {
 
     (async () => {
       try {
-        const [reports, annotations] = await Promise.all([
+        const [reportsPage, annotations] = await Promise.all([
           getProjectReportsReview(projectId),
           getAnnotations(projectId),
         ]);
 
         if (!cancelled) {
-          setData({ reports: reports ?? [], annotations: annotations ?? {} });
+          setData({ reports: reportsPage?.items ?? [], annotations: annotations ?? {} });
         }
       } catch (error) {
         if (cancelled) return;

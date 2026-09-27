@@ -48,6 +48,11 @@ export interface ReportDetailDto {
   assignedStudies: StudyDto[];
 }
 
+export interface ReportPageDto {
+  items: ReportDetailDto[];
+  nextCursor: string | null;
+}
+
 // `any` (the default/absent) means "don't filter on this dimension". `only` keeps just the
 // reports matching this dimension (e.g. processed: "only" -> only processed reports); `exclude`
 // keeps everything else (processed: "exclude" -> only unprocessed reports). Different fields
@@ -79,6 +84,8 @@ export interface ReportFilterDimension {
 
 export interface GetProjectReportsParams extends ReportFiltersState {
   search?: string;
+  cursor?: string;
+  limit?: number;
 }
 
 export interface SimilarTagDto {
