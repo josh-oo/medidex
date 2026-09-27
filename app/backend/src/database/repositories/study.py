@@ -43,18 +43,6 @@ class StudyRepository:
     async def rollback(self):
         await self.db.rollback()
 
-    def process_fields(self, fields):
-        if fields is None:
-            # Use Report.__table__.columns to dynamically get all field names
-            fields = [col.name for col in Report.__table__.columns]
-        else:
-            # Validate provided field names exist on the Report model
-            report_columns = {col.name for col in Report.__table__.columns}
-            invalid_fields = [f for f in fields if f not in report_columns]
-            if invalid_fields:
-                raise ValueError(f"Invalid field(s): {', '.join(invalid_fields)}")
-        return tuple(getattr(Report, f) for f in fields), fields
-
     async def add_study(self, short_name : str, study_status: str, countries : List[str], duration : str, number_of_participants : int, comparison : str) -> Study:
         #TODO add more sophisticated checks
 
@@ -111,11 +99,9 @@ class StudyRepository:
         result = (await self.db.execute(stmt)).scalar_one_or_none()
         return result
 
-    async def get_study_reports_by_study_ids(self, study_ids: Optional[List[int]], cutoff: Optional[str] = None, fields: Optional[List[str]] = None) -> Dict[int, List[Report]]:
-        select_fields, field_names = self.process_fields(fields)
-
+    async def get_study_reports_by_study_ids(self, study_ids: Optional[List[int]], cutoff: Optional[str] = None) -> Dict[int, List[Report]]:
         stmt = (
-            select(StudyReport.study_id, *select_fields)
+            select(StudyReport.study_id, Report)
             .join(Report, Report.id == StudyReport.report_id)
         )
 
@@ -128,25 +114,19 @@ class StudyRepository:
         rows = (await self.db.execute(stmt)).all()
 
         grouped = {}
-        for row in rows:
-            study_id = row[0]  # first item is StudyID
-            report_data = dict(zip(field_names, row[1:]))  # remaining fields as dict
-            grouped.setdefault(study_id, []).append(report_data)
+        for study_id, report in rows:
+            grouped.setdefault(study_id, []).append(report)
         return grouped
 
-    async def get_study_reports_by_study_id(self, study_id: int, cutoff=None,) -> List[Report]:
-        result = await self.get_study_reports_by_study_ids(study_ids=[study_id], cutoff=cutoff, fields=None,)
-        if study_id in result:
-            return result[study_id]
-        return []
+    async def get_study_reports_by_study_id(self, study_id: int, cutoff: Optional[str] = None) -> List[Report]:
+        result = await self.get_study_reports_by_study_ids(study_ids=[study_id], cutoff=cutoff)
+        return result.get(study_id, [])
 
     async def get_linked_reports(self, study_id: int) -> List[Report]:
         """Full Report entities linked to a study - the inverse of
-        ReportRepository.get_linked_studies(). Unlike
-        get_study_reports_by_study_id() above (a dict-row projection built
-        for the bulk/field-filtered REST and agent-tool callers), this
-        returns real ORM Report objects for callers - like mcp_server's
-        resources - that just want the whole record.
+        ReportRepository.get_linked_studies(). Like
+        get_study_reports_by_study_id() above, but without cutoff filtering -
+        used by mcp_server's resources, which have no notion of a cutoff date.
         """
         stmt = (
             select(Report)

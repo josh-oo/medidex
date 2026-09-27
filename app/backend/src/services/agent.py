@@ -233,8 +233,8 @@ async def fetch_reports_linked_to_study(
 
     return [
         {
-            "reportId": item["id"],
-            "title": item["title"],
+            "reportId": item.id,
+            "title": item.title,
         }
         for item in response
     ]

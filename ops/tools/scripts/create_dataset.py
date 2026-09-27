@@ -86,7 +86,7 @@ def create_test_set(path, cutoff, model_id, only_single_report_studies=False):
                     continue
                 candidate_study_id = ground_truth[0]
                 #check if the study only has one report
-                response = session.get(BACKEND_API + f"/studies/reports", params={'study_ids': [candidate_study_id], 'fields': ['id']})
+                response = session.get(BACKEND_API + f"/studies/reports", params={'study_ids': [candidate_study_id]})
                 if len(response.json()[str(candidate_study_id)]) != 1:
                     if scroll_offset is None:
                         break

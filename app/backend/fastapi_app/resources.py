@@ -92,8 +92,8 @@ async def get_studies(study_ids: List[int] = study_ids_query, ctx: RequestContex
     return await ctx.study_service.get_studies(study_ids)
 
 @router.get("/studies/reports", include_in_schema=False)
-async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, fields: Optional[List[str]] = Query(None), ctx: RequestContext = Depends(get_context)) -> Dict[int, List[DbReport]]:
-    return await ctx.study_repo.get_study_reports_by_study_ids(study_ids, cutoff, fields)
+async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[DbReport]]:
+    return await ctx.study_repo.get_study_reports_by_study_ids(study_ids, cutoff)
 
 @router.get("/studies/persons", include_in_schema=False)
 async def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, normalize_names : bool = Query(False), ctx: RequestContext = Depends(get_context)) -> Dict[int, List[str]]:
@@ -112,14 +112,14 @@ async def get_study_reports_by_id(study_id : int = study_id_path,  cutoff: str =
     result = []
     for db_report in db_reports:
         result.append(Report(
-            reportId=db_report['id'],
-            year=db_report['year'],
-            title=db_report['title'],
-            abstract=db_report['abstract'],
-            trialId=db_report['trial_registration_id'],
-            authors=db_report['authors'].split("//"),
-            createdAt=db_report['date_entered'],
-            updatedAt=db_report['date_edited'],
+            reportId=db_report.id,
+            year=db_report.year,
+            title=db_report.title,
+            abstract=db_report.abstract,
+            trialId=db_report.trial_registration_id,
+            authors=db_report.authors.split("//"),
+            createdAt=db_report.date_entered,
+            updatedAt=db_report.date_edited,
         ))
     return result
 
