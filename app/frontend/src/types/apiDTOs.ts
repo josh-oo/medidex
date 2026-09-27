@@ -121,6 +121,18 @@ export interface StudyDto {
 
 export type StudyCreateDto = Omit<StudyDto, "studyId" | "createdAt" | "updatedAt">;
 
+// A page of the free-text study search (searchStudies).
+export interface StudyPageDto {
+  items: StudyDto[];
+  nextCursor: string | null;
+}
+
+export interface GetStudySearchParams {
+  q: string;
+  limit?: number;
+  cursor?: string;
+}
+
 // A study suggested as a possible match for a report by the similarity search
 // (getSimilarStudiesByReportId) - a StudyDto plus how relevant this particular
 // suggestion is, for the researcher to accept or reject.

@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
 
-from .auth import is_verified_api_call, get_user_id, is_admin
+from .auth import is_verified_api_call, is_admin
 
 from src.database.models import Report as DbReport, Study as DbStudy
 from src.database.models import Condition as DbCondition, Intervention as DbIntervention, Design as DbDesign, Outcome as DbOutcome, Participant as DbParticipant
@@ -26,7 +26,8 @@ from src.database.repositories.study import DuplicateShortNameError
 from src.context import RequestContext
 from .deps import get_context
 
-from src.utils.dto import Study, StudyCreate, Report, ReportSources, ReportFlagUpdate, ReportFlag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, report_flag_to_dto
+from src.utils.dto import Study, StudyCreate, StudyPage, Report, ReportSources, ReportFlagUpdate, ReportFlag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, report_flag_to_dto
+from src.utils.pagination import encode_cursor, decode_cursor, InvalidCursorError
 
 load_dotenv()
 
@@ -91,6 +92,22 @@ async def add_study(study_params: StudyCreate, ctx: RequestContext = Depends(get
 async def get_studies(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> List[Study]:
     return await ctx.study_service.get_studies(study_ids)
 
+@router.get("/studies/search", summary="Free-text search across studies by name, trial ID, author or intervention.")
+async def search_studies(
+    q: str = Query(..., min_length=3, description="Search text (study name, trial ID, author, intervention, ...)"),
+    limit: int = Query(25, ge=1, le=100, description="Maximum number of results to return per page."),
+    cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
+    ctx: RequestContext = Depends(get_context),
+) -> StudyPage:
+    try:
+        offset = decode_cursor(cursor) if cursor else 0
+    except InvalidCursorError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    studies, has_more = await ctx.study_service.search_studies(q, limit, offset)
+    next_cursor = encode_cursor(offset + limit) if has_more else None
+    return StudyPage(items=studies, nextCursor=next_cursor)
+
 @router.get("/studies/reports", include_in_schema=False)
 async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[DbReport]]:
     return await ctx.study_repo.get_study_reports_by_study_ids(study_ids, cutoff)
@@ -123,13 +140,6 @@ async def get_study_reports_by_id(study_id : int = study_id_path,  cutoff: str =
         ))
     return result
 
-
-@router.get("/studies/{trial_id}/study_id", summary="Get the study ID given a matching trial registration id")
-async def get_study_id_by_trial_id(trial_id: str = Path(..., description="A regular trial id (e.g. ACTRN12605000202662, NCT00034892)"), cutoff: str = cutoff_query, ctx: RequestContext = Depends(get_context)) -> List[int]:
-    result = await ctx.study_repo.get_study_id_by_trial_id(trial_id, cutoff)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"Trial {trial_id} not found")
-    return result
 
 @router.get("/studies/{study_id}/date_entered", summary="Get the date when the study was entered into the database")
 async def get_study_date_by_id(study_id: int = study_id_path, ctx: RequestContext = Depends(get_context)) -> str:
@@ -290,13 +300,6 @@ async def get_pdf_metadata(report_id: int = report_id_path, ctx: RequestContext 
         if str(e) == "Upstream request timed out":
             raise HTTPException(status_code=504, detail="Upstream request timed out.")
 
-@router.get("/reports/{report_id}/trial_ids", summary="Get related trial ids.")
-async def get_report_trial_ids(report_id: int = report_id_path, include_fulltext : bool = Query(False, description="Also consider the fulltext for the trial id search."), ctx: RequestContext = Depends(get_context)) -> List[str]:
-    result = await ctx.report_service.get_trial_ids(report_id, include_fulltext)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Report not found.")
-    return result
-
 @router.get("/reports/{report_id}/flag", summary="Get your report flag for a specific report.")
 async def get_report_flag(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> Optional[ReportFlag]:
     report = await ctx.report_repo.get_report_by_id(report_id)
@@ -340,25 +343,16 @@ async def delete_report_flag(report_id: int = report_id_path, ctx: RequestContex
         await ctx.report_repo.rollback()
         raise HTTPException(status_code=501, detail=f"Failed delting report flag")
 
-@router.post("/reports/{report_id}/events", summary="Track UI events related to the corresponding report.", description="Attach UI events using a timestamp and reasonable event_types for example 'start' when the report is first clicked and 'end' when a final selection is made or 'ui_interaction' for report-related UI interactions. Feel free to use other descriptive event types.")
 async def post_report_event(report_id : int, event: Event, ctx: RequestContext = Depends(get_context)):
+    """Log a report-related UI event. Used internally (e.g. study-visited, pdf-downloaded)
+    - not exposed as its own route anymore, event tracking now goes through server-side
+    logging at the point of interest instead of a client-called endpoint."""
     if report_id != -1 and await ctx.report_repo.get_report_by_id(report_id) is None:
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
     user_id = ctx.user_id or "anonymous"
     payload = {"user": user_id, "event_type": event.event_type, "report_id": report_id, "original_timestamp": event.timestamp}
     logger.info("ReportInteraction", extra={"payload": payload})
-
-    return payload
-
-@router.post("/events", summary="Track general UI events.", description="Track general UI events using a timestamp and reasonable event_types for example 'login', 'logout', 'ui_interaction' or 'idle'. Feel free to use other descriptive event types.")
-async def post_event(event: Event, user_id = Depends(get_user_id)):
-
-    if not user_id:
-        user_id = "anonymous"
-
-    payload = {"user": user_id, "event_type": event.event_type, "original_timestamp": event.timestamp}
-    logger.info("GeneralInteraction", extra={"payload": payload})
 
     return payload
 

@@ -38,8 +38,8 @@ interface CandidateStudyTableProps {
 
 // The backend rejects shorter queries.
 const MIN_SEARCH_QUERY_LENGTH = 3;
-// The search endpoint is unbounded, so only the top hits are rendered.
-const MAX_VISIBLE_SEARCH_RESULTS = 25;
+// Page size for both the explicit search and its "Load more" pagination.
+const SEARCH_PAGE_SIZE = 10;
 
 export function CandidateStudyTable({
   reportId,
@@ -52,7 +52,9 @@ export function CandidateStudyTable({
   const [searchQuery, setSearchQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [searchResults, setSearchResults] = useState<StudyDto[] | null>(null);
+  const [searchNextCursor, setSearchNextCursor] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [isLoadingMoreSearch, setIsLoadingMoreSearch] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
   const addAssignedStudy = useReportStore((state) => state.addAssignedStudy);
@@ -184,21 +186,18 @@ export function CandidateStudyTable({
     [currentReport?.assignedStudies]
   );
 
-  const visibleSearchResults = useMemo(
-    () => (searchResults ?? []).slice(0, MAX_VISIBLE_SEARCH_RESULTS),
-    [searchResults]
-  );
-
   const runSearch = useCallback(async (query: string) => {
     setIsSearching(true);
     setSearchError(null);
     setSubmittedQuery(query);
 
     try {
-      const results = await searchStudies(query);
-      setSearchResults(Array.isArray(results) ? results : []);
+      const response = await searchStudies({ q: query, limit: SEARCH_PAGE_SIZE });
+      setSearchResults(response.items);
+      setSearchNextCursor(response.nextCursor);
     } catch (error) {
       setSearchResults(null);
+      setSearchNextCursor(null);
       setSearchError(
         error instanceof Error ? error.message : "Failed to search studies."
       );
@@ -206,6 +205,29 @@ export function CandidateStudyTable({
       setIsSearching(false);
     }
   }, []);
+
+  const handleLoadMoreSearch = useCallback(() => {
+    if (!searchNextCursor || isLoadingMoreSearch) {
+      return;
+    }
+
+    setIsLoadingMoreSearch(true);
+    searchStudies({ q: submittedQuery, limit: SEARCH_PAGE_SIZE, cursor: searchNextCursor })
+      .then((response) => {
+        setSearchResults((prev) => [...(prev ?? []), ...response.items]);
+        setSearchNextCursor(response.nextCursor);
+      })
+      .catch((error) => {
+        toast.error(
+          `Failed to load more studies: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`
+        );
+      })
+      .finally(() => {
+        setIsLoadingMoreSearch(false);
+      });
+  }, [submittedQuery, searchNextCursor, isLoadingMoreSearch]);
 
   const handleSearchSubmit = useCallback(
     (event: React.FormEvent<HTMLFormElement>) => {
@@ -228,6 +250,7 @@ export function CandidateStudyTable({
     setSearchQuery("");
     setSubmittedQuery("");
     setSearchResults(null);
+    setSearchNextCursor(null);
     setSearchError(null);
   }, []);
 
@@ -273,9 +296,6 @@ export function CandidateStudyTable({
               <Microscope className="h-6 w-6 text-primary" />
             </div>
             <h2 className="text-lg font-semibold">Relevant Studies</h2>
-            <Badge variant="secondary" className="text-xs font-normal">
-              {candidateStudies.length}
-            </Badge>
           </div>
           <div className="flex items-center gap-2">
               <AddStudyDialog
@@ -365,7 +385,7 @@ export function CandidateStudyTable({
                 </div>
               ) : (
                 <>
-                  {visibleSearchResults.map((study) => (
+                  {searchResults.map((study) => (
                     <StudyCard
                       key={`search-${study.studyId}`}
                       {...study}
@@ -375,12 +395,8 @@ export function CandidateStudyTable({
                       onAssign={(target) => void handleAssignStudy(target)}
                     />
                   ))}
-                  {searchResults.length > visibleSearchResults.length && (
-                    <p className="pt-1 text-xs text-muted-foreground text-center">
-                      Showing the top {visibleSearchResults.length} of{" "}
-                      {searchResults.length} matches. Refine your query to narrow
-                      them down.
-                    </p>
+                  {searchNextCursor && (
+                    <LoadMoreStudiesButton onClick={handleLoadMoreSearch} loading={isLoadingMoreSearch} />
                   )}
                 </>
               )}
@@ -389,12 +405,12 @@ export function CandidateStudyTable({
             </div>
           )}
 
-          {/* Recommended studies */}
+          {/* Similar studies */}
           <div>
             {searchResults && (
               <div className="flex items-center gap-2 pb-2">
                 <Sparkles className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-semibold">Recommended studies</h3>
+                <h3 className="text-sm font-semibold">Similar studies</h3>
                 <Badge variant="secondary" className="text-xs font-normal">
                   {candidateStudies.length}
                 </Badge>

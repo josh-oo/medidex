@@ -9,7 +9,7 @@ from sqlmodel import select, func, text
 from dotenv import load_dotenv
 
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 from ..models import Report, Study, StudyAdded, StudyReport
 from ..models import StudyIntervention, Intervention, StudyCondition, Condition, StudyOutcome, Outcome, StudyDesign, Design, StudyParticipant, Participant
@@ -76,9 +76,41 @@ class StudyRepository:
                 raise DuplicateShortNameError("short_name already exists")
             raise
 
-    async def search_studies(self, trial_ids : Optional[List[str]] = None, number_of_participants : Optional[List[int]] = None, authors : Optional[List[str]] = None):
-        study_ids = []
-        return await self.get_studies(study_ids=study_ids)
+    async def search_studies(self, query: str, limit: int, offset: int) -> Tuple[List[Study], bool]:
+        """Free-text search across a study's own name/trial ID plus its linked reports'
+        authors/trial ID and interventions. Returns (page, has_more) - one extra id beyond
+        the page is fetched so has_more can be determined without a separate count query,
+        same convention as StudySimilaritySearchService.get_similar_studies_by_id.
+        """
+        pattern = f"%{query}%"
+        id_stmt = (
+            select(Study.id, Study.short_name)
+            .outerjoin(StudyReport, StudyReport.study_id == Study.id)
+            .outerjoin(Report, Report.id == StudyReport.report_id)
+            .outerjoin(StudyIntervention, StudyIntervention.study_id == Study.id)
+            .outerjoin(Intervention, Intervention.id == StudyIntervention.intervention_id)
+            .where(
+                Study.short_name.ilike(pattern)
+                | Study.trial_registration_id.ilike(pattern)
+                | Report.authors.ilike(pattern)
+                | Report.trial_registration_id.ilike(pattern)
+                | Intervention.description.ilike(pattern)
+            )
+            .distinct()
+            .order_by(Study.short_name, Study.id)
+            .offset(offset)
+            .limit(limit + 1)
+        )
+        rows = (await self.db.execute(id_stmt)).all()
+
+        has_more = len(rows) > limit
+        study_ids = [study_id for study_id, _short_name in rows[:limit]]
+        if not study_ids:
+            return [], has_more
+
+        studies_by_id = {study.id: study for study in await self.get_studies(study_ids)}
+        page = [studies_by_id[study_id] for study_id in study_ids if study_id in studies_by_id]
+        return page, has_more
 
     async def get_studies(self, study_ids: Optional[List[int]] = None) -> List[Study]:
         stmt = select(Study)

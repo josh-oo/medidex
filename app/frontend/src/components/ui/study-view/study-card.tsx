@@ -145,7 +145,7 @@ export function StudyCard({
                   className="font-normal text-xs px-2 py-0.5 gap-1"
                 >
                   <Sparkles className="h-3 w-3" />
-                  Also recommended
+                  Also similar
                 </Badge>
               )}
               {aiBadge}

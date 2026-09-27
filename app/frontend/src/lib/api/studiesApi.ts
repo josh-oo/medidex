@@ -1,5 +1,5 @@
 import apiClient from "./apiClient";
-import { StudyDto, StudyCreateDto , ReportDto, InterventionDto, ConditionDto, OutcomeDto , GetPersonsResponseDto } from "../../types/apiDTOs";
+import { StudyDto, StudyCreateDto , ReportDto, InterventionDto, ConditionDto, OutcomeDto , GetPersonsResponseDto, StudyPageDto, GetStudySearchParams } from "../../types/apiDTOs";
 import { serializeParams } from "./helpers";
 import { AxiosRequestConfig } from "axios";
 
@@ -26,26 +26,25 @@ export const getStudyById = (
 }
 
 export const searchStudies = (
-  query: string,
+  params: GetStudySearchParams,
   config?: AxiosRequestConfig
-): Promise<StudyDto[]> => {
-  const requestConfig = {
-    ...config,
-    params: {
-      ...config?.params,
-      q: query,
-    },
-    paramsSerializer: {
-      serialize: serializeParams,
-    },
+): Promise<StudyPageDto> => {
+  const { params: configParams, ...restConfig } = config ?? {};
+  const requestParams = {
+    ...(configParams ?? {}),
+    ...params,
   };
 
-  return apiClient.get<StudyDto[]>("/studies", requestConfig)
+  return apiClient.get<StudyPageDto>("/studies/search", {
+      ...restConfig,
+      params: requestParams,
+      paramsSerializer: { serialize: serializeParams },
+    })
     .then(response => {
       return response.data;
     })
     .catch(error => {
-      console.error(`Error searching studies for "${query}":`, error);
+      console.error(`Error searching studies for "${params.q}":`, error);
       throw error;
     });
 }

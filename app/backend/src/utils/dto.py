@@ -58,6 +58,11 @@ class StudyCreate(BaseModel):
     comparison: Optional[str]
     trialId: Optional[str] = None
 
+class StudyPage(BaseModel):
+    """A page of the free-text study search (fastapi_app/resources.py's GET /studies/search)."""
+    items: List[Study]
+    nextCursor: Optional[str] = None
+
 class CandidateStudy(Study):
     """A study suggested as a possible match for a report by the similarity search
     (fastapi_app/core.py's /reports/{report_id}/similar-studies) - a Study plus how

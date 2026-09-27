@@ -1,7 +1,7 @@
 from ..database.repositories.study import StudyRepository
 from ..utils.dto import StudyCreate, studies_to_dto
 
-from typing import List
+from typing import List, Tuple
 
 class StudyResourceService:
     def __init__(self, study_repo : StudyRepository):
@@ -26,3 +26,7 @@ class StudyResourceService:
     async def get_studies(self, study_ids : List[int]):
         result = await self.study_repo.get_studies(study_ids)
         return studies_to_dto(result)
+
+    async def search_studies(self, query: str, limit: int, offset: int) -> Tuple[List, bool]:
+        result, has_more = await self.study_repo.search_studies(query, limit, offset)
+        return studies_to_dto(result), has_more
