@@ -393,13 +393,26 @@ export function ReportList({
   const handleOpenReportPdf = async (reportId: number) => {
     // Open the tab synchronously (still tied to the user gesture) so
     // browsers don't treat the later navigation as a blocked popup.
-    const newTab = window.open("", "_blank", "noopener,noreferrer");
+    // Note: "noopener" makes window.open() return null, which would
+    // leave us with no reference to navigate once the PDF is fetched.
+    const newTab = window.open("", "_blank");
     try {
       const buffer = await getReportPdf(reportId);
       const blob = new Blob([buffer], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       if (newTab) {
-        newTab.location.href = url;
+        // Navigating a popup's top-level location to a blob: URL renders
+        // blank in some browsers (Safari in particular); embedding it in
+        // the popup's own document works reliably everywhere instead.
+        newTab.document.title = `Report ${reportId}`;
+        const style = newTab.document.createElement("style");
+        style.textContent = "html,body,embed{margin:0;height:100%;width:100%}";
+        newTab.document.head.appendChild(style);
+        const embed = newTab.document.createElement("embed");
+        embed.src = url;
+        embed.type = "application/pdf";
+        newTab.document.body.appendChild(embed);
+        newTab.focus();
       }
     } catch (error) {
       console.error("Error opening report PDF:", error);
