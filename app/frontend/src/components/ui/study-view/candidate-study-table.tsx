@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import type { RelevanceStudy } from "@/types/reports";
 import {
   FileText,
   Search,
@@ -19,7 +18,7 @@ import { AddStudyDialog } from "./add-study-dialog";
 import { AIMatchSettingsDialog } from "./ai-match-settings-dialog";
 import { LoadMoreStudiesButton } from "./load-more-studies-button";
 import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
-import type { NewStudySuggestion, StudyDto, StudyCreateDto } from "@/types/apiDTOs";
+import type { CandidateStudyDto, NewStudySuggestion, StudyDto, StudyCreateDto } from "@/types/apiDTOs";
 import { StudyAIBadge } from "./study-ai-badge";
 import { StudyAIReasonDialog } from "./study-ai-reason-dialog";
 import { AiEvaluationProgress } from "./ai-evaluation-progress";
@@ -29,9 +28,9 @@ import { useDetailsSheet } from "@/context/details-sheet-context";
 import { assignNewStudyToReportByReportId } from "@/lib/api/reportApi";
 import { searchStudies } from "@/lib/api/studiesApi";
 
-interface StudyRelevanceTableProps {
+interface CandidateStudyTableProps {
   reportId?: number;
-  studies: RelevanceStudy[];
+  studies: CandidateStudyDto[];
   hasMore?: boolean;
   isLoadingMore?: boolean;
   onLoadMore?: () => void;
@@ -42,13 +41,13 @@ const MIN_SEARCH_QUERY_LENGTH = 3;
 // The search endpoint is unbounded, so only the top hits are rendered.
 const MAX_VISIBLE_SEARCH_RESULTS = 25;
 
-export function StudyRelevanceTable({
+export function CandidateStudyTable({
   reportId,
   studies,
   hasMore = false,
   isLoadingMore = false,
   onLoadMore,
-}: StudyRelevanceTableProps) {
+}: CandidateStudyTableProps) {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
@@ -56,9 +55,8 @@ export function StudyRelevanceTable({
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
-  const addAssignedStudies = useReportStore((state) => state.addAssignedStudy);
+  const addAssignedStudy = useReportStore((state) => state.addAssignedStudy);
   const syncAssignedStudy = useReportStore((state) => state.syncAssignedStudy);
-  const removeAssignedStudies = useReportStore((state) => state.removeAssignedStudy);
   const currentReport = useReportStore((state) =>
     reportId !== undefined ? state.reports[reportId] : undefined
   );
@@ -113,43 +111,25 @@ export function StudyRelevanceTable({
     ? `${reportId}:${JSON.stringify(newStudySuggestion)}`
     : null;
 
-  const handleLinkedChange = useCallback(
-    async (study: StudyDto, checked: boolean) => {
+  const handleAssignStudy = useCallback(
+    async (study: StudyDto) => {
       if (reportId === undefined) {
         return;
       }
 
-      if (checked) {
-        try {
-          await addAssignedStudies(reportId, study);
-          toast.success("Report assigned to study");
-        } catch (error) {
-          toast.error(
-            `Failed to link study: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`
-          );
-          throw error;
-        }
-      } else {
-        try {
-          await removeAssignedStudies(reportId, study.studyId);
-          toast.success("Report unassigned from study");
-        } catch (error) {
-          toast.error(
-            `Failed to unlink study: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`
-          );
-          throw error;
-        }
+      try {
+        await addAssignedStudy(reportId, study);
+        toast.success("Report assigned to study");
+      } catch (error) {
+        toast.error(
+          `Failed to link study: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`
+        );
+        throw error;
       }
     },
-    [
-      reportId,
-      addAssignedStudies,
-      removeAssignedStudies,
-    ]
+    [reportId, addAssignedStudy]
   );
 
   const handleSaveNewStudy = useCallback(
@@ -186,20 +166,20 @@ export function StudyRelevanceTable({
   //  closeAIDialog();
   //}, []);
 
-  const recommendedStudies = useMemo(
+  const candidateStudies = useMemo(
     () => [...studies].sort((a, b) => b.relevance - a.relevance),
     [studies]
   );
 
-  const recommendedStudyIds = useMemo(
-    () => new Set(recommendedStudies.map((entry) => entry.study.studyId)),
-    [recommendedStudies]
+  const candidateStudyIds = useMemo(
+    () => new Set(candidateStudies.map((study) => study.studyId)),
+    [candidateStudies]
   );
 
-  // The single source of truth for link state - currentReport.assignedStudies already
-  // updates reactively the moment addAssignedStudies/removeAssignedStudies/
-  // syncAssignedStudy touch the store, so there's no separate local flag to keep in sync.
-  const linkedStudyIds = useMemo(
+  // The single source of truth for assignment state - currentReport.assignedStudies already
+  // updates reactively the moment addAssignedStudy/syncAssignedStudy touch the store, so
+  // there's no separate local flag to keep in sync.
+  const assignedStudyIds = useMemo(
     () => new Set((currentReport?.assignedStudies ?? []).map((assigned) => assigned.studyId)),
     [currentReport?.assignedStudies]
   );
@@ -282,7 +262,7 @@ export function StudyRelevanceTable({
         open={aiDialogOpen}
         onOpenChange={setAiDialogOpen}
         reportId={reportId}
-        studies={recommendedStudies}
+        studies={candidateStudies}
       />
 
       {/* Header - Sticky */}
@@ -294,7 +274,7 @@ export function StudyRelevanceTable({
             </div>
             <h2 className="text-lg font-semibold">Relevant Studies</h2>
             <Badge variant="secondary" className="text-xs font-normal">
-              {recommendedStudies.length}
+              {candidateStudies.length}
             </Badge>
           </div>
           <div className="flex items-center gap-2">
@@ -389,10 +369,10 @@ export function StudyRelevanceTable({
                     <StudyCard
                       key={`search-${study.studyId}`}
                       {...study}
-                      isLinked={linkedStudyIds.has(study.studyId)}
-                      alsoRecommended={recommendedStudyIds.has(study.studyId)}
+                      isAssigned={assignedStudyIds.has(study.studyId)}
+                      alsoRecommended={candidateStudyIds.has(study.studyId)}
                       onClick={handleStudyClick}
-                      onLink={(target) => void handleLinkedChange(target, true)}
+                      onAssign={(target) => void handleAssignStudy(target)}
                     />
                   ))}
                   {searchResults.length > visibleSearchResults.length && (
@@ -416,12 +396,12 @@ export function StudyRelevanceTable({
                 <Sparkles className="h-4 w-4 text-muted-foreground" />
                 <h3 className="text-sm font-semibold">Recommended studies</h3>
                 <Badge variant="secondary" className="text-xs font-normal">
-                  {recommendedStudies.length}
+                  {candidateStudies.length}
                 </Badge>
               </div>
             )}
 
-            {recommendedStudies.length === 0 ? (
+            {candidateStudies.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <div className="p-3 rounded-full bg-muted mb-4">
                   <FileText className="h-6 w-6 opacity-50" />
@@ -431,23 +411,22 @@ export function StudyRelevanceTable({
               </div>
             ) : (
               <>
-                {recommendedStudies.map((entry) => (
+                {candidateStudies.map((study) => (
                   <StudyCard
-                    key={entry.study.studyId}
-                    {...entry.study}
-                    relevance={entry.relevance}
-                    isLinked={linkedStudyIds.has(entry.study.studyId)}
+                    key={study.studyId}
+                    {...study}
+                    isAssigned={assignedStudyIds.has(study.studyId)}
                     onClick={handleStudyClick}
-                    onLink={(target) => void handleLinkedChange(target, true)}
+                    onAssign={(target) => void handleAssignStudy(target)}
                     aiBadge={
-                      studyResults?.[entry.study.studyId] && (
+                      studyResults?.[study.studyId] && (
                         <StudyAIBadge
-                          classification={studyResults[entry.study.studyId].classification}
+                          classification={studyResults[study.studyId].classification}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleAIBadgeClick(
-                              entry.study.studyId,
-                              entry.study.shortName
+                              study.studyId,
+                              study.shortName
                             );
                           }}
                         />

@@ -38,7 +38,7 @@ import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
 import { useReportStore } from "@/hooks/use-report-store";
 import { toast } from "sonner";
 import type { AIModel, PromptOverrides, DefaultPrompts } from "@/hooks/use-genai-evaluation-store";
-import { RelevanceStudy } from "@/types/reports";
+import type { CandidateStudyDto } from "@/types/apiDTOs";
 import { fetchDefaultPrompts } from "@/lib/api/genaiApi";
 
 const MODEL_OPTIONS: AIModel[] = ["gpt-5.2", "gpt-5", "gpt-5-mini", "gpt-4.1"];
@@ -57,7 +57,7 @@ interface AIMatchSettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   reportId?: number;
-  studies: RelevanceStudy[];
+  studies: CandidateStudyDto[];
 }
 
 export function AIMatchSettingsDialog({
@@ -94,7 +94,7 @@ export function AIMatchSettingsDialog({
             toast.info(`Evaluating ${studies.length} studies with AI (${runningCount + 1}/4 running)...`);
             evaluateStream(
                 currentReport,
-                studies.map((study: any) => study.study),
+                studies,
                 options,
                 () => {
                     toast.success("AI evaluation complete!");

@@ -163,8 +163,12 @@ def tags_to_dto(tags) -> List[Tag]:
     result = []
     for tag in tags:
         tag_data = tag if isinstance(tag, Mapping) else tag.model_dump()
-        tag_id = tag_data.get("id")
-        result.append(Tag(id=str(tag_id) if tag_id is not None else None, keyword=tag_data.get("description")))
+        # Two shapes flow through here: SQLModel objects dumped to lowercase field
+        # names ("id"/"description"), and StudyRepository._get_study_aspect's plain
+        # dicts, which use "ID"/"Description" instead.
+        tag_id = tag_data.get("id", tag_data.get("ID"))
+        keyword = tag_data.get("description", tag_data.get("Description"))
+        result.append(Tag(id=str(tag_id) if tag_id is not None else "", keyword=keyword or ""))
     return result
 
 def report_flag_to_dto(flag) -> ReportFlag:

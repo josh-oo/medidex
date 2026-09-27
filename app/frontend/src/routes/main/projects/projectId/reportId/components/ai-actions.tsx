@@ -6,13 +6,13 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { useState } from "react";
 import ReportChat from "./report-chat";
 import { AIMatchSettingsDialog } from "@/components/ui/study-view/ai-match-settings-dialog";
-import { RelevanceStudy } from "@/types/reports";
+import type { CandidateStudyDto } from "@/types/apiDTOs";
 import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
 import { Spinner } from "@/components/ui/spinner";
 
 interface ReportChatButtonsProps {
   reportId: number;
-  studies: RelevanceStudy[];
+  studies: CandidateStudyDto[];
 }
 
 export function ReportChatButtons({ reportId, studies }: ReportChatButtonsProps) {

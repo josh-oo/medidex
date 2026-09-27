@@ -2,23 +2,13 @@ import axios from "axios";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { StudyRelevanceTable } from "@/components/ui/study-view/study-relevance-table";
+import { CandidateStudyTable } from "@/components/ui/study-view/candidate-study-table";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { CandidateStudyDto } from "@/types/apiDTOs";
-import type { RelevanceStudy } from "@/types/reports";
 import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
 import { ReportChatButtons } from "./ai-actions";
 
 const PAGE_SIZE = 10;
-
-const mapResponseToRelevanceStudies = (
-  response: CandidateStudyDto[]
-): RelevanceStudy[] => {
-  return response.map(({ relevance, ...study }) => ({
-    relevance,
-    study,
-  }));
-};
 
 export default function StudyList() {
   const { projectId, reportId } = useParams<{ projectId: string; reportId: string }>() as {
@@ -28,7 +18,7 @@ export default function StudyList() {
   const source = projectId;
   const reportIdNumber = Number(reportId);
 
-  const [studies, setStudies] = useState<RelevanceStudy[] | null>(null);
+  const [studies, setStudies] = useState<CandidateStudyDto[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [notFound, setNotFound] = useState(false);
@@ -44,7 +34,7 @@ export default function StudyList() {
     getSimilarStudiesByReportId(reportIdNumber, undefined, { params: { limit: PAGE_SIZE, source } })
       .then((response) => {
         if (cancelled) return;
-        setStudies(mapResponseToRelevanceStudies(response.items));
+        setStudies(response.items);
         setNextCursor(response.nextCursor);
       })
       .catch((error) => {
@@ -70,7 +60,7 @@ export default function StudyList() {
       params: { limit: PAGE_SIZE, cursor: nextCursor, source },
     })
       .then((response) => {
-        setStudies((prev) => [...(prev ?? []), ...mapResponseToRelevanceStudies(response.items)]);
+        setStudies((prev) => [...(prev ?? []), ...response.items]);
         setNextCursor(response.nextCursor);
       })
       .catch((error) => {
@@ -104,7 +94,7 @@ export default function StudyList() {
 
   return (
     <>
-      <StudyRelevanceTable
+      <CandidateStudyTable
         reportId={reportIdNumber}
         studies={studies}
         hasMore={nextCursor !== null}

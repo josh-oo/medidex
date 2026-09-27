@@ -5,6 +5,7 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
+  SheetDescription,
 } from "@/components/ui/sheet";
 import { Separator } from "../separator";
 import { FileText, Download } from "lucide-react";
@@ -176,6 +177,11 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
       <>
         <SheetHeader className="border-b border-border/60">
           <SheetTitle className="text-lg">{studyShortName}</SheetTitle>
+          {study.trialId !== null && (
+            <SheetDescription className="font-mono text-xs">
+              {study.trialId}
+            </SheetDescription>
+          )}
         </SheetHeader>
         <div className="space-y-6">
           <StudyOverview study={study} />

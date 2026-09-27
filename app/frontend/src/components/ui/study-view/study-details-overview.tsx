@@ -2,14 +2,13 @@
 
 import { StudyDto } from "@/types/apiDTOs";
 import { Badge } from "@/components/ui/badge";
-import { 
-  FileText, 
-  MapPin, 
-  Users, 
-  Clock, 
+import {
+  FileText,
+  MapPin,
+  Users,
+  Clock,
   Scale,
   Calendar,
-  Hash,
 } from "lucide-react";
 
 interface StudyOverviewProps{
@@ -49,8 +48,6 @@ export function StudyOverview({ study }: StudyOverviewProps) {
     "Open/Ongoing": "default" as const,
     "Planned": "secondary" as const,
   }[study.status] || "secondary" as const;
-
-  const hasTrialIds = study.trialId !== null;
 
   return (
     <div className="space-y-4 px-4">
@@ -122,23 +119,6 @@ export function StudyOverview({ study }: StudyOverviewProps) {
               <span className="text-sm font-medium">Comparison</span>
             </div>
             <p className="text-sm text-muted-foreground pl-6 leading-relaxed">{study.comparison}</p>
-          </div>
-        )}
-
-        {/* Trial IDs */}
-        {study.trialId !== null && (
-          <div className="space-y-2.5">
-            <div className="flex items-center gap-2">
-              <div className="p-1 rounded bg-cyan-50 dark:bg-cyan-950/30">
-                <Hash className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-400" />
-              </div>
-              <span className="text-sm font-medium">Trial Identifiers</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2.5 pl-6">
-              <div className="p-2.5 rounded-md bg-muted/50 border border-border/50">
-                <code className="text-xs font-mono">{study.trialId}</code>
-              </div>
-            </div>
           </div>
         )}
 
