@@ -139,7 +139,7 @@ async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentCont
         return_details=False
     )
 
-    study_id = response['id'][visited_candidate_studies]
+    study_id = response[visited_candidate_studies].id
 
     response = await runtime.context.study_repo.get_study_by_id(study_id=study_id)
 

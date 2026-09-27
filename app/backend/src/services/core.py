@@ -6,6 +6,7 @@ from .report import ReportService
 from .aspects import TagScoringService, TagCategories
 
 from typing import List, Any
+from types import SimpleNamespace
 
 import math
 
@@ -67,9 +68,8 @@ class StudySimilaritySearchService:
                         debug_map[item] = debug_map.get(item, []) + [info]
 
         if len(found_study_ids.keys()) == 0:
-            return {'id': [] , 'Relevance' : []}
+            return []
         all_studies = await self.study_repo.get_studies(list(found_study_ids.keys()))
-        #list of dicts to dict of lists:
 
         #Remove this block for evaluation without authors
         #scores_authors = await self.author_feature_service.get_author_scores(report_authors=authors, study_ids=list(found_study_ids.keys()), cutoff=cutoff)
@@ -77,34 +77,23 @@ class StudySimilaritySearchService:
         #    debug_map[study_id].append({'source_id': 'author_reranking', 'score': 0.65 * score})
         #    found_study_ids[study_id] = min(1.00, found_study_ids[study_id] + 0.65 * score)
 
-        for i in range(0, len(all_studies)):
-            item = all_studies[i].dict()
-            item['Relevance'] = found_study_ids[item['id']]
-            all_studies[i] = item
-
-        result = {}
+        rows = []
         for study in all_studies:
-            for key, value in study.items():
-                result.setdefault(key, []).append(value)
+            row = SimpleNamespace(**study.model_dump())
+            row.relevance = found_study_ids[row.id]
+            if return_details:
+                row.details = list({d['source_id']: d for d in debug_map[row.id]}.values())
+            rows.append(row)
 
-        order = ['id', 'Relevance', 'short_name', 'number_participants', 'duration', 'comparison', 'countries', 'date_entered', 'date_edited', 'status', 'trial_registration_id']
-        reordered = {key: result[key] for key in order}
+        rows.sort(key=lambda study: study.relevance, reverse=True)
 
-        if return_details:
-            reordered['details'] = [list({d['source_id']: d for d in debug_map[key]}.values()) for key in reordered['id']]
-
-        sorted_indices = sorted(range(len(reordered['Relevance'])), key=lambda i: reordered['Relevance'][i], reverse=True)
-        for k in reordered:
-            reordered[k] = [reordered[k][i] for i in sorted_indices]
-
-        # Add this right before "return reordered"
-        for study_id, relevance in zip(reordered['id'], reordered['Relevance']):
-            if isinstance(relevance, float) and math.isnan(relevance):
-                print(f"CRITICAL: NaN detected for Study ID {study_id}")
+        for study in rows:
+            if isinstance(study.relevance, float) and math.isnan(study.relevance):
+                print(f"CRITICAL: NaN detected for Study ID {study.id}")
                 # Optionally look into debug_map for this ID to see the source
-                print(f"Debug info for culprit: {debug_map.get(study_id)}")
+                print(f"Debug info for culprit: {debug_map.get(study.id)}")
 
-        return reordered
+        return rows
 
     async def get_similar_studies_by_id(self, report_id : int, cutoff: str, limit: int, offset: int, negative_studies: List[int], negative_reports: List[int], return_details: bool):
         """Returns (page, has_more): `page` is the [offset, offset + limit) slice of the
@@ -127,62 +116,40 @@ class StudySimilaritySearchService:
         query = self.vectorstore.build_recommandation_based_on_report_id(report.id, negative_reports)
 
         pool_target = offset + limit + 1
-        result = await self.get_similar_study_by_query(query,cutoff,pool_target,negative_studies, trial_ids, authors, return_details=return_details)
+        rows = await self.get_similar_study_by_query(query,cutoff,pool_target,negative_studies, trial_ids, authors, return_details=return_details)
 
         # Check if there are any similar items in the same project which are more similar than already retrieved existing studies
-        if result.get('Relevance'):
-            min_score = min(result['Relevance'])
+        if rows:
+            min_score = min(row.relevance for row in rows)
             project_studies = await self.project_repo.get_similar_report_studies(report.id, min_score)
 
-            # Create a map of existing study IDs to their positions and scores
-            existing_study_map = {}
-            for idx, study_id in enumerate(result.get('id', [])):
-                existing_study_map[study_id] = {
-                    'index': idx,
-                    'score': result['Relevance'][idx]
-                }
+            # Map of existing study IDs to their row, so project matches can update in place
+            existing_study_map = {row.id: row for row in rows}
 
             for study, score in project_studies:
-                study_dict = study.dict()
-                study_id = study_dict.get('id')
-                
+                study_id = study.id
+
                 # If study already exists, update with higher score
                 if study_id in existing_study_map:
-                    existing_info = existing_study_map[study_id]
-                    if score > existing_info['score']:
-                        # Update the existing entry with the higher score
-                        result['Relevance'][existing_info['index']] = score
+                    existing_row = existing_study_map[study_id]
+                    if score > existing_row.relevance:
+                        existing_row.relevance = score
                 else:
                     # Add new study
-                    result['Relevance'].append(score)
-                    for key in result.keys():
-                        if key == "Relevance":
-                            continue
-                        result[key].append(study_dict.get(key))
-                    
-                    # Track the new study in our map
-                    existing_study_map[study_id] = {
-                        'index': len(result['Relevance']) - 1,
-                        'score': score
-                    }
-            
+                    new_row = SimpleNamespace(**study.model_dump())
+                    new_row.relevance = score
+                    rows.append(new_row)
+                    existing_study_map[study_id] = new_row
+
             # Reorder all results by relevance score (descending)
-            if result['Relevance']:
-                sorted_indices = sorted(
-                    range(len(result['Relevance'])), 
-                    key=lambda i: result['Relevance'][i], 
-                    reverse=True
-                )
-                for key in result.keys():
-                    result[key] = [result[key][i] for i in sorted_indices]
+            rows.sort(key=lambda row: row.relevance, reverse=True)
 
-                # Truncate to the pool target (one more than the page) if we have more
-                if len(result['Relevance']) > pool_target:
-                    for key in result.keys():
-                        result[key] = result[key][:pool_target]
+            # Truncate to the pool target (one more than the page) if we have more
+            if len(rows) > pool_target:
+                rows = rows[:pool_target]
 
-        has_more = len(result.get('Relevance', [])) > offset + limit
-        page = {key: values[offset:offset + limit] for key, values in result.items()}
+        has_more = len(rows) > offset + limit
+        page = rows[offset:offset + limit]
         return page, has_more
 
 
@@ -214,7 +181,7 @@ class RelatedTagSearchService:
         
         #similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, TagCategories.default, cutoff, k, None, None, False)
         similar_studies, _has_more = await self.study_similarity_service.get_similar_studies_by_id(report_id, cutoff, k, 0, None, None, False)
-        predicted_studies = similar_studies['id']
+        predicted_studies = [row.id for row in similar_studies]
 
         vectors = await self.vectorstore.get_vectors_by_report_id(report_id)
         

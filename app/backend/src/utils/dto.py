@@ -204,7 +204,7 @@ def studies_to_dto(studies):
             numberParticipants=study.number_participants,
             duration=study.duration,
             comparison=study.comparison,
-            countries=study.countries.split("//"),
+            countries=study.countries.split("//") if study.countries else [],
             createdAt=study.date_entered,
             updatedAt=study.date_edited,
             status=study.status,
@@ -213,20 +213,20 @@ def studies_to_dto(studies):
         result.append(output_study)
     return result
 
-def candidate_studies_to_dto(studies):
+def candidate_studies_to_dto(studies) -> List[CandidateStudy]:
     results = []
-    for i in range(0, len(studies['Relevance'])):
+    for study in studies:
         results.append(CandidateStudy(
-            studyId=studies['id'][i],
-            shortName=studies['short_name'][i],
-            numberParticipants=studies['number_participants'][i],
-            duration=studies['duration'][i],
-            comparison=studies['comparison'][i],
-            countries=studies['countries'][i].split("//"),
-            createdAt=studies['date_entered'][i],
-            updatedAt=studies['date_edited'][i],
-            status=studies['status'][i],
-            trialId=studies['trial_registration_id'][i],
-            relevance=studies['Relevance'][i],
+            studyId=study.id,
+            shortName=study.short_name,
+            numberParticipants=study.number_participants,
+            duration=study.duration,
+            comparison=study.comparison,
+            countries=study.countries.split("//") if study.countries else [],
+            createdAt=study.date_entered,
+            updatedAt=study.date_edited,
+            status=study.status,
+            trialId=study.trial_registration_id,
+            relevance=study.relevance,
         ))
     return results
