@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
 import { useReportStore } from "@/hooks/use-report-store";
-import { FilterMode, GetProjectReportsParams, ReportDetailDto, ReportFilterDimension, ReportFiltersState, ReportPageDto } from "@/types/apiDTOs";
+import { FilterMode, GetProjectReportsParams, ProjectReportDto, ReportFilterDimension, ReportFiltersState, ProjectReportPageDto } from "@/types/apiDTOs";
 import { toast } from "sonner";
 import { Abstract } from "./report-abstract";
 import {
@@ -78,12 +78,12 @@ interface ReportListProps {
   fetchReports: (
     projectId: string,
     filters: GetProjectReportsParams
-  ) => Promise<ReportPageDto>;
+  ) => Promise<ProjectReportPageDto>;
   // The parent layout's own initial, unfiltered fetch (same endpoint as `fetchReports` with no
   // filters/search) - used only to seed the very first render so the list doesn't flash empty
   // while that same data is re-fetched below; every filter/search change after that always goes
   // through fetchReports, never falls back to a cached snapshot.
-  initialReports: ReportDetailDto[];
+  initialReports: ProjectReportDto[];
 }
 
 export function ReportList({
@@ -143,7 +143,7 @@ export function ReportList({
 
   // Seeded from the parent layout's own initial fetch so the list doesn't flash empty while
   // the (functionally identical) fetch below is still in flight.
-  const [filteredReports, setFilteredReports] = useState<ReportDetailDto[]>(initialReports);
+  const [filteredReports, setFilteredReports] = useState<ProjectReportDto[]>(initialReports);
   const [isLoading, setIsLoading] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   // Cursor for the next page of the *current* search/filter combination - reset to null
@@ -247,7 +247,7 @@ export function ReportList({
 
   const patchFilteredReportFlag = (reportId: number, flag: string | undefined) => {
     setFilteredReports((prev) =>
-      prev.map((r) => (r.report.reportId === reportId ? { ...r, flag } : r))
+      prev.map((r) => (r.reportId === reportId ? { ...r, flag } : r))
     );
   };
 
@@ -520,15 +520,15 @@ export function ReportList({
             </div>
           ) : (
             filteredReports.map((report, idx) => {
-              const displayDate = report.report.year
-                ? report.report.year.toString()
+              const displayDate = report.year
+                ? report.year.toString()
                 : null;
 
-              const hasAbstract = report.report.abstract && report.report.abstract.length > 0;
-              const isSelected = selectedReportId === report.report.reportId;
+              const hasAbstract = report.abstract && report.abstract.length > 0;
+              const isSelected = selectedReportId === report.reportId;
               const isExpanded = isSelected && hasAbstract;
-              const isRunningEvaluation = runningEvaluations.includes(report.report.reportId);
-              const reportResults = storeResults[report.report.reportId];
+              const isRunningEvaluation = runningEvaluations.includes(report.reportId);
+              const reportResults = storeResults[report.reportId];
               const resultCount = reportResults ? Object.keys(reportResults).length : 0;
               const flagMessage = report.flag?.trim() ?? "";
               const hasFlag = Boolean(flagMessage);
@@ -537,14 +537,14 @@ export function ReportList({
                   .filter(([_, v]) => v !== undefined)
                   .map(([k, v]) => [k, String(v)])
               ).toString();
-              const reportHref = `/${baseUrl}/${projectId}/${report.report.reportId}${params ? `?${params}` : ""}`;
+              const reportHref = `/${baseUrl}/${projectId}/${report.reportId}${params ? `?${params}` : ""}`;
 
               if (!reportHref) {
                 return null;
               }
 
               return (
-                <div key={report.report.reportId || idx} className="relative">
+                <div key={report.reportId || idx} className="relative">
                   <div
                     ref={isSelected ? selectedCardRef : undefined}
                     tabIndex={0}
@@ -572,7 +572,7 @@ export function ReportList({
                             ) : resultCount > 0 ? (
                               <Sparkles className="mr-1 inline h-3 w-3" />
                             ) : null)}
-                          {report.report.title}
+                          {report.title}
                         </h3>
                         <div
                           className={`absolute right-0 top-0 inline-flex items-center gap-1 ${
@@ -589,7 +589,7 @@ export function ReportList({
                                   size="icon"
                                   disabled={!isSelected}
                                   className="h-8 w-8 shrink-0 text-muted-foreground"
-                                  aria-label={`More actions for ${report.report.title}`}
+                                  aria-label={`More actions for ${report.title}`}
                                   onClick={(e) => e.stopPropagation()}
                                 >
                                   <MoreVertical className="h-4 w-4" />
@@ -601,7 +601,7 @@ export function ReportList({
                               >
                                 <DropdownMenuItem
                                   onSelect={() => {
-                                    void handleOpenReportPdf(report.report.reportId);
+                                    void handleOpenReportPdf(report.reportId);
                                   }}
                                 >
                                   <ExternalLink className="h-4 w-4" />
@@ -610,8 +610,8 @@ export function ReportList({
                                 <DropdownMenuItem
                                   onSelect={() => {
                                     void handleDownloadReportPdf(
-                                      report.report.reportId,
-                                      report.report.title
+                                      report.reportId,
+                                      report.title
                                     );
                                   }}
                                 >
@@ -622,7 +622,7 @@ export function ReportList({
                                 {editMode && (
                                   <DropdownMenuItem
                                     onSelect={() => {
-                                      handleOpenFlagDialog(report.report.reportId, report.report.title);
+                                      handleOpenFlagDialog(report.reportId, report.title);
                                     }}
                                   >
                                     <Flag className="h-4 w-4" />
@@ -631,13 +631,13 @@ export function ReportList({
                                 )}
                                 {editMode && hasFlag && (
                                   <DropdownMenuItem
-                                    disabled={isDeletingFlagReportId === report.report.reportId}
+                                    disabled={isDeletingFlagReportId === report.reportId}
                                     onSelect={() => {
-                                      void handleDeleteFlag(report.report.reportId);
+                                      void handleDeleteFlag(report.reportId);
                                     }}
                                   >
                                     <FlagOff className="h-4 w-4" />
-                                    {isDeletingFlagReportId === report.report.reportId
+                                    {isDeletingFlagReportId === report.reportId
                                       ? "Deleting flag..."
                                       : "Delete flag"}
                                   </DropdownMenuItem>
@@ -654,11 +654,11 @@ export function ReportList({
                             <span>{displayDate}</span>
                           </div>
                         )}
-                        {report.report.authors && report.report.authors.length > 0 && (
+                        {report.authors && report.authors.length > 0 && (
                           <div className="flex items-center gap-1.5">
                             <Users className="h-3.5 w-3.5 shrink-0" />
                             <span className={isExpanded ? "" : "truncate max-w-[200px]"}>
-                              {report.report.authors.join(", ")}
+                              {report.authors.join(", ")}
                             </span>
                           </div>
                         )}
@@ -666,7 +666,7 @@ export function ReportList({
 
                       {hasAbstract && !isExpanded && (
                         <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 mt-2">
-                          {report.report.abstract}
+                          {report.abstract}
                         </p>
                       )}
                       {editMode && (
@@ -677,7 +677,7 @@ export function ReportList({
                     {hasAbstract && isExpanded && (
                       <div className="px-4 pb-4 border-t bg-muted/30">
                         <div className="text-xs text-muted-foreground leading-relaxed mt-2 whitespace-pre-wrap">
-                          <Abstract text={report.report.abstract}></Abstract>
+                          <Abstract text={report.abstract}></Abstract>
                         </div>
                       </div>
                     )}

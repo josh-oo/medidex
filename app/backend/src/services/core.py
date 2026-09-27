@@ -111,7 +111,7 @@ class StudySimilaritySearchService:
         relevance-ranked candidate pool, `has_more` says whether a further page exists.
         The candidate pool has no stable id ordering to page by (it's assembled from
         exact trial-id matches, vectorstore hits and project studies, then re-sorted by
-        score), so pagination is offset-based rather than keyset-based like ReportPage -
+        score), so pagination is offset-based rather than keyset-based like ProjectReportPage -
         see src/utils/pagination.py. One extra candidate beyond the page (`pool_target`)
         is fetched/kept so has_more can be determined without a separate count query.
         """

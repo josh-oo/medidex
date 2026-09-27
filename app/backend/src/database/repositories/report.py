@@ -38,6 +38,40 @@ class ReportRepository:
         report_added.embedded = value
         await self.db.commit()
 
+    async def get_report_added(self, report_id: int) -> Optional[ReportAdded]:
+        return await self.db.get(ReportAdded, report_id)
+
+    async def set_fulltext_links(self, report_id: int, links: List[str]) -> None:
+        """Persists a fresh OpenAlex fulltext-link lookup for one report (see
+        report_added.fulltext_links's comment in models.py). A report with no
+        report_added row (no current project association) has nowhere to cache this
+        and is silently skipped - the caller then just re-fetches live next time.
+        """
+        report_added = await self.db.get(ReportAdded, report_id)
+        if report_added is None:
+            return
+        report_added.fulltext_links = links
+        await self.db.commit()
+
+    async def get_fulltext_links_for_reports(self, report_ids: List[int]) -> Dict[int, List[str]]:
+        """Bulk read of the cached report_added.fulltext_links column (see its comment
+        in models.py) for a page of reports - the intake list's version of
+        ReportService.get_fulltext_links, minus that method's live-OpenAlex fallback:
+        a paginated list has too many rows to risk an uncached external call per row,
+        so it's cache-only here (a report whose cache hasn't been populated yet just
+        shows no links until the background job or a detail-view visit fills it in).
+        """
+        report_ids = report_ids or []
+        if not report_ids:
+            return {}
+
+        stmt = (
+            select(ReportAdded.report_id, ReportAdded.fulltext_links)
+            .where(ReportAdded.report_id.in_(report_ids))
+        )
+        rows = (await self.db.execute(stmt)).all()
+        return {report_id: (links or []) for report_id, links in rows}
+
     async def get_readiness_sets(self, report_ids: List[int]) -> Tuple[Set[int], Set[int]]:
         """Plain SQL read of the embedded/has_pdf columns for the given reports -
         replaces what used to be a live Qdrant retrieve + per-file filesystem stat call

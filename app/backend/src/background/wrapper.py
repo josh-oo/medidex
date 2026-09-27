@@ -11,7 +11,7 @@ import asyncio
 import io
 import json
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import httpx
 
@@ -73,21 +73,31 @@ async def _download_pdf_bytes(client: httpx.AsyncClient, url: str) -> Optional[b
     return None
 
 
-async def _auto_search_report_pdf(client: httpx.AsyncClient, report: DbReport, open_alex_service) -> Optional[_InMemoryPdfUpload]:
-    """Try to find and download a report's fulltext PDF via OpenAlex (by DOI)."""
-    if report.report_number > 0:  # report already has a pdf
-        return None
+async def _auto_search_report_pdf(client: httpx.AsyncClient, report: DbReport, open_alex_service) -> Tuple[Optional[_InMemoryPdfUpload], List[str]]:
+    """Look up a report's OpenAlex fulltext links by DOI, and try to download one as
+    the report's PDF if it doesn't already have one. Links are looked up (and
+    returned for the caller to cache on report_added.fulltext_links - see
+    ProjectRepository.set_report_auto_searched_pdf) even when a PDF already exists,
+    since the report detail view wants them regardless of PDF status.
+    """
+    if not report.doi:
+        return None, []
 
     try:
-        links = await open_alex_service.get_pdf_links_by_doi(report.doi)
-        for link in links:
-            payload = await _download_pdf_bytes(client, link)
-            if payload is not None:
-                return _InMemoryPdfUpload(payload)
+        links = list(await open_alex_service.get_pdf_links_by_doi(report.doi))
     except Exception as exc:
-        logger.warning("Auto PDF search failed for report %s: %s", report.id, exc)
+        logger.warning("OpenAlex lookup failed for report %s: %s", report.id, exc)
+        return None, []
 
-    return None
+    if report.report_number > 0:  # report already has a pdf, skip the download attempt
+        return None, links
+
+    for link in links:
+        payload = await _download_pdf_bytes(client, link)
+        if payload is not None:
+            return _InMemoryPdfUpload(payload), links
+
+    return None, links
 
 
 async def _finalize_project_upload(project_id: str, project_repo, vectorstore, maintenance_service, pubsub_service) -> None:
@@ -119,10 +129,10 @@ async def process_report(reports: List[DbReport], project_id: str, ctx: RequestC
                 project = await write_ctx.project_repo.get_project_by_id(project_id)
                 if not project:  # project already deleted
                     return
-                pdf_file = await _auto_search_report_pdf(client, report, write_ctx.open_alex_service)
+                pdf_file, fulltext_links = await _auto_search_report_pdf(client, report, write_ctx.open_alex_service)
                 if pdf_file:
                     await write_ctx.document_service.upload_pdf(report.id, pdf_file)
-                await write_ctx.project_repo.set_report_auto_searched_pdf(report.id)
+                await write_ctx.project_repo.set_report_auto_searched_pdf(report.id, fulltext_links=fulltext_links)
                 await write_session.commit()
                 await ctx.pubsub_service.publish_project_update(project_id)
 

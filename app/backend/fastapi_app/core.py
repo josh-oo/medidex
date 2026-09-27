@@ -24,7 +24,7 @@ from src.services.authorization import (
     ReportAccessDeniedError,
 )
 
-from src.utils.dto import StudyCreate, Study, Tag, SimilarStudyPage, studies_to_dto, similar_studies_to_dto
+from src.utils.dto import StudyCreate, Study, Tag, CandidateStudyPage, studies_to_dto, candidate_studies_to_dto
 from src.utils.pagination import encode_cursor, decode_cursor, InvalidCursorError
 from datetime import datetime
 
@@ -110,7 +110,7 @@ async def similarity_search_studies_by_id(
     negative_reports: List[int] = Query(None),
     return_details: bool = False,
     ctx: RequestContext = Depends(get_context),
-) -> SimilarStudyPage:
+) -> CandidateStudyPage:
     _,_, ready_report_ids = await get_vectorized_and_ready_report_ids(
         [report_id], ctx.report_repo
     )
@@ -136,9 +136,9 @@ async def similarity_search_studies_by_id(
         negative_reports,
         return_details,
     )
-    studies = similar_studies_to_dto(result)
+    studies = candidate_studies_to_dto(result)
     next_cursor = encode_cursor(offset + limit) if has_more else None
-    return SimilarStudyPage(items=studies, nextCursor=next_cursor)
+    return CandidateStudyPage(items=studies, nextCursor=next_cursor)
 
 @router.get("/reports/{report_id}/similar-studies/tags", dependencies=[Depends(is_verified_api_call), Depends(check_report_access)], summary="")
 async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(10, description="The number of related studies considered for retrieving relevant tags."), ctx: RequestContext = Depends(get_context)):

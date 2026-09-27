@@ -1,8 +1,3 @@
-export interface ReportSourcesDto {
-  doi: string;
-  links: string[];
-}
-
 export type JsonValue =
   | string
   | number
@@ -11,47 +6,66 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-export type ReportChatDto = JsonValue;
+// ---------------------------------------------------------------------------
+// Report DTOs
+// ---------------------------------------------------------------------------
+// Named the same way as the backend (src/utils/dto.py): each type's name says what
+// it adds over ReportDto, not how "detailed" or "list-like" it is. ReportDto is the
+// shared bibliographic base. The backend also has a standalone ReportSources
+// (Report + DOI/fulltext links, returned by GET /reports/{id}) that ProjectReport and
+// IntakeReport both build on - but nothing here calls that endpoint directly anymore
+// (the pdf-upload view reads DOI/links off IntakeReportDto instead, straight from the
+// list it already loaded), so there's no ReportSourcesDto on this side: its two fields
+// are just declared directly on IntakeReportDto below instead of via an intermediate
+// type with no other consumer.
 
-export interface ProjectAssigneeDto {
-  userId : string;
-  numberReportsLinked: number;
+export interface ReportDto {
+  reportId: number;
+  year: number;
+  title: string;
+  authors: string[];
+  abstract: string | null;
+  trialId: string | null;
+  createdAt: string | undefined;
+  updatedAt: string | undefined;
 }
 
-export interface ProjectDto {
-  projectId: string;
-  name: string;
-  createdAt: string;
-  owner: string;
-  numberReportsReadyForProcessing: number;
-}
-
-export interface ProjectDetailsDto extends ProjectDto{
-  numberReportsTotal: number;
-  numberReportsPreProcessed: number;
-  numberReportsWithPdf: number;
-  numberReportsAutoSearchedPdf: number,
-  numberReportsReadyForReview: number;
-  numberReportsConfirmed: number;
-  assignees : ProjectAssigneeDto[]
-}
-
-export interface ProjectTaskDto {
-  project : ProjectDto;
-  numberReportsProcessed: number;
-}
-
-export interface ReportDetailDto {
-  report: ReportDto;
+// A report plus its state within a project's curation workflow (ProjectReportPageDto.
+// items below): whether it has a PDF, this user's flag on it, and its linked studies.
+// flag/assignedStudies are optional (rather than required-but-possibly-empty)
+// because IntakeReportDto below deliberately doesn't carry them - an intake report
+// hasn't been curated yet, so there's nothing to fetch there - and still needs to
+// satisfy this shape wherever it's passed into the shared list UI (ReportList,
+// useReportStore).
+export interface ProjectReportDto extends ReportDto {
   hasPdf: boolean | undefined;
-  flag: string | undefined;
-  assignedStudies: StudyDto[];
+  flag?: string;
+  assignedStudies?: StudyDto[];
 }
 
-export interface ReportPageDto {
-  items: ReportDetailDto[];
+export interface ProjectReportPageDto {
+  items: ProjectReportDto[];
   nextCursor: string | null;
 }
+
+// The admin intake list's row shape (IntakeReportPageDto.items below) - a report plus
+// its DOI/cached OpenAlex fulltext links (so the pdf-upload view can read them
+// straight from this list instead of a separate per-report fetch) and hasPdf.
+// Deliberately NOT a ProjectReportDto: an intake report hasn't been curated yet, so
+// flag/assignedStudies don't apply here (see ProjectReportDto's comment above for why
+// it's still accepted anywhere a ProjectReportDto is expected).
+export interface IntakeReportDto extends ReportDto {
+  doi: string | null;
+  fulltextLinks: string[];
+  hasPdf: boolean | undefined;
+}
+
+export interface IntakeReportPageDto {
+  items: IntakeReportDto[];
+  nextCursor: string | null;
+}
+
+export type ReportChatDto = JsonValue;
 
 // `any` (the default/absent) means "don't filter on this dimension". `only` keeps just the
 // reports matching this dimension (e.g. processed: "only" -> only processed reports); `exclude`
@@ -88,35 +102,9 @@ export interface GetProjectReportsParams extends ReportFiltersState {
   limit?: number;
 }
 
-export interface SimilarTagDto {
-  id: string;
-  name: string;
-  score: number;
-}
-
-export interface GetSimilarTagsParams {
-  sources?: string[];
-  aspect?: string;
-  k?: number;
-}
-
-export interface SimilarStudyDto {
-  relevance: number;
-  study: StudyDto;
-}
-
-export interface SimilarStudyPageDto {
-  items: SimilarStudyDto[];
-  nextCursor: string | null;
-}
-
-export interface GetSimilarStudiesParams {
-  aspect?: string;
-  cutoff?: string;
-  limit?: number;
-  cursor?: string;
-  return_details?: boolean;
-}
+// ---------------------------------------------------------------------------
+// Study DTOs
+// ---------------------------------------------------------------------------
 
 export interface StudyDto {
   studyId: number;
@@ -133,16 +121,73 @@ export interface StudyDto {
 
 export type StudyCreateDto = Omit<StudyDto, "studyId" | "createdAt" | "updatedAt">;
 
-export interface ReportDto {
-  reportId: number;
-  year: number;
-  title: string;
-  authors: string[];
-  abstract: string | null;
-  trialId: string | null;
-  createdAt: string | undefined;
-  updatedAt: string | undefined;
+// A study suggested as a possible match for a report by the similarity search
+// (getSimilarStudiesByReportId) - a StudyDto plus how relevant this particular
+// suggestion is, for the researcher to accept or reject.
+export interface CandidateStudyDto extends StudyDto {
+  relevance: number;
 }
+
+export interface CandidateStudyPageDto {
+  items: CandidateStudyDto[];
+  nextCursor: string | null;
+}
+
+export interface GetSimilarStudiesParams {
+  aspect?: string;
+  cutoff?: string;
+  limit?: number;
+  cursor?: string;
+  return_details?: boolean;
+}
+
+export interface SimilarTagDto {
+  id: string;
+  name: string;
+  score: number;
+}
+
+export interface GetSimilarTagsParams {
+  sources?: string[];
+  aspect?: string;
+  k?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Project DTOs
+// ---------------------------------------------------------------------------
+
+export interface ProjectDto {
+  projectId: string;
+  name: string;
+  createdAt: string;
+  owner: string;
+  numberReportsReadyForProcessing: number;
+}
+
+export interface ProjectDetailsDto extends ProjectDto{
+  numberReportsTotal: number;
+  numberReportsPreProcessed: number;
+  numberReportsWithPdf: number;
+  numberReportsAutoSearchedPdf: number,
+  numberReportsReadyForReview: number;
+  numberReportsConfirmed: number;
+  assignees : ProjectAssigneeDto[]
+}
+
+export interface ProjectAssigneeDto {
+  userId : string;
+  numberReportsLinked: number;
+}
+
+export interface ProjectTaskDto {
+  project : ProjectDto;
+  numberReportsProcessed: number;
+}
+
+// ---------------------------------------------------------------------------
+// Aspect DTOs (interventions / conditions / outcomes / persons)
+// ---------------------------------------------------------------------------
 
 export interface InterventionDto {
   ID: number;
@@ -161,7 +206,34 @@ export interface OutcomeDto {
 
 export type GetPersonsResponseDto = Record<string, string[]>;
 
-// GenAI Backend DTOs
+// ---------------------------------------------------------------------------
+// Annotation DTOs
+// ---------------------------------------------------------------------------
+
+export interface AnnotationDto {
+  user: string;
+  studyId: number;
+  studyShortName: string;
+  confirmed: boolean,
+}
+
+export interface AnnotationFlagDto {
+  user: string;
+  flag: string;
+  public: boolean;
+}
+
+export interface ReportAnnotationsDto {
+  studies: AnnotationDto[];
+  flags: AnnotationFlagDto[];
+}
+
+export type ProjectAnnotationsDto = Record<string, ReportAnnotationsDto>;
+
+// ---------------------------------------------------------------------------
+// GenAI evaluation backend DTOs
+// ---------------------------------------------------------------------------
+
 export interface EvaluateRequest {
   report: ReportDto;
   studies: StudyDto[];
@@ -280,23 +352,3 @@ export interface StreamCallbacks {
   onComplete: () => void;
   onError: (error: Error) => void;
 }
-
-export interface AnnotationDto {
-  user: string;
-  studyId: number;
-  studyShortName: string;
-  confirmed: boolean,
-}
-
-export interface AnnotationFlagDto {
-  user: string;
-  flag: string;
-  public: boolean;
-}
-
-export interface ReportAnnotationsDto {
-  studies: AnnotationDto[];
-  flags: AnnotationFlagDto[];
-}
-
-export type ProjectAnnotationsDto = Record<string, ReportAnnotationsDto>;

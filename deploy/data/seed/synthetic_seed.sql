@@ -175,8 +175,14 @@ CREATE TABLE IF NOT EXISTS "report_added" (
     -- scoped to the project association (not "report") since they're only meaningful for
     -- its lifetime - see app/backend/src/database/models.py's ReportAdded model.
     "embedded" boolean NOT NULL DEFAULT false,
-    "has_pdf" boolean NOT NULL DEFAULT false
+    "has_pdf" boolean NOT NULL DEFAULT false,
+    -- Cached OpenAlex fulltext-link search result for this report's DOI - see
+    -- app/backend/src/database/models.py's ReportAdded.fulltext_links comment.
+    "fulltext_links" jsonb
 );
+-- Added after the table above first shipped without it - idempotent for
+-- already-provisioned databases (CREATE TABLE IF NOT EXISTS won't add it on its own).
+ALTER TABLE "report_added" ADD COLUMN IF NOT EXISTS "fulltext_links" jsonb;
 CREATE INDEX IF NOT EXISTS "idx_report_added_project_report"
     ON "report_added" ("project_id", "report_id");
 CREATE INDEX IF NOT EXISTS "idx_report_added_embedded" ON "report_added" ("embedded");

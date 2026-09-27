@@ -21,7 +21,7 @@ from src.background.wrapper import (
 )
 
 from src.services.authorization import ProjectAccessDeniedError, check_project_access
-from src.utils.dto import FilterMode, Project, ProjectAssignee, ProjectDetails, ProjectTask, ReportPage
+from src.utils.dto import FilterMode, IntakeReportPage, Project, ProjectAssignee, ProjectDetails, ProjectReportPage, ProjectTask
 from src.utils.pagination import InvalidCursorError
 
 router = APIRouter(tags=["projects"])
@@ -199,7 +199,7 @@ async def get_project_reports(
     new_study: FilterMode = Query(FilterMode.any, description="Only/exclude reports where a linked study was created after the report itself."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
-) -> ReportPage:
+) -> ProjectReportPage:
     try:
         return await ctx.project_service.get_reports_page(
             project_id,
@@ -228,7 +228,7 @@ async def get_project_reports_intake(
     with_pdf: FilterMode = Query(FilterMode.any, description="Only/exclude reports that have a PDF available."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
-) -> ReportPage:
+) -> IntakeReportPage:
     try:
         return await ctx.project_service.get_intake_reports_page(
             project_id,
@@ -257,7 +257,7 @@ async def get_project_reports_review(
     reviewed: FilterMode = Query(FilterMode.any, description="Only/exclude reports where an annotator has confirmed their annotation."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
-) -> ReportPage:
+) -> ProjectReportPage:
     try:
         return await ctx.project_service.get_review_reports_page(
             project_id,

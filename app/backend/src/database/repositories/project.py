@@ -137,8 +137,13 @@ class ProjectRepository:
         )
         return result.scalars().all()
 
-    async def set_report_auto_searched_pdf(self, report_id: int) -> None:
-        print("Set auto searched: ", report_id,flush=True)
+    async def set_report_auto_searched_pdf(self, report_id: int, fulltext_links: Optional[List[str]] = None) -> None:
+        """`fulltext_links`, when given, is the OpenAlex lookup this same background
+        pass already did to find a PDF to auto-download (see
+        src/background/wrapper.py's _auto_search_report_pdf) - cached here alongside
+        the flag so report detail views don't have to re-query OpenAlex live
+        (see report_added.fulltext_links's comment in models.py).
+        """
         stmt = (
             select(ReportAdded)
             .where(ReportAdded.report_id == report_id)
@@ -148,9 +153,9 @@ class ProjectRepository:
             return
 
         report_added.auto_searched_pdf = True
+        if fulltext_links is not None:
+            report_added.fulltext_links = fulltext_links
         await self.db.flush()
-        print("Set auto searched: ", report_added,flush=True)
-        #await self.db.commit()
 
         # auto_searched_pdf gates report.has_pdf's eligibility (see
         # ReportRepository._compute_has_pdf) - a fulltext file may already exist and just

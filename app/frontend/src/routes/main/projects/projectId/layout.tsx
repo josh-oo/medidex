@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { useParams, Outlet } from "react-router-dom";
-import { ReportDetailDto } from "@/types/apiDTOs";
+import { ProjectReportDto } from "@/types/apiDTOs";
 import { ReportColumnClient } from "./components/report-column-client";
 import { getProjectReports } from "@/lib/api/projectApi";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function ReportColumn() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
-  const [reports, setReports] = useState<ReportDetailDto[] | null>(null);
+  const [reports, setReports] = useState<ProjectReportDto[] | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {

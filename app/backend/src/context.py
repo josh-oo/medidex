@@ -110,6 +110,7 @@ class RequestContext:
             study_repo=self.study_repo,
             document_service=self.document_service,
             llm_service=self.llm_service,
+            open_alex_service=self.open_alex_service,
         )
 
     @cached_property

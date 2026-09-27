@@ -4,7 +4,7 @@ import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { StudyRelevanceTable } from "@/components/ui/study-view/study-relevance-table";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { SimilarStudyDto } from "@/types/apiDTOs";
+import type { CandidateStudyDto } from "@/types/apiDTOs";
 import type { RelevanceStudy } from "@/types/reports";
 import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
 import { ReportChatButtons } from "./ai-actions";
@@ -12,11 +12,11 @@ import { ReportChatButtons } from "./ai-actions";
 const PAGE_SIZE = 10;
 
 const mapResponseToRelevanceStudies = (
-  response: SimilarStudyDto[]
+  response: CandidateStudyDto[]
 ): RelevanceStudy[] => {
-  return response.map((study) => ({
-    ...study,
-    isLinked: false
+  return response.map(({ relevance, ...study }) => ({
+    relevance,
+    study,
   }));
 };
 

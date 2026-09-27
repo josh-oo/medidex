@@ -18,8 +18,7 @@ import {
 import type { StudyDto } from "@/types/apiDTOs";
 import type { ReactNode } from "react";
 
-interface StudyCardProps {
-  study: StudyDto;
+interface StudyCardProps extends StudyDto {
   /** Omitted for globally searched studies, which carry no relevance score. */
   relevance?: number | null;
   isLinked: boolean;
@@ -54,13 +53,13 @@ const getRelevanceBadgeStyle = (relevance: number) => {
 };
 
 export function StudyCard({
-  study,
   relevance,
   isLinked,
   alsoRecommended = false,
   onClick,
   onLink,
   aiBadge,
+  ...study
 }: StudyCardProps) {
   const hasRelevance = typeof relevance === "number";
 

@@ -5,7 +5,7 @@ from sqlalchemy import Column
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import UniqueConstraint
 from sqlalchemy import FetchedValue
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import datetime
 
 """
@@ -209,6 +209,17 @@ class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
     # computed on read.
     embedded: bool = Field(default=False, nullable=False)
     has_pdf: bool = Field(default=False, nullable=False)
+    # Cached OpenAlex fulltext-link search result for this report's DOI (see
+    # OpenAlexService.get_pdf_links_by_doi) - populated by the post-upload background
+    # job (src/background/wrapper.py's _auto_search_report_pdf, via
+    # ProjectRepository.set_report_auto_searched_pdf) so report detail views
+    # (ReportService.get_fulltext_links) don't re-hit OpenAlex on every read. None means
+    # "not searched yet" (falls back to a live lookup); an empty list means "searched,
+    # nothing found" - that distinction matters so the fallback doesn't refetch forever.
+    fulltext_links: Optional[List[str]] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
 
     __table_args__ = (
         Index('idx_report_added_project_report', 'project_id', 'report_id'),

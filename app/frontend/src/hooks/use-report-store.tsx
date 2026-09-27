@@ -1,4 +1,4 @@
-import { ReportDetailDto, StudyDto } from "@/types/apiDTOs"
+import { ProjectReportDto, StudyDto } from "@/types/apiDTOs"
 import { create } from "zustand"
 import {
     assignStudyToReportByReportId,
@@ -17,10 +17,10 @@ const removeStudyViaApi = async (reportId: number, studyId: number) => {
 }
 
 type ReportState = {
-    reports: Record<number, ReportDetailDto>
-    setReports: (reports: ReportDetailDto[]) => void
-    addReports: (reports: ReportDetailDto[]) => void
-    getReport: (reportId: number) => ReportDetailDto
+    reports: Record<number, ProjectReportDto>
+    setReports: (reports: ProjectReportDto[]) => void
+    addReports: (reports: ProjectReportDto[]) => void
+    getReport: (reportId: number) => ProjectReportDto
     addAssignedStudy: (reportId: number, study: StudyDto) => Promise<void>
     syncAssignedStudy: (reportId: number, study: StudyDto) => void
     removeAssignedStudy: (reportId: number, studyId: number) => Promise<void>
@@ -33,7 +33,7 @@ export const useReportStore = create<ReportState>((set, get) => ({
 
     setReports: (reports) => set({
         reports: Object.fromEntries(
-            reports.map((r) => [r.report.reportId, r]),
+            reports.map((r) => [r.reportId, r]),
         ),
     }),
 
@@ -49,8 +49,8 @@ export const useReportStore = create<ReportState>((set, get) => ({
     addReports: (reports) => set((state) => {
         const additions = Object.fromEntries(
             reports
-                .filter((r) => !(r.report.reportId in state.reports))
-                .map((r) => [r.report.reportId, r]),
+                .filter((r) => !(r.reportId in state.reports))
+                .map((r) => [r.reportId, r]),
         );
         if (Object.keys(additions).length === 0) {
             return state;

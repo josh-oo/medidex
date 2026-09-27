@@ -3,11 +3,12 @@ import { AxiosRequestConfig } from "axios";
 import { getAccessToken } from "@/lib/client/keycloak";
 import {
   GetProjectReportsParams,
+  IntakeReportPageDto,
   ProjectAnnotationsDto,
   ProjectAssigneeDto,
   ProjectDetailsDto,
   ProjectTaskDto,
-  ReportPageDto,
+  ProjectReportPageDto,
   StreamCallbacks,
   StreamEvent,
 } from "../../types/apiDTOs";
@@ -93,7 +94,7 @@ export const getProjectReports = (
   projectId: string,
   filters?: GetProjectReportsParams,
   config?: AxiosRequestConfig
-): Promise<ReportPageDto> => {
+): Promise<ProjectReportPageDto> => {
   const requestConfig: AxiosRequestConfig = {
     ...config,
     params: {
@@ -108,7 +109,7 @@ export const getProjectReports = (
   };
 
   return apiClient
-    .get<ReportPageDto>(`/projects/${projectId}/reports`, requestConfig)
+    .get<ProjectReportPageDto>(`/projects/${projectId}/reports`, requestConfig)
     .then(response => {
       return response.data;
     })
@@ -123,7 +124,7 @@ export const getProjectReportsIntake = (
   projectId: string,
   filters?: GetProjectReportsParams,
   config?: AxiosRequestConfig
-): Promise<ReportPageDto> => {
+): Promise<IntakeReportPageDto> => {
   const requestConfig: AxiosRequestConfig = {
     ...config,
     params: {
@@ -136,7 +137,7 @@ export const getProjectReportsIntake = (
   };
 
   return apiClient
-    .get<ReportPageDto>(`/projects/${projectId}/reports/intake`, requestConfig)
+    .get<IntakeReportPageDto>(`/projects/${projectId}/reports/intake`, requestConfig)
     .then(response => {
       return response.data;
     })
@@ -152,7 +153,7 @@ export const getProjectReportsReview = (
   projectId: string,
   filters?: GetProjectReportsParams,
   config?: AxiosRequestConfig
-): Promise<ReportPageDto> => {
+): Promise<ProjectReportPageDto> => {
   const requestConfig: AxiosRequestConfig = {
     ...config,
     params: {
@@ -166,7 +167,7 @@ export const getProjectReportsReview = (
   };
 
   return apiClient
-    .get<ReportPageDto>(`/projects/${projectId}/reports/review`, requestConfig)
+    .get<ProjectReportPageDto>(`/projects/${projectId}/reports/review`, requestConfig)
     .then(response => {
       return response.data;
     })

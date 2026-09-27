@@ -6,16 +6,18 @@ from ..database.models import Project as DbProject, Report as DbReport
 from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
 from ..utils.dto import (
-    BatchedReport,
     FilterMode,
+    IntakeReport,
+    IntakeReportPage,
     Project,
     ProjectAssignee,
     ProjectDetails,
+    ProjectReport,
+    ProjectReportPage,
     ProjectTask,
-    Report as ReportDTO,
-    ReportPage,
     filter_mode_to_bool,
     matches_filter,
+    reports_to_dto,
     studies_to_dto,
 )
 from ..utils.pagination import decode_cursor, encode_cursor
@@ -257,43 +259,53 @@ class ProjectResourceService:
 
         return candidate_ids
 
-    async def hydrate_report_page(self, page_rows: List[DbReport], limit: int) -> ReportPage:
+    async def hydrate_report_page(
+        self, page_rows: List[DbReport], limit: int, *, include_report_detail: bool = False
+    ) -> ProjectReportPage | IntakeReportPage:
         """Turns a page of plain Report rows - as ReportRepository.query_project_reports_page
-        returns them, including its +1 lookahead row - into the DTO shape, fetching linked
-        studies/flags/pdf-readiness only for this page.
+        returns them, including its +1 lookahead row - into the DTO shape, fetching only
+        what that shape needs for this page.
+
+        `include_report_detail` switches the row (and page) shape from ProjectReport/
+        ProjectReportPage to IntakeReport/IntakeReportPage: DOI + cached OpenAlex fulltext
+        links (see get_fulltext_links_for_reports's docstring for why this is cache-only,
+        unlike the single-report detail endpoint's live fallback) instead of flag/
+        assignedStudies - intake reports haven't been curated yet, so those don't apply and
+        this branch never queries for them. Only get_intake_reports_page sets this.
         """
         has_more = len(page_rows) > limit
         page_rows = page_rows[:limit]
         page_ids = [report.id for report in page_rows]
 
-        all_linked_studies = await self.report_repo.get_linked_studies_for_reports(page_ids)
-        report_flags = await self.report_repo.get_report_flags_for_reports(page_ids)
         _, reports_with_pdf = await self.report_repo.get_readiness_sets(page_ids)
 
-        items = []
-        for report in page_rows:
-            authors = report.authors.split("//") if report.authors else []
-            linked_studies = studies_to_dto(all_linked_studies.get(report.id, []))
-            items.append(
-                BatchedReport(
-                    report=ReportDTO(
-                        reportId=report.id,
-                        year=report.year,
-                        title=report.title,
-                        abstract=report.abstract,
-                        authors=authors,
-                        trialId=report.trial_registration_id,
-                        createdAt=report.date_entered,
-                        updatedAt=report.date_edited,
-                    ),
+        if include_report_detail:
+            fulltext_links_by_report = await self.report_repo.get_fulltext_links_for_reports(page_ids)
+            items = [
+                IntakeReport(
+                    **reports_to_dto([report])[0].model_dump(),
                     hasPdf=report.id in reports_with_pdf,
-                    flag=report_flags.get(report.id).message if report.id in report_flags else None,
-                    assignedStudies=linked_studies,
+                    doi=report.doi,
+                    fulltextLinks=fulltext_links_by_report.get(report.id, []),
                 )
-            )
+                for report in page_rows
+            ]
+            next_cursor = encode_cursor(page_ids[-1]) if has_more and page_ids else None
+            return IntakeReportPage(items=items, nextCursor=next_cursor)
 
+        all_linked_studies = await self.report_repo.get_linked_studies_for_reports(page_ids)
+        report_flags = await self.report_repo.get_report_flags_for_reports(page_ids)
+        items = [
+            ProjectReport(
+                **reports_to_dto([report])[0].model_dump(),
+                hasPdf=report.id in reports_with_pdf,
+                flag=report_flags.get(report.id).message if report.id in report_flags else None,
+                assignedStudies=studies_to_dto(all_linked_studies.get(report.id, [])),
+            )
+            for report in page_rows
+        ]
         next_cursor = encode_cursor(page_ids[-1]) if has_more and page_ids else None
-        return ReportPage(items=items, nextCursor=next_cursor)
+        return ProjectReportPage(items=items, nextCursor=next_cursor)
 
     async def get_reports_page(
         self,
@@ -305,7 +317,7 @@ class ProjectResourceService:
         new_study: FilterMode = FilterMode.any,
         cursor: Optional[str] = None,
         limit: int = 50,
-    ) -> ReportPage:
+    ) -> ProjectReportPage:
         """The normal curation view: never includes reports that are still being
         processed (not yet embedded/PDF-ready) - see get_intake_reports_page for that.
         """
@@ -330,10 +342,12 @@ class ProjectResourceService:
         with_pdf: FilterMode = FilterMode.any,
         cursor: Optional[str] = None,
         limit: int = 50,
-    ) -> ReportPage:
+    ) -> IntakeReportPage:
         """The admin intake view: unlike get_reports_page, always includes reports that
         have been auto-searched for a PDF but aren't fully processed yet, so an admin (or
-        an MCP client) can watch reports as they arrive.
+        an MCP client) can watch reports as they arrive. Returns the richer IntakeReport
+        shape (DOI + fulltext links included) so the pdf-upload UI can read a report's
+        DOI/links straight off this list instead of a separate per-report fetch.
         """
         cursor_id = decode_cursor(cursor) if cursor else None
         page_rows = await self.report_repo.query_project_reports_page(
@@ -344,7 +358,7 @@ class ProjectResourceService:
             cursor_id=cursor_id,
             limit=limit,
         )
-        return await self.hydrate_report_page(page_rows, limit)
+        return await self.hydrate_report_page(page_rows, limit, include_report_detail=True)
 
     async def get_review_reports_page(
         self,
@@ -355,7 +369,7 @@ class ProjectResourceService:
         reviewed: FilterMode = FilterMode.any,
         cursor: Optional[str] = None,
         limit: int = 50,
-    ) -> ReportPage:
+    ) -> ProjectReportPage:
         """The admin annotator-review view: always restricted to reports every project
         assignee has completed annotating, regardless of search/filter.
         """

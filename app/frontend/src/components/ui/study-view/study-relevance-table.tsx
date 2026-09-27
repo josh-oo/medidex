@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback} from "react";
+import { useState, useMemo, useCallback} from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,7 +50,6 @@ export function StudyRelevanceTable({
   onLoadMore,
 }: StudyRelevanceTableProps) {
 
-  const [resolvedStudies, setResolvedStudies] = useState<RelevanceStudy[]>(() => [...studies]);
   const [searchQuery, setSearchQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [searchResults, setSearchResults] = useState<StudyDto[] | null>(null);
@@ -114,14 +113,6 @@ export function StudyRelevanceTable({
     ? `${reportId}:${JSON.stringify(newStudySuggestion)}`
     : null;
 
-  const markStudyLinkedState = useCallback((studyId: number, linked: boolean) => {
-    setResolvedStudies((prev) =>
-      prev.map((entry) =>
-        entry.study.studyId === studyId ? { ...entry, isLinked: linked } : entry
-      )
-    );
-  }, []);
-
   const handleLinkedChange = useCallback(
     async (study: StudyDto, checked: boolean) => {
       if (reportId === undefined) {
@@ -131,7 +122,6 @@ export function StudyRelevanceTable({
       if (checked) {
         try {
           await addAssignedStudies(reportId, study);
-          markStudyLinkedState(study.studyId, true);
           toast.success("Report assigned to study");
         } catch (error) {
           toast.error(
@@ -144,7 +134,6 @@ export function StudyRelevanceTable({
       } else {
         try {
           await removeAssignedStudies(reportId, study.studyId);
-          markStudyLinkedState(study.studyId, false);
           toast.success("Report unassigned from study");
         } catch (error) {
           toast.error(
@@ -160,7 +149,6 @@ export function StudyRelevanceTable({
       reportId,
       addAssignedStudies,
       removeAssignedStudies,
-      markStudyLinkedState,
     ]
   );
 
@@ -185,26 +173,13 @@ export function StudyRelevanceTable({
       }
 
       syncAssignedStudy(reportId, createdStudy);
-      markStudyLinkedState(createdStudy.studyId, true);
 
       if (suggestionKey) {
         dismissSuggestion(suggestionKey);
       }
     },
-    [reportId, suggestionKey, dismissSuggestion, syncAssignedStudy, markStudyLinkedState]
+    [reportId, suggestionKey, dismissSuggestion, syncAssignedStudy]
   );
-
-  useEffect(() => {
-    const assignedStudyIds = new Set(
-      (currentReport?.assignedStudies ?? []).map((assigned) => assigned.studyId)
-    );
-    setResolvedStudies(
-      studies.map((study) => ({
-        ...study,
-        isLinked: study.isLinked || assignedStudyIds.has(study.study.studyId),
-      }))
-    );
-  }, [studies, currentReport?.assignedStudies]);
 
   // Reset evaluation state when report changes
   //useEffect(() => {
@@ -212,8 +187,8 @@ export function StudyRelevanceTable({
   //}, []);
 
   const recommendedStudies = useMemo(
-    () => [...resolvedStudies].sort((a, b) => b.relevance - a.relevance),
-    [resolvedStudies]
+    () => [...studies].sort((a, b) => b.relevance - a.relevance),
+    [studies]
   );
 
   const recommendedStudyIds = useMemo(
@@ -221,17 +196,13 @@ export function StudyRelevanceTable({
     [recommendedStudies]
   );
 
-  const linkedStudyIds = useMemo(() => {
-    const ids = new Set(
-      (currentReport?.assignedStudies ?? []).map((assigned) => assigned.studyId)
-    );
-    resolvedStudies.forEach((entry) => {
-      if (entry.isLinked) {
-        ids.add(entry.study.studyId);
-      }
-    });
-    return ids;
-  }, [currentReport?.assignedStudies, resolvedStudies]);
+  // The single source of truth for link state - currentReport.assignedStudies already
+  // updates reactively the moment addAssignedStudies/removeAssignedStudies/
+  // syncAssignedStudy touch the store, so there's no separate local flag to keep in sync.
+  const linkedStudyIds = useMemo(
+    () => new Set((currentReport?.assignedStudies ?? []).map((assigned) => assigned.studyId)),
+    [currentReport?.assignedStudies]
+  );
 
   const visibleSearchResults = useMemo(
     () => (searchResults ?? []).slice(0, MAX_VISIBLE_SEARCH_RESULTS),
@@ -417,7 +388,7 @@ export function StudyRelevanceTable({
                   {visibleSearchResults.map((study) => (
                     <StudyCard
                       key={`search-${study.studyId}`}
-                      study={study}
+                      {...study}
                       isLinked={linkedStudyIds.has(study.studyId)}
                       alsoRecommended={recommendedStudyIds.has(study.studyId)}
                       onClick={handleStudyClick}
@@ -463,7 +434,7 @@ export function StudyRelevanceTable({
                 {recommendedStudies.map((entry) => (
                   <StudyCard
                     key={entry.study.studyId}
-                    study={entry.study}
+                    {...entry.study}
                     relevance={entry.relevance}
                     isLinked={linkedStudyIds.has(entry.study.studyId)}
                     onClick={handleStudyClick}

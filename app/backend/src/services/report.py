@@ -266,14 +266,36 @@ class DocumentService:
             raise
         
 class ReportService:
-    def __init__(self, report_repo : ReportRepository, study_repo : StudyRepository, document_service : DocumentService, llm_service : LanguageModelService):
+    def __init__(self, report_repo : ReportRepository, study_repo : StudyRepository, document_service : DocumentService, llm_service : LanguageModelService, open_alex_service):
         self.report_repo = report_repo
         self.study_repo = study_repo
 
         self.document_service = document_service
         self.llm_service = llm_service
+        self.open_alex_service = open_alex_service
 
         self.report_cache = {}
+
+    async def get_fulltext_links(self, report_id: int) -> List[str]:
+        """OpenAlex fulltext links for a report's DOI. Normally just reads the cache
+        the post-upload background job populates (report_added.fulltext_links - see
+        ProjectRepository.set_report_auto_searched_pdf); falls back to a live OpenAlex
+        lookup (and caches it) only for reports that cache predates - e.g. reports
+        added before this field existed, or added outside the normal project-upload
+        pipeline - so this is a live call at most once per report.
+        """
+        report_added = await self.report_repo.get_report_added(report_id)
+        if report_added is not None and report_added.fulltext_links is not None:
+            return report_added.fulltext_links
+
+        report = await self.get_report(report_id)
+        if report is None or not report.doi:
+            return []
+
+        links = list(await self.open_alex_service.get_pdf_links_by_doi(report.doi))
+        if report_added is not None:
+            await self.report_repo.set_fulltext_links(report_id, links)
+        return links
 
     async def get_trial_ids(self, report_id: int, include_fulltext: bool, use_cache : bool = True) -> List:
         if include_fulltext and use_cache:

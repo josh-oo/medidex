@@ -58,12 +58,14 @@ class StudyCreate(BaseModel):
     comparison: Optional[str]
     trialId: Optional[str] = None
 
-class SimilarStudy(BaseModel):
+class CandidateStudy(Study):
+    """A study suggested as a possible match for a report by the similarity search
+    (fastapi_app/core.py's /reports/{report_id}/similar-studies) - a Study plus how
+    relevant this particular suggestion is, for the researcher to accept or reject."""
     relevance: float
-    study: Study
 
-class SimilarStudyPage(BaseModel):
-    items: List[SimilarStudy]
+class CandidateStudyPage(BaseModel):
+    items: List[CandidateStudy]
     nextCursor: Optional[str] = None
 
 class Tag(BaseModel):
@@ -71,19 +73,28 @@ class Tag(BaseModel):
     keyword: str
     relevance: Optional[float] = None
 
-class ReportSources(BaseModel):
-    doi: str
-    links: List[str]
+# Naming convention below: each subclass's name says what it adds over its parent,
+# not how "detailed" or "list-like" it is - Report is the shared bibliographic base;
+# every other Report* type is named for the specific extra data it carries.
 
 class Report(BaseModel):
     reportId: int
-    year: int 
+    year: int
     title: str
     abstract: Optional[str]
     trialId: Optional[str]
     authors: List[str]
     createdAt: Optional[str]
     updatedAt: Optional[str]
+
+class ReportSources(Report):
+    """A Report plus where to find it: its DOI and cached OpenAlex fulltext links
+    (ReportService.get_fulltext_links). Returned by GET /reports/{report_id} for the
+    pdf-upload view. Too heavy/situational to carry on every row of a paginated
+    report list (see ProjectReport below) - only fetched for a single report, or for
+    IntakeReport's list (below) which specifically needs it up front."""
+    doi: Optional[str] = None
+    fulltextLinks: List[str] = Field(default_factory=list)
 
 class ReportFlagUpdate(BaseModel):
     message: str
@@ -120,14 +131,32 @@ class ProjectTask(BaseModel):
     project: Project
     numberReportsProcessed: int
 
-class BatchedReport(BaseModel):
-    report: Report
+class ProjectReport(Report):
+    """A Report plus its state within a project's curation workflow: whether it has a
+    PDF, this user's flag on it, and its linked studies - the row shape for the normal/
+    review project report lists (ProjectReportPage.items below). Mirrors report_added
+    (src/database/models.py) being project-scoped, temporary metadata rather than
+    something that lives on Report itself."""
     hasPdf: Optional[bool]
     flag: Optional[str]
     assignedStudies: List[Study] = Field(default_factory=list)
 
-class ReportPage(BaseModel):
-    items: List[BatchedReport]
+class ProjectReportPage(BaseModel):
+    items: List[ProjectReport]
+    nextCursor: Optional[str] = None
+
+class IntakeReport(ReportSources):
+    """A ReportSources (DOI + fulltext links, so the pdf-upload view can read them
+    straight from the list it already loaded instead of issuing a separate
+    GET /reports/{report_id} per row) plus hasPdf. Deliberately NOT a ProjectReport:
+    an intake report hasn't been curated yet, so flag/assignedStudies don't apply and
+    aren't fetched for this list (see ProjectResourceService.hydrate_report_page's
+    include_report_detail branch). The row shape for the admin intake list
+    (IntakeReportPage.items below)."""
+    hasPdf: Optional[bool] = None
+
+class IntakeReportPage(BaseModel):
+    items: List[IntakeReport]
     nextCursor: Optional[str] = None
 
 def tags_to_dto(tags) -> List[Tag]:
@@ -180,10 +209,10 @@ def studies_to_dto(studies):
         result.append(output_study)
     return result
 
-def similar_studies_to_dto(studies):
+def candidate_studies_to_dto(studies):
     results = []
     for i in range(0, len(studies['Relevance'])):
-        study = Study(
+        results.append(CandidateStudy(
             studyId=studies['id'][i],
             shortName=studies['short_name'][i],
             numberParticipants=studies['number_participants'][i],
@@ -194,6 +223,6 @@ def similar_studies_to_dto(studies):
             updatedAt=studies['date_edited'][i],
             status=studies['status'][i],
             trialId=studies['trial_registration_id'][i],
-        )
-        results.append(SimilarStudy(relevance=studies['Relevance'][i], study=study))
+            relevance=studies['Relevance'][i],
+        ))
     return results

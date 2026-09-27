@@ -26,7 +26,7 @@ from src.database.repositories.study import DuplicateShortNameError
 from src.context import RequestContext
 from .deps import get_context
 
-from src.utils.dto import Study, StudyCreate, ReportSources, Report, ReportFlagUpdate, ReportFlag, Tag, tags_to_dto, studies_to_dto, report_flag_to_dto
+from src.utils.dto import Study, StudyCreate, Report, ReportSources, ReportFlagUpdate, ReportFlag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, report_flag_to_dto
 
 load_dotenv()
 
@@ -184,12 +184,14 @@ async def get_all_reports(
 ) -> List[DbReport]:
     return await ctx.report_repo.get_all_reports(report_ids, date_from, date_to)
 
-@router.get("/reports/{report_id}", summary="Get details for a specific report.")
-async def get_report_by_id(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> DbReport:
-    result = await ctx.report_repo.get_report_by_id(report_id)
-    if result is None:
+@router.get("/reports/{report_id}", summary="Get full details for a specific report, including its DOI and OpenAlex fulltext links.")
+async def get_report_by_id(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> ReportSources:
+    report = await ctx.report_repo.get_report_by_id(report_id)
+    if report is None:
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
-    return result
+    base = reports_to_dto([report])[0]
+    links = await ctx.report_service.get_fulltext_links(report_id)
+    return ReportSources(**base.model_dump(), doi=report.doi, fulltextLinks=links)
 
 @router.delete("/reports/{report_id}", status_code=204, summary="Delete a report. Only the owner of the report's project can delete it.")
 async def delete_report(
@@ -278,18 +280,6 @@ async def get_fulltext(report_id: int = report_id_path, ctx: RequestContext = De
     except Exception as e:
         if str(e) == "Upstream request timed out":
             raise HTTPException(status_code=504, detail="Upstream request timed out.")
-
-@router.get("/reports/{report_id}/sources", summary="Get fulltext links for a report via OpenAlex (by DOI)")
-async def get_report_fulltext_links(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> ReportSources:
-    # Get the report from the database
-    report = await ctx.report_repo.get_report_by_id(report_id)
-    if report is None:
-        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
-    doi = report.doi
-    if not doi:
-        return ReportSources(doi="", links=[])
-    links = await ctx.open_alex_service.get_pdf_links_by_doi(doi)
-    return ReportSources(doi=doi, links=links)
 
 @router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
 async def get_pdf_metadata(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> Dict:

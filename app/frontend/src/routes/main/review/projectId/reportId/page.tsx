@@ -147,7 +147,7 @@ export default function ReviewDetailsPage() {
   }, [reportIdParam]);
 
   const reportCreatedAt = useReportStore((state) =>
-    reportId === null ? undefined : state.reports[reportId]?.report.createdAt
+    reportId === null ? undefined : state.reports[reportId]?.createdAt
   );
 
   useEffect(() => {
