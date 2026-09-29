@@ -163,6 +163,10 @@ export interface GetStudySearchParams {
   q: string;
   limit?: number;
   cursor?: string;
+  // Parse `q` as an advanced AND/OR field==value expression (see src/utils/query_parser.py
+  // on the backend) instead of a free-text search. Omitted (not `false`) for a plain search,
+  // matching the backend's own default.
+  advanced?: boolean;
 }
 
 // A study suggested as a possible match for a report by the similarity search
@@ -230,6 +234,18 @@ export interface TaskDto {
 export interface TagDto {
   id: string;
   keyword: string;
+}
+
+// Raw shape of GET /participants and GET /design - unlike interventions/conditions/
+// outcomes, these two aren't wrapped into TagDto by the backend (see resources.py).
+export interface ParticipantDto {
+  id: number;
+  description: string;
+}
+
+export interface DesignDto {
+  id: number;
+  description?: string | null;
 }
 
 export type GetPersonsResponseDto = Record<string, string[]>;

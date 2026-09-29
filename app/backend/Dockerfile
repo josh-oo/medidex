@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE 1
 WORKDIR /app
 
 COPY app/backend/requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir --no-compile -r requirements.txt
 
 COPY app/backend/main.py .
 COPY app/backend/src/ ./src/

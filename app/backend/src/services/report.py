@@ -1,4 +1,4 @@
-import fitz
+import pypdf
 import re
 from rapidfuzz import fuzz
 
@@ -53,13 +53,9 @@ class DocumentService:
     async def get_pages(self, report_id: int) -> List[str]:
         def _sync_extract(path):
             try:
-                doc = fitz.open(path)
-                parts = []
-                for page in doc:
-                    parts.append(page.get_text() or "")
-                doc.close()
-                return parts
-            except fitz.FileDataError:
+                reader = pypdf.PdfReader(path)
+                return [page.extract_text() or "" for page in reader.pages]
+            except pypdf.errors.PyPdfError:
                 return []
             except Exception as e:
                 print(f"Error extracting text from PDF: {e}")

@@ -15,6 +15,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { StudyCard } from "./study-card";
 import { AddStudyDialog } from "./add-study-dialog";
+import { AdvancedSearchDialog } from "./advanced-search-dialog";
 import { AIMatchSettingsDialog } from "./ai-match-settings-dialog";
 import { LoadMoreStudiesButton } from "./load-more-studies-button";
 import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
@@ -56,6 +57,7 @@ export function CandidateStudyTable({
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingMoreSearch, setIsLoadingMoreSearch] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [isAdvancedSearch, setIsAdvancedSearch] = useState(false);
 
   const addAssignedStudy = useReportStore((state) => state.addAssignedStudy);
   const syncAssignedStudy = useReportStore((state) => state.syncAssignedStudy);
@@ -186,13 +188,18 @@ export function CandidateStudyTable({
     [currentReport?.assignedStudies]
   );
 
-  const runSearch = useCallback(async (query: string) => {
+  const runSearch = useCallback(async (query: string, advanced: boolean = false) => {
     setIsSearching(true);
     setSearchError(null);
     setSubmittedQuery(query);
+    setIsAdvancedSearch(advanced);
 
     try {
-      const response = await searchStudies({ q: query, limit: SEARCH_PAGE_SIZE });
+      const response = await searchStudies({
+        q: query,
+        limit: SEARCH_PAGE_SIZE,
+        advanced: advanced || undefined,
+      });
       setSearchResults(response.items);
       setSearchNextCursor(response.nextCursor);
     } catch (error) {
@@ -212,7 +219,12 @@ export function CandidateStudyTable({
     }
 
     setIsLoadingMoreSearch(true);
-    searchStudies({ q: submittedQuery, limit: SEARCH_PAGE_SIZE, cursor: searchNextCursor })
+    searchStudies({
+      q: submittedQuery,
+      limit: SEARCH_PAGE_SIZE,
+      cursor: searchNextCursor,
+      advanced: isAdvancedSearch || undefined,
+    })
       .then((response) => {
         setSearchResults((prev) => [...(prev ?? []), ...response.items]);
         setSearchNextCursor(response.nextCursor);
@@ -227,7 +239,7 @@ export function CandidateStudyTable({
       .finally(() => {
         setIsLoadingMoreSearch(false);
       });
-  }, [submittedQuery, searchNextCursor, isLoadingMoreSearch]);
+  }, [submittedQuery, searchNextCursor, isLoadingMoreSearch, isAdvancedSearch]);
 
   const handleSearchSubmit = useCallback(
     (event: React.FormEvent<HTMLFormElement>) => {
@@ -246,12 +258,26 @@ export function CandidateStudyTable({
     [searchQuery, runSearch]
   );
 
+  const handleAdvancedSearch = useCallback(
+    (query: string) => {
+      // Deliberately doesn't touch searchQuery (the plain-text input's bound value):
+      // the raw grammar string (quotes/parens/==) isn't meant to be shown or re-submitted
+      // there - the free-text form's Enter-to-submit always runs a plain ILIKE search,
+      // which would silently break on this text. The advanced query itself is still
+      // shown to the user via submittedQuery/isAdvancedSearch in the results header below.
+      setSearchQuery("");
+      void runSearch(query, true);
+    },
+    [runSearch]
+  );
+
   const clearSearch = useCallback(() => {
     setSearchQuery("");
     setSubmittedQuery("");
     setSearchResults(null);
     setSearchNextCursor(null);
     setSearchError(null);
+    setIsAdvancedSearch(false);
   }, []);
 
   // Prefill the explicit search with the report's trial id - the confirmed one if a
@@ -324,7 +350,7 @@ export function CandidateStudyTable({
 
         {/* Global search across all studies */}
         <div className="mt-3">
-          <form onSubmit={handleSearchSubmit}>
+          <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -353,6 +379,7 @@ export function CandidateStudyTable({
                 )
               )}
             </div>
+            <AdvancedSearchDialog onSearch={handleAdvancedSearch} />
           </form>
           {searchError && (
             <p className="mt-1.5 text-xs text-destructive">{searchError}</p>
@@ -386,10 +413,19 @@ export function CandidateStudyTable({
             <div>
               <div className="flex items-center gap-2 pb-2">
                 <Search className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-semibold">
-                  Search results for &ldquo;{submittedQuery}&rdquo;
-                </h3>
-                <Badge variant="secondary" className="text-xs font-normal">
+                {isAdvancedSearch ? (
+                  <h3 className="text-sm font-semibold flex items-center gap-2 min-w-0">
+                    <span>Advanced search results for</span>
+                    <code className="text-xs font-normal bg-muted px-1.5 py-0.5 rounded truncate">
+                      {submittedQuery}
+                    </code>
+                  </h3>
+                ) : (
+                  <h3 className="text-sm font-semibold">
+                    Search results for &ldquo;{submittedQuery}&rdquo;
+                  </h3>
+                )}
+                <Badge variant="secondary" className="text-xs font-normal shrink-0">
                   {searchNextCursor ? `${searchResults.length}+` : searchResults.length}
                 </Badge>
               </div>

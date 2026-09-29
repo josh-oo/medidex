@@ -4,6 +4,7 @@ import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, or_
 from sqlmodel import select, func, text
 
 from dotenv import load_dotenv
@@ -16,6 +17,7 @@ from ..models import StudyIntervention, Intervention, StudyCondition, Condition,
 
 from ...utils.postprocessing import normalize_author_names
 from ...utils.dto import Tag
+from ...utils.query_parser import AdvancedSearchField, AndGroup, Comparison, OrGroup, QueryNode
 
 load_dotenv()
 
@@ -32,6 +34,71 @@ def load_trial_id_mapping():
         return json.load(json_file)
 
 trial_id_mapping = load_trial_id_mapping()
+
+# Each aspect field is a study_<aspect> join table to an <aspect> table with an
+# id + description column (see models.py) - maps an advanced-search field to the
+# (join table's study_id column, its fk-to-aspect column, aspect table's pk, aspect
+# table's description column) needed to build an EXISTS clause for it. Keyed by the
+# AdvancedSearchField enum (not a raw string) - field-name validity, including
+# alias/plural normalization, is already enforced by Comparison's own pydantic
+# validation (src/utils/query_parser.py) before a Comparison ever reaches here, so
+# there's no "unknown field" case left to check or raise for at this layer.
+_ASPECT_FIELDS = {
+    AdvancedSearchField.INTERVENTION: (StudyIntervention.study_id, StudyIntervention.intervention_id, Intervention.id, Intervention.description),
+    AdvancedSearchField.CONDITION: (StudyCondition.study_id, StudyCondition.condition_id, Condition.id, Condition.description),
+    AdvancedSearchField.OUTCOME: (StudyOutcome.study_id, StudyOutcome.outcome_id, Outcome.id, Outcome.description),
+    AdvancedSearchField.PARTICIPANT: (StudyParticipant.study_id, StudyParticipant.participant_id, Participant.id, Participant.description),
+    AdvancedSearchField.DESIGN: (StudyDesign.study_id, StudyDesign.design_id, Design.id, Design.description),
+}
+
+def _aspect_exists(join_study_id, join_fk_col, aspect_pk_col, aspect_desc_col, pattern):
+    return (
+        select(1)
+        .where(join_study_id == Study.id, join_fk_col == aspect_pk_col, aspect_desc_col.ilike(pattern))
+        .exists()
+    )
+
+def _comparison_to_condition(comparison: Comparison):
+    field = comparison.field
+    pattern = f"%{comparison.value}%"
+
+    if field in _ASPECT_FIELDS:
+        join_study_id, join_fk_col, aspect_pk_col, aspect_desc_col = _ASPECT_FIELDS[field]
+        return _aspect_exists(join_study_id, join_fk_col, aspect_pk_col, aspect_desc_col, pattern)
+
+    if field == AdvancedSearchField.AUTHOR:
+        return (
+            select(1)
+            .where(StudyReport.study_id == Study.id, StudyReport.report_id == Report.id, Report.authors.ilike(pattern))
+            .exists()
+        )
+
+    if field == AdvancedSearchField.NAME:
+        return Study.short_name.ilike(pattern)
+
+    if field == AdvancedSearchField.TRIAL_ID:
+        return or_(
+            Study.trial_registration_id.ilike(pattern),
+            select(1).where(StudyReport.study_id == Study.id, StudyReport.report_id == Report.id, Report.trial_registration_id.ilike(pattern)).exists(),
+            select(1).where(StudyReport.study_id == Study.id, StudyReport.report_id == ReportAdded.report_id, ReportAdded.trial_registration_id.ilike(pattern)).exists(),
+        )
+
+    if field == AdvancedSearchField.STATUS:
+        return Study.status.ilike(pattern)
+
+    if field == AdvancedSearchField.COUNTRY:
+        return Study.countries.ilike(pattern)
+
+    # Unreachable: AdvancedSearchField is a closed enum and every member is handled
+    # above - this only trips if a new enum member is added without a case here.
+    raise AssertionError(f"No SQL mapping for advanced-search field {field!r}")
+
+def _query_node_to_condition(node: QueryNode):
+    if isinstance(node, AndGroup):
+        return and_(*[_query_node_to_condition(operand) for operand in node.operands])
+    if isinstance(node, OrGroup):
+        return or_(*[_query_node_to_condition(operand) for operand in node.operands])
+    return _comparison_to_condition(node)
 
 class StudyRepository:
     def __init__(self, db : AsyncSession, user_id : str):
@@ -101,6 +168,34 @@ class StudyRepository:
                 | ReportAdded.trial_registration_id.ilike(pattern)
                 | Intervention.description.ilike(pattern)
             )
+            .distinct()
+            .order_by(Study.short_name, Study.id)
+            .offset(offset)
+            .limit(limit + 1)
+        )
+        rows = (await self.db.execute(id_stmt)).all()
+
+        has_more = len(rows) > limit
+        study_ids = [study_id for study_id, _short_name in rows[:limit]]
+        if not study_ids:
+            return [], has_more
+
+        studies_by_id = {study.id: study for study in await self.get_studies(study_ids)}
+        page = [studies_by_id[study_id] for study_id in study_ids if study_id in studies_by_id]
+        return page, has_more
+
+    async def search_studies_advanced(self, query: QueryNode, limit: int, offset: int) -> Tuple[List[Study], bool]:
+        """Boolean AND/OR search across studies by field==value comparisons (see
+        src/utils/query_parser.py for the grammar and QueryNode shape). Supported fields:
+        name/shortName, trialId, author, status, country/countries, intervention,
+        condition, outcome, participant, design - each translated into an ilike match,
+        an EXISTS against its join table for the many-to-many aspect fields. Same
+        two-phase id-then-hydrate paging convention as search_studies() above.
+        """
+        condition = _query_node_to_condition(query)
+        id_stmt = (
+            select(Study.id, Study.short_name)
+            .where(condition)
             .distinct()
             .order_by(Study.short_name, Study.id)
             .offset(offset)

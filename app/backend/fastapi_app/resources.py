@@ -17,6 +17,7 @@ from src.database.models import Report as DbReport, Study as DbStudy
 from src.database.models import Participant as DbParticipant, Design as DbDesign
 
 from src.database.repositories.study import DuplicateShortNameError
+from src.utils.query_parser import QuerySyntaxError
 from src.context import RequestContext
 from .deps import get_context
 
@@ -62,9 +63,10 @@ async def add_study(study_params: StudyPayload, ctx: RequestContext = Depends(ge
 async def get_studies(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> List[Study]:
     return await ctx.study_service.get_studies(study_ids)
 
-@router.get("/studies/search", summary="Free-text search across studies by name, trial ID, author or intervention.")
+@router.get("/studies/search", summary="Search studies by name, trial ID, author or intervention - free-text, or advanced AND/OR field matching.")
 async def search_studies(
-    q: str = Query(..., min_length=3, description="Search text (study name, trial ID, author, intervention, ...)"),
+    q: str = Query(..., min_length=3, description="Search text. In free-text mode (default), matched against study name, trial ID, author and intervention. In advanced mode, a boolean expression of field==value (or field=value) comparisons combined with AND/OR (AND binds tighter than OR) and optional parentheses, e.g. 'intervention==Drug A AND condition==Sick OR condition==Healthy'. Quote a value (\"...\" or '...') to include literal AND/OR/)/whitespace. Valid fields: name/shortName, trialId, author, status, country, intervention, condition, outcome, participant, design (plurals accepted too, e.g. conditions)."),
+    advanced: bool = Query(False, description="Parse q as an advanced AND/OR field==value expression instead of a free-text search."),
     limit: int = Query(25, ge=1, le=100, description="Maximum number of results to return per page."),
     cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
     ctx: RequestContext = Depends(get_context),
@@ -74,7 +76,14 @@ async def search_studies(
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    studies, has_more = await ctx.study_service.search_studies(q, limit, offset)
+    if advanced:
+        try:
+            studies, has_more = await ctx.study_service.search_studies_advanced(q, limit, offset)
+        except QuerySyntaxError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        studies, has_more = await ctx.study_service.search_studies(q, limit, offset)
+
     next_cursor = encode_cursor(offset + limit) if has_more else None
     return Page[Study](items=studies, nextCursor=next_cursor)
 

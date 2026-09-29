@@ -4,7 +4,7 @@ import os
 from httpx import ReadTimeout
 from bs4 import BeautifulSoup
 from pathlib import Path
-import fitz  # PyMuPDF
+import pypdf
 
 from typing import Any, List
 
@@ -134,9 +134,7 @@ class DoclingService:
             "table_mode": "fast",
         }
 
-        doc = fitz.open(path)
-        num_pages = doc.page_count
-        doc.close()
+        num_pages = len(pypdf.PdfReader(path).pages)
 
         timeout = max(30, min(num_pages * 10, 120))
 

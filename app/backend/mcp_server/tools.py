@@ -58,7 +58,7 @@ docstring), which the tool form doesn't replicate.
 """
 
 import asyncio
-from typing import Annotated, List, Set
+from typing import Annotated, List, Set, Union
 
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
@@ -90,6 +90,7 @@ from src.utils.dto import (
     reports_to_dto,
     studies_to_dto,
 )
+from src.utils.query_parser import QueryNode
 from src.utils.ris_parser import RisParseError
 
 from .context import current_user_id, request_context, require_admin, require_report_access
@@ -154,37 +155,44 @@ def register(server: MCPServer) -> None:
 
     @server.tool(
         annotations=ToolAnnotations(
-            title="Search Study by Short Name",
+            title="Search Studies",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
             openWorldHint=False,
         )
     )
-    async def search_study_by_short_name(short_name: str) -> Study:
-        """Search for a clinical study by its short name (acronym, trial registration id, or "first author + year" label). Returns the single best match."""
-        async with request_context(current_user_id()) as ctx:
-            study = await ctx.study_repo.search_study_by_shortname(short_name)
-            if study is None:
-                raise ToolError(f"No study found with shortname '{short_name}'")
-            return studies_to_dto([study])[0]
+    async def search_studies(query: Union[str, QueryNode], limit: int = 10) -> List[Study]:
+        """Search across all studies to find candidates for "studification" (linking a
+        report to its parent study).
 
-    @server.tool(
-        annotations=ToolAnnotations(
-            title="Search Study IDs by Trial ID",
-            readOnlyHint=True,
-            destructiveHint=False,
-            idempotentHint=True,
-            openWorldHint=False,
-        )
-    )
-    async def search_study_ids_by_trial_id(trial_id: str) -> List[int]:
-        """Search for study ids by trial registration id (e.g. NCT00034892, ACTRN12605000202662)."""
+        Pass a plain string for free-text search, matched against study name, trial ID,
+        author and intervention - e.g. query="NCT04267848" or query="Smith diabetes".
+
+        Pass a structured filter object to instead AND/OR-combine field==value
+        conditions (each a case-insensitive substring match) - e.g. to find studies
+        about Metformin for Diabetes:
+          {"type": "and", "operands": [
+            {"type": "comparison", "field": "intervention", "value": "Metformin"},
+            {"type": "comparison", "field": "condition", "value": "Diabetes"}
+          ]}
+        "and"/"or" operands can themselves be "and"/"or" groups, nested as deep as
+        needed - there's no operator-precedence ambiguity to worry about, unlike a
+        string query language, since the nesting itself says exactly what groups with
+        what. Valid `field` values: name (the study's short name), trialId, author,
+        status, country, intervention, condition, outcome, participant, design.
+
+        Returns at most `limit` studies (default 10, max 50) and has no pagination
+        cursor, unlike the REST API's /studies/search - narrow the query instead of
+        paging through a long result set.
+        """
+        limit = max(1, min(limit, 50))
         async with request_context(current_user_id()) as ctx:
-            result = await ctx.study_repo.get_study_id_by_trial_id(trial_id)
-            if result is None:
-                raise ToolError(f"Trial {trial_id} not found")
-            return result
+            if isinstance(query, str):
+                studies, _has_more = await ctx.study_service.search_studies(query, limit, 0)
+            else:
+                studies, _has_more = await ctx.study_service.search_studies_advanced(query, limit, 0)
+            return studies
 
     """
     Study/report/project lookup tools
@@ -205,7 +213,7 @@ def register(server: MCPServer) -> None:
 
     @server.tool(
         annotations=ToolAnnotations(
-            title="Get Study",
+            title="Get Study Details",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
