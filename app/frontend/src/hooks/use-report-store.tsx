@@ -1,11 +1,11 @@
-import { ProjectReportDto, StudyDto } from "@/types/apiDTOs"
+import { ReportCurationDto, StudyDto, StudyPreviewDto } from "@/types/apiDTOs"
 import { create } from "zustand"
 import {
     assignStudyToReportByReportId,
     removeStudyFromReportByReportId,
 } from "@/lib/api/reportApi"
 
-const hasStudyById = (studies: StudyDto[] = [], studyId: number) =>
+const hasStudyById = (studies: StudyPreviewDto[] = [], studyId: number) =>
     studies.some((candidate) => candidate.studyId === studyId)
 
 const assignStudyViaApi = async (reportId: number, studyId: number) => {
@@ -17,10 +17,10 @@ const removeStudyViaApi = async (reportId: number, studyId: number) => {
 }
 
 type ReportState = {
-    reports: Record<number, ProjectReportDto>
-    setReports: (reports: ProjectReportDto[]) => void
-    addReports: (reports: ProjectReportDto[]) => void
-    getReport: (reportId: number) => ProjectReportDto
+    reports: Record<number, ReportCurationDto>
+    setReports: (reports: ReportCurationDto[]) => void
+    addReports: (reports: ReportCurationDto[]) => void
+    getReport: (reportId: number) => ReportCurationDto
     addAssignedStudy: (reportId: number, study: StudyDto) => Promise<void>
     syncAssignedStudy: (reportId: number, study: StudyDto) => void
     removeAssignedStudy: (reportId: number, studyId: number) => Promise<void>

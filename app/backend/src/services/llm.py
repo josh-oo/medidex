@@ -13,7 +13,7 @@ class LanguageModelService:
         async def _select_candidate(term, category):
             candidates = await self.tag_similarity_service.get_similar_tags_by_string(term, category, ["internal"], 10)
             #remove the relevance information preventing llm distraction
-            candidates_without_relevance = [{k: v for k, v in item.items() if k != 'relevance'} for item in candidates]
+            candidates_without_relevance = [{k: v for k, v in item.model_dump().items() if k != 'relevance'} for item in candidates]
             return await find_match(term, candidates_without_relevance)
         
         result = await extract_pico(title, abstract, fulltext)

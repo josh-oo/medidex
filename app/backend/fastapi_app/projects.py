@@ -24,7 +24,7 @@ from src.services.project import (
     ProjectAssigneeNotFoundError,
     ProjectNotFoundError,
 )
-from src.utils.dto import FilterMode, IntakeReportPage, Project, ProjectAssignee, ProjectDetails, ProjectReportPage, ProjectTask
+from src.utils.dto import FilterMode, ReportIntake, Assignee, Project, ReportCuration, Task, Page
 from src.utils.pagination import InvalidCursorError
 
 router = APIRouter(tags=["projects"])
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 project_id_path = Path(..., description="The projects's id")
 
 @router.get("/tasks",dependencies=[Depends(is_verified_api_call)], summary="Get pending review tasks for the authenticated user.", description="Returns all projects the user is assigned to along with their personal study-link counts.")
-async def get_user_tasks(ctx: RequestContext = Depends(get_context)) -> List[ProjectTask]:
+async def get_user_tasks(ctx: RequestContext = Depends(get_context)) -> List[Task]:
     return await ctx.project_service.get_user_tasks()
 
 @router.post("/projects", dependencies=[Depends(is_admin)], summary="Upload a project (batch of new reports that need to be assigned to studies) (usually in the .ris file format)", status_code=201)
@@ -57,15 +57,8 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     return project
 
 @router.get("/projects", dependencies=[Depends(is_admin)], summary="Get an overview of all current projects.", description="For each project the current progress of embedding calculation and the number of already assigned reports is returned")
-async def get_available_projects(ctx: RequestContext = Depends(get_context)) -> List[ProjectDetails]:
+async def get_available_projects(ctx: RequestContext = Depends(get_context)) -> List[Project]:
     return await ctx.project_service.get_all_project_stats()
-
-@router.get("/projects/{project_id}", dependencies=[Depends(is_admin)], summary="Get a specific project by id.",description="Returns details and progress information for a single project identified by project id.")
-async def get_project_stats_by_id(project_id : str, ctx: RequestContext = Depends(get_context)) -> Project:
-    try:
-        return await ctx.project_service.get_project_stats_by_id(project_id)
-    except ProjectNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 @router.delete("/projects/{project_id}", dependencies=[Depends(is_admin)], summary="Delete a project and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
 async def delete_project(project_id : str, ctx: RequestContext = Depends(get_context)):
@@ -83,7 +76,7 @@ async def assign_user_to_project(
     assignee_user_id: str = Body(..., embed=False, description="User ID to assign"),
     model: str = Query("gpt-5-nano", description="LLM model name to use for study prediction"),
     ctx: RequestContext = Depends(get_context),
-) -> ProjectAssignee:
+) -> Assignee:
     try:
         assignee = await ctx.project_service.assign_user_to_project(project_id, assignee_user_id)
     except ProjectNotFoundError as exc:
@@ -139,7 +132,7 @@ async def get_project_reports(
     new_study: FilterMode = Query(FilterMode.any, description="Only/exclude reports where a linked study was created after the report itself."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
-) -> ProjectReportPage:
+) -> Page[ReportCuration]:
     try:
         return await ctx.project_service.get_reports_page(
             project_id,
@@ -170,7 +163,7 @@ async def get_project_reports_intake(
     with_pdf: FilterMode = Query(FilterMode.any, description="Only/exclude reports that have a PDF available."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
-) -> IntakeReportPage:
+) -> Page[ReportIntake]:
     try:
         return await ctx.project_service.get_intake_reports_page(
             project_id,
@@ -199,7 +192,7 @@ async def get_project_reports_review(
     reviewed: FilterMode = Query(FilterMode.any, description="Only/exclude reports where an annotator has confirmed their annotation."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
-) -> ProjectReportPage:
+) -> Page[ReportCuration]:
     try:
         return await ctx.project_service.get_review_reports_page(
             project_id,

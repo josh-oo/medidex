@@ -6,14 +6,14 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { IntakeReportDto, ReportFilterDimension } from "@/types/apiDTOs";
+import { ReportIntakeDto, ReportFilterDimension } from "@/types/apiDTOs";
 import { ReportList } from "@/components/ui/report-view/report-list";
 import { useReportStore } from "@/hooks/use-report-store";
 import { getProjectReportsIntake } from "@/lib/api/projectApi";
 
 interface ReportColumnClientProps {
   children: ReactNode;
-  reports: IntakeReportDto[];
+  reports: ReportIntakeDto[];
   projectId: string;
 }
 

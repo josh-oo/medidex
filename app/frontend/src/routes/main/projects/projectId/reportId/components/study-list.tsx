@@ -4,7 +4,7 @@ import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CandidateStudyTable } from "@/components/ui/study-view/candidate-study-table";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { CandidateStudyDto } from "@/types/apiDTOs";
+import type { StudyCandidateDto } from "@/types/apiDTOs";
 import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
 import { ReportChatButtons } from "./ai-actions";
 
@@ -18,7 +18,7 @@ export default function StudyList() {
   const source = projectId;
   const reportIdNumber = Number(reportId);
 
-  const [studies, setStudies] = useState<CandidateStudyDto[] | null>(null);
+  const [studies, setStudies] = useState<StudyCandidateDto[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [notFound, setNotFound] = useState(false);

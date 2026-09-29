@@ -1,7 +1,7 @@
 from ..database.repositories.study import StudyRepository
 from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
-from ..utils.dto import CandidateStudyPage, candidate_studies_to_dto
+from ..utils.dto import Page, StudyCandidate, candidate_studies_to_dto
 from ..utils.pagination import decode_cursor, encode_cursor
 from .authorization import get_authorized_project_id
 from .authors import AuthorFeatureService
@@ -158,7 +158,7 @@ class StudySimilaritySearchService:
         negative_reports: Optional[List[int]],
         return_details: bool,
         user_id: Optional[str],
-    ) -> CandidateStudyPage:
+    ) -> Page[StudyCandidate]:
         """Full request-level wrapper around get_similar_studies_by_id: access check,
         readiness/source checks, cursor decoding, and DTO assembly, shared by both heads
         (previously inline in fastapi_app/core.py's similarity_search_studies_by_id, gated
@@ -197,7 +197,7 @@ class StudySimilaritySearchService:
         )
         studies = candidate_studies_to_dto(result)
         next_cursor = encode_cursor(offset + limit) if has_more else None
-        return CandidateStudyPage(items=studies, nextCursor=next_cursor)
+        return Page[StudyCandidate](items=studies, nextCursor=next_cursor)
 
 
 class RelatedTagSearchService:

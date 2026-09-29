@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Search, Calendar, UserPlus, Check, Settings, FileUp, ClipboardCheck, Trash2, Bot, ArrowDown, Microscope, AlertTriangle } from "lucide-react";
 import RelativeTime from "@/components/ui/relative-time";
-import type { ProjectDetailsDto, ProjectAssigneeDto } from "@/types/apiDTOs";
+import type { ProjectDto, AssigneeDto } from "@/types/apiDTOs";
 import type { UserDto } from "@/types/user/user.dto";
 import {
   assignUserToProject,
@@ -48,7 +48,7 @@ const withMediBot = (users: UserDto[]) => {
 };
 
 interface ProjectCardProps {
-  project: ProjectDetailsDto;
+  project: ProjectDto;
   index?: number;
   assignableUsers?: UserDto[];
   onAssigneesChange?: (payload: { projectId: string; userIds: string[] }) => void;
@@ -147,7 +147,7 @@ export function ProjectCard({
   );
 
   const assigneeMap = useMemo(() => {
-    const map = new Map<string, ProjectAssigneeDto>();
+    const map = new Map<string, AssigneeDto>();
     (project.assignees ?? []).forEach((assignee) => map.set(assignee.userId, assignee));
     return map;
   }, [project.assignees]);

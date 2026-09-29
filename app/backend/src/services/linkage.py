@@ -6,7 +6,7 @@ from ..database.repositories.study import StudyRepository
 from .authorization import get_authorized_project_id
 from .pubsub import ProjectPubSubService
 from .vectorstore import VectorstoreService
-from ..services.study import StudyCreate
+from ..services.study import StudyPayload
 
 
 class ReportNotInProjectError(Exception):
@@ -80,7 +80,7 @@ class LinkageService:
     async def create_study_and_link_to_report(
         self,
         report_id: int,
-        study: StudyCreate,
+        study: StudyPayload,
         user_id: Optional[str],
     ) -> Any:
         project_id = await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)

@@ -18,7 +18,7 @@ import { AddStudyDialog } from "./add-study-dialog";
 import { AIMatchSettingsDialog } from "./ai-match-settings-dialog";
 import { LoadMoreStudiesButton } from "./load-more-studies-button";
 import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
-import type { CandidateStudyDto, NewStudySuggestion, StudyDto, StudyCreateDto } from "@/types/apiDTOs";
+import type { StudyCandidateDto, NewStudySuggestion, StudyDto, StudyBaseDto } from "@/types/apiDTOs";
 import { StudyAIBadge } from "./study-ai-badge";
 import { StudyAIReasonDialog } from "./study-ai-reason-dialog";
 import { AiEvaluationProgress } from "./ai-evaluation-progress";
@@ -30,7 +30,7 @@ import { searchStudies } from "@/lib/api/studiesApi";
 
 interface CandidateStudyTableProps {
   reportId?: number;
-  studies: CandidateStudyDto[];
+  studies: StudyCandidateDto[];
   hasMore?: boolean;
   isLoadingMore?: boolean;
   onLoadMore?: () => void;
@@ -135,7 +135,7 @@ export function CandidateStudyTable({
   );
 
   const handleSaveNewStudy = useCallback(
-    async (payload: StudyCreateDto) => {
+    async (payload: StudyBaseDto) => {
       if (reportId === undefined) {
         throw new Error("Select a report before adding a new study.");
       }

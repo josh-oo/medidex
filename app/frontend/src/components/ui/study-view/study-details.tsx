@@ -41,6 +41,8 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
   const [reports, setReports] = useState<ReportListItem[]>([]);
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportsError, setReportsError] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [downloadingPdfs, setDownloadingPdfs] = useState<Set<number>>(new Set());
   const [downloadingSingle, setDownloadingSingle] = useState<Set<number>>(
     new Set()
@@ -51,6 +53,7 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
       setReports([]);
       setReportsLoading(false);
       setReportsError(null);
+      setNextCursor(null);
       return;
     }
 
@@ -62,9 +65,10 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
 
     const fetchReports = async () => {
       try {
-        const data = await getReportsByStudyId(studyId);
+        const page = await getReportsByStudyId(studyId);
         if (!requestActive) return;
-        setReports(normalizeReports(data));
+        setReports(normalizeReports(page.items));
+        setNextCursor(page.nextCursor);
       } catch (error) {
         if (!requestActive) return;
         const message =
@@ -83,6 +87,23 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
       requestActive = false;
     };
   }, [study, isActive]);
+
+  const handleLoadMoreReports = async () => {
+    if (!study || !nextCursor) return;
+
+    setLoadingMore(true);
+    try {
+      const page = await getReportsByStudyId(study.studyId, undefined, nextCursor);
+      setReports((prev) => [...prev, ...normalizeReports(page.items)]);
+      setNextCursor(page.nextCursor);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to load more reports";
+      toast.error(`Failed to load more reports: ${message}`);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   if (!study) {
     return null;
@@ -278,6 +299,18 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
                     <p className="text-sm">No reports available</p>
                   </div>
                 )
+              )}
+              {nextCursor && !reportsLoading && (
+                <div className="flex justify-center pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLoadMoreReports}
+                    disabled={loadingMore}
+                  >
+                    {loadingMore ? "Loading..." : "Load more"}
+                  </Button>
+                </div>
               )}
             </div>
           </div>

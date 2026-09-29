@@ -158,6 +158,25 @@ class StudyRepository:
         result = await self.get_study_reports_by_study_ids(study_ids=[study_id], cutoff=cutoff)
         return result.get(study_id, [])
 
+    async def get_study_reports_by_study_id_page(self, study_id: int, limit: int, offset: int, cutoff: Optional[str] = None) -> Tuple[List[Report], bool]:
+        """Paginated version of get_study_reports_by_study_id() above - one extra row
+        beyond the page is fetched so has_more can be determined without a separate
+        count query, same convention as search_studies()."""
+        stmt = (
+            select(Report)
+            .join(StudyReport, StudyReport.report_id == Report.id)
+            .where(StudyReport.study_id == study_id)
+        )
+
+        if cutoff:
+            stmt = stmt.where(Report.date_entered < cutoff)
+
+        stmt = stmt.order_by(Report.id).offset(offset).limit(limit + 1)
+
+        reports = (await self.db.execute(stmt)).scalars().all()
+        has_more = len(reports) > limit
+        return reports[:limit], has_more
+
     async def get_linked_reports(self, study_id: int) -> List[Report]:
         """Full Report entities linked to a study - the inverse of
         ReportRepository.get_linked_studies(). Like

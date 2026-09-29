@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
 import { useReportStore } from "@/hooks/use-report-store";
-import { FilterMode, GetProjectReportsParams, ProjectReportDto, ReportFilterDimension, ReportFiltersState, ProjectReportPageDto } from "@/types/apiDTOs";
+import { FilterMode, GetProjectReportsParams, ReportCurationDto, ReportFilterDimension, ReportFiltersState, Page } from "@/types/apiDTOs";
 import { toast } from "sonner";
 import { Abstract } from "./report-abstract";
 import {
@@ -78,12 +78,12 @@ interface ReportListProps {
   fetchReports: (
     projectId: string,
     filters: GetProjectReportsParams
-  ) => Promise<ProjectReportPageDto>;
+  ) => Promise<Page<ReportCurationDto>>;
   // The parent layout's own initial, unfiltered fetch (same endpoint as `fetchReports` with no
   // filters/search) - used only to seed the very first render so the list doesn't flash empty
   // while that same data is re-fetched below; every filter/search change after that always goes
   // through fetchReports, never falls back to a cached snapshot.
-  initialReports: ProjectReportDto[];
+  initialReports: ReportCurationDto[];
 }
 
 export function ReportList({
@@ -143,7 +143,7 @@ export function ReportList({
 
   // Seeded from the parent layout's own initial fetch so the list doesn't flash empty while
   // the (functionally identical) fetch below is still in flight.
-  const [filteredReports, setFilteredReports] = useState<ProjectReportDto[]>(initialReports);
+  const [filteredReports, setFilteredReports] = useState<ReportCurationDto[]>(initialReports);
   const [isLoading, setIsLoading] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   // Cursor for the next page of the *current* search/filter combination - reset to null

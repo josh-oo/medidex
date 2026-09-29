@@ -81,10 +81,9 @@ from src.services.project import (
     ProjectNotFoundError,
 )
 from src.utils.dto import (
+    Assignee,
     Project,
-    ProjectAssignee,
-    ProjectDetails,
-    ProjectTask,
+    Task,
     Report,
     Study,
     Tag,
@@ -369,7 +368,7 @@ def register(server: MCPServer) -> None:
             openWorldHint=False,
         )
     )
-    async def get_project(project_id: str) -> ProjectDetails:
+    async def get_project(project_id: str) -> Project:
         """Details and progress for a single project. Admin only. Tool form of the `project` resource - unlike the resource, this snapshot isn't subscribable; poll it or use the resource form for live updates."""
         require_admin()
         async with request_context(current_user_id()) as ctx:
@@ -417,7 +416,7 @@ def register(server: MCPServer) -> None:
             openWorldHint=False,
         )
     )
-    async def list_projects() -> List[ProjectDetails]:
+    async def list_projects() -> List[Project]:
         """List all current projects, with embedding/assignment progress for each. Admin only. Tool form of the `projects` resource, for clients that don't support MCP resources."""
         require_admin()
         async with request_context(current_user_id()) as ctx:
@@ -432,7 +431,7 @@ def register(server: MCPServer) -> None:
             openWorldHint=False,
         )
     )
-    async def list_tasks() -> List[ProjectTask]:
+    async def list_tasks() -> List[Task]:
         """List the authenticated user's pending review tasks: every project they're assigned to, with their personal study-link counts. Tool form of the `tasks` resource, for clients that don't support MCP resources."""
         async with request_context(current_user_id()) as ctx:
             return await ctx.project_service.get_user_tasks()
@@ -446,7 +445,7 @@ def register(server: MCPServer) -> None:
             openWorldHint=False,
         )
     )
-    async def assign_project_task(project_id: str, assignee_user_id: str) -> ProjectAssignee:
+    async def assign_project_task(project_id: str, assignee_user_id: str) -> Assignee:
         """Assign a user to a project, giving them a review task: they can link that project's reports to studies, and the project shows up in their `tasks` resource. Admin only."""
         require_admin()
         async with request_context(current_user_id()) as ctx:

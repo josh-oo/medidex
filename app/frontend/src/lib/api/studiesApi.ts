@@ -1,5 +1,5 @@
 import apiClient from "./apiClient";
-import { StudyDto, StudyCreateDto , ReportDto, InterventionDto, ConditionDto, OutcomeDto , GetPersonsResponseDto, StudyPageDto, GetStudySearchParams } from "../../types/apiDTOs";
+import { StudyDto, StudyBaseDto , ReportPreviewDto, TagDto, GetPersonsResponseDto, Page, GetStudySearchParams } from "../../types/apiDTOs";
 import { serializeParams } from "./helpers";
 import { AxiosRequestConfig } from "axios";
 
@@ -28,14 +28,14 @@ export const getStudyById = (
 export const searchStudies = (
   params: GetStudySearchParams,
   config?: AxiosRequestConfig
-): Promise<StudyPageDto> => {
+): Promise<Page<StudyDto>> => {
   const { params: configParams, ...restConfig } = config ?? {};
   const requestParams = {
     ...(configParams ?? {}),
     ...params,
   };
 
-  return apiClient.get<StudyPageDto>("/studies/search", {
+  return apiClient.get<Page<StudyDto>>("/studies/search", {
       ...restConfig,
       params: requestParams,
       paramsSerializer: { serialize: serializeParams },
@@ -51,21 +51,23 @@ export const searchStudies = (
 
 export const getReportsByStudyId = (
   studyId: number,
-  includePdfLinks?: boolean,
+  limit?: number,
+  cursor?: string | null,
   config?: AxiosRequestConfig
-): Promise<ReportDto[]> => {
+): Promise<Page<ReportPreviewDto>> => {
   const path = `/studies/${studyId}/reports`;
 
   const requestConfig = {
     ...config,
     params: {
-      include_pdf_links: includePdfLinks,
+      limit,
+      cursor: cursor ?? undefined,
     },
     paramsSerializer: {
       serialize: serializeParams,
     },
   };
-  return apiClient.get<ReportDto[]>(path, requestConfig)
+  return apiClient.get<Page<ReportPreviewDto>>(path, requestConfig)
     .then(response => {
       return response.data;
     })
@@ -78,9 +80,9 @@ export const getReportsByStudyId = (
 export const getInterventionsForStudy = (
   studyId: number,
   config?: AxiosRequestConfig
-): Promise<InterventionDto[]> => {
+): Promise<TagDto[]> => {
   const path = `/studies/${studyId}/interventions`;
-  return apiClient.get<InterventionDto[]>(path, config)
+  return apiClient.get<TagDto[]>(path, config)
     .then(response => {
       return response.data;
     })
@@ -93,9 +95,9 @@ export const getInterventionsForStudy = (
 export const getConditionsForStudy = (
   studyId: number,
   config?: AxiosRequestConfig
-): Promise<ConditionDto[]> => {
+): Promise<TagDto[]> => {
     const path = `/studies/${studyId}/conditions`;
-    return apiClient.get<ConditionDto[]>(path, config)
+    return apiClient.get<TagDto[]>(path, config)
       .then(response => {
         return response.data;
       })
@@ -108,9 +110,9 @@ export const getConditionsForStudy = (
 export const getOutcomesForStudy = (
   studyId: number,
   config?: AxiosRequestConfig
-): Promise<OutcomeDto[]> => {
+): Promise<TagDto[]> => {
     const path = `/studies/${studyId}/outcomes`;
-    return apiClient.get<OutcomeDto[]>(path, config)
+    return apiClient.get<TagDto[]>(path, config)
       .then(response => {
         return response.data;
       })
@@ -164,7 +166,7 @@ export const getPersonsForStudy = (
 };
 
 export const createStudy = (
-  payload: StudyCreateDto,
+  payload: StudyBaseDto,
   config?: AxiosRequestConfig
 ): Promise<StudyDto> => {
   return apiClient

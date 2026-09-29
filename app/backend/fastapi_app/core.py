@@ -1,9 +1,7 @@
 from fastapi import APIRouter
 from fastapi import Query, Path, HTTPException, Depends
 from fastapi.responses import Response
-from dotenv import load_dotenv
 from typing import List, Optional
-import os
 import logging
 
 from src.utils.logger import setup_logging
@@ -28,32 +26,27 @@ from src.services.linkage import (
     ReportStudyLinkNotFoundError,
 )
 
-from src.utils.dto import StudyCreate, Study, Tag, CandidateStudyPage, studies_to_dto
+from src.utils.dto import StudyPayload, Study, StudyCandidate, TagCandidate, Page, studies_to_dto
 from src.utils.pagination import InvalidCursorError
 from datetime import datetime
 
-load_dotenv()
-
-DEBUG = os.getenv("DEBUG", None) == "true"
+router = APIRouter(tags=["logic"])
 
 setup_logging("events.log")
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["logic"])
-
 cutoff_query : Optional[datetime] = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
-
 k_query : int = Query(10, description="Maximum number of returned results.")
 
 @router.get("/reports/{report_id}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a project based on its embedding vectors.")
-async def similar_tags_by_report(report_id: int, tag_category: TagCategories =Query(TagCategories.default), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'internal' or both)"), k : int = k_query, ctx: RequestContext = Depends(get_context)) -> List[Tag]:
+async def similar_tags_by_report(report_id: int, tag_category: TagCategories =Query(TagCategories.default), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'internal' or both)"), k : int = k_query, ctx: RequestContext = Depends(get_context)) -> List[TagCandidate]:
     try:
         return await ctx.tag_similarity_service.get_similar_tags_by_id(report_id, tag_category, sources, k)
     except UnsupportedAspectError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.get("/{tag_category}/{tag_value}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a project based on its embedding vectors.")
-async def similar_tags(tag_category: TagCategories =Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value : str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'internal' or both)"), k : int = k_query, ctx: RequestContext = Depends(get_context)) -> List[Tag]:
+async def similar_tags(tag_category: TagCategories =Path(..., description="The tags category (e.g. 'interventions', 'conditions', ...)"), tag_value : str = Path(..., description="The specific tags value (e.g. 'Placebo' for interventions)"), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'internal' or both)"), k : int = k_query, ctx: RequestContext = Depends(get_context)) -> List[TagCandidate]:
     try:
         return await ctx.tag_similarity_service.get_similar_tags_by_string(tag_value, tag_category, sources, k)
     except UnsupportedAspectError as exc:
@@ -84,7 +77,7 @@ async def similarity_search_studies_by_id(
     negative_reports: List[int] = Query(None),
     return_details: bool = False,
     ctx: RequestContext = Depends(get_context),
-) -> CandidateStudyPage:
+) -> Page[StudyCandidate]:
     try:
         return await ctx.study_similarity_service.get_similar_studies_page(
             report_id,
@@ -150,7 +143,7 @@ async def delete_assigned_studies(
 @router.post("/reports/{report_id}/studies", dependencies=[Depends(is_verified_api_call)], summary="Remove assigned studies from a specific report.", status_code=200)
 async def link_to_new_study(
     report_id: int,
-    study: StudyCreate,
+    study: StudyPayload,
     ctx: RequestContext = Depends(get_context),
 ) -> Study:
     try:

@@ -6,23 +6,39 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
+// A page of items from any cursor-paginated list endpoint - see the backend's
+// src/utils/pagination.py for what the cursor itself encodes.
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Report DTOs
 // ---------------------------------------------------------------------------
 // Named the same way as the backend (src/utils/dto.py): each type's name says what
-// it adds over ReportDto, not how "detailed" or "list-like" it is. ReportDto is the
-// shared bibliographic base. The backend also has a standalone ReportSources
-// (Report + DOI/fulltext links, returned by GET /reports/{id}) that ProjectReport and
-// IntakeReport both build on - but nothing here calls that endpoint directly anymore
-// (the pdf-upload view reads DOI/links off IntakeReportDto instead, straight from the
-// list it already loaded), so there's no ReportSourcesDto on this side: its two fields
-// are just declared directly on IntakeReportDto below instead of via an intermediate
-// type with no other consumer.
+// it adds over its parent, not how "detailed" or "list-like" it is. ReportBaseDto is
+// the bare identity every report type shares, ReportDto is the full bibliographic
+// record built on it. The backend also has a standalone ReportSources (Report +
+// DOI/fulltext links, returned by GET /reports/{id}) that ReportCurationDto and
+// ReportIntakeDto both build on - but nothing here calls that endpoint directly
+// anymore (the pdf-upload view reads DOI/links off ReportIntakeDto instead, straight
+// from the list it already loaded), so there's no ReportSourcesDto on this side: its
+// two fields are just declared directly on ReportIntakeDto below instead of via an
+// intermediate type with no other consumer.
+
+// Bare-bones report identity (id + title) for list views that don't need the full
+// bibliographic record - GET /studies/{study_id}/reports's Page<ReportBaseDto> below,
+// which pages through a study's reports instead of returning them all at once.
+export interface ReportPreviewDto {
+  reportId: number;
+  title: string;
+}
 
 export interface ReportDto {
   reportId: number;
-  year: number;
   title: string;
+  year: number;
   authors: string[];
   abstract: string | null;
   trialId: string | null;
@@ -30,44 +46,34 @@ export interface ReportDto {
   updatedAt: string | undefined;
 }
 
-// A report plus its state within a project's curation workflow (ProjectReportPageDto.
+// A report plus its state within a project's curation workflow (Page<ReportCurationDto>.
 // items below): whether it has a PDF, this user's flag on it, and its linked studies.
 // flag/assignedStudies are optional (rather than required-but-possibly-empty)
-// because IntakeReportDto below deliberately doesn't carry them - an intake report
+// because ReportIntakeDto below deliberately doesn't carry them - an intake report
 // hasn't been curated yet, so there's nothing to fetch there - and still needs to
 // satisfy this shape wherever it's passed into the shared list UI (ReportList,
 // useReportStore).
-export interface ProjectReportDto extends ReportDto {
+export interface ReportCurationDto extends ReportDto {
   hasPdf: boolean | undefined;
   flag?: string;
-  assignedStudies?: StudyDto[];
+  assignedStudies?: StudyPreviewDto[];
   // The unconfirmed .ris-upload/fulltext guess (report_added.trial_registration_id) -
   // distinct from trialId above, which only ever holds a reviewer-confirmed value.
-  // Optional for the same reason flag/assignedStudies are: IntakeReportDto doesn't carry
+  // Optional for the same reason flag/assignedStudies are: ReportIntakeDto doesn't carry
   // it either, but still needs to satisfy this shape (see this interface's comment).
   preliminaryTrialId?: string | null;
 }
 
-export interface ProjectReportPageDto {
-  items: ProjectReportDto[];
-  nextCursor: string | null;
-}
-
-// The admin intake list's row shape (IntakeReportPageDto.items below) - a report plus
+// The admin intake list's row shape (Page<ReportIntakeDto>.items below) - a report plus
 // its DOI/cached OpenAlex fulltext links (so the pdf-upload view can read them
 // straight from this list instead of a separate per-report fetch) and hasPdf.
-// Deliberately NOT a ProjectReportDto: an intake report hasn't been curated yet, so
-// flag/assignedStudies don't apply here (see ProjectReportDto's comment above for why
-// it's still accepted anywhere a ProjectReportDto is expected).
-export interface IntakeReportDto extends ReportDto {
+// Deliberately NOT a ReportCurationDto: an intake report hasn't been curated yet, so
+// flag/assignedStudies don't apply here (see ReportCurationDto's comment above for why
+// it's still accepted anywhere a ReportCurationDto is expected).
+export interface ReportIntakeDto extends ReportDto {
   doi: string | null;
   fulltextLinks: string[];
   hasPdf: boolean | undefined;
-}
-
-export interface IntakeReportPageDto {
-  items: IntakeReportDto[];
-  nextCursor: string | null;
 }
 
 export type ReportChatDto = JsonValue;
@@ -111,25 +117,32 @@ export interface GetProjectReportsParams extends ReportFiltersState {
 // Study DTOs
 // ---------------------------------------------------------------------------
 
-export interface StudyDto {
-  studyId: number;
+// The fields needed to create a study - everything else (studyId, timestamps) is
+// server-generated, so this also doubles as the addStudy request payload.
+export interface StudyBaseDto {
   status: string;
   shortName: string;
   countries: string[];
   numberParticipants: string | null;
   duration: string | null;
-  comparison: string | null
+  comparison: string | null;
   trialId: string | null;
+}
+
+export interface StudyDto extends StudyBaseDto {
+  studyId: number;
   createdAt: string | undefined;
   updatedAt: string | undefined;
 }
 
-export type StudyCreateDto = Omit<StudyDto, "studyId" | "createdAt" | "updatedAt">;
-
-// A page of the free-text study search (searchStudies).
-export interface StudyPageDto {
-  items: StudyDto[];
-  nextCursor: string | null;
+// Bare-bones Study identity for ReportCurationDto.assignedStudies - the UI only ever
+// reads studyId/shortName/createdAt off an assigned study (the badge label,
+// click-to-open, and the "linked after this report was entered" highlight), never the
+// full bibliographic record.
+export interface StudyPreviewDto {
+  studyId: number;
+  shortName: string;
+  createdAt: string | undefined;
 }
 
 export interface GetStudySearchParams {
@@ -141,13 +154,8 @@ export interface GetStudySearchParams {
 // A study suggested as a possible match for a report by the similarity search
 // (getSimilarStudiesByReportId) - a StudyDto plus how relevant this particular
 // suggestion is, for the researcher to accept or reject.
-export interface CandidateStudyDto extends StudyDto {
+export interface StudyCandidateDto extends StudyDto {
   relevance: number;
-}
-
-export interface CandidateStudyPageDto {
-  items: CandidateStudyDto[];
-  nextCursor: string | null;
 }
 
 export interface GetSimilarStudiesParams {
@@ -158,10 +166,8 @@ export interface GetSimilarStudiesParams {
   return_details?: boolean;
 }
 
-export interface SimilarTagDto {
-  id: string;
-  name: string;
-  score: number;
+export interface TagCandidateDto extends TagDto {
+  relevance: number;
 }
 
 export interface GetSimilarTagsParams {
@@ -174,31 +180,32 @@ export interface GetSimilarTagsParams {
 // Project DTOs
 // ---------------------------------------------------------------------------
 
-export interface ProjectDto {
+export interface ProjectDto{
   projectId: string;
   name: string;
   createdAt: string;
   owner: string;
   numberReportsReadyForProcessing: number;
-}
-
-export interface ProjectDetailsDto extends ProjectDto{
   numberReportsTotal: number;
   numberReportsPreProcessed: number;
   numberReportsWithPdf: number;
   numberReportsAutoSearchedPdf: number,
   numberReportsReadyForReview: number;
   numberReportsConfirmed: number;
-  assignees : ProjectAssigneeDto[]
+  assignees : AssigneeDto[]
 }
 
-export interface ProjectAssigneeDto {
+export interface AssigneeDto {
   userId : string;
   numberReportsLinked: number;
 }
 
-export interface ProjectTaskDto {
-  project : ProjectDto;
+export interface TaskDto {
+  projectId: string;
+  name: string;
+  createdAt: string;
+  owner: string;
+  numberReportsReadyForProcessing: number;
   numberReportsProcessed: number;
 }
 
@@ -206,19 +213,9 @@ export interface ProjectTaskDto {
 // Aspect DTOs (interventions / conditions / outcomes / persons)
 // ---------------------------------------------------------------------------
 
-export interface InterventionDto {
-  ID: number;
-  Description: string;
-}
-
-export interface ConditionDto {
-  ID: number;
-  Description: string;
-}
-
-export interface OutcomeDto {
-  ID: number;
-  Description: string;
+export interface TagDto {
+  id: string;
+  keyword: string;
 }
 
 export type GetPersonsResponseDto = Record<string, string[]>;

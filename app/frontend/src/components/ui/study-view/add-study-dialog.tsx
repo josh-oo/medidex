@@ -41,9 +41,8 @@ import { getSimilarTagsByReportId } from "@/lib/api/reportApi";
 import { getInterventions } from "@/lib/api/interventionsApi";
 import type {
   DurationUnit,
-  InterventionDto,
   NewStudySuggestion,
-  StudyCreateDto,
+  StudyBaseDto,
   ComparisonGroup as SuggestedComparisonGroup,
 } from "@/types/apiDTOs";
 import type {
@@ -87,7 +86,7 @@ type StudyDurationUnit = DurationUnit | "Uncertain";
 interface AddStudyDialogProps {
   currentReportId?: number;
   suggestedValues?: NewStudySuggestion;
-  onSaveStudy: (values: StudyCreateDto) => Promise<void>;
+  onSaveStudy: (values: StudyBaseDto) => Promise<void>;
 }
 
 const buildComparisonPayload = (groups: ComparisonGroup[]) =>
@@ -202,10 +201,10 @@ export function AddStudyDialog({
         );
         const parsedSuggestions = Array.isArray(data)
           ? data
-              .map((entry: { name?: string } | string | null) => {
+              .map((entry: { keyword?: string } | string | null) => {
                 if (typeof entry === "string") return entry;
-                if (entry && typeof entry === "object" && typeof entry.name === "string") {
-                  return entry.name;
+                if (entry && typeof entry === "object" && typeof entry.keyword === "string") {
+                  return entry.keyword;
                 }
                 return null;
               })
@@ -245,7 +244,7 @@ export function AddStudyDialog({
         const data = await getInterventions({ signal: controller.signal });
         const descriptions = Array.isArray(data)
           ? data
-              .map((entry) => entry?.Description)
+              .map((entry) => entry?.keyword)
               .filter((entry): entry is string => Boolean(entry))
           : [];
 
@@ -335,7 +334,7 @@ export function AddStudyDialog({
         ? selectedCountries.map((country) => country.trim()).filter(Boolean)
         : ["Unclear"];
 
-    const payload: StudyCreateDto = {
+    const payload: StudyBaseDto = {
       shortName: shortName.trim(),
       status: statusOfStudy.trim(),
       countries: normalizedCountries,

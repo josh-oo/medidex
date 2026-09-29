@@ -7,18 +7,16 @@ from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
 from ..utils.dto import (
     FilterMode,
-    IntakeReport,
-    IntakeReportPage,
+    Page,
+    ReportIntake,
+    Assignee,
     Project,
-    ProjectAssignee,
-    ProjectDetails,
-    ProjectReport,
-    ProjectReportPage,
-    ProjectTask,
+    ReportCuration,
+    Task,
     filter_mode_to_bool,
     matches_filter,
     reports_to_dto,
-    studies_to_dto,
+    studies_to_preview_dto,
 )
 from ..utils.pagination import decode_cursor, encode_cursor
 from ..utils.ris_parser import UploadedFile, parse_file
@@ -75,20 +73,9 @@ class ProjectResourceService:
         ready_reports = embedded_reports & pdf_ready_reports
         return embedded_reports, pdf_ready_reports, ready_reports
 
-    async def get_project_stats_by_id(self, project_id: str) -> ProjectDetails:
-        """Fetch the project by id, then delegate to get_project_stats - for callers
-        that only have the id (e.g. a route path parameter). Raises ProjectNotFoundError
-        if it doesn't exist.
-        """
-        project = await self.project_repo.get_project_by_id(project_id)
-        if project is None:
-            raise ProjectNotFoundError(f"Project {project_id} not found")
-        return await self.get_project_stats(project)
-
-    async def get_project_stats(self, project: DbProject) -> ProjectDetails:
+    async def get_project_stats(self, project: DbProject) -> Project:
         """For callers that already have the project row (e.g. get_all_project_stats,
-        which just fetched every project) - see get_project_stats_by_id for the
-        id-based version, so neither side has to convert to the other's shape and back.
+        which just fetched every project).
         """
         report_ids = await self.project_repo.get_project_associated_report_ids(project.id)
         auto_searched_pdf_count = await self.project_repo.get_auto_searched_pdf_count_for_project(project.id)
@@ -109,11 +96,11 @@ class ProjectResourceService:
             )
 
         assignee_payload = [
-            ProjectAssignee(userId=user_id, numberReportsLinked=linked_count)
+            Assignee(userId=user_id, numberReportsLinked=linked_count)
             for user_id, linked_count in assignees
         ]
 
-        return ProjectDetails(
+        return Project(
             projectId=project.id,
             name=project.description,
             createdAt=project.date_created,
@@ -128,11 +115,11 @@ class ProjectResourceService:
             assignees=assignee_payload,
         )
 
-    async def get_all_project_stats(self) -> List[ProjectDetails]:
+    async def get_all_project_stats(self) -> List[Project]:
         projects = await self.project_repo.get_all_projects()
         return await asyncio.gather(*(self.get_project_stats(project) for project in projects))
 
-    async def get_user_tasks(self) -> List[ProjectTask]:
+    async def get_user_tasks(self) -> List[Task]:
         if not self.project_repo.user_id:
             return []
 
@@ -146,18 +133,15 @@ class ProjectResourceService:
             *(self.get_vectorized_and_ready_report_ids(project.id) for project in projects)
         )
 
-        tasks: List[ProjectTask] = []
+        tasks: List[Task] = []
         for project, (_, _, ready_for_processing) in zip(projects, progress_results):
-            project_payload = Project(
-                projectId=project.id,
-                name=project.description,
-                owner=project.uploaded_by or "",
-                createdAt=project.date_created,
-                numberReportsReadyForProcessing=len(ready_for_processing),
-            )
             tasks.append(
-                ProjectTask(
-                    project=project_payload,
+                Task(
+                    projectId=project.id,
+                    name=project.description,
+                    owner=project.uploaded_by or "",
+                    createdAt=project.date_created,
+                    numberReportsReadyForProcessing=len(ready_for_processing),
                     numberReportsProcessed=user_link_counts.get(project.id, 0),
                 )
             )
@@ -241,7 +225,7 @@ class ProjectResourceService:
         Raises RisParseError if the file can't be parsed. Returns None if a project
         with this exact set of reports already exists (see
         build_reports_from_entries's deterministic project_id), otherwise the new
-        project as a DTO plus its report ids.
+        project's full stats (via get_project_stats) plus its report ids.
         """
         entries = await parse_file(upload)
         project_id, reports, trial_ids = self.build_reports_from_entries(entries)
@@ -252,15 +236,9 @@ class ProjectResourceService:
         await self.pubsub_service.publish_project_update(project_id)
 
         project = await self.project_repo.get_project_by_id(project_id)
-        project_dto = Project(
-            projectId=project.id,
-            name=project.description,
-            owner=project.uploaded_by or "",
-            createdAt=project.date_created,
-            numberReportsReadyForProcessing=0,
-        )
+        project_full = await self.get_project_stats(project)
         report_ids = [report.id for report in saved_reports]
-        return project_dto, report_ids
+        return project_full, report_ids
 
     async def delete_project(self, project_id: str) -> None:
         """Delete a project (cascading to its reports/assignments/annotations
@@ -279,7 +257,7 @@ class ProjectResourceService:
         await self.vectorstore_service.delete_vectors_by_report_ids(report_ids)
         await self.pubsub_service.publish_project_update(project_id)
 
-    async def assign_user_to_project(self, project_id: str, assignee_user_id: str) -> ProjectAssignee:
+    async def assign_user_to_project(self, project_id: str, assignee_user_id: str) -> Assignee:
         """Assign a user to a project, giving them a review task. Raises
         ProjectNotFoundError if the project doesn't exist, or
         ProjectAssigneeAlreadyExistsError if they're already assigned.
@@ -301,7 +279,7 @@ class ProjectResourceService:
             )
 
         await self.pubsub_service.publish_project_update(project_id)
-        return ProjectAssignee(userId=assignee_user_id, numberReportsLinked=0)
+        return Assignee(userId=assignee_user_id, numberReportsLinked=0)
 
     async def remove_user_from_project(self, project_id: str, user_id: str) -> None:
         """Remove a user's assignment from a project. Raises
@@ -442,13 +420,13 @@ class ProjectResourceService:
 
     async def hydrate_report_page(
         self, page_rows: List[DbReport], limit: int, *, include_report_detail: bool = False
-    ) -> ProjectReportPage | IntakeReportPage:
+    ) -> Page[ReportCuration] | Page[ReportIntake]:
         """Turns a page of plain Report rows - as ReportRepository.query_project_reports_page
         returns them, including its +1 lookahead row - into the DTO shape, fetching only
         what that shape needs for this page.
 
-        `include_report_detail` switches the row (and page) shape from ProjectReport/
-        ProjectReportPage to IntakeReport/IntakeReportPage: DOI + cached OpenAlex fulltext
+        `include_report_detail` switches the row (and page) shape from ReportCuration/
+        Page[ReportCuration] to ReportIntake/Page[ReportIntake]: DOI + cached OpenAlex fulltext
         links (see get_fulltext_links_for_reports's docstring for why this is cache-only,
         unlike the single-report detail endpoint's live fallback) instead of flag/
         assignedStudies - intake reports haven't been curated yet, so those don't apply and
@@ -463,7 +441,7 @@ class ProjectResourceService:
         if include_report_detail:
             fulltext_links_by_report = await self.report_repo.get_fulltext_links_for_reports(page_ids)
             items = [
-                IntakeReport(
+                ReportIntake(
                     **reports_to_dto([report])[0].model_dump(),
                     hasPdf=report.id in reports_with_pdf,
                     doi=report.doi,
@@ -472,23 +450,23 @@ class ProjectResourceService:
                 for report in page_rows
             ]
             next_cursor = encode_cursor(page_ids[-1]) if has_more and page_ids else None
-            return IntakeReportPage(items=items, nextCursor=next_cursor)
+            return Page[ReportIntake](items=items, nextCursor=next_cursor)
 
         all_linked_studies = await self.report_repo.get_linked_studies_for_reports(page_ids)
         report_flags = await self.report_repo.get_report_flags_for_reports(page_ids)
         preliminary_trial_ids = await self.report_repo.get_preliminary_trial_ids_for_reports(page_ids)
         items = [
-            ProjectReport(
+            ReportCuration(
                 **reports_to_dto([report])[0].model_dump(),
                 hasPdf=report.id in reports_with_pdf,
                 flag=report_flags.get(report.id).message if report.id in report_flags else None,
-                assignedStudies=studies_to_dto(all_linked_studies.get(report.id, [])),
+                assignedStudies=studies_to_preview_dto(all_linked_studies.get(report.id, [])),
                 preliminaryTrialId=preliminary_trial_ids.get(report.id),
             )
             for report in page_rows
         ]
         next_cursor = encode_cursor(page_ids[-1]) if has_more and page_ids else None
-        return ProjectReportPage(items=items, nextCursor=next_cursor)
+        return Page[ReportCuration](items=items, nextCursor=next_cursor)
 
     async def get_reports_page(
         self,
@@ -500,7 +478,7 @@ class ProjectResourceService:
         new_study: FilterMode = FilterMode.any,
         cursor: Optional[str] = None,
         limit: int = 50,
-    ) -> ProjectReportPage:
+    ) -> Page[ReportCuration]:
         """The normal curation view: never includes reports that are still being
         processed (not yet embedded/PDF-ready) - see get_intake_reports_page for that.
         Restricted to project assignees (or whoever uploaded it), enforced here
@@ -530,10 +508,10 @@ class ProjectResourceService:
         with_pdf: FilterMode = FilterMode.any,
         cursor: Optional[str] = None,
         limit: int = 50,
-    ) -> IntakeReportPage:
+    ) -> Page[ReportIntake]:
         """The admin intake view: unlike get_reports_page, always includes reports that
         have been auto-searched for a PDF but aren't fully processed yet, so an admin (or
-        an MCP client) can watch reports as they arrive. Returns the richer IntakeReport
+        an MCP client) can watch reports as they arrive. Returns the richer ReportIntake
         shape (DOI + fulltext links included) so the pdf-upload UI can read a report's
         DOI/links straight off this list instead of a separate per-report fetch.
         """
@@ -557,7 +535,7 @@ class ProjectResourceService:
         reviewed: FilterMode = FilterMode.any,
         cursor: Optional[str] = None,
         limit: int = 50,
-    ) -> ProjectReportPage:
+    ) -> Page[ReportCuration]:
         """The admin annotator-review view: always restricted to reports every project
         assignee has completed annotating, regardless of search/filter.
         """

@@ -1,5 +1,5 @@
 from ..database.repositories.study import StudyRepository
-from ..utils.dto import StudyCreate, studies_to_dto
+from ..utils.dto import StudyPayload, studies_to_dto
 
 from typing import List, Tuple
 
@@ -7,7 +7,7 @@ class StudyResourceService:
     def __init__(self, study_repo : StudyRepository):
         self.study_repo = study_repo
 
-    async def add_study(self, study : StudyCreate):
+    async def add_study(self, study : StudyPayload):
         try:
             new_study = await self.study_repo.add_study(
                     short_name=study.shortName,

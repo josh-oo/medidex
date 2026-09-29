@@ -3,14 +3,14 @@ import { useEffect, useState } from "react";
 import { useParams, Outlet } from "react-router-dom";
 import { AdminGuard } from "@/components/auth/admin-guard";
 import { ReportColumnClient } from "./components/report-column-client";
-import type { ProjectAnnotationsDto, ProjectReportDto } from "@/types/apiDTOs";
+import type { ProjectAnnotationsDto, ReportCurationDto } from "@/types/apiDTOs";
 import { getAnnotations, getProjectReportsReview } from "@/lib/api/projectApi";
 import { ReviewAnnotationsProvider } from "./components/review-annotations-context";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuthStore } from "@/hooks/use-auth";
 
 interface ProjectReviewData {
-  reports: ProjectReportDto[];
+  reports: ReportCurationDto[];
   annotations: ProjectAnnotationsDto;
 }
 

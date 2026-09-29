@@ -19,9 +19,6 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import {
-  ConditionDto,
-  InterventionDto,
-  OutcomeDto,
   StudyDto,
 } from "@/types/apiDTOs";
 import {

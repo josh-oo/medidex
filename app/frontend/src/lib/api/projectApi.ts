@@ -3,20 +3,21 @@ import { AxiosRequestConfig } from "axios";
 import { getAccessToken } from "@/lib/client/keycloak";
 import {
   GetProjectReportsParams,
-  IntakeReportPageDto,
+  ReportIntakeDto,
   ProjectAnnotationsDto,
-  ProjectAssigneeDto,
-  ProjectDetailsDto,
-  ProjectTaskDto,
-  ProjectReportPageDto,
+  AssigneeDto,
+  ProjectDto,
+  TaskDto,
+  ReportCurationDto,
+  Page,
   StreamCallbacks,
   StreamEvent,
 } from "../../types/apiDTOs";
 
 //get all projects
-export const getProjects = (config?: AxiosRequestConfig): Promise<ProjectDetailsDto[]> => {
+export const getProjects = (config?: AxiosRequestConfig): Promise<ProjectDto[]> => {
   return apiClient
-    .get<ProjectDetailsDto[]>("/projects", config)
+    .get<ProjectDto[]>("/projects", config)
     .then(response => {
       return response.data;
     })
@@ -27,9 +28,9 @@ export const getProjects = (config?: AxiosRequestConfig): Promise<ProjectDetails
 }
 
 //get all projects
-export const getTasks = (config?: AxiosRequestConfig): Promise<ProjectTaskDto[]> => {
+export const getTasks = (config?: AxiosRequestConfig): Promise<TaskDto[]> => {
   return apiClient
-    .get<ProjectTaskDto[]>("/tasks", config)
+    .get<TaskDto[]>("/tasks", config)
     .then(response => {
       return response.data;
     })
@@ -94,7 +95,7 @@ export const getProjectReports = (
   projectId: string,
   filters?: GetProjectReportsParams,
   config?: AxiosRequestConfig
-): Promise<ProjectReportPageDto> => {
+): Promise<Page<ReportCurationDto>> => {
   const requestConfig: AxiosRequestConfig = {
     ...config,
     params: {
@@ -109,7 +110,7 @@ export const getProjectReports = (
   };
 
   return apiClient
-    .get<ProjectReportPageDto>(`/projects/${projectId}/reports`, requestConfig)
+    .get<Page<ReportCurationDto>>(`/projects/${projectId}/reports`, requestConfig)
     .then(response => {
       return response.data;
     })
@@ -124,7 +125,7 @@ export const getProjectReportsIntake = (
   projectId: string,
   filters?: GetProjectReportsParams,
   config?: AxiosRequestConfig
-): Promise<IntakeReportPageDto> => {
+): Promise<Page<ReportIntakeDto>> => {
   const requestConfig: AxiosRequestConfig = {
     ...config,
     params: {
@@ -137,7 +138,7 @@ export const getProjectReportsIntake = (
   };
 
   return apiClient
-    .get<IntakeReportPageDto>(`/projects/${projectId}/reports/intake`, requestConfig)
+    .get<Page<ReportIntakeDto>>(`/projects/${projectId}/reports/intake`, requestConfig)
     .then(response => {
       return response.data;
     })
@@ -153,7 +154,7 @@ export const getProjectReportsReview = (
   projectId: string,
   filters?: GetProjectReportsParams,
   config?: AxiosRequestConfig
-): Promise<ProjectReportPageDto> => {
+): Promise<Page<ReportCurationDto>> => {
   const requestConfig: AxiosRequestConfig = {
     ...config,
     params: {
@@ -167,7 +168,7 @@ export const getProjectReportsReview = (
   };
 
   return apiClient
-    .get<ProjectReportPageDto>(`/projects/${projectId}/reports/review`, requestConfig)
+    .get<Page<ReportCurationDto>>(`/projects/${projectId}/reports/review`, requestConfig)
     .then(response => {
       return response.data;
     })
@@ -196,11 +197,11 @@ export const assignUserToProject = (
   projectId: string,
   userId: string,
   config?: AxiosRequestConfig
-): Promise<ProjectAssigneeDto> => {
+): Promise<AssigneeDto> => {
   const path = `/projects/${projectId}/assignees`;
 
   return apiClient
-    .post<ProjectAssigneeDto>(path, JSON.stringify(userId), config)
+    .post<AssigneeDto>(path, JSON.stringify(userId), config)
     .then(response => response.data)
     .catch(error => {
       console.error(`Error assigning user to project ${projectId}:`, error);

@@ -1,7 +1,15 @@
 from pydantic import BaseModel, Field
-from typing import Mapping, Optional, List
+from typing import Mapping, Optional, List, Dict, Any, TypeVar, Generic
 from datetime import datetime
 from enum import Enum
+
+T = TypeVar("T")
+
+class Page(BaseModel, Generic[T]):
+    """A page of items from any cursor-paginated list endpoint - see
+    src/utils/pagination.py for what the cursor itself encodes."""
+    items: List[T]
+    nextCursor: Optional[str] = None
 
 
 class FilterMode(str, Enum):
@@ -37,19 +45,86 @@ def filter_mode_to_bool(mode: FilterMode) -> Optional[bool]:
     return mode is FilterMode.only
 
 
-class Study(BaseModel):
+# Naming convention below: each subclass's name says what it adds over its parent,
+# not how "detailed" or "list-like" it is - ReportBase is the bare identity every
+# Report* type shares, Report is the full bibliographic record built on it, and
+# every further subclass is named for the specific extra data it carries.
+
+class ReportPreview(BaseModel):
+    """Bare-bones Report identity (id + title) for list views that don't need the
+    full bibliographic record, e.g. GET /studies/{study_id}/reports's Page[ReportBase]
+    below, which can page through a study with a lot of linked reports."""
+    reportId: int
+    title: str
+
+class StudyPreview(BaseModel):
+    """Bare-bones Study identity for ReportCuration.assignedStudies below - the frontend
+    only ever reads studyId/shortName/createdAt off an assigned study (the badge label,
+    click-to-open, and the "linked after this report was entered" highlight), never the
+    full bibliographic record."""
     studyId: int
     shortName: str
-    status: str
-    countries: List[str]
-    numberParticipants: Optional[str]
-    duration: Optional[str]
-    comparison: Optional[str]
+    createdAt: Optional[str]
+
+class ReportPayload(BaseModel):
+    """Bare-bones Report identity (id + title) for list views that don't need the
+    full bibliographic record, e.g. GET /studies/{study_id}/reports's Page[ReportBase]
+    below, which can page through a study with a lot of linked reports."""
+    title: str
+    year: int
+    abstract: Optional[str]
     trialId: Optional[str]
+    authors: List[str]
+
+class Report(ReportPayload):
+    reportId: int
     createdAt: Optional[str]
     updatedAt: Optional[str]
 
-class StudyCreate(BaseModel):
+class ReportSources(Report):
+    """A Report plus where to find it: its DOI and cached OpenAlex fulltext links
+    (ReportService.get_fulltext_links). Returned by GET /reports/{report_id} for the
+    pdf-upload view. Too heavy/situational to carry on every row of a paginated
+    report list (see ReportCuration below) - only fetched for a single report, or for
+    ReportIntake's list (below) which specifically needs it up front."""
+    doi: Optional[str] = None
+    fulltextLinks: List[str] = Field(default_factory=list)
+
+class ReportCuration(Report):
+    """A Report plus its state within a project's curation workflow: whether it has a
+    PDF, this user's flag on it, and its linked studies - the row shape for the normal/
+    review project report lists (Page[ReportCuration].items below). Mirrors report_added
+    (src/database/models.py) being project-scoped, temporary metadata rather than
+    something that lives on Report itself."""
+    hasPdf: Optional[bool]
+    flag: Optional[str]
+    assignedStudies: List[StudyPreview] = Field(default_factory=list)
+    # The unconfirmed .ris-upload/fulltext guess (report_added.trial_registration_id) -
+    # distinct from this Report's own trialId, which only ever holds a reviewer-confirmed
+    # value. Lets the frontend prefill a trial-id search with a best guess even before
+    # anyone has confirmed it.
+    preliminaryTrialId: Optional[str] = None
+
+class ReportIntake(ReportSources):
+    """A ReportSources (DOI + fulltext links, so the pdf-upload view can read them
+    straight from the list it already loaded instead of issuing a separate
+    GET /reports/{report_id} per row) plus hasPdf. Deliberately NOT a ReportCuration:
+    an intake report hasn't been curated yet, so flag/assignedStudies don't apply and
+    aren't fetched for this list (see ProjectResourceService.hydrate_report_page's
+    include_report_detail branch). The row shape for the admin intake list
+    (Page[ReportIntake].items below)."""
+    hasPdf: Optional[bool] = None
+
+class Tag(BaseModel):
+    id: str
+    keyword: str
+
+class TagCandidate(Tag):
+    relevance: float
+
+class StudyPayload(BaseModel):
+    """The fields needed to create a study - everything else (studyId, timestamps) is
+    server-generated, so this also doubles as the PUT /studies request body."""
     shortName: str
     status: str
     countries: List[str]
@@ -58,61 +133,40 @@ class StudyCreate(BaseModel):
     comparison: Optional[str]
     trialId: Optional[str] = None
 
-class StudyPage(BaseModel):
-    """A page of the free-text study search (fastapi_app/resources.py's GET /studies/search)."""
-    items: List[Study]
-    nextCursor: Optional[str] = None
+class Study(StudyPayload):
+    studyId: int
+    createdAt: Optional[str]
+    updatedAt: Optional[str]
 
-class CandidateStudy(Study):
+class StudyFull(Study):
+    """A Study plus everything the study details view fetches per-study: its linked
+    reports and the tag-like aspects (interventions/conditions/outcomes) attached to
+    it. Not yet wired to an endpoint - fastapi_app/resources.py's /studies/{study_id}/*
+    endpoints still fetch these one at a time; this exists as a target shape for
+    combining them."""
+    reports: List[ReportPreview] = Field(default_factory=list)
+    interventions: List[Tag] = Field(default_factory=list)
+    conditions: List[Tag] = Field(default_factory=list)
+    outcomes: List[Tag] = Field(default_factory=list)
+    participants: List[Dict[str, Any]] = Field(default_factory=list)
+    design: List[Dict[str, Any]] = Field(default_factory=list)
+
+class StudyCandidate(Study):
     """A study suggested as a possible match for a report by the similarity search
     (fastapi_app/core.py's /reports/{report_id}/similar-studies) - a Study plus how
     relevant this particular suggestion is, for the researcher to accept or reject."""
     relevance: float
 
-class CandidateStudyPage(BaseModel):
-    items: List[CandidateStudy]
-    nextCursor: Optional[str] = None
-
-class Tag(BaseModel):
-    id: str
-    keyword: str
-    relevance: Optional[float] = None
-
-# Naming convention below: each subclass's name says what it adds over its parent,
-# not how "detailed" or "list-like" it is - Report is the shared bibliographic base;
-# every other Report* type is named for the specific extra data it carries.
-
-class Report(BaseModel):
-    reportId: int
-    year: int
-    title: str
-    abstract: Optional[str]
-    trialId: Optional[str]
-    authors: List[str]
-    createdAt: Optional[str]
-    updatedAt: Optional[str]
-
-class ReportSources(Report):
-    """A Report plus where to find it: its DOI and cached OpenAlex fulltext links
-    (ReportService.get_fulltext_links). Returned by GET /reports/{report_id} for the
-    pdf-upload view. Too heavy/situational to carry on every row of a paginated
-    report list (see ProjectReport below) - only fetched for a single report, or for
-    IntakeReport's list (below) which specifically needs it up front."""
-    doi: Optional[str] = None
-    fulltextLinks: List[str] = Field(default_factory=list)
-
-class ReportFlagUpdate(BaseModel):
+class FlagPayload(BaseModel):
     message: str
     public: bool = False
 
-class ReportFlag(BaseModel):
+class Flag(FlagPayload):
     reportId: int
     createdBy: str
-    message: str
-    public: bool
     createdAt: str
 
-class ProjectAssignee(BaseModel):
+class Assignee(BaseModel):
     userId : str
     numberReportsLinked: int = 0
 
@@ -122,52 +176,21 @@ class Project(BaseModel):
     owner: str
     createdAt: datetime
     numberReportsReadyForProcessing: int = 0
-
-class ProjectDetails(Project):
     numberReportsTotal: int
     numberReportsPreProcessed: int = 0
     numberReportsWithPdf: int = 0
     numberReportsReadyForReview: int = 0
     numberReportsAutoSearchedPdf: int = 0
     numberReportsConfirmed: int = 0
-    assignees: List[ProjectAssignee] = Field(default_factory=list)
+    assignees: List[Assignee] = Field(default_factory=list)
 
-class ProjectTask(BaseModel):
-    project: Project
+class Task(BaseModel):
+    projectId: str
+    name: str
+    owner: str
+    createdAt: datetime
+    numberReportsReadyForProcessing: int = 0
     numberReportsProcessed: int
-
-class ProjectReport(Report):
-    """A Report plus its state within a project's curation workflow: whether it has a
-    PDF, this user's flag on it, and its linked studies - the row shape for the normal/
-    review project report lists (ProjectReportPage.items below). Mirrors report_added
-    (src/database/models.py) being project-scoped, temporary metadata rather than
-    something that lives on Report itself."""
-    hasPdf: Optional[bool]
-    flag: Optional[str]
-    assignedStudies: List[Study] = Field(default_factory=list)
-    # The unconfirmed .ris-upload/fulltext guess (report_added.trial_registration_id) -
-    # distinct from this Report's own trialId, which only ever holds a reviewer-confirmed
-    # value. Lets the frontend prefill a trial-id search with a best guess even before
-    # anyone has confirmed it.
-    preliminaryTrialId: Optional[str] = None
-
-class ProjectReportPage(BaseModel):
-    items: List[ProjectReport]
-    nextCursor: Optional[str] = None
-
-class IntakeReport(ReportSources):
-    """A ReportSources (DOI + fulltext links, so the pdf-upload view can read them
-    straight from the list it already loaded instead of issuing a separate
-    GET /reports/{report_id} per row) plus hasPdf. Deliberately NOT a ProjectReport:
-    an intake report hasn't been curated yet, so flag/assignedStudies don't apply and
-    aren't fetched for this list (see ProjectResourceService.hydrate_report_page's
-    include_report_detail branch). The row shape for the admin intake list
-    (IntakeReportPage.items below)."""
-    hasPdf: Optional[bool] = None
-
-class IntakeReportPage(BaseModel):
-    items: List[IntakeReport]
-    nextCursor: Optional[str] = None
 
 def tags_to_dto(tags) -> List[Tag]:
     result = []
@@ -181,8 +204,8 @@ def tags_to_dto(tags) -> List[Tag]:
         result.append(Tag(id=str(tag_id) if tag_id is not None else "", keyword=keyword or ""))
     return result
 
-def report_flag_to_dto(flag) -> ReportFlag:
-    return ReportFlag(
+def report_flag_to_dto(flag) -> Flag:
+    return Flag(
         reportId=flag.report_id,
         createdBy=flag.created_by,
         message=flag.message,
@@ -205,6 +228,9 @@ def reports_to_dto(reports) -> List[Report]:
         ))
     return result
 
+def reports_to_base_dto(reports) -> List[ReportPreview]:
+    return [ReportPreview(reportId=report.id, title=report.title) for report in reports]
+
 def studies_to_dto(studies):
     result = []
     for study in studies:
@@ -223,10 +249,16 @@ def studies_to_dto(studies):
         result.append(output_study)
     return result
 
-def candidate_studies_to_dto(studies) -> List[CandidateStudy]:
+def studies_to_preview_dto(studies) -> List[StudyPreview]:
+    return [
+        StudyPreview(studyId=study.id, shortName=study.short_name, createdAt=study.date_entered)
+        for study in studies
+    ]
+
+def candidate_studies_to_dto(studies) -> List[StudyCandidate]:
     results = []
     for study in studies:
-        results.append(CandidateStudy(
+        results.append(StudyCandidate(
             studyId=study.id,
             shortName=study.short_name,
             numberParticipants=study.number_participants,

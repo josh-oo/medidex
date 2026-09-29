@@ -2,8 +2,6 @@ from fastapi import APIRouter, File, UploadFile
 from fastapi import Depends, HTTPException, Query, Path
 from fastapi.responses import FileResponse
 from starlette.responses import Response
-import os
-import json
 import enum
 import logging
 
@@ -11,7 +9,6 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel
 
-from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
 
 from .auth import is_verified_api_call, is_admin
@@ -19,37 +16,16 @@ from .auth import is_verified_api_call, is_admin
 from src.database.models import Report as DbReport, Study as DbStudy
 from src.database.models import Participant as DbParticipant, Design as DbDesign
 
-from src.utils.logger import setup_logging
-
 from src.database.repositories.study import DuplicateShortNameError
 from src.context import RequestContext
 from .deps import get_context
 
-from src.utils.dto import Study, StudyCreate, StudyPage, Report, ReportSources, ReportFlagUpdate, ReportFlag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, report_flag_to_dto
+from src.utils.dto import Study, StudyPayload, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
 from src.utils.pagination import encode_cursor, decode_cursor, InvalidCursorError
 
-load_dotenv()
-
-DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
-#PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
-
-setup_logging("events.log")
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["resources"], dependencies=[Depends(is_verified_api_call)])
-
-
-class StudyStatus(str, enum.Enum):
-    closed = "Closed"
-    stopped_early = "Stopped early"
-    open = "Open/Ongoing"
-    planned = "Planned"
-
-class CENTRALSubmissionStatus(str, enum.Enum):
-    accepted = "Accepted"
-    pending = "Pending"
-    rejected = "Rejected"
-    not_cochrane = "Not Cochrane"
 
 class Event(BaseModel):
     timestamp: str
@@ -63,13 +39,6 @@ class Event(BaseModel):
             }
         }
 
-def load_trial_id_mapping():
-    file_path = os.path.join(DATABASE_VOLUME,"resources", "trial_id_mapping.json")
-    if not os.path.exists(file_path):
-        return {}
-    with open(file_path, "r") as json_file:
-        return json.load(json_file)
-
 cutoff_query = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
 study_ids_query =  Query(None, description="List of study IDs (used to filter your results)")
 study_id_path = Path(..., description="Study ID")
@@ -81,7 +50,7 @@ Study Endpoints
 """
 
 @router.put("/studies", summary="Add new study to the database.")
-async def add_study(study_params: StudyCreate, ctx: RequestContext = Depends(get_context)) -> Study:
+async def add_study(study_params: StudyPayload, ctx: RequestContext = Depends(get_context)) -> Study:
     try:
         return await ctx.study_service.add_study(study_params)
     except DuplicateShortNameError:
@@ -97,7 +66,7 @@ async def search_studies(
     limit: int = Query(25, ge=1, le=100, description="Maximum number of results to return per page."),
     cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
     ctx: RequestContext = Depends(get_context),
-) -> StudyPage:
+) -> Page[Study]:
     try:
         offset = decode_cursor(cursor) if cursor else 0
     except InvalidCursorError as exc:
@@ -105,7 +74,7 @@ async def search_studies(
 
     studies, has_more = await ctx.study_service.search_studies(q, limit, offset)
     next_cursor = encode_cursor(offset + limit) if has_more else None
-    return StudyPage(items=studies, nextCursor=next_cursor)
+    return Page[Study](items=studies, nextCursor=next_cursor)
 
 @router.get("/studies/reports", include_in_schema=False)
 async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[DbReport]]:
@@ -121,23 +90,22 @@ async def get_study_by_id(study_id: int = study_id_path, ctx: RequestContext = D
         raise HTTPException(status_code=404, detail=f"Study {study_id} not found")
     return study
 
-@router.get("/studies/{study_id}/reports", summary="Get all reports (and corresponding data) already belonging to this study")
-async def get_study_reports_by_id(study_id : int = study_id_path,  cutoff: str = cutoff_query, ctx: RequestContext = Depends(get_context)) -> List[Report]:
+@router.get("/studies/{study_id}/reports", summary="Get reports (id + title only) already belonging to this study, paginated.")
+async def get_study_reports_by_id(
+    study_id: int = study_id_path,
+    cutoff: str = cutoff_query,
+    limit: int = Query(5, ge=1, le=100, description="Maximum number of results to return per page."),
+    cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
+    ctx: RequestContext = Depends(get_context),
+) -> Page[ReportPreview]:
+    try:
+        offset = decode_cursor(cursor) if cursor else 0
+    except InvalidCursorError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
-    db_reports = await ctx.study_repo.get_study_reports_by_study_id(study_id, cutoff=cutoff)
-    result = []
-    for db_report in db_reports:
-        result.append(Report(
-            reportId=db_report.id,
-            year=db_report.year,
-            title=db_report.title,
-            abstract=db_report.abstract,
-            trialId=db_report.trial_registration_id,
-            authors=db_report.authors.split("//"),
-            createdAt=db_report.date_entered,
-            updatedAt=db_report.date_edited,
-        ))
-    return result
+    reports, has_more = await ctx.study_repo.get_study_reports_by_study_id_page(study_id, limit=limit, offset=offset, cutoff=cutoff)
+    next_cursor = encode_cursor(offset + limit) if has_more else None
+    return Page[ReportPreview](items=reports_to_base_dto(reports), nextCursor=next_cursor)
 
 
 @router.get("/studies/{study_id}/date_entered", summary="Get the date when the study was entered into the database")
@@ -175,7 +143,7 @@ async def get_study_persons_single(study_id : int = study_id_path, cutoff: str =
     return await ctx.study_repo.get_study_persons_single(study_id=study_id, cutoff=cutoff, normalize_names=normalize_names)
 
 @router.get("/studies/{study_id}", summary="Get study details for a specific study.")
-async def get_study_by_id_legacy(study: DbStudy = Depends(get_study_by_id), ctx: RequestContext = Depends(get_context)) -> Study:
+async def get_study_by_id(study: DbStudy = Depends(get_study_by_id), ctx: RequestContext = Depends(get_context)) -> Study:
     await post_report_event(-1, Event(event_type=f"study::{study.id}::visted", timestamp=datetime.now(timezone.utc).isoformat()), ctx)
     return studies_to_dto([study])[0]
 
@@ -293,14 +261,9 @@ async def get_fulltext(report_id: int = report_id_path, ctx: RequestContext = De
 @router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
 async def get_pdf_metadata(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> Dict:
     return await ctx.report_service.get_metadata(report_id)
-    try:
-        return await ctx.report_service.get_metadata(report_id)
-    except Exception as e:
-        if str(e) == "Upstream request timed out":
-            raise HTTPException(status_code=504, detail="Upstream request timed out.")
 
 @router.get("/reports/{report_id}/flag", summary="Get your report flag for a specific report.")
-async def get_report_flag(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> Optional[ReportFlag]:
+async def get_report_flag(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> Optional[Flag]:
     report = await ctx.report_repo.get_report_by_id(report_id)
     if report is None:
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
@@ -313,10 +276,10 @@ async def get_report_flag(report_id: int = report_id_path, ctx: RequestContext =
 
 @router.put("/reports/{report_id}/flag", summary="Create or edit your report flag for a specific report.")
 async def upsert_report_flag(
-    payload: ReportFlagUpdate,
+    payload: FlagPayload,
     report_id: int = report_id_path,
     ctx: RequestContext = Depends(get_context),
-) -> ReportFlag:
+) -> Flag:
     try:
         flag = await ctx.report_repo.upsert_report_flag(
             report_id=report_id,

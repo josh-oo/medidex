@@ -4,7 +4,7 @@ import {
   UploadSection,
   type UploadSectionHandle,
 } from "@/components/ui/upload/upload-section";
-import { IntakeReportDto } from "@/types/apiDTOs";
+import { ReportIntakeDto } from "@/types/apiDTOs";
 import { useReportStore } from "@/hooks/use-report-store";
 import {
   AlertDialog,
@@ -40,10 +40,10 @@ export default function PdfDetailsPage() {
   const [iframeKey, setIframeKey] = useState(0);
 
   // This route is only ever reached via the pdf-upload layout, which populates the store
-  // from getProjectReportsIntake (IntakeReportDto rows) before rendering it - so doi/
+  // from getProjectReportsIntake (ReportIntakeDto rows) before rendering it - so doi/
   // fulltextLinks are already here, no separate GET /reports/{id} needed.
   const report = useReportStore(
-    (state) => state.reports[Number(reportId)] as IntakeReportDto | undefined
+    (state) => state.reports[Number(reportId)] as ReportIntakeDto | undefined
   );
 
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);

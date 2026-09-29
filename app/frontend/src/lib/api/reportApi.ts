@@ -1,6 +1,6 @@
 import apiClient from "./apiClient";
 import { AxiosRequestConfig } from "axios";
-import { ReportChatDto, SimilarTagDto, CandidateStudyPageDto, GetSimilarStudiesParams, GetSimilarTagsParams, StudyDto} from "../../types/apiDTOs";
+import { ReportChatDto, TagCandidateDto, StudyCandidateDto, Page, GetSimilarStudiesParams, GetSimilarTagsParams, StudyDto} from "../../types/apiDTOs";
 import { serializeParams } from "./helpers";    
 
 export interface ReportFlagDto {
@@ -17,14 +17,14 @@ export const getSimilarStudiesByReportId = (
   reportId: number,
   params: GetSimilarStudiesParams = {},
   config?: AxiosRequestConfig
-): Promise<CandidateStudyPageDto> => {
+): Promise<Page<StudyCandidateDto>> => {
   const path = `/reports/${reportId}/similar-studies`;
   const { params: configParams, ...restConfig } = config ?? {};
   const requestParams = {
     ...(configParams ?? {}),
     ...params,
   };
-  return apiClient.get<CandidateStudyPageDto>(path, {
+  return apiClient.get<Page<StudyCandidateDto>>(path, {
       ...restConfig,
       params: requestParams,
       paramsSerializer: { serialize: serializeParams }
@@ -123,14 +123,14 @@ export const getSimilarTagsByReportId = (
   reportId: number,
   params: GetSimilarTagsParams = {},
   config?: AxiosRequestConfig
-): Promise<SimilarTagDto[]> => {
+): Promise<TagCandidateDto[]> => {
   const path = `/reports/${reportId}/similar-studies/tags`;
   const { params: configParams, ...restConfig } = config ?? {};
   const requestParams = {
     ...(configParams ?? {}),
     ...params,
   };
-  return apiClient.get<SimilarTagDto[]>(path, {
+  return apiClient.get<TagCandidateDto[]>(path, {
       ...restConfig,
       params: requestParams,
       paramsSerializer: { serialize: serializeParams }

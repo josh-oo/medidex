@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/resizable";
 import { DetailsSheetProvider } from "@/context/details-sheet-context";
 import StudySheet from "../study-sheet";
-import { ProjectReportDto, ReportFilterDimension } from "@/types/apiDTOs";
+import { ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
 import { ReportList } from "@/components/ui/report-view/report-list";
 import { useReportStore } from "@/hooks/use-report-store";
 import { getProjectReports } from "@/lib/api/projectApi";
@@ -21,7 +21,7 @@ const reportFilterDimensions: ReportFilterDimension[] = [
 
 interface ReportColumnClientProps {
   children: ReactNode;
-  reports: ProjectReportDto[];
+  reports: ReportCurationDto[];
   projectId: string;
 }
 

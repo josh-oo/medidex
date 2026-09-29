@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, X } from "lucide-react";
 import React, { useState } from "react";
 
-import type { StudyDto, ReportDto, ProjectReportDto} from "../../../types/apiDTOs";
+import type { StudyPreviewDto, ReportDto, ReportCurationDto} from "../../../types/apiDTOs";
 
 import { toast } from "sonner";
 
@@ -23,7 +23,7 @@ import { useReportStore } from "@/hooks/use-report-store";
 import { useDetailsSheet } from "@/context/details-sheet-context";
 
 interface ReportAssignedStudiesBadgesProps {
-  report: ProjectReportDto;
+  report: ReportCurationDto;
 }
 
 export function ReportAssignedStudiesBadges({
@@ -38,7 +38,7 @@ export function ReportAssignedStudiesBadges({
   const [removing, setRemoving] = useState<Set<string>>(new Set());
   const [studyToRemove, setStudyToRemove] = useState<{
     report: ReportDto;
-    study: StudyDto;
+    study: StudyPreviewDto;
   } | null>(null);
   const getAssignmentKey = (reportId: number, studyId: number) => `${reportId}-${studyId}`;
   const isRemovalDialogOpen = Boolean(studyToRemove);
@@ -79,7 +79,7 @@ export function ReportAssignedStudiesBadges({
   };
 
   // Open dialog for confirmation instead of removing directly
-  const onRemoveAssignedStudy = async (report : ReportDto, study : StudyDto) => {
+  const onRemoveAssignedStudy = async (report : ReportDto, study : StudyPreviewDto) => {
         if (report && study) {
             setStudyToRemove({ report: report, study: study });
         }
@@ -111,7 +111,7 @@ export function ReportAssignedStudiesBadges({
   const handleRemoveClick = async (
     event: React.MouseEvent,
     report: ReportDto,
-    study: StudyDto
+    study: StudyPreviewDto
   ) => {
     event.stopPropagation();
     event.preventDefault();

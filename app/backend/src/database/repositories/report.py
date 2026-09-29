@@ -75,7 +75,7 @@ class ReportRepository:
     async def get_preliminary_trial_ids_for_reports(self, report_ids: List[int]) -> Dict[int, Optional[str]]:
         """Bulk read of the unconfirmed report_added.trial_registration_id guess (see its
         comment in models.py) for a page of reports - same shape/purpose as
-        get_fulltext_links_for_reports, for ProjectReport.preliminaryTrialId.
+        get_fulltext_links_for_reports, for ReportCuration.preliminaryTrialId.
         """
         report_ids = report_ids or []
         if not report_ids:

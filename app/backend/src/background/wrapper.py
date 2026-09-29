@@ -20,7 +20,7 @@ from ..database.repositories.study import DuplicateShortNameError
 from ..database.sessions import AsyncSessionLocal
 from ..database.models import Report as DbReport
 from ..services.agent import AutomationService
-from ..utils.dto import StudyCreate
+from ..utils.dto import StudyPayload
 from ..utils.llm.agent import get_checkpointer
 
 logger = logging.getLogger(__name__)
@@ -227,7 +227,7 @@ async def _process_report_with_agent(
             if isinstance(comparison, list):
                 comparison = json.dumps(comparison)
 
-            study_payload = StudyCreate(
+            study_payload = StudyPayload(
                 shortName=short_name or f"bot-{report_id}",
                 status=status,
                 countries=countries,

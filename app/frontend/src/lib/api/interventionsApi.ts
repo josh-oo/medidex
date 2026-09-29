@@ -1,22 +1,14 @@
 import apiClient from "./apiClient";
-import { InterventionDto } from "../../types/apiDTOs";
+import { TagDto } from "../../types/apiDTOs";
 import { AxiosRequestConfig } from "axios";
-
-type InterventionListEntry = {
-  InterventionID: number;
-  InterventionDescription: string;
-};
 
 export const getInterventions = (
   config?: AxiosRequestConfig
-): Promise<InterventionDto[]> => {
+): Promise<TagDto[]> => {
   const path = `/interventions`;
-  return apiClient.get<InterventionListEntry[]>(path, config)
+  return apiClient.get<TagDto[]>(path, config)
     .then(response => {
-      return response.data.map(entry => ({
-        ID: entry.InterventionID,
-        Description: entry.InterventionDescription,
-      }));
+      return response.data;
     })
     .catch(error => {
       console.error('Error fetching interventions:', error);
