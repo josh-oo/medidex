@@ -10,13 +10,20 @@ class TagCategories(str, enum.Enum):
     outcomes = 'outcomes'
     participants = 'participants'
 
+
+class UnsupportedAspectError(Exception):
+    """No tag search is defined for this aspect."""
+
+
 class TagSimilaritySearchService:
 
     def __init__(self, vectorstore : VectorstoreService):
         self.vectorstore = vectorstore
 
     async def get_similar_tags_by_id(self, report_id : int, aspect : TagCategories, sources : List[str], k : int):
-        
+        if aspect == TagCategories.default:
+            raise UnsupportedAspectError("No tags for 'default' embedding.")
+
         query = self.vectorstore.build_recommandation_based_on_report_id(report_id)
         data = await self.vectorstore.get_similar_tags(query, sources, aspect, k)
 
@@ -24,15 +31,18 @@ class TagSimilaritySearchService:
             {"id": i, "keyword": n, "relevance": s}
             for i, n, s in zip(data["ID"], data["Keyword"], data["Relevance"])
         ]
-        return result  
-    
+        return result
+
     async def get_similar_tags_by_string(self, text : str, aspect : TagCategories, sources : List[str], k : int):
+        if aspect == TagCategories.default:
+            raise UnsupportedAspectError("No tags for 'default' embedding.")
+
         data = await self.vectorstore.get_similar_tags_by_string(text, sources,aspect, k)
         result = [
             {"id": i, "keyword": k, "relevance": r}
             for i, k, r in zip(data["ID"], data["Keyword"], data["Relevance"])
         ]
-        return result  
+        return result
     
 class TagScoringService:
 

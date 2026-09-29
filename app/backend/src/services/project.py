@@ -1,6 +1,6 @@
 import asyncio
 import hashlib
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from ..database.models import Project as DbProject, Report as DbReport
 from ..database.repositories.project import ProjectRepository
@@ -21,8 +21,23 @@ from ..utils.dto import (
     studies_to_dto,
 )
 from ..utils.pagination import decode_cursor, encode_cursor
+from ..utils.ris_parser import UploadedFile, parse_file
 from ..utils.trial_registration_id import extract_trial_id
+from .authorization import ProjectAccessDeniedError
+from .pubsub import ProjectPubSubService
 from .vectorstore import VectorstoreService
+
+
+class ProjectNotFoundError(Exception):
+    """No project exists with the given id."""
+
+
+class ProjectAssigneeAlreadyExistsError(Exception):
+    """The user is already assigned to this project."""
+
+
+class ProjectAssigneeNotFoundError(Exception):
+    """The user isn't assigned to this project."""
 
 
 class ProjectResourceService:
@@ -36,10 +51,17 @@ class ProjectResourceService:
     needs FastAPI, so both heads can query the same project the same way.
     """
 
-    def __init__(self, project_repo: ProjectRepository, report_repo: ReportRepository, vectorstore_service: VectorstoreService):
+    def __init__(
+        self,
+        project_repo: ProjectRepository,
+        report_repo: ReportRepository,
+        vectorstore_service: VectorstoreService,
+        pubsub_service: ProjectPubSubService,
+    ):
         self.project_repo = project_repo
         self.report_repo = report_repo
         self.vectorstore_service = vectorstore_service
+        self.pubsub_service = pubsub_service
 
     async def get_vectorized_and_ready_report_ids(self, project_id: str) -> Tuple[Set[int], Set[int], Set[int]]:
         report_ids = await self.project_repo.get_project_associated_report_ids(project_id)
@@ -53,7 +75,21 @@ class ProjectResourceService:
         ready_reports = embedded_reports & pdf_ready_reports
         return embedded_reports, pdf_ready_reports, ready_reports
 
+    async def get_project_stats_by_id(self, project_id: str) -> ProjectDetails:
+        """Fetch the project by id, then delegate to get_project_stats - for callers
+        that only have the id (e.g. a route path parameter). Raises ProjectNotFoundError
+        if it doesn't exist.
+        """
+        project = await self.project_repo.get_project_by_id(project_id)
+        if project is None:
+            raise ProjectNotFoundError(f"Project {project_id} not found")
+        return await self.get_project_stats(project)
+
     async def get_project_stats(self, project: DbProject) -> ProjectDetails:
+        """For callers that already have the project row (e.g. get_all_project_stats,
+        which just fetched every project) - see get_project_stats_by_id for the
+        id-based version, so neither side has to convert to the other's shape and back.
+        """
         report_ids = await self.project_repo.get_project_associated_report_ids(project.id)
         auto_searched_pdf_count = await self.project_repo.get_auto_searched_pdf_count_for_project(project.id)
         confirmed_report_count = await self.project_repo.get_confirmed_report_count_for_project(project.id)
@@ -181,6 +217,146 @@ class ProjectResourceService:
 
         project_id = hashlib.sha256(fingerprint_string.encode()).hexdigest()
         return project_id, reports, trial_ids_by_report
+
+    async def create_project(
+        self,
+        project_name: str,
+        upload: UploadedFile,
+    ) -> Optional[Tuple[Project, List[int]]]:
+        """Parse a bibliography file (.ris/.cgi/.nbib, selected by `upload.filename`'s
+        extension) into a new project, persist it, and notify subscribers. Who's
+        allowed to call this at all (ADMIN role) is a coarse, data-independent
+        permission - enforced at the API layer (FastAPI's Depends(is_admin), the MCP
+        tool's require_admin()), not re-checked here: this method only owns the
+        actual business logic of turning an uploaded file into a project, not the
+        perimeter check for reaching it.
+
+        Scheduling the background PDF-search/embedding pass
+        (src/background/wrapper.py's run_process_report_background) is left to the
+        caller: how to fire it without blocking the response is framework-specific
+        (FastAPI's BackgroundTasks vs the MCP tool's bare asyncio.create_task, see
+        that module's docstring) - this just hands back the report ids to schedule
+        it with.
+
+        Raises RisParseError if the file can't be parsed. Returns None if a project
+        with this exact set of reports already exists (see
+        build_reports_from_entries's deterministic project_id), otherwise the new
+        project as a DTO plus its report ids.
+        """
+        entries = await parse_file(upload)
+        project_id, reports, trial_ids = self.build_reports_from_entries(entries)
+        saved_reports = await self.project_repo.add_new_project(project_id, project_name, reports, trial_ids)
+        if saved_reports is None:
+            return None
+
+        await self.pubsub_service.publish_project_update(project_id)
+
+        project = await self.project_repo.get_project_by_id(project_id)
+        project_dto = Project(
+            projectId=project.id,
+            name=project.description,
+            owner=project.uploaded_by or "",
+            createdAt=project.date_created,
+            numberReportsReadyForProcessing=0,
+        )
+        report_ids = [report.id for report in saved_reports]
+        return project_dto, report_ids
+
+    async def delete_project(self, project_id: str) -> None:
+        """Delete a project (cascading to its reports/assignments/annotations
+        - see the DB schema) and clean up everything that isn't cascade-owned
+        by Postgres: the reports' vectorstore embeddings, plus notifying
+        subscribers. Raises ProjectNotFoundError if it doesn't exist. Who's
+        allowed to call this (ADMIN role) is enforced at the API layer, same
+        as create_project.
+        """
+        project = await self.project_repo.get_project_by_id(project_id)
+        if project is None:
+            raise ProjectNotFoundError(f"Project {project_id} not found")
+
+        report_ids = await self.project_repo.get_project_associated_report_ids(project_id)
+        await self.project_repo.delete_project(project_id)
+        await self.vectorstore_service.delete_vectors_by_report_ids(report_ids)
+        await self.pubsub_service.publish_project_update(project_id)
+
+    async def assign_user_to_project(self, project_id: str, assignee_user_id: str) -> ProjectAssignee:
+        """Assign a user to a project, giving them a review task. Raises
+        ProjectNotFoundError if the project doesn't exist, or
+        ProjectAssigneeAlreadyExistsError if they're already assigned.
+        project_repo.add_project_assignee's own ValueError/PermissionError
+        (no caller/ownership) propagate as-is - both heads already translate
+        those generically, so there's nothing project-specific to add here.
+        Scheduling the "bot" assignee's automation run is left to the caller,
+        same as create_project leaves scheduling to the caller - which
+        background-task mechanism to use is framework-specific.
+        """
+        project = await self.project_repo.get_project_by_id(project_id)
+        if project is None:
+            raise ProjectNotFoundError(f"Project {project_id} not found")
+
+        created = await self.project_repo.add_project_assignee(project_id, assignee_user_id)
+        if not created:
+            raise ProjectAssigneeAlreadyExistsError(
+                f"{assignee_user_id} is already assigned to project {project_id}"
+            )
+
+        await self.pubsub_service.publish_project_update(project_id)
+        return ProjectAssignee(userId=assignee_user_id, numberReportsLinked=0)
+
+    async def remove_user_from_project(self, project_id: str, user_id: str) -> None:
+        """Remove a user's assignment from a project. Raises
+        ProjectNotFoundError if the project doesn't exist, or
+        ProjectAssigneeNotFoundError if they weren't assigned to begin with.
+        """
+        project = await self.project_repo.get_project_by_id(project_id)
+        if project is None:
+            raise ProjectNotFoundError(f"Project {project_id} not found")
+
+        removed = await self.project_repo.remove_project_assignee(project_id, user_id)
+        if not removed:
+            raise ProjectAssigneeNotFoundError(
+                f"{user_id} is not assigned to project {project_id}"
+            )
+
+        await self.pubsub_service.publish_project_update(project_id)
+
+    async def ensure_project_access(self, project_id: str) -> None:
+        """Raise ProjectAccessDeniedError unless the caller uploaded this
+        project or is assigned to it. Exposed for callers that don't have a
+        more specific project_service operation to attach the check to (e.g.
+        stream_project_updates below).
+        """
+        project = await self.project_repo.get_project_by_id(project_id)
+        if project is not None and project.uploaded_by == self.project_repo.user_id:
+            return
+        if not await self.project_repo.is_project_assignee(project_id):
+            raise ProjectAccessDeniedError(f"Not assigned to project {project_id}")
+
+    async def stream_project_updates(
+        self, project_id: str, is_disconnected: Callable[[], Awaitable[bool]]
+    ) -> AsyncIterator[str]:
+        """SSE frames ('data: ...\\n\\n') of a project's pubsub updates, until
+        `is_disconnected` reports the caller has gone away. `is_disconnected`
+        abstracts over the one framework-specific bit here (Starlette's
+        Request.is_disconnected()), so the polling loop itself doesn't need
+        to import FastAPI.
+
+        Doesn't call ensure_project_access itself: this is a generator, so
+        nothing in its body runs until the caller starts iterating it - too
+        late to turn a denied access into an upfront 403/ResourceError
+        instead of a failure mid-stream. Callers must call
+        ensure_project_access(project_id) themselves first (see
+        fastapi_app/projects.py's stream route).
+        """
+        pubsub = await self.pubsub_service.subscribe_to_project(project_id)
+        try:
+            while True:
+                if await is_disconnected():
+                    break
+                data = await self.pubsub_service.get_next_project_update(pubsub)
+                yield f"data: {data}\n\n"
+        finally:
+            await self.pubsub_service.unsubscribe_from_project(project_id, pubsub)
 
     async def get_project_annotations(
         self, project_id: str
@@ -327,7 +503,12 @@ class ProjectResourceService:
     ) -> ProjectReportPage:
         """The normal curation view: never includes reports that are still being
         processed (not yet embedded/PDF-ready) - see get_intake_reports_page for that.
+        Restricted to project assignees (or whoever uploaded it), enforced here
+        rather than via a FastAPI-level dependency, so every caller (REST or a
+        future MCP one) goes through it, not just the ones that remember to
+        declare it.
         """
+        await self.ensure_project_access(project_id)
         cursor_id = decode_cursor(cursor) if cursor else None
         page_rows = await self.report_repo.query_project_reports_page(
             project_id,

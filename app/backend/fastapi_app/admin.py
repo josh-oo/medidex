@@ -8,7 +8,7 @@ import secrets
 
 from keycloak import KeycloakAdmin
 
-from .auth import KEYCLOAK_URL, KEYCLOAK_REALM, is_admin, is_verified, verify_token, revoke_api_key_cache
+from .auth import KEYCLOAK_URL, KEYCLOAK_REALM, is_admin, get_user, revoke_api_key_cache
 
 load_dotenv()
 
@@ -101,7 +101,7 @@ async def list_users(_: str = Depends(is_admin)) -> List[UserSummary]:
     ]
 
 @router.get("/admin/users/names", summary="Resolve display names for a comma-separated list of user ids.")
-async def get_user_names(ids: str = "", _: str = Depends(is_verified)) -> Dict[str, str]:
+async def get_user_names(ids: str = "", _: dict = Depends(get_user)) -> Dict[str, str]:
     names: Dict[str, str] = {}
     for user_id in [i for i in ids.split(",") if i]:
         try:
@@ -163,7 +163,7 @@ API_KEY_ACCESS_TOKEN_LIFESPAN_SECONDS = "60"
 
 # Must mirror the protocol mappers on the "medidex-frontend" client in
 # keycloak/realm-medidex.json, so tokens issued for API-key clients also carry
-# the flattened "roles" claim verify_token() reads and validate the audience
+# the flattened "roles" claim decode_token() reads and validate the audience
 # checks the rest of the app relies on.
 API_KEY_PROTOCOL_MAPPERS = [
     {
@@ -204,9 +204,10 @@ async def find_api_key_client(key_id: str, owner_id: str) -> dict:
     raise HTTPException(status_code=404, detail="API key not found or does not belong to user")
 
 @router.put("/users/me/api_keys", summary="Create a new API key for the given user.", status_code=201)
-async def create_api_key(token: str = Depends(is_verified)) -> ApiKeyResponse:
-    decoded = await verify_token(token)
-    user_id = decoded["sub"]
+async def create_api_key(claims: Optional[dict] = Depends(get_user)) -> ApiKeyResponse:
+    if claims is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user_id = claims["sub"]
 
     client_id_str = API_KEY_CLIENT_PREFIX + secrets.token_urlsafe(8)
     internal_id = await keycloak_admin.a_create_client({
@@ -232,9 +233,10 @@ async def create_api_key(token: str = Depends(is_verified)) -> ApiKeyResponse:
     return ApiKeyResponse(api_key=f"{client_id_str}.{secret['value']}")
 
 @router.get("/users/me/api_keys", summary="Get all API keys created by the given user.")
-async def get_api_keys(token: str = Depends(is_verified)) -> List[str]:
-    decoded = await verify_token(token)
-    user_id = decoded["sub"]
+async def get_api_keys(claims: Optional[dict] = Depends(get_user)) -> List[str]:
+    if claims is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user_id = claims["sub"]
 
     clients = await keycloak_admin.a_get_clients()
     return [
@@ -244,9 +246,10 @@ async def get_api_keys(token: str = Depends(is_verified)) -> List[str]:
     ]
 
 @router.delete("/users/me/api_keys/{key_id}", summary="Delete an API key belonging to the given user.", status_code=204)
-async def delete_api_key(key_id: str, token: str = Depends(is_verified)):
-    decoded = await verify_token(token)
-    user_id = decoded["sub"]
+async def delete_api_key(key_id: str, claims: Optional[dict] = Depends(get_user)):
+    if claims is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user_id = claims["sub"]
 
     client = await find_api_key_client(key_id, user_id)
     await keycloak_admin.a_delete_client(client["id"])

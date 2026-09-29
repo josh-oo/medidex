@@ -143,6 +143,8 @@ class RequestContext:
             tag_scoring_service=self.tag_scoring_service,
             study_similarity_service=self.study_similarity_service,
             study_repo=self.study_repo,
+            report_repo=self.report_repo,
+            project_repo=self.project_repo,
         )
 
     @cached_property
@@ -150,7 +152,9 @@ class RequestContext:
         return LinkageService(
             report_repo=self.report_repo,
             study_repo=self.study_repo,
+            project_repo=self.project_repo,
             vectorstore=self.vectorstore_service,
+            pubsub_service=self.pubsub_service,
         )
 
     @cached_property
@@ -171,4 +175,5 @@ class RequestContext:
             project_repo=self.project_repo,
             report_repo=self.report_repo,
             vectorstore_service=self.vectorstore_service,
+            pubsub_service=self.pubsub_service,
         )

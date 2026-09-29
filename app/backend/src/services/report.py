@@ -397,4 +397,14 @@ class ReportService:
             self.report_cache[report_id] = await self.report_repo.get_report_by_id(report_id)
         return self.report_cache[report_id]
 
+    async def is_ready(self, report_id: int) -> bool:
+        """Whether a report has finished both embedding and PDF processing (see
+        ReportRepository.get_readiness_sets) - the same readiness definition
+        ProjectResourceService.get_vectorized_and_ready_report_ids uses per-project,
+        here for callers (e.g. StudySimilaritySearchService) that only have a
+        single report id.
+        """
+        embedded, has_pdf = await self.report_repo.get_readiness_sets([report_id])
+        return report_id in embedded and report_id in has_pdf
+
     

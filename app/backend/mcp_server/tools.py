@@ -76,7 +76,10 @@ from mcp.server.mcpserver import (
 from mcp.server.mcpserver.exceptions import ToolError
 
 from src.background.wrapper import run_process_report_background
-from src.services.project import ProjectResourceService
+from src.services.project import (
+    ProjectAssigneeAlreadyExistsError,
+    ProjectNotFoundError,
+)
 from src.utils.dto import (
     Project,
     ProjectAssignee,
@@ -89,7 +92,7 @@ from src.utils.dto import (
     studies_to_dto,
     tags_to_dto,
 )
-from src.utils.ris_parser import RisParseError, parse_file
+from src.utils.ris_parser import RisParseError
 
 from .context import current_user_id, request_context, require_admin, require_report_access
 
@@ -394,29 +397,16 @@ def register(server: MCPServer) -> None:
         async with request_context(current_user_id()) as ctx:
             upload = _InMemoryUpload(file_content.encode("utf-8"), filename)
             try:
-                entries = await parse_file(upload)
+                result = await ctx.project_service.create_project(project_name, upload)
             except RisParseError as exc:
                 raise ToolError(str(exc)) from exc
-
-            project_id, reports, trial_ids = ProjectResourceService.build_reports_from_entries(entries)
-
-            saved_reports = await ctx.project_repo.add_new_project(project_id, project_name, reports, trial_ids)
-            if saved_reports is None:
+            if result is None:
                 raise ToolError("Project already exists")
+            project, report_ids = result
 
-            report_ids = [report.id for report in saved_reports]
-            _fire_and_forget(run_process_report_background(project_id, report_ids, ctx.user_id))
+            _fire_and_forget(run_process_report_background(project.projectId, report_ids, ctx.user_id))
 
-            await ctx.pubsub_service.publish_project_update(project_id)
-
-            project = await ctx.project_repo.get_project_by_id(project_id)
-            return Project(
-                projectId=project.id,
-                name=project.description,
-                owner=project.uploaded_by or "",
-                createdAt=project.date_created,
-                numberReportsReadyForProcessing=0,
-            )
+            return project
 
     @server.tool(
         annotations=ToolAnnotations(
@@ -460,20 +450,14 @@ def register(server: MCPServer) -> None:
         """Assign a user to a project, giving them a review task: they can link that project's reports to studies, and the project shows up in their `tasks` resource. Admin only."""
         require_admin()
         async with request_context(current_user_id()) as ctx:
-            project = await ctx.project_repo.get_project_by_id(project_id)
-            if project is None:
-                raise ToolError(f"Project {project_id} not found")
-
             try:
-                created = await ctx.project_repo.add_project_assignee(project_id, assignee_user_id)
+                return await ctx.project_service.assign_user_to_project(project_id, assignee_user_id)
+            except ProjectNotFoundError as exc:
+                raise ToolError(str(exc)) from exc
+            except ProjectAssigneeAlreadyExistsError as exc:
+                raise ToolError(str(exc)) from exc
             except (ValueError, PermissionError) as exc:
                 raise ToolError(str(exc)) from exc
-
-            if not created:
-                raise ToolError(f"{assignee_user_id} is already assigned to project {project_id}")
-
-            await ctx.pubsub_service.publish_project_update(project_id)
-            return ProjectAssignee(userId=assignee_user_id, numberReportsLinked=0)
 
     @server.tool(
         annotations=ToolAnnotations(
@@ -494,13 +478,7 @@ def register(server: MCPServer) -> None:
                 raise ToolError("Not confirmed - no changes were made.")
 
         async with request_context(current_user_id()) as ctx:
-            project = await ctx.project_repo.get_project_by_id(project_id)
-            if project is None:
-                raise ToolError(f"Project {project_id} not found")
-
-            report_ids = await ctx.project_repo.get_project_associated_report_ids(
-                project_id
-            )
-            await ctx.project_repo.delete_project(project_id)
-            await ctx.vectorstore_service.delete_vectors_by_report_ids(report_ids)
-            await ctx.pubsub_service.publish_project_update(project_id)
+            try:
+                await ctx.project_service.delete_project(project_id)
+            except ProjectNotFoundError as exc:
+                raise ToolError(str(exc)) from exc

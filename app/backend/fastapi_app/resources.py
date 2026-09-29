@@ -17,8 +17,7 @@ from typing import List, Optional, Dict, Any
 from .auth import is_verified_api_call, is_admin
 
 from src.database.models import Report as DbReport, Study as DbStudy
-from src.database.models import Condition as DbCondition, Intervention as DbIntervention, Design as DbDesign, Outcome as DbOutcome, Participant as DbParticipant
-from src.database.models import ReportFlag as DbReportFlag
+from src.database.models import Participant as DbParticipant, Design as DbDesign
 
 from src.utils.logger import setup_logging
 

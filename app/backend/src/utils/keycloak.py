@@ -10,6 +10,7 @@ the REST API's presentation tier.
 """
 
 import os
+from typing import Optional
 
 from dotenv import load_dotenv
 from jwcrypto import jwk
@@ -89,3 +90,32 @@ async def decode_access_token(token: str, keycloak_openid: KeycloakOpenID) -> di
         # Signing key may have rotated; refresh once and retry
         key_set = await get_jwk_set(keycloak_openid, force_refresh=True)
         return await keycloak_openid.a_decode_token(token, key=key_set)
+
+
+class InvalidTokenError(Exception):
+    """Token is missing, malformed, or otherwise fails verification."""
+
+
+class TokenExpiredError(InvalidTokenError):
+    """Token was well-formed but has expired."""
+
+
+async def verify_token(token: Optional[str], keycloak_openid: KeycloakOpenID) -> dict:
+    """Single token-verification entry point for both heads: turns a bearer
+    token into decoded claims, or raises InvalidTokenError/TokenExpiredError.
+
+    This used to be reimplemented separately in fastapi_app/auth.py (raising
+    HTTPException) and mcp_server/auth.py (swallowing to None) - both now call
+    this and translate the same two exception types into their own
+    presentation-layer convention, instead of each owning its own decode +
+    error-handling logic.
+    """
+    if not token:
+        raise InvalidTokenError("Not authenticated")
+
+    try:
+        return await decode_access_token(token, keycloak_openid)
+    except JWTExpired:
+        raise TokenExpiredError("Token expired")
+    except Exception as e:
+        raise InvalidTokenError("Invalid token") from e

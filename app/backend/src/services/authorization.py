@@ -23,7 +23,49 @@ class ReportAccessDeniedError(Exception):
 
 
 class ProjectAccessDeniedError(Exception):
-    """The caller isn't an admin and isn't assigned to this project."""
+    """The caller isn't assigned to this project."""
+
+
+class NotApprovedError(Exception):
+    """The caller's account doesn't have the APPROVED role."""
+
+
+class AdminRequiredError(Exception):
+    """The caller doesn't have the ADMIN role."""
+
+
+def has_role(roles: List[str], role: str) -> bool:
+    return role in roles
+
+
+def require_approved(roles: List[str]) -> None:
+    """Shared "is this token allowed to use the app at all" check - same
+    definition of APPROVED for both the REST API (fastapi_app/auth.py) and
+    the MCP server (mcp_server/auth.py), so the role name isn't duplicated
+    across heads.
+    """
+    if not has_role(roles, "APPROVED"):
+        raise NotApprovedError("Account not approved")
+
+
+def require_admin(roles: List[str]) -> None:
+    if not has_role(roles, "ADMIN"):
+        raise AdminRequiredError("ADMIN role required")
+
+
+class ResourceMismatchError(Exception):
+    """Token isn't bound (RFC 8707 resource indicator) to the required resource."""
+
+
+def require_resource_audience(claims: dict, resource_url: str) -> None:
+    """RFC 8707 resource binding check used by the MCP server: require the
+    resource-indicator audience mapper's value to be present in the token's
+    audience, not just a valid client audience/azp.
+    """
+    aud = claims.get("aud")
+    aud_list = aud if isinstance(aud, list) else [aud] if aud else []
+    if resource_url not in aud_list:
+        raise ResourceMismatchError(f"Token not bound to resource {resource_url}")
 
 
 async def get_authorized_project_id(
@@ -53,19 +95,3 @@ async def get_authorized_project_id(
         raise ReportAccessDeniedError("You can only access reports in projects assigned to you")
 
     return project_id
-
-
-async def check_project_access(
-    project_id: str,
-    roles: List[str],
-    project_repo: ProjectRepository,
-) -> None:
-    """Admins can access any project; everyone else must be an assignee of this
-    one - the one place that grants access based on per-project membership
-    rather than a global role, so a normal user's own projects work without
-    making every project world-readable to every approved user.
-    """
-    if "ADMIN" in roles:
-        return
-    if not await project_repo.is_project_assignee(project_id):
-        raise ProjectAccessDeniedError(f"Not assigned to project {project_id}")

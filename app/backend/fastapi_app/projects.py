@@ -5,22 +5,25 @@ from fastapi.responses import Response, StreamingResponse
 from typing import Dict, List, Any, Optional
 import logging
 
-from src.utils.ris_parser import parse_file, RisParseError
+from src.utils.ris_parser import RisParseError
 from src.utils.logger import setup_logging
 
-from .auth import is_verified_api_call, is_admin, get_roles
+from .auth import is_verified_api_call, is_admin
 
 from src.context import RequestContext
 from .deps import get_context
-
-from src.database.models import Project as DbProject
 
 from src.background.wrapper import (
     run_process_report_background,
     run_start_automation_background,
 )
 
-from src.services.authorization import ProjectAccessDeniedError, check_project_access
+from src.services.authorization import ProjectAccessDeniedError
+from src.services.project import (
+    ProjectAssigneeAlreadyExistsError,
+    ProjectAssigneeNotFoundError,
+    ProjectNotFoundError,
+)
 from src.utils.dto import FilterMode, IntakeReportPage, Project, ProjectAssignee, ProjectDetails, ProjectReportPage, ProjectTask
 from src.utils.pagination import InvalidCursorError
 
@@ -31,89 +34,45 @@ logger = logging.getLogger(__name__)
 
 project_id_path = Path(..., description="The projects's id")
 
-
-async def get_project_by_id(project_id: str, ctx: RequestContext = Depends(get_context)) -> DbProject:
-    project = await ctx.project_repo.get_project_by_id(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return project
-
-async def require_project_access(
-    project_id: str = project_id_path,
-    ctx: RequestContext = Depends(get_context),
-    roles: List[str] = Depends(get_roles),
-) -> None:
-    """FastAPI-facing wrapper around services.authorization.check_project_access -
-    translates its plain exception into an HTTP response. The MCP server would call
-    that function directly instead, since it isn't a FastAPI app.
-    """
-    if "APPROVED" not in roles:
-        raise HTTPException(status_code=401, detail="Not allowed")
-    try:
-        await check_project_access(project_id, roles, ctx.project_repo)
-    except ProjectAccessDeniedError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-
-async def get_project_stats(
-    project: DbProject = Depends(get_project_by_id),
-    ctx: RequestContext = Depends(get_context),
-) -> ProjectDetails:
-    return await ctx.project_service.get_project_stats(project)
-
-
 @router.get("/tasks",dependencies=[Depends(is_verified_api_call)], summary="Get pending review tasks for the authenticated user.", description="Returns all projects the user is assigned to along with their personal study-link counts.")
 async def get_user_tasks(ctx: RequestContext = Depends(get_context)) -> List[ProjectTask]:
     return await ctx.project_service.get_user_tasks()
 
 @router.post("/projects", dependencies=[Depends(is_admin)], summary="Upload a project (batch of new reports that need to be assigned to studies) (usually in the .ris file format)", status_code=201)
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), ctx: RequestContext = Depends(get_context)):
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), ctx: RequestContext = Depends(get_context)) -> Project:
 
+    # dependencies=[Depends(is_admin)] above is the actual (and only) admin check -
+    # who's allowed to create a project is an API-layer permission, not a business
+    # rule, so ProjectResourceService.create_project doesn't re-check it.
     try:
-        entries = await parse_file(file)
+        result = await ctx.project_service.create_project(projectName, file)
     except RisParseError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-
-    project_id, reports, trial_ids = ctx.project_service.build_reports_from_entries(entries)
-
-    reports = await ctx.project_repo.add_new_project(project_id,projectName,reports,trial_ids)
-    if reports is None:
+    if result is None:
         raise HTTPException(status_code=409, detail="Project already exists")
-    # schedule background tasks
-    #for report in reports:
-    #    print("Report provcess appended")
-    report_ids = [report.id for report in reports]
-    background_tasks.add_task(run_process_report_background, project_id, report_ids, ctx.user_id)
+    project, report_ids = result
 
-    await ctx.pubsub_service.publish_project_update(project_id)
+    background_tasks.add_task(run_process_report_background, project.projectId, report_ids, ctx.user_id)
 
-    #TODO disabled for legacy reasons
-    #reports_dict = [report.dict() for report in reports]
-    #JSONResponse(content={"project_id": project_id, "project_description": file.filename, "reports": reports_dict}, status_code=201)
-
-    return Response(status_code=201)
+    return project
 
 @router.get("/projects", dependencies=[Depends(is_admin)], summary="Get an overview of all current projects.", description="For each project the current progress of embedding calculation and the number of already assigned reports is returned")
 async def get_available_projects(ctx: RequestContext = Depends(get_context)) -> List[ProjectDetails]:
     return await ctx.project_service.get_all_project_stats()
 
 @router.get("/projects/{project_id}", dependencies=[Depends(is_admin)], summary="Get a specific project by id.",description="Returns details and progress information for a single project identified by project id.")
-async def get_project_stats_by_id(project_stats : Project = Depends(get_project_stats)) -> Project:
-    return project_stats
+async def get_project_stats_by_id(project_id : str, ctx: RequestContext = Depends(get_context)) -> Project:
+    try:
+        return await ctx.project_service.get_project_stats_by_id(project_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 @router.delete("/projects/{project_id}", dependencies=[Depends(is_admin)], summary="Delete a project and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
 async def delete_project(project_id : str, ctx: RequestContext = Depends(get_context)):
-    #Deletes the project and through cascade and triggers everythig related to it
-    project = await ctx.project_repo.get_project_by_id(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    report_ids = await ctx.project_repo.get_project_associated_report_ids(project_id)
-
-    await ctx.project_repo.delete_project(project_id)
-
-    await ctx.vectorstore_service.delete_vectors_by_report_ids(report_ids)
-
-    await ctx.pubsub_service.publish_project_update(project_id)
+    try:
+        await ctx.project_service.delete_project(project_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return Response(status_code=204)
 
@@ -124,31 +83,22 @@ async def assign_user_to_project(
     assignee_user_id: str = Body(..., embed=False, description="User ID to assign"),
     model: str = Query("gpt-5-nano", description="LLM model name to use for study prediction"),
     ctx: RequestContext = Depends(get_context),
-):
+) -> ProjectAssignee:
     try:
-        project = await ctx.project_repo.get_project_by_id(project_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    try:
-        created = await ctx.project_repo.add_project_assignee(project_id, assignee_user_id)
+        assignee = await ctx.project_service.assign_user_to_project(project_id, assignee_user_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProjectAssigneeAlreadyExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    if not created:
-        raise HTTPException(status_code=409, detail="User already assigned to project")
-
-    await ctx.pubsub_service.publish_project_update(project_id)
-
     if assignee_user_id == "bot":
         background_tasks.add_task(run_start_automation_background, project_id, ctx.user_id, model)
 
-    return ProjectAssignee(userId=assignee_user_id, numberReportsLinked=0)
+    return assignee
 
 @router.delete("/projects/{project_id}/assignees/{user_id}", dependencies=[Depends(is_admin)],summary="Remove a user assignment from a project",status_code=204,)
 async def remove_user_from_project(
@@ -157,24 +107,15 @@ async def remove_user_from_project(
     ctx: RequestContext = Depends(get_context),
 ):
     try:
-        project = await ctx.project_repo.get_project_by_id(project_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    try:
-        removed = await ctx.project_repo.remove_project_assignee(project_id, user_id)
+        await ctx.project_service.remove_user_from_project(project_id, user_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProjectAssigneeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-
-    if not removed:
-        raise HTTPException(status_code=404, detail="User is not assigned to this project")
-
-    await ctx.pubsub_service.publish_project_update(project_id)
 
     return Response(status_code=204)
 
@@ -185,10 +126,9 @@ _limit_query = Query(50, ge=1, le=200, description="Maximum number of reports to
 
 @router.get(
     "/projects/{project_id}/reports",
-    dependencies=[Depends(require_project_access)],
     summary="Get all fully-processed reports in a project - the normal curation view.",
     description="Never returns reports that are still being processed (not yet embedded/PDF-ready); "
-                "see /reports/intake for that. Available to project assignees, not just admins.",
+                "see /reports/intake for that. Restricted to project assignees.",
 )
 async def get_project_reports(
     project_id: str,
@@ -212,6 +152,8 @@ async def get_project_reports(
         )
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProjectAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @router.get(
@@ -271,25 +213,21 @@ async def get_project_reports_review(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.get( "/projects/{project_id}/annotations",dependencies=[Depends(is_admin)],summary="Get reports annotated by all assigned users in a project.")
-async def get_project_annotations(project: DbProject = Depends(get_project_by_id), ctx: RequestContext = Depends(get_context)) -> Dict[int, Dict[str, List[Dict[str, Any]]]]:
-    return await ctx.project_service.get_project_annotations(project.id)
+async def get_project_annotations(project_id: str, ctx: RequestContext = Depends(get_context)) -> Dict[int, Dict[str, List[Dict[str, Any]]]]:
+    return await ctx.project_service.get_project_annotations(project_id)
 
-@router.get("/projects/{project_id}/stream",dependencies=[], summary="Stream updated batch information.")
+@router.get("/projects/{project_id}/stream", summary="Stream updated batch information.")
 async def stream_project_updates(
     project_id: str,
     request: Request,
     ctx: RequestContext = Depends(get_context),
 ) -> StreamingResponse:
-    async def event_stream():
-        pubsub = await ctx.pubsub_service.subscribe_to_project(project_id)
-        try:
-            while True:
-                if await request.is_disconnected():
-                    break
+    try:
+        await ctx.project_service.ensure_project_access(project_id)
+    except ProjectAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-                data = await ctx.pubsub_service.get_next_project_update(pubsub)
-                yield f"data: {data}\n\n"
-        finally:
-            await ctx.pubsub_service.unsubscribe_from_project(project_id, pubsub)
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        ctx.project_service.stream_project_updates(project_id, request.is_disconnected),
+        media_type="text/event-stream",
+    )

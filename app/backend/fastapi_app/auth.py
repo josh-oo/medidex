@@ -8,14 +8,21 @@ import os
 import time
 
 import httpx
-from jwcrypto.jwt import JWTExpired
 
 from src.utils.keycloak import (
     KEYCLOAK_URL,
     KEYCLOAK_PUBLIC_URL,
     KEYCLOAK_REALM,
+    InvalidTokenError,
+    TokenExpiredError,
     create_keycloak_openid,
-    decode_access_token,
+    verify_token as verify_keycloak_token,
+)
+from src.services.authorization import (
+    AdminRequiredError,
+    NotApprovedError,
+    require_admin,
+    require_approved,
 )
 
 load_dotenv()
@@ -52,50 +59,64 @@ FastAPI-specific presentation tier (see mcp_server/auth.py).
 
 keycloak_openid = create_keycloak_openid(KEYCLOAK_CLIENT_ID)
 
-async def verify_token(token):
-    """Verify a Keycloak-issued access token and return its decoded claims."""
+async def decode_token(token: Optional[str]) -> dict:
+    """Decode a Keycloak-issued access token into its claims, or raise HTTPException.
+
+    Actual decoding (and turning failures into InvalidTokenError/
+    TokenExpiredError) lives in src/utils/keycloak.py, shared with
+    mcp_server/auth.py - this just translates those into this head's
+    HTTPException convention. Every other dependency in this module
+    (get_roles, is_admin, get_user) builds on this one function rather than
+    decoding independently.
+    """
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        return await decode_access_token(token, keycloak_openid)
-    except JWTExpired:
+        return await verify_keycloak_token(token, keycloak_openid)
+    except TokenExpiredError:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
-    except Exception:
+    except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token. Please log in again.")
 
 async def get_roles(token: str = Security(oauth2_scheme)):
-    decoded = await verify_token(token)
+    decoded = await decode_token(token)
     return decoded.get("roles", [])
 
-async def is_admin(token: str = Security(oauth2_scheme)):
-    decoded = await verify_token(token)
-    if "ADMIN" not in decoded.get("roles", []):
+async def is_admin(token: str = Security(oauth2_scheme)) -> dict:
+    """Require a token with the ADMIN role. Returns its decoded claims."""
+    decoded = await decode_token(token)
+    try:
+        require_admin(decoded.get("roles", []))
+    except AdminRequiredError:
         raise HTTPException(status_code=401, detail="Not allowed")
-    return token
+    return decoded
 
-async def get_user_id(token: Optional[str] = Security(oauth2_scheme)):
-    if not token:
-        return None
-    decoded = await verify_token(token)
-    if not decoded:
-        return None
-    return decoded.get("sub")
+async def get_user(token: Optional[str] = Security(oauth2_scheme)) -> Optional[dict]:
+    """Decode the caller's token, requiring the APPROVED role if a token was
+    given at all. Returns the decoded claims when valid, or None when no
+    token was given - callers decide whether that's acceptable (auto_error=False
+    on oauth2_scheme lets a missing token reach here instead of FastAPI
+    rejecting it outright). Raises HTTPException if a token was given but
+    isn't APPROVED.
 
-async def is_verified(token: Optional[str] = Security(oauth2_scheme)):
-    """Validate a JWT token if provided. Returns the token string when valid, otherwise None.
-
-    Note: auto_error=False lets callers decide whether a missing token is acceptable.
+    Replaces what used to be two separate dependencies: get_user_id (only
+    needed decoded["sub"]) and is_verified (needed the APPROVED check) - every
+    caller of either one decoded the same token the same way, so there was no
+    reason to keep them apart. One side effect: get_context (fastapi_app/deps.py)
+    depends on this for user_id, so nearly every route now gets the APPROVED
+    check for free instead of only the routes that happened to also declare
+    Depends(is_verified)/is_admin/is_verified_api_call.
     """
     if not token:
         return None
-    decoded = await verify_token(token)
-    if not decoded:
-        return None
-    if "APPROVED" not in decoded.get("roles", []):
+    decoded = await decode_token(token)
+    try:
+        require_approved(decoded.get("roles", []))
+    except NotApprovedError:
         raise HTTPException(status_code=401, detail="Not allowed")
 
-    return token
+    return decoded
 
 """
 API keys
@@ -164,19 +185,21 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> O
         return None
 
     try:
-        decoded = await verify_token(token)
+        decoded = await decode_token(token)
     except HTTPException:
         return None
-    if "APPROVED" not in decoded.get("roles", []):
+    try:
+        require_approved(decoded.get("roles", []))
+    except NotApprovedError:
         return None
     return True
 
 def is_verified_api_call(
-    token: Optional[str] = Depends(is_verified, use_cache=False),
+    claims: Optional[dict] = Depends(get_user, use_cache=False),
     api_key_valid: Optional[bool] = Depends(verify_api_key, use_cache=False),
 ):
     """Allow either a valid JWT (Authorization header) or a valid API key (X-API-Key header)."""
-    if token:
+    if claims:
         return True
     if api_key_valid:
         return True

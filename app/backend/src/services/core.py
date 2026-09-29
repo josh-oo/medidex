@@ -1,16 +1,28 @@
 from ..database.repositories.study import StudyRepository
 from ..database.repositories.project import ProjectRepository
+from ..database.repositories.report import ReportRepository
+from ..utils.dto import CandidateStudyPage, candidate_studies_to_dto
+from ..utils.pagination import decode_cursor, encode_cursor
+from .authorization import get_authorized_project_id
 from .authors import AuthorFeatureService
 from .vectorstore import VectorstoreService
 from .report import ReportService
-from .aspects import TagScoringService, TagCategories
+from .aspects import TagScoringService, TagCategories, UnsupportedAspectError
 
-from typing import List, Any
+from typing import List, Any, Optional
 from types import SimpleNamespace
 
 import math
 
-    
+
+class ReportNotReadyError(Exception):
+    """The report hasn't finished embedding/PDF processing yet."""
+
+
+class ReportNotInSourceProjectError(Exception):
+    """The report isn't part of the given source project."""
+
+
 class StudySimilaritySearchService:
     def __init__(self, user_id : str, vectorstore : VectorstoreService, study_repo : StudyRepository, project_repo : ProjectRepository, author_feature_service : AuthorFeatureService, report_service : ReportService):
         self.user_id = user_id
@@ -135,17 +147,79 @@ class StudySimilaritySearchService:
         page = rows[offset:offset + limit]
         return page, has_more
 
+    async def get_similar_studies_page(
+        self,
+        report_id: int,
+        cutoff: Optional[str],
+        limit: int,
+        cursor: Optional[str],
+        source: Optional[str],
+        negative_studies: Optional[List[int]],
+        negative_reports: Optional[List[int]],
+        return_details: bool,
+        user_id: Optional[str],
+    ) -> CandidateStudyPage:
+        """Full request-level wrapper around get_similar_studies_by_id: access check,
+        readiness/source checks, cursor decoding, and DTO assembly, shared by both heads
+        (previously inline in fastapi_app/core.py's similarity_search_studies_by_id, gated
+        by a separate check_report_access FastAPI dependency). `user_id` is the caller's
+        authenticated id for that access check - kept as an explicit argument rather than
+        reusing self.user_id, which this service coerces to a "user" placeholder for
+        vectorstore query personalization (see __init__) and so can't double as an
+        "is this request even authenticated" signal.
+
+        Raises (from get_authorized_project_id, src/services/authorization.py)
+        ReportNotFoundError/AuthenticationRequiredError/ReportAccessDeniedError for the
+        access check; ReportNotReadyError unless the report has finished embedding/PDF
+        processing (skipped when `cutoff` is given - that's a test-only path over
+        historical data, where "ready" doesn't apply); ReportNotInSourceProjectError if
+        `source` is given and doesn't match the report's actual project; and
+        InvalidCursorError (src/utils/pagination.py) for a malformed cursor.
+        """
+        project_id = await get_authorized_project_id(report_id, self.report_service.report_repo, self.project_repo, user_id)
+
+        if not cutoff and not await self.report_service.is_ready(report_id):
+            raise ReportNotReadyError(f"Report {report_id} is not ready for processing")
+
+        if source is not None and project_id != source:
+            raise ReportNotInSourceProjectError(f"Report {report_id} not found in project {source}")
+
+        offset = decode_cursor(cursor) if cursor else 0
+
+        result, has_more = await self.get_similar_studies_by_id(
+            report_id,
+            cutoff,
+            limit,
+            offset,
+            negative_studies,
+            negative_reports,
+            return_details,
+        )
+        studies = candidate_studies_to_dto(result)
+        next_cursor = encode_cursor(offset + limit) if has_more else None
+        return CandidateStudyPage(items=studies, nextCursor=next_cursor)
+
 
 class RelatedTagSearchService:
 
-    def __init__(self, vectorstore : VectorstoreService, tag_scoring_service : TagScoringService, study_similarity_service : StudySimilaritySearchService, study_repo : StudyRepository):
+    def __init__(
+        self,
+        vectorstore : VectorstoreService,
+        tag_scoring_service : TagScoringService,
+        study_similarity_service : StudySimilaritySearchService,
+        study_repo : StudyRepository,
+        report_repo : ReportRepository,
+        project_repo : ProjectRepository,
+    ):
         self.vectorstore = vectorstore
         self.tag_scoring_service = tag_scoring_service
         self.study_similarity_service = study_similarity_service
         self.study_repo = study_repo
+        self.report_repo = report_repo
+        self.project_repo = project_repo
 
     async def search_related_tags_by_study_ids(self, study_ids: List[int], aspect : TagCategories, vectors : Any):
-        
+
         related_tags = []
         if aspect == TagCategories.interventions:
             related_tags = await self.study_repo.get_study_interventions(study_ids)
@@ -159,9 +233,19 @@ class RelatedTagSearchService:
             related_tags = await self.study_repo.get_study_outcomes(study_ids=study_ids)
             related_ids = {item["ID"] for items in related_tags.values() for item in items}
             return await self.tag_scoring_service.score_related_tags(related_ids, vectors, TagCategories.outcomes)
-    
-    async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : str):
-        
+        else:
+            raise UnsupportedAspectError(f"No related-tag search is defined for aspect '{aspect}'")
+
+    async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : str, user_id: Optional[str] = None):
+        """`user_id` gates access the same way get_similar_studies_page does (see that
+        method's docstring) - previously enforced by a separate check_report_access
+        FastAPI dependency ahead of this call.
+        """
+        await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
+
+        if aspect not in (TagCategories.interventions, TagCategories.conditions, TagCategories.outcomes):
+            raise UnsupportedAspectError(f"No related-tag search is defined for aspect '{aspect}'")
+
         #similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, TagCategories.default, cutoff, k, None, None, False)
         similar_studies, _has_more = await self.study_similarity_service.get_similar_studies_by_id(report_id, cutoff, k, 0, None, None, False)
         predicted_studies = [row.id for row in similar_studies]

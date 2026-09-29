@@ -12,7 +12,7 @@ REST API's FastAPI presentation tier).
 """
 
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, List, Optional
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver.exceptions import ResourceError, ResourceNotFoundError
@@ -21,6 +21,8 @@ from src.context import RequestContext
 from src.database import get_session
 from src.services.authorization import (
     get_authorized_project_id,
+    require_admin as require_admin_role,
+    AdminRequiredError,
     ReportNotFoundError,
     AuthenticationRequiredError,
     ReportAccessDeniedError,
@@ -39,21 +41,37 @@ def current_user_id() -> str:
     return access_token.subject
 
 
+def current_roles() -> List[str]:
+    """The caller's realm roles, straight off the already-decoded token claims
+    (KeycloakMCPTokenVerifier keeps them on AccessToken.claims) - no token
+    present means no roles, same convention as an empty list from a token
+    with no "roles" claim.
+    """
+    access_token = get_access_token()
+    if access_token is None:
+        return []
+    return (access_token.claims or {}).get("roles", [])
+
+
 def require_admin() -> None:
     """Raise ResourceError (the MCP tool/resource error convention - caught and
     surfaced with its message intact from both a tool call and a resource read,
     see mcp.server.mcpserver.exceptions) unless the caller's token carries
-    Keycloak's ADMIN realm role - same check as the REST API's is_admin
-    dependency (fastapi_app/auth.py), applied to the medidex-mcp client's own
-    token (KeycloakMCPTokenVerifier already decodes it and keeps the raw claims
-    on AccessToken.claims) instead of re-decoding it here.
+    Keycloak's ADMIN realm role. Delegates the actual role check to
+    src/services/authorization.py's require_admin - the same rule the REST
+    API's is_admin dependency (fastapi_app/auth.py) enforces. This is a
+    fail-fast convenience for tools that are admin-only outright; it doesn't
+    replace an authorization decision made inside a shared src/ service (see
+    ProjectResourceService.create_project), which stays the actual
+    enforcement no matter which head calls it.
     """
     access_token = get_access_token()
     if access_token is None:
         raise ResourceError("Not authenticated")
-    roles = (access_token.claims or {}).get("roles", [])
-    if "ADMIN" not in roles:
-        raise ResourceError("Not allowed: admin role required")
+    try:
+        require_admin_role(current_roles())
+    except AdminRequiredError as exc:
+        raise ResourceError(f"Not allowed: {exc}") from exc
 
 
 @asynccontextmanager
@@ -64,9 +82,11 @@ async def request_context(user_id: Optional[str]) -> AsyncIterator[RequestContex
 
 async def require_report_access(report_id: int, ctx: RequestContext) -> None:
     """Raise ResourceError/ResourceNotFoundError (the MCP tool/resource error
-    convention) unless the caller may access this report - same check as the
-    REST API's check_report_access (fastapi_app/core.py), called via the shared
-    domain function directly instead of through that FastAPI dependency.
+    convention) unless the caller may access this report - for tools that read a
+    report directly (get_report, get_report_studies) rather than through a src/
+    service method that already performs this same check itself (e.g.
+    LinkageService.link_existing_study_to_report, StudySimilaritySearchService.
+    get_similar_studies_page - see get_authorized_project_id's other callers).
     """
     try:
         await get_authorized_project_id(report_id, ctx.report_repo, ctx.project_repo, ctx.user_id)
