@@ -58,7 +58,7 @@ docstring), which the tool form doesn't replicate.
 """
 
 import asyncio
-from typing import Annotated, Any, Dict, List, Set
+from typing import Annotated, List, Set
 
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
@@ -89,7 +89,6 @@ from src.utils.dto import (
     Tag,
     reports_to_dto,
     studies_to_dto,
-    tags_to_dto,
 )
 from src.utils.ris_parser import RisParseError
 
@@ -248,8 +247,7 @@ def register(server: MCPServer) -> None:
     async def get_study_interventions(study_id: int) -> List[Tag]:
         """Interventions for a specific study (e.g. 'Placebo', 'Group Therapy', ...). Tool form of the `study-interventions` resource."""
         async with request_context(current_user_id()) as ctx:
-            result = await ctx.study_repo.get_study_interventions_single(study_id)
-            return tags_to_dto(result)
+            return await ctx.study_repo.get_study_interventions_single(study_id)
 
     @server.tool(
         annotations=ToolAnnotations(
@@ -263,8 +261,7 @@ def register(server: MCPServer) -> None:
     async def get_study_conditions(study_id: int) -> List[Tag]:
         """The health conditions of participants in a specific study (e.g. 'COVID-19', 'Diabetes', ...). Tool form of the `study-conditions` resource."""
         async with request_context(current_user_id()) as ctx:
-            result = await ctx.study_repo.get_study_conditions_single(study_id)
-            return tags_to_dto(result)
+            return await ctx.study_repo.get_study_conditions_single(study_id)
 
     @server.tool(
         annotations=ToolAnnotations(
@@ -278,8 +275,7 @@ def register(server: MCPServer) -> None:
     async def get_study_outcomes(study_id: int) -> List[Tag]:
         """Outcomes for a specific study (e.g. 'Mortality', 'Hospitalization', ...). Tool form of the `study-outcomes` resource."""
         async with request_context(current_user_id()) as ctx:
-            result = await ctx.study_repo.get_study_outcomes_single(study_id)
-            return tags_to_dto(result)
+            return await ctx.study_repo.get_study_outcomes_single(study_id)
 
     @server.tool(
         annotations=ToolAnnotations(
@@ -290,7 +286,7 @@ def register(server: MCPServer) -> None:
             openWorldHint=False,
         )
     )
-    async def get_study_participants(study_id: int) -> List[Dict[str, Any]]:
+    async def get_study_participants(study_id: int) -> List[Tag]:
         """Participant description for a specific study (e.g. Male, Female, Adult, Child, ...). Tool form of the `study-participants` resource."""
         async with request_context(current_user_id()) as ctx:
             return await ctx.study_repo.get_study_participants_single(study_id)
@@ -304,7 +300,7 @@ def register(server: MCPServer) -> None:
             openWorldHint=False,
         )
     )
-    async def get_study_design(study_id: int) -> List[Dict[str, Any]]:
+    async def get_study_design(study_id: int) -> List[Tag]:
         """The study design of the corresponding study ('Randomized Controlled Trial', 'Controlled Clinical Trial'). Tool form of the `study-design` resource."""
         async with request_context(current_user_id()) as ctx:
             return await ctx.study_repo.get_study_design_single(study_id)

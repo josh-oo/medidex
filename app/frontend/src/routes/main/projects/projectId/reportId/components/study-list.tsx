@@ -97,7 +97,7 @@ export default function StudyList() {
       <CandidateStudyTable
         reportId={reportIdNumber}
         studies={studies}
-        hasMore={nextCursor !== null}
+        nextCursor={nextCursor}
         isLoadingMore={isLoadingMore}
         onLoadMore={handleLoadMore}
       />

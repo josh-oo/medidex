@@ -322,7 +322,21 @@ INSERT INTO "intervention" ("id", "description") VALUES
 (3000098, '10-week supervised combined resistance and elastic-band exercise program'),
 (3000099, 'weekly mandala artistic engagement sessions for 4 weeks'),
 (3000100, 'integrated digital adherence technology (TB-TST: mobile app plus metabolite testing)'),
-(3000101, 'Oral Ziltravir (800 mg twice daily)') ON CONFLICT DO NOTHING;
+(3000101, 'Oral Ziltravir (800 mg twice daily)'),
+-- Extra synthetic interventions below, added to give SYNTH-DYSLIPIDEMIA-A-091
+-- (study 1000091) more than one page of each aspect list, for exercising
+-- pagination/"Load more" in the study details view.
+(3000102, 'TLC-2716 40 mg once daily'),
+(3000103, 'TLC-2716 80 mg once daily'),
+(3000104, 'matching placebo capsule once daily'),
+(3000105, 'rosuvastatin 20 mg background therapy'),
+(3000106, 'atorvastatin 40 mg background therapy'),
+(3000107, 'ezetimibe 10 mg add-on therapy'),
+(3000108, 'PCSK9 inhibitor add-on therapy (evolocumab)'),
+(3000109, 'structured low-saturated-fat dietary counseling'),
+(3000110, 'bempedoic acid 180 mg once daily'),
+(3000111, 'icosapent ethyl 2 g twice daily'),
+(3000112, 'fenofibrate 145 mg once daily') ON CONFLICT DO NOTHING;
 
 INSERT INTO "condition" ("id", "description") VALUES
 
@@ -424,7 +438,19 @@ INSERT INTO "condition" ("id", "description") VALUES
 (3100096, 'metabolic syndrome in older adults'),
 (3100097, 'psychological distress in family members of terminally ill patients'),
 (3100098, 'tuberculosis requiring multi-month treatment'),
-(3100099, 'mild-to-moderate COVID-19') ON CONFLICT DO NOTHING;
+(3100099, 'mild-to-moderate COVID-19'),
+-- Extra synthetic conditions for study 1000091 - see the intervention block above.
+(3100100, 'familial combined hyperlipidemia'),
+(3100101, 'atherosclerotic cardiovascular disease risk reduction'),
+(3100102, 'hypertriglyceridemia'),
+(3100103, 'elevated LDL cholesterol despite statin therapy'),
+(3100104, 'metabolic syndrome with dyslipidemia'),
+(3100105, 'type 2 diabetes with mixed dyslipidemia'),
+(3100106, 'statin-associated muscle symptoms'),
+(3100107, 'heterozygous familial hypercholesterolemia'),
+(3100108, 'residual cardiovascular risk on maximally tolerated statin therapy'),
+(3100109, 'non-alcoholic fatty liver disease with dyslipidemia'),
+(3100110, 'low HDL cholesterol with elevated triglycerides') ON CONFLICT DO NOTHING;
 
 INSERT INTO "outcome" ("id", "description") VALUES
 
@@ -625,7 +651,18 @@ INSERT INTO "outcome" ("id", "description") VALUES
 (3200195, 'spiritual well-being and self-reported quality of life'),
 (3200196, 'treatment adherence measured by metabolite testing and app engagement'),
 (3200197, 'TB treatment completion rates and patient satisfaction with technology support'),
-(3200198, 'incidence of COVID-19–related hospitalization or all-cause mortality by day 28') ON CONFLICT DO NOTHING;
+(3200198, 'incidence of COVID-19–related hospitalization or all-cause mortality by day 28'),
+-- Extra synthetic outcomes for study 1000091 - see the intervention block above.
+(3200199, 'change in LDL cholesterol from baseline'),
+(3200200, 'change in apolipoprotein B concentration'),
+(3200201, 'incidence of treatment-emergent adverse events'),
+(3200202, 'change in high-sensitivity C-reactive protein'),
+(3200203, 'change in HDL cholesterol from baseline'),
+(3200204, 'proportion of participants achieving LDL cholesterol target'),
+(3200205, 'change in liver enzyme concentrations'),
+(3200206, 'change in fasting insulin and glucose'),
+(3200207, 'pharmacokinetic parameters (Cmax, AUC)'),
+(3200208, 'patient-reported treatment satisfaction') ON CONFLICT DO NOTHING;
 
 INSERT INTO "design" ("id", "description") VALUES
 
@@ -723,7 +760,19 @@ INSERT INTO "design" ("id", "description") VALUES
 (3300092, 'Multi-country adaptation study'),
 (3300093, 'Phase 2, randomized, double-blind trial'),
 (3300094, 'Pragmatic randomized trial'),
-(3300095, 'Phase 3, multicenter, double-blind, placebo-controlled trial') ON CONFLICT DO NOTHING;
+(3300095, 'Phase 3, multicenter, double-blind, placebo-controlled trial'),
+-- Extra synthetic designs for study 1000091 - see the intervention block above.
+(3300096, 'Phase 2, randomized, double-blind, placebo-controlled, dose-ranging trial'),
+(3300097, 'Open-label extension study'),
+(3300098, 'Randomized, crossover pharmacokinetic study'),
+(3300099, 'Multicenter, randomized, active-comparator trial'),
+(3300100, 'Single-blind, dose-escalation safety study'),
+(3300101, 'Randomized, double-blind, parallel-group trial'),
+(3300102, 'Observational cohort extension study'),
+(3300103, 'Randomized withdrawal study'),
+(3300104, 'Phase 1b, randomized, placebo-controlled, multiple-ascending-dose study'),
+(3300105, 'Adaptive, randomized, double-blind trial'),
+(3300106, 'Post-hoc pooled analysis of phase 1 and phase 2 data') ON CONFLICT DO NOTHING;
 
 INSERT INTO "participant" ("id", "description") VALUES
 
@@ -827,7 +876,19 @@ INSERT INTO "participant" ("id", "description") VALUES
 (3400098, 'women aged 70 years or older with metabolic syndrome (mean age 75.2 years)'),
 (3400099, 'adult family caregivers of patients in palliative/hospice care settings'),
 (3400100, 'adults with drug-susceptible tuberculosis in treatment initiation or continuation phase'),
-(3400101, 'unvaccinated adults with mild-to-moderate COVID-19 and at least one risk factor for severe disease') ON CONFLICT DO NOTHING;
+(3400101, 'unvaccinated adults with mild-to-moderate COVID-19 and at least one risk factor for severe disease'),
+-- Extra synthetic participant descriptions for study 1000091 - see the intervention block above.
+(3400102, 'adults aged 18-75 with LDL cholesterol above 130 mg/dL despite statin therapy'),
+(3400103, 'adults with genetically confirmed familial combined hyperlipidemia'),
+(3400104, 'adults with fasting triglycerides between 200 and 500 mg/dL'),
+(3400105, 'adults intolerant to at least two statins'),
+(3400106, 'adults with type 2 diabetes and mixed dyslipidemia'),
+(3400107, 'postmenopausal women with elevated cardiovascular risk'),
+(3400108, 'adults with heterozygous familial hypercholesterolemia on maximally tolerated statin'),
+(3400109, 'adults with non-alcoholic fatty liver disease and dyslipidemia'),
+(3400110, 'adults aged 40-70 with low HDL cholesterol and elevated triglycerides'),
+(3400111, 'healthy volunteers enrolled in the single-ascending-dose cohort'),
+(3400112, 'adults with residual cardiovascular risk despite maximally tolerated statin therapy') ON CONFLICT DO NOTHING;
 
 -- The comments above each row below cite the real, open-access PubMed/PMC RCT
 -- that inspired that study's synthetic reports. These citations are SQL
@@ -1140,7 +1201,19 @@ INSERT INTO "study_condition" ("study_id", "condition_id") VALUES
 (1000098, 3100096),
 (1000099, 3100097),
 (1000100, 3100098),
-(1000101, 3100099) ON CONFLICT DO NOTHING;
+(1000101, 3100099),
+-- Extra links for study 1000091 - see the intervention block above.
+(1000091, 3100100),
+(1000091, 3100101),
+(1000091, 3100102),
+(1000091, 3100103),
+(1000091, 3100104),
+(1000091, 3100105),
+(1000091, 3100106),
+(1000091, 3100107),
+(1000091, 3100108),
+(1000091, 3100109),
+(1000091, 3100110) ON CONFLICT DO NOTHING;
 
 INSERT INTO "study_intervention" ("study_id", "intervention_id") VALUES
 
@@ -1244,7 +1317,19 @@ INSERT INTO "study_intervention" ("study_id", "intervention_id") VALUES
 (1000098, 3000098),
 (1000099, 3000099),
 (1000100, 3000100),
-(1000101, 3000101) ON CONFLICT DO NOTHING;
+(1000101, 3000101),
+-- Extra links for study 1000091 - see the intervention block above.
+(1000091, 3000102),
+(1000091, 3000103),
+(1000091, 3000104),
+(1000091, 3000105),
+(1000091, 3000106),
+(1000091, 3000107),
+(1000091, 3000108),
+(1000091, 3000109),
+(1000091, 3000110),
+(1000091, 3000111),
+(1000091, 3000112) ON CONFLICT DO NOTHING;
 
 INSERT INTO "study_outcome" ("study_id", "outcome_id") VALUES
 
@@ -1445,7 +1530,18 @@ INSERT INTO "study_outcome" ("study_id", "outcome_id") VALUES
 (1000099, 3200195),
 (1000100, 3200196),
 (1000100, 3200197),
-(1000101, 3200198) ON CONFLICT DO NOTHING;
+(1000101, 3200198),
+-- Extra links for study 1000091 - see the intervention block above.
+(1000091, 3200199),
+(1000091, 3200200),
+(1000091, 3200201),
+(1000091, 3200202),
+(1000091, 3200203),
+(1000091, 3200204),
+(1000091, 3200205),
+(1000091, 3200206),
+(1000091, 3200207),
+(1000091, 3200208) ON CONFLICT DO NOTHING;
 
 INSERT INTO "study_design" ("study_id", "design_id") VALUES
 
@@ -1549,7 +1645,19 @@ INSERT INTO "study_design" ("study_id", "design_id") VALUES
 (1000098, 3300023),
 (1000099, 3300023),
 (1000100, 3300094),
-(1000101, 3300095) ON CONFLICT DO NOTHING;
+(1000101, 3300095),
+-- Extra links for study 1000091 - see the intervention block above.
+(1000091, 3300096),
+(1000091, 3300097),
+(1000091, 3300098),
+(1000091, 3300099),
+(1000091, 3300100),
+(1000091, 3300101),
+(1000091, 3300102),
+(1000091, 3300103),
+(1000091, 3300104),
+(1000091, 3300105),
+(1000091, 3300106) ON CONFLICT DO NOTHING;
 
 INSERT INTO "study_participant" ("study_id", "participant_id") VALUES
 
@@ -1653,7 +1761,19 @@ INSERT INTO "study_participant" ("study_id", "participant_id") VALUES
 (1000098, 3400098),
 (1000099, 3400099),
 (1000100, 3400100),
-(1000101, 3400101) ON CONFLICT DO NOTHING;
+(1000101, 3400101),
+-- Extra links for study 1000091 - see the intervention block above.
+(1000091, 3400102),
+(1000091, 3400103),
+(1000091, 3400104),
+(1000091, 3400105),
+(1000091, 3400106),
+(1000091, 3400107),
+(1000091, 3400108),
+(1000091, 3400109),
+(1000091, 3400110),
+(1000091, 3400111),
+(1000091, 3400112) ON CONFLICT DO NOTHING;
 
 INSERT INTO "report" ("id", "report_number", "title", "authors", "journal", "year", "abstract", "date_entered", "date_edited", "doi", "trial_registration_id", "language", "publisher") VALUES
 
@@ -1867,7 +1987,19 @@ INSERT INTO "report" ("id", "report_number", "title", "authors", "journal", "yea
 (2000213, 208, 'Digital adherence technology with metabolite-based verification improves TB treatment completion in resource-limited settings', 'Tariq Kowalski//Chidi Ionescu//Hiroshi Zeleny//Felix Csik//Nadia Okoye', 'Clinical Outcomes Research Review', 2020, 'Background: TB treatment non-adherence threatens individual outcomes and public health through emergence of drug-resistant strains. Digital adherence technologies combined with objective biomarker verification may improve outcomes. Objective: To evaluate whether integrated digital technology (TB-TST) plus standard care improves TB treatment completion compared to standard care alone. Methods: A total of 68 TB patients (mean age 38 years; 64% male) in Argentina''s public TB program were randomized to standard directly observed therapy (n=34) or standard care plus TB-TST mobile app with urine metabolite monitoring (n=34). Primary endpoint was TB treatment completion at 6 months. Secondary endpoints included metabolite-confirmed adherence rates, app engagement metrics, and patient satisfaction. Results: Treatment completion occurred in 76% of TB-TST participants versus 56% of standard care (relative risk 1.36; 95% CI 1.01–1.82; P = 0.039). Metabolite testing confirmed adherence on 87% of scheduled assessments in the intervention arm. App utilization was high (mean 68% of prescribed daily reminders accessed). Patients reported improved confidence in their adherence (P = 0.008) and strengthened therapeutic relationships with treatment supporters. No serious adverse events occurred. Conclusion: Integrated digital adherence technology with metabolite verification enhances TB treatment completion in pragmatic clinical settings, supporting scale-up for TB program implementation.', '2020-07-21 09:00:00', '2026-04-09 00:00:00', '10.5555/medidex.synthetic.0213', 'SYNTH-NCT0000100', 'English', 'Clinical Outcomes Research Review Press'),
 (2000214, 209, 'Patient perspectives and implementation factors shaping acceptance and sustained use of digital TB adherence support tools', 'Tariq Kowalski//Chidi Ionescu//Hiroshi Zeleny//Felix Csik//Nadia Okoye', 'International Trials Register Quarterly', 2021, 'Background: Digital health tools for TB adherence require sustained patient engagement for effectiveness. Understanding facilitators and barriers to technology adoption in diverse, resource-limited settings is critical for implementation success. Objective: Qualitative analysis of patient experiences and perceptions regarding TB-TST implementation. Methods: Semi-structured interviews with 33 intervention-arm participants and 5 treatment support workers were conducted during or shortly after TB treatment completion. Data were analyzed using thematic coding informed by normalization process theory to identify factors enabling or hindering technology integration into routine TB care. Results: Patients identified app medication reminders and direct messaging with treatment supporters as most valuable; many used the app to ask sensitive questions avoided in face-to-face settings. Perceived benefits included improved organization, reduced treatment burden perceptions, and psychological reassurance. Initial confusion about the metabolite test purpose resolved over time through repeated explanation. Key barriers included inconsistent smartphone access, limited internet connectivity in some neighborhoods, burden of cumulative TB medication side effects, and work schedule conflicts with testing appointments. Qualitative feedback emphasized the importance of the treatment supporter relationship as a trusted anchor for technology use. Conclusions: Successful digital TB adherence tools require attention to social context, patient-centered design, and integration with human support systems rather than technology-only approaches.', '2021-02-06 09:00:00', '2026-05-08 00:00:00', '10.5555/medidex.synthetic.0214', 'SYNTH-NCT0000100', 'English', 'International Trials Register Quarterly Press'),
 (2000215, 210, 'Corrigendum: Digital adherence technology with metabolite-based verification improves TB treatment completion', 'Tariq Kowalski//Chidi Ionescu//Hiroshi Zeleny//Felix Csik//Nadia Okoye', 'Clinical Outcomes Research Review', 2022, 'In the primary results article of this trial, Table 2 contained a mislabeled column header. The percentages reported under ''Baseline Adherence'' were inadvertently duplicated in the row for ''Week 12 Metabolite Detection'' due to a data import error. The corrected table reflects accurate metabolite detection rates at all timepoints and does not affect the primary efficacy conclusions. The study conclusions remain unchanged. We regret any confusion this may have caused.', '2022-04-23 09:00:00', '2026-06-17 00:00:00', '10.5555/medidex.synthetic.0215', NULL, 'English', 'Clinical Outcomes Research Review Press'),
-(2000216, 211, 'Efficacy and Safety of Oral Ziltravir in Early COVID-19: Protocol for a Phase 3, Randomized, Placebo-Controlled Trial', 'Smith J//Doe A//Johnson R', 'Journal of Infectious Disease Interventions', 2025, 'Background: Accessible oral antiviral treatments remain critical for preventing COVID-19 progression. This protocol describes a trial evaluating ziltravir, a novel oral RNA-dependent RNA polymerase inhibitor, in non-hospitalized adults. Methods: This is a phase 3, multicenter, double-blind, placebo-controlled trial. Approximately 1,050 symptomatic adults with mild-to-moderate COVID-19 and at least one risk factor for severe disease will be randomized 1:1 to receive ziltravir (800 mg twice daily) or a matching placebo for 5 days. The primary endpoint is the incidence of COVID-19–related hospitalization or all-cause mortality by day 28. Secondary endpoints include time to sustained symptom resolution, viral load reduction, and safety metrics. Discussion: This trial will determine whether early intervention with ziltravir safely and effectively mitigates severe COVID-19 outcomes in high-risk outpatients, potentially offering a new therapeutic option for clinical management.', '2025-01-10 09:00:00', '2025-01-10 09:00:00', '10.5555/medidex.synthetic.0002', 'NCT012345678', 'English', 'Journal of Infectious Disease Interventions Press');
+(2000216, 211, 'Efficacy and Safety of Oral Ziltravir in Early COVID-19: Protocol for a Phase 3, Randomized, Placebo-Controlled Trial', 'Smith J//Doe A//Johnson R', 'Journal of Infectious Disease Interventions', 2025, 'Background: Accessible oral antiviral treatments remain critical for preventing COVID-19 progression. This protocol describes a trial evaluating ziltravir, a novel oral RNA-dependent RNA polymerase inhibitor, in non-hospitalized adults. Methods: This is a phase 3, multicenter, double-blind, placebo-controlled trial. Approximately 1,050 symptomatic adults with mild-to-moderate COVID-19 and at least one risk factor for severe disease will be randomized 1:1 to receive ziltravir (800 mg twice daily) or a matching placebo for 5 days. The primary endpoint is the incidence of COVID-19–related hospitalization or all-cause mortality by day 28. Secondary endpoints include time to sustained symptom resolution, viral load reduction, and safety metrics. Discussion: This trial will determine whether early intervention with ziltravir safely and effectively mitigates severe COVID-19 outcomes in high-risk outpatients, potentially offering a new therapeutic option for clinical management.', '2025-01-10 09:00:00', '2025-01-10 09:00:00', '10.5555/medidex.synthetic.0002', 'NCT012345678', 'English', 'Journal of Infectious Disease Interventions Press'),
+-- Extra synthetic reports for study 1000091 (SYNTH-DYSLIPIDEMIA-A-091) below, to
+-- give it more than one page of reports for exercising pagination/"Load more"
+-- in the study details view.
+(2000217, 212, 'Dose-ranging phase 2 extension of TLC-2716 in adults with residual dyslipidemia: study protocol', 'Chidi Moreau//Farah Farrell//Viktor Moreau//Oleksandr Eriksson', 'Annals of Pragmatic Clinical Research', 2022, 'Building on phase 1 safety and tolerability data, this protocol describes a randomized, double-blind, placebo-controlled dose-ranging trial of TLC-2716 (40 mg and 80 mg once daily) in adults with residual dyslipidemia despite maximally tolerated statin therapy. Approximately 180 participants will be randomized 1:1:1 to TLC-2716 40 mg, 80 mg, or matching placebo for 12 weeks. The primary endpoint is change in LDL cholesterol from baseline; secondary endpoints include apolipoprotein B, high-sensitivity C-reactive protein, and safety measures including liver enzymes.', '2022-01-05 09:00:00', '2026-07-03 00:00:00', '10.5555/medidex.synthetic.0217', 'SYNTH-ISRCTN-0000091', 'English', 'Annals of Pragmatic Clinical Research Press'),
+(2000218, 213, 'Lipid-lowering efficacy and safety of TLC-2716 40 mg and 80 mg in a 12-week randomized dose-ranging trial', 'Chidi Moreau//Farah Farrell//Viktor Moreau//Oleksandr Eriksson', 'International Journal of Behavioral Medicine Practice', 2023, 'Background: Residual dyslipidemia despite statin therapy remains a modifiable driver of cardiovascular risk. Methods: In this randomized, double-blind trial, 180 adults with LDL cholesterol above 130 mg/dL despite maximally tolerated statins received TLC-2716 40 mg, 80 mg, or placebo once daily for 12 weeks. Results: LDL cholesterol fell by 28% and 41% in the 40 mg and 80 mg arms respectively, versus 3% with placebo (P < 0.001 for both comparisons). Apolipoprotein B and high-sensitivity C-reactive protein also declined significantly with active treatment. Adverse events were mild and balanced across groups, with no clinically significant liver enzyme elevations. Conclusion: TLC-2716 produced dose-dependent LDL cholesterol reductions with an acceptable short-term safety profile.', '2023-03-14 09:00:00', '2026-07-03 00:00:00', '10.5555/medidex.synthetic.0218', 'SYNTH-ISRCTN-0000091', 'English', 'International Journal of Behavioral Medicine Practice Press'),
+(2000219, 214, 'Effects of TLC-2716 on apolipoprotein B and high-sensitivity C-reactive protein in adults with residual cardiovascular risk', 'Chidi Moreau//Viktor Moreau//Oleksandr Eriksson', 'Clinical Outcomes Research Review', 2023, 'This secondary analysis of the phase 2 dose-ranging trial examined lipoprotein particle number and inflammatory biomarker changes with TLC-2716. Apolipoprotein B fell by 24% (80 mg arm) versus 2% with placebo (P < 0.001), and high-sensitivity C-reactive protein declined by 19% in active-treatment participants with elevated baseline values. These findings support a favorable effect on atherogenic particle burden beyond LDL cholesterol lowering alone.', '2023-09-02 09:00:00', '2026-07-03 00:00:00', '10.5555/medidex.synthetic.0219', 'SYNTH-ISRCTN-0000091', 'English', 'Clinical Outcomes Research Review Press'),
+(2000220, 215, 'Combination therapy with TLC-2716 and ezetimibe in statin-intolerant adults with elevated LDL cholesterol: a randomized trial', 'Farah Farrell//Chidi Moreau//Wojciech Tremblay', 'Journal of Applied Clinical Trials', 2024, 'Background: Statin-intolerant patients have limited options for achieving LDL cholesterol targets. Methods: 96 statin-intolerant adults with LDL cholesterol above 130 mg/dL were randomized to TLC-2716 80 mg plus ezetimibe 10 mg or ezetimibe alone for 12 weeks. Results: Combination therapy reduced LDL cholesterol by 46% versus 19% with ezetimibe alone (P < 0.001), with a similar proportion of participants reporting muscle-related symptoms in both arms. Conclusion: Adding TLC-2716 to ezetimibe provides substantial incremental LDL cholesterol lowering in statin-intolerant patients.', '2024-02-19 09:00:00', '2026-07-03 00:00:00', '10.5555/medidex.synthetic.0220', 'SYNTH-ISRCTN-0000091', 'English', 'Journal of Applied Clinical Trials Press'),
+(2000221, 216, 'Open-label extension safety data for TLC-2716 in familial combined hyperlipidemia: 52-week follow-up', 'Viktor Moreau//Oleksandr Eriksson//Wojciech Tremblay', 'International Trials Register Quarterly', 2024, 'Participants completing the 12-week dose-ranging trial were offered enrollment in a 52-week open-label extension at TLC-2716 80 mg once daily. Among 142 enrolled participants, LDL cholesterol reductions were sustained through week 52, and no new safety signals emerged. Two participants discontinued due to mild, reversible liver enzyme elevations. These extension data support the longer-term tolerability of TLC-2716 in familial combined hyperlipidemia.', '2024-08-11 09:00:00', '2026-07-03 00:00:00', '10.5555/medidex.synthetic.0221', 'SYNTH-ISRCTN-0000091', 'English', 'International Trials Register Quarterly Press'),
+(2000222, 217, 'Pharmacokinetics and hepatic safety of TLC-2716 in a multiple-ascending-dose study', 'Chidi Moreau//Farah Farrell', 'Annals of Pragmatic Clinical Research', 2022, 'This randomized, placebo-controlled, multiple-ascending-dose study characterized the pharmacokinetics of TLC-2716 (20-120 mg once daily) over 14 days in 48 healthy volunteers. Exposure increased in a dose-proportional manner, with no accumulation beyond day 7. Hepatic transaminases remained within normal limits at all dose levels, supporting the liver-restricted mechanism of action and informing dose selection for subsequent efficacy trials.', '2022-06-27 09:00:00', '2026-07-03 00:00:00', '10.5555/medidex.synthetic.0222', 'SYNTH-ISRCTN-0000091', 'English', 'Annals of Pragmatic Clinical Research Press'),
+(2000223, 218, 'Corrigendum: Lipid-lowering efficacy and safety of TLC-2716 40 mg and 80 mg', 'Chidi Moreau//Farah Farrell//Viktor Moreau//Oleksandr Eriksson', 'International Journal of Behavioral Medicine Practice', 2024, 'In the originally published results article, the baseline mean LDL cholesterol value reported in Table 1 for the 80 mg arm was transcribed incorrectly due to a spreadsheet formatting error. The corrected baseline value does not change the reported percentage reductions or any statistical conclusions of the trial. The authors regret the error.', '2024-01-15 09:00:00', '2026-07-03 00:00:00', '10.5555/medidex.synthetic.0223', 'SYNTH-ISRCTN-0000091', 'English', 'International Journal of Behavioral Medicine Practice Press'),
+(2000224, 219, 'Patient-reported treatment satisfaction with TLC-2716 versus placebo in dyslipidemia management', 'Wojciech Tremblay//Viktor Moreau', 'International Journal of Sleep and Behavior Research', 2024, 'Treatment satisfaction was assessed as a secondary endpoint in the phase 2 dose-ranging trial using a validated questionnaire administered at week 12. Participants receiving TLC-2716 reported higher satisfaction scores than those receiving placebo (mean difference 11.4 points, P = 0.002), driven primarily by perceived effectiveness rather than convenience or side-effect burden.', '2024-11-08 09:00:00', '2026-07-03 00:00:00', '10.5555/medidex.synthetic.0224', 'SYNTH-ISRCTN-0000091', 'English', 'International Journal of Sleep and Behavior Research Press'),
+(2000225, 220, 'Post-hoc pooled analysis of phase 1 and phase 2 TLC-2716 trials: cardiometabolic and hepatic outcomes', 'Chidi Moreau//Farah Farrell//Viktor Moreau//Oleksandr Eriksson//Wojciech Tremblay', 'Clinical Outcomes Research Review', 2025, 'This pooled analysis combined individual participant data from the phase 1 multiple-ascending-dose study and the phase 2 dose-ranging trial (n=270 total) to characterize dose-response relationships for lipid and hepatic safety endpoints across the TLC-2716 development program. Pooled results confirmed dose-proportional LDL cholesterol reduction and a consistent absence of clinically meaningful hepatic enzyme elevation across all tested doses, supporting continued development into phase 3.', '2025-04-30 09:00:00', '2026-07-03 00:00:00', '10.5555/medidex.synthetic.0225', 'SYNTH-ISRCTN-0000091', 'English', 'Clinical Outcomes Research Review Press');
 
 INSERT INTO "study_report" ("id", "study_id", "report_id") VALUES
 
@@ -2081,8 +2213,17 @@ INSERT INTO "study_report" ("id", "study_id", "report_id") VALUES
 (4000213, 1000100, 2000213),
 (4000214, 1000100, 2000214),
 (4000215, 1000100, 2000215),
-(4000217, 1000101, 2000216);
---(4000218, 1000101, 2000217);
+(4000217, 1000101, 2000216),
+-- Extra report links for study 1000091 - see the report block above.
+(4000218, 1000091, 2000217),
+(4000219, 1000091, 2000218),
+(4000220, 1000091, 2000219),
+(4000221, 1000091, 2000220),
+(4000222, 1000091, 2000221),
+(4000223, 1000091, 2000222),
+(4000224, 1000091, 2000223),
+(4000225, 1000091, 2000224),
+(4000226, 1000091, 2000225);
 
 SELECT setval(
     pg_get_serial_sequence('"report"', 'id'),

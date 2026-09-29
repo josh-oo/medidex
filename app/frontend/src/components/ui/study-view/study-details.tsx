@@ -10,13 +10,21 @@ import {
 import { Separator } from "../separator";
 import { FileText, Download } from "lucide-react";
 import { StudyOverview } from "@/components/ui/study-view/study-details-overview";
-import { StudyAspects } from "@/components/ui/study-view/study-details-aspects";
+import { StudyAspects, type AspectPageState } from "@/components/ui/study-view/study-details-aspects";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { StudyDto } from "@/types/apiDTOs";
-import { getReportsByStudyId } from "@/lib/api/studiesApi";
+import { StudyDto, TagDto, Page } from "@/types/apiDTOs";
+import {
+  getStudyById,
+  getReportsByStudyId,
+  getInterventionsForStudy,
+  getConditionsForStudy,
+  getOutcomesForStudy,
+  getParticipantsForStudy,
+  getDesignForStudy,
+} from "@/lib/api/studiesApi";
 import { getReportPdf } from "@/lib/api/reportApi";
 
 type ReportListItem = {
@@ -32,6 +40,18 @@ const normalizeReports = (
     title: report.title ?? `Report ${report.reportId}`,
   }));
 
+const EMPTY_ASPECT_PAGE: AspectPageState = {
+  items: [],
+  nextCursor: null,
+  loadingMore: false,
+};
+
+const pageToAspectState = (page: Page<TagDto>): AspectPageState => ({
+  items: page.items,
+  nextCursor: page.nextCursor,
+  loadingMore: false,
+});
+
 interface StudyDetailsProps {
   study: StudyDto | null;
   isActive: boolean;
@@ -39,10 +59,18 @@ interface StudyDetailsProps {
 
 export function StudyDetails({ study, isActive }: StudyDetailsProps) {
   const [reports, setReports] = useState<ReportListItem[]>([]);
-  const [reportsLoading, setReportsLoading] = useState(false);
-  const [reportsError, setReportsError] = useState<string | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [reportsNextCursor, setReportsNextCursor] = useState<string | null>(null);
+  const [loadingMoreReports, setLoadingMoreReports] = useState(false);
+
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+
+  const [interventions, setInterventions] = useState<AspectPageState>(EMPTY_ASPECT_PAGE);
+  const [conditions, setConditions] = useState<AspectPageState>(EMPTY_ASPECT_PAGE);
+  const [outcomes, setOutcomes] = useState<AspectPageState>(EMPTY_ASPECT_PAGE);
+  const [participants, setParticipants] = useState<AspectPageState>(EMPTY_ASPECT_PAGE);
+  const [design, setDesign] = useState<AspectPageState>(EMPTY_ASPECT_PAGE);
+
   const [downloadingPdfs, setDownloadingPdfs] = useState<Set<number>>(new Set());
   const [downloadingSingle, setDownloadingSingle] = useState<Set<number>>(
     new Set()
@@ -51,59 +79,56 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
   useEffect(() => {
     if (!study || !isActive) {
       setReports([]);
-      setReportsLoading(false);
-      setReportsError(null);
-      setNextCursor(null);
+      setReportsNextCursor(null);
+      setInterventions(EMPTY_ASPECT_PAGE);
+      setConditions(EMPTY_ASPECT_PAGE);
+      setOutcomes(EMPTY_ASPECT_PAGE);
+      setParticipants(EMPTY_ASPECT_PAGE);
+      setDesign(EMPTY_ASPECT_PAGE);
+      setDetailsLoading(false);
+      setDetailsError(null);
       return;
     }
 
     let requestActive = true;
     const studyId = study.studyId;
 
-    setReportsLoading(true);
-    setReportsError(null);
+    setDetailsLoading(true);
+    setDetailsError(null);
 
-    const fetchReports = async () => {
+    // One call to the combined GET /studies/{study_id} endpoint replaces what used
+    // to be six separate requests (reports + the five aspect lists below) - each
+    // comes back as just its first page, paged further via its own "Load more".
+    const fetchDetails = async () => {
       try {
-        const page = await getReportsByStudyId(studyId);
+        const full = await getStudyById(studyId);
         if (!requestActive) return;
-        setReports(normalizeReports(page.items));
-        setNextCursor(page.nextCursor);
+        setReports(normalizeReports(full.reports.items));
+        setReportsNextCursor(full.reports.nextCursor);
+        setInterventions(pageToAspectState(full.interventions));
+        setConditions(pageToAspectState(full.conditions));
+        setOutcomes(pageToAspectState(full.outcomes));
+        setParticipants(pageToAspectState(full.participants));
+        setDesign(pageToAspectState(full.design));
       } catch (error) {
         if (!requestActive) return;
         const message =
-          error instanceof Error ? error.message : "Unable to load reports";
-        setReportsError(message);
-        toast.error(`Failed to load reports: ${message}`);
+          error instanceof Error ? error.message : "Unable to load study details";
+        setDetailsError(message);
+        toast.error(`Failed to load study details: ${message}`);
       } finally {
-        if (!requestActive) return;
-        setReportsLoading(false);
+        if (requestActive) {
+          setDetailsLoading(false);
+        }
       }
     };
 
-    void fetchReports();
+    void fetchDetails();
 
     return () => {
       requestActive = false;
     };
   }, [study, isActive]);
-
-  const handleLoadMoreReports = async () => {
-    if (!study || !nextCursor) return;
-
-    setLoadingMore(true);
-    try {
-      const page = await getReportsByStudyId(study.studyId, undefined, nextCursor);
-      setReports((prev) => [...prev, ...normalizeReports(page.items)]);
-      setNextCursor(page.nextCursor);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to load more reports";
-      toast.error(`Failed to load more reports: ${message}`);
-    } finally {
-      setLoadingMore(false);
-    }
-  };
 
   if (!study) {
     return null;
@@ -111,6 +136,83 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
 
   const studyId = study.studyId;
   const studyShortName = study.shortName ?? "study";
+
+  const handleLoadMoreReports = async () => {
+    if (!reportsNextCursor) return;
+
+    setLoadingMoreReports(true);
+    try {
+      const page = await getReportsByStudyId(studyId, undefined, reportsNextCursor);
+      setReports((prev) => [...prev, ...normalizeReports(page.items)]);
+      setReportsNextCursor(page.nextCursor);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to load more reports";
+      toast.error(`Failed to load more reports: ${message}`);
+    } finally {
+      setLoadingMoreReports(false);
+    }
+  };
+
+  const loadMoreAspect = async (
+    state: AspectPageState,
+    setState: React.Dispatch<React.SetStateAction<AspectPageState>>,
+    fetchPage: (cursor: string) => Promise<Page<TagDto>>,
+    label: string
+  ) => {
+    if (!state.nextCursor || state.loadingMore) return;
+
+    setState((prev) => ({ ...prev, loadingMore: true }));
+    try {
+      const page = await fetchPage(state.nextCursor);
+      setState((prev) => ({
+        items: [...prev.items, ...page.items],
+        nextCursor: page.nextCursor,
+        loadingMore: false,
+      }));
+    } catch (error) {
+      setState((prev) => ({ ...prev, loadingMore: false }));
+      const message =
+        error instanceof Error ? error.message : `Unable to load more ${label}`;
+      toast.error(`Failed to load more ${label}: ${message}`);
+    }
+  };
+
+  const handleLoadMoreInterventions = () =>
+    loadMoreAspect(
+      interventions,
+      setInterventions,
+      (cursor) => getInterventionsForStudy(studyId, undefined, cursor),
+      "interventions"
+    );
+  const handleLoadMoreConditions = () =>
+    loadMoreAspect(
+      conditions,
+      setConditions,
+      (cursor) => getConditionsForStudy(studyId, undefined, cursor),
+      "conditions"
+    );
+  const handleLoadMoreOutcomes = () =>
+    loadMoreAspect(
+      outcomes,
+      setOutcomes,
+      (cursor) => getOutcomesForStudy(studyId, undefined, cursor),
+      "outcomes"
+    );
+  const handleLoadMoreParticipants = () =>
+    loadMoreAspect(
+      participants,
+      setParticipants,
+      (cursor) => getParticipantsForStudy(studyId, undefined, cursor),
+      "participants"
+    );
+  const handleLoadMoreDesign = () =>
+    loadMoreAspect(
+      design,
+      setDesign,
+      (cursor) => getDesignForStudy(studyId, undefined, cursor),
+      "design"
+    );
 
   const handleDownloadAllReportPdfs = async () => {
     if (reports.length === 0) return;
@@ -209,7 +311,20 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
 
           <Separator />
 
-          <StudyAspects study={study}
+          <StudyAspects
+            study={study}
+            loading={detailsLoading}
+            error={detailsError}
+            interventions={interventions}
+            conditions={conditions}
+            outcomes={outcomes}
+            participants={participants}
+            design={design}
+            onLoadMoreInterventions={handleLoadMoreInterventions}
+            onLoadMoreConditions={handleLoadMoreConditions}
+            onLoadMoreOutcomes={handleLoadMoreOutcomes}
+            onLoadMoreParticipants={handleLoadMoreParticipants}
+            onLoadMoreDesign={handleLoadMoreDesign}
           />
 
           <Separator />
@@ -222,7 +337,7 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
                 </div>
                 Reports
                 <Badge variant="secondary" className="text-xs font-normal">
-                  {reports.length}
+                  {reportsNextCursor ? `${reports.length}+` : reports.length}
                 </Badge>
               </h3>
               {reports.length > 0 && (
@@ -231,7 +346,7 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
                   size="sm"
                   onClick={handleDownloadAllReportPdfs}
                   disabled={
-                    reportsLoading ||
+                    detailsLoading ||
                     downloadingPdfs.has(studyId)
                   }
                   className="flex items-center gap-2"
@@ -245,7 +360,7 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
             </div>
 
             <div className="space-y-2">
-              {reportsLoading && (
+              {detailsLoading && (
                 <div className="px-4">
                   <div className="space-y-2 rounded-md border border-border/60 bg-muted/30 p-3.5">
                     <div className="flex items-center gap-3">
@@ -257,8 +372,8 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
                   </div>
                 </div>
               )}
-              {reportsError && (
-                <p className="px-4 text-sm text-destructive">{reportsError}</p>
+              {detailsError && (
+                <p className="px-4 text-sm text-destructive">{detailsError}</p>
               )}
               {reports.length > 0 ? (
                 reports.map((report) => (
@@ -292,23 +407,23 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
                   </div>
                 ))
               ) : (
-                !reportsLoading &&
-                !reportsError && (
+                !detailsLoading &&
+                !detailsError && (
                   <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                     <FileText className="h-8 w-8 mb-2 opacity-30" />
                     <p className="text-sm">No reports available</p>
                   </div>
                 )
               )}
-              {nextCursor && !reportsLoading && (
+              {reportsNextCursor && !detailsLoading && (
                 <div className="flex justify-center pt-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={handleLoadMoreReports}
-                    disabled={loadingMore}
+                    disabled={loadingMoreReports}
                   >
-                    {loadingMore ? "Loading..." : "Load more"}
+                    {loadingMoreReports ? "Loading..." : "Load more"}
                   </Button>
                 </div>
               )}

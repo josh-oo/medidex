@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Activity,
@@ -10,6 +11,7 @@ import {
   Syringe,
   Info,
   UserRound,
+  Users,
   CircleDashed,
 } from "lucide-react";
 import {
@@ -20,17 +22,33 @@ import {
 } from "@/components/ui/accordion";
 import {
   StudyDto,
+  TagDto,
 } from "@/types/apiDTOs";
-import {
-  getInterventionsForStudy,
-  getConditionsForStudy,
-  getOutcomesForStudy,
-  getDesignForStudy,
-  getPersonsForStudy,
-} from "@/lib/api/studiesApi";
+import { getPersonsForStudy } from "@/lib/api/studiesApi";
 
-interface StudyDetailsProps {
+// A paginated aspect list's current state, as owned and fetched by the parent
+// (StudyDetails, via GET /studies/{study_id} and this category's own
+// /studies/{study_id}/{category} endpoint for "Load more").
+export interface AspectPageState {
+  items: TagDto[];
+  nextCursor: string | null;
+  loadingMore: boolean;
+}
+
+interface StudyAspectsProps {
   study: StudyDto;
+  loading: boolean;
+  error: string | null;
+  interventions: AspectPageState;
+  conditions: AspectPageState;
+  outcomes: AspectPageState;
+  participants: AspectPageState;
+  design: AspectPageState;
+  onLoadMoreInterventions: () => void;
+  onLoadMoreConditions: () => void;
+  onLoadMoreOutcomes: () => void;
+  onLoadMoreParticipants: () => void;
+  onLoadMoreDesign: () => void;
 }
 
 const categoryConfig = {
@@ -55,6 +73,13 @@ const categoryConfig = {
     bgClass: "bg-rose-50 dark:bg-rose-950/30",
     borderClass: "border-l-rose-500",
   },
+  participants: {
+    icon: Users,
+    label: "Participants",
+    accentClass: "text-sky-600 dark:text-sky-400",
+    bgClass: "bg-sky-50 dark:bg-sky-950/30",
+    borderClass: "border-l-sky-500",
+  },
   design: {
     icon: Activity,
     label: "Study Design",
@@ -71,121 +96,61 @@ const categoryConfig = {
   },
 };
 
-type DescriptionItem = {
-  id?: number | string;
-  description?: string;
-};
+type PagedCategory = Exclude<keyof typeof categoryConfig, "persons">;
 
-type DescriptionSource = {
-  ID?: number | string;
-  Description?: string;
-  id?: number | string;
-  description?: string;
-  keyword?: string;
-  name?: string;
-  value?: string;
-};
-
-interface StudyAspectData {
-  interventions: DescriptionItem[];
-  conditions: DescriptionItem[];
-  outcomes: DescriptionItem[];
-  design: DescriptionItem[];
-  persons: string[];
-}
-
-const defaultAspectData: StudyAspectData = {
-  interventions: [],
-  conditions: [],
-  outcomes: [],
-  design: [],
-  persons: [],
-};
-
-const mapDescriptionItems = (
-  items: DescriptionSource[]
-): DescriptionItem[] =>
-  items.map((item, index) => ({
-    id: item.ID ?? item.id ?? index,
-    description:
-      item.Description ??
-      item.description ??
-      item.keyword ??
-      item.name ??
-      item.value ??
-      "",
-  }));
-
-export function StudyAspects({ study }: StudyDetailsProps) {
-  const [aspectData, setAspectData] = useState<StudyAspectData>(
-    defaultAspectData
-  );
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const { interventions, conditions, outcomes, design, persons } = aspectData;
+export function StudyAspects({
+  study,
+  loading,
+  error,
+  interventions,
+  conditions,
+  outcomes,
+  participants,
+  design,
+  onLoadMoreInterventions,
+  onLoadMoreConditions,
+  onLoadMoreOutcomes,
+  onLoadMoreParticipants,
+  onLoadMoreDesign,
+}: StudyAspectsProps) {
+  const [persons, setPersons] = useState<string[]>([]);
+  const [personsLoading, setPersonsLoading] = useState(true);
+  const [personsError, setPersonsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!study) {
-      setAspectData(defaultAspectData);
-      setLoading(false);
-      setError(null);
+      setPersons([]);
+      setPersonsLoading(false);
+      setPersonsError(null);
       return;
     }
 
     let isMounted = true;
     const controller = new AbortController();
 
-    const loadAspects = async () => {
-      setLoading(true);
-      setError(null);
+    const loadPersons = async () => {
+      setPersonsLoading(true);
+      setPersonsError(null);
 
       try {
-        const [
-          interventionsResponse,
-          conditionsResponse,
-          outcomesResponse,
-          designResponse,
-          personsResponse,
-        ] = await Promise.all([
-          getInterventionsForStudy(study.studyId, { signal: controller.signal }),
-          getConditionsForStudy(study.studyId, { signal: controller.signal }),
-          getOutcomesForStudy(study.studyId, { signal: controller.signal }),
-          getDesignForStudy(study.studyId, { signal: controller.signal }) as unknown as Promise<
-            Array<{ ID?: number | string; Description?: string }>
-          >,
-          getPersonsForStudy(study.studyId, { signal: controller.signal }),
-        ]);
-
-        if (!isMounted) {
-          return;
-        }
-
-        setAspectData({
-          interventions: mapDescriptionItems(interventionsResponse),
-          conditions: mapDescriptionItems(conditionsResponse),
-          outcomes: mapDescriptionItems(outcomesResponse),
-          design: mapDescriptionItems(designResponse ?? []),
-          persons: personsResponse ?? [],
+        const personsResponse = await getPersonsForStudy(study.studyId, {
+          signal: controller.signal,
         });
+        if (!isMounted) return;
+        setPersons(personsResponse ?? []);
       } catch (fetchError) {
-        if (!isMounted) {
-          return;
-        }
-
+        if (!isMounted) return;
         const message =
           fetchError instanceof Error
             ? fetchError.message
-            : "Unable to load study details.";
-        setError(message);
+            : "Unable to load persons.";
+        setPersonsError(message);
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        if (isMounted) setPersonsLoading(false);
       }
     };
 
-    void loadAspects();
+    void loadPersons();
 
     return () => {
       isMounted = false;
@@ -193,7 +158,10 @@ export function StudyAspects({ study }: StudyDetailsProps) {
     };
   }, [study]);
 
-  if (loading) {
+  const isLoading = loading || personsLoading;
+  const combinedError = error ?? personsError;
+
+  if (isLoading) {
     return (
       <div className="space-y-4 px-4">
         <div className="flex items-center justify-between">
@@ -227,10 +195,13 @@ export function StudyAspects({ study }: StudyDetailsProps) {
     );
   }
 
-  const renderCategoryItems = (
-    items: Array<DescriptionItem | string>,
-    category: keyof typeof categoryConfig,
-    emptyMessage: string
+  const renderTagItems = (
+    items: TagDto[],
+    category: PagedCategory,
+    emptyMessage: string,
+    nextCursor: string | null,
+    loadingMore: boolean,
+    onLoadMore: () => void
   ) => {
     const config = categoryConfig[category];
 
@@ -245,22 +216,54 @@ export function StudyAspects({ study }: StudyDetailsProps) {
 
     return (
       <div className="space-y-2 py-3">
-        {items.map((item, index) => {
-          const text =
-            typeof item === "string" ? item : item.description ?? "";
-          const key = typeof item === "string" ? index : item.id ?? index;
-
-          return (
-            <div
-              key={key}
-              className={`p-3.5 rounded-md border-l-2 ${config.borderClass} ${
-                config.bgClass
-              } transition-colors`}
+        {items.map((item) => (
+          <div
+            key={item.id}
+            className={`p-3.5 rounded-md border-l-2 ${config.borderClass} ${config.bgClass} transition-colors`}
+          >
+            <p className="text-foreground text-sm leading-relaxed">
+              {item.keyword}
+            </p>
+          </div>
+        ))}
+        {nextCursor && (
+          <div className="flex justify-center pt-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onLoadMore}
+              disabled={loadingMore}
             >
-              <p className="text-foreground text-sm leading-relaxed">{text}</p>
-            </div>
-          );
-        })}
+              {loadingMore ? "Loading..." : "Load more"}
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderPersonItems = (items: string[], emptyMessage: string) => {
+    const config = categoryConfig.persons;
+
+    if (!items.length) {
+      return (
+        <div className="flex items-center gap-3 py-6 px-4 text-muted-foreground">
+          <CircleDashed className="h-4 w-4 opacity-50" />
+          <p className="text-sm">{emptyMessage}</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-2 py-3">
+        {items.map((item, index) => (
+          <div
+            key={index}
+            className={`p-3.5 rounded-md border-l-2 ${config.borderClass} ${config.bgClass} transition-colors`}
+          >
+            <p className="text-foreground text-sm leading-relaxed">{item}</p>
+          </div>
+        ))}
       </div>
     );
   };
@@ -269,7 +272,8 @@ export function StudyAspects({ study }: StudyDetailsProps) {
     value: string,
     category: keyof typeof categoryConfig,
     count: number,
-    children: ReactNode
+    children: ReactNode,
+    hasMore = false
   ) => {
     const config = categoryConfig[category];
     const Icon = config.icon;
@@ -289,7 +293,7 @@ export function StudyAspects({ study }: StudyDetailsProps) {
               variant="secondary"
               className="ml-1 h-5 px-1.5 text-xs font-normal"
             >
-              {count}
+              {hasMore ? `${count}+` : count}
             </Badge>
           </div>
         </AccordionTrigger>
@@ -309,65 +313,92 @@ export function StudyAspects({ study }: StudyDetailsProps) {
         </h3>
       </div>
       <div>
-        {error && (
+        {combinedError && (
           <div className="mb-4 px-1 text-sm text-destructive">
-            {error}
+            {combinedError}
           </div>
         )}
         <Accordion type="multiple" className="w-full">
           {renderAccordionItem(
             "interventions",
             "interventions",
-            interventions.length,
-            renderCategoryItems(
-              interventions,
+            interventions.items.length,
+            renderTagItems(
+              interventions.items,
               "interventions",
-              "No interventions available"
-            )
+              "No interventions available",
+              interventions.nextCursor,
+              interventions.loadingMore,
+              onLoadMoreInterventions
+            ),
+            interventions.nextCursor !== null
           )}
 
           {renderAccordionItem(
             "conditions",
             "conditions",
-            conditions.length,
-            renderCategoryItems(
-              conditions,
+            conditions.items.length,
+            renderTagItems(
+              conditions.items,
               "conditions",
-              "No conditions available"
-            )
+              "No conditions available",
+              conditions.nextCursor,
+              conditions.loadingMore,
+              onLoadMoreConditions
+            ),
+            conditions.nextCursor !== null
           )}
 
           {renderAccordionItem(
             "outcomes",
             "outcomes",
-            outcomes.length,
-            renderCategoryItems(
-              outcomes,
+            outcomes.items.length,
+            renderTagItems(
+              outcomes.items,
               "outcomes",
-              "No outcomes available"
-            )
+              "No outcomes available",
+              outcomes.nextCursor,
+              outcomes.loadingMore,
+              onLoadMoreOutcomes
+            ),
+            outcomes.nextCursor !== null
+          )}
+
+          {renderAccordionItem(
+            "participants",
+            "participants",
+            participants.items.length,
+            renderTagItems(
+              participants.items,
+              "participants",
+              "No participant description available",
+              participants.nextCursor,
+              participants.loadingMore,
+              onLoadMoreParticipants
+            ),
+            participants.nextCursor !== null
           )}
 
           {renderAccordionItem(
             "design",
             "design",
-            design.length,
-            renderCategoryItems(
-              design,
+            design.items.length,
+            renderTagItems(
+              design.items,
               "design",
-              "No design information available"
-            )
+              "No design information available",
+              design.nextCursor,
+              design.loadingMore,
+              onLoadMoreDesign
+            ),
+            design.nextCursor !== null
           )}
 
           {renderAccordionItem(
             "persons",
             "persons",
             persons.length,
-            renderCategoryItems(
-              persons,
-              "persons",
-              "No persons information available"
-            )
+            renderPersonItems(persons, "No persons information available")
           )}
         </Accordion>
       </div>

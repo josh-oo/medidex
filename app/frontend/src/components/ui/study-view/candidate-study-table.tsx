@@ -31,7 +31,7 @@ import { searchStudies } from "@/lib/api/studiesApi";
 interface CandidateStudyTableProps {
   reportId?: number;
   studies: StudyCandidateDto[];
-  hasMore?: boolean;
+  nextCursor?: string | null;
   isLoadingMore?: boolean;
   onLoadMore?: () => void;
 }
@@ -44,7 +44,7 @@ const SEARCH_PAGE_SIZE = 10;
 export function CandidateStudyTable({
   reportId,
   studies,
-  hasMore = false,
+  nextCursor = null,
   isLoadingMore = false,
   onLoadMore,
 }: CandidateStudyTableProps) {
@@ -390,7 +390,7 @@ export function CandidateStudyTable({
                   Search results for &ldquo;{submittedQuery}&rdquo;
                 </h3>
                 <Badge variant="secondary" className="text-xs font-normal">
-                  {searchResults.length}
+                  {searchNextCursor ? `${searchResults.length}+` : searchResults.length}
                 </Badge>
               </div>
 
@@ -428,7 +428,7 @@ export function CandidateStudyTable({
                 <Sparkles className="h-4 w-4 text-muted-foreground" />
                 <h3 className="text-sm font-semibold">Similar studies</h3>
                 <Badge variant="secondary" className="text-xs font-normal">
-                  {candidateStudies.length}
+                  {nextCursor ? `${candidateStudies.length}+` : candidateStudies.length}
                 </Badge>
               </div>
             )}
@@ -468,7 +468,7 @@ export function CandidateStudyTable({
                 ))}
 
                 {/* Load More Button */}
-                {hasMore && (
+                {nextCursor && (
                   <LoadMoreStudiesButton onClick={onLoadMore} loading={isLoadingMore} />
                 )}
               </>

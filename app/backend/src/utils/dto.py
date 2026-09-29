@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Mapping, Optional, List, Dict, Any, TypeVar, Generic
+from typing import Mapping, Optional, List, TypeVar, Generic
 from datetime import datetime
 from enum import Enum
 
@@ -140,16 +140,17 @@ class Study(StudyPayload):
 
 class StudyFull(Study):
     """A Study plus everything the study details view fetches per-study: its linked
-    reports and the tag-like aspects (interventions/conditions/outcomes) attached to
-    it. Not yet wired to an endpoint - fastapi_app/resources.py's /studies/{study_id}/*
-    endpoints still fetch these one at a time; this exists as a target shape for
-    combining them."""
-    reports: List[ReportPreview] = Field(default_factory=list)
-    interventions: List[Tag] = Field(default_factory=list)
-    conditions: List[Tag] = Field(default_factory=list)
-    outcomes: List[Tag] = Field(default_factory=list)
-    participants: List[Dict[str, Any]] = Field(default_factory=list)
-    design: List[Dict[str, Any]] = Field(default_factory=list)
+    reports and the tag-like aspects (interventions/conditions/outcomes/participants/
+    design) attached to it. Returned by GET /studies/{study_id}. Each nested list is
+    only its first page (see that endpoint's `limit` param, default 10) - page further
+    through any one of them with the matching /studies/{study_id}/* endpoint and its
+    nextCursor, same as fastapi_app/resources.py's standalone aspect endpoints."""
+    reports: Page[ReportPreview] = Field(default_factory=lambda: Page[ReportPreview](items=[]))
+    interventions: Page[Tag] = Field(default_factory=lambda: Page[Tag](items=[]))
+    conditions: Page[Tag] = Field(default_factory=lambda: Page[Tag](items=[]))
+    outcomes: Page[Tag] = Field(default_factory=lambda: Page[Tag](items=[]))
+    participants: Page[Tag] = Field(default_factory=lambda: Page[Tag](items=[]))
+    design: Page[Tag] = Field(default_factory=lambda: Page[Tag](items=[]))
 
 class StudyCandidate(Study):
     """A study suggested as a possible match for a report by the similarity search
@@ -193,14 +194,16 @@ class Task(BaseModel):
     numberReportsProcessed: int
 
 def tags_to_dto(tags) -> List[Tag]:
+    """Converts SQLModel aspect rows (Intervention/Condition/Outcome, dumped to their
+    lowercase "id"/"description" field names) into Tag - used by the /interventions,
+    /conditions, /outcomes "all items" endpoints. StudyRepository's own study-scoped
+    aspect lookups (interventions/conditions/outcomes/participants/design) build Tag
+    directly instead of going through here."""
     result = []
     for tag in tags:
         tag_data = tag if isinstance(tag, Mapping) else tag.model_dump()
-        # Two shapes flow through here: SQLModel objects dumped to lowercase field
-        # names ("id"/"description"), and StudyRepository._get_study_aspect's plain
-        # dicts, which use "ID"/"Description" instead.
-        tag_id = tag_data.get("id", tag_data.get("ID"))
-        keyword = tag_data.get("description", tag_data.get("Description"))
+        tag_id = tag_data.get("id")
+        keyword = tag_data.get("description")
         result.append(Tag(id=str(tag_id) if tag_id is not None else "", keyword=keyword or ""))
     return result
 

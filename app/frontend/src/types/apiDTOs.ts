@@ -135,6 +135,20 @@ export interface StudyDto extends StudyBaseDto {
   updatedAt: string | undefined;
 }
 
+// A StudyDto plus everything the study details view needs, returned in one call by
+// GET /studies/{study_id}: linked reports and the tag-like aspects (interventions/
+// conditions/outcomes/participants/design). Each nested list is only its first page
+// (the endpoint's `limit` param, default 10) - page further through any one of them
+// via its own /studies/{study_id}/* endpoint and the returned nextCursor.
+export interface StudyFullDto extends StudyDto {
+  reports: Page<ReportPreviewDto>;
+  interventions: Page<TagDto>;
+  conditions: Page<TagDto>;
+  outcomes: Page<TagDto>;
+  participants: Page<TagDto>;
+  design: Page<TagDto>;
+}
+
 // Bare-bones Study identity for ReportCurationDto.assignedStudies - the UI only ever
 // reads studyId/shortName/createdAt off an assigned study (the badge label,
 // click-to-open, and the "linked after this report was entered" highlight), never the

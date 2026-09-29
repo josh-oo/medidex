@@ -9,12 +9,13 @@ from sqlmodel import select, func, text
 from dotenv import load_dotenv
 
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Tuple
 
 from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport
 from ..models import StudyIntervention, Intervention, StudyCondition, Condition, StudyOutcome, Outcome, StudyDesign, Design, StudyParticipant, Participant
 
 from ...utils.postprocessing import normalize_author_names
+from ...utils.dto import Tag
 
 load_dotenv()
 
@@ -289,18 +290,32 @@ class StudyRepository:
 
     # Study Aspects
 
-    async def _get_study_aspect(self, stmt):
+    async def _get_study_aspect(self, stmt) -> Dict[int, List[Tag]]:
         rows = (await self.db.execute(stmt)).all()  # -> [(StudyID, ID, Description), ...]
 
         # --- Group results by StudyID ---
-        final_result: Dict[int, List[Dict[str, Any]]] = {}
+        final_result: Dict[int, List[Tag]] = {}
         for study_id, aspect_id, description in rows:
-            item = {"ID": aspect_id, "Description": description}
+            item = Tag(id=str(aspect_id), keyword=description or "")
             final_result.setdefault(study_id, []).append(item)
 
         return final_result
 
-    async def get_study_interventions(self, study_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
+    async def _get_study_aspect_page(self, stmt, limit: int, offset: int) -> Tuple[List[Tag], bool]:
+        """Paginated counterpart of _get_study_aspect() above, for a single study - stmt
+        must already be scoped to one study_id and select (id, description) columns in
+        a stable order. One extra row beyond the page is fetched so has_more can be
+        determined without a separate count query, same convention as
+        get_study_reports_by_study_id_page()/search_studies(). Returns Tag directly
+        (rather than _get_study_aspect()'s raw {"ID", "Description"} dicts) since every
+        caller of the *_single_page() methods below wants a Tag anyway - no reason to
+        make them convert a second intermediate shape themselves."""
+        rows = (await self.db.execute(stmt.offset(offset).limit(limit + 1))).all()  # -> [(ID, Description), ...]
+        has_more = len(rows) > limit
+        items = [Tag(id=str(aspect_id), keyword=description or "") for aspect_id, description in rows[:limit]]
+        return items, has_more
+
+    async def get_study_interventions(self, study_ids: List[int]) -> Dict[int, List[Tag]]:
         if not study_ids:
             return {}
         stmt = (
@@ -315,13 +330,25 @@ class StudyRepository:
 
         return await self._get_study_aspect(stmt)
 
-    async def get_study_interventions_single(self, study_id : int) -> List[Dict[str, Any]]:
+    async def get_study_interventions_single(self, study_id : int) -> List[Tag]:
         result = await self.get_study_interventions(study_ids=[study_id])
         if study_id in result.keys():
             return result[study_id]
         return []
 
-    async def get_study_conditions(self, study_ids: List[int]):
+    async def get_study_interventions_single_page(self, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
+        stmt = (
+            select(
+                StudyIntervention.intervention_id.label("id"),
+                Intervention.description.label("description"),
+            )
+            .join(Intervention, Intervention.id == StudyIntervention.intervention_id)
+            .where(StudyIntervention.study_id == study_id)
+            .order_by(StudyIntervention.intervention_id)
+        )
+        return await self._get_study_aspect_page(stmt, limit, offset)
+
+    async def get_study_conditions(self, study_ids: List[int]) -> Dict[int, List[Tag]]:
         if not study_ids:
             return {}
         stmt = (
@@ -336,13 +363,25 @@ class StudyRepository:
 
         return await self._get_study_aspect(stmt)
 
-    async def get_study_conditions_single(self, study_id : int) -> List[Dict[str, Any]]:
+    async def get_study_conditions_single(self, study_id : int) -> List[Tag]:
         result = await self.get_study_conditions(study_ids=[study_id])
         if study_id in result.keys():
             return result[study_id]
         return []
 
-    async def get_study_outcomes(self, study_ids: List[int]):
+    async def get_study_conditions_single_page(self, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
+        stmt = (
+            select(
+                StudyCondition.condition_id.label("id"),
+                Condition.description.label("description"),
+            )
+            .join(Condition, Condition.id == StudyCondition.condition_id)
+            .where(StudyCondition.study_id == study_id)
+            .order_by(StudyCondition.condition_id)
+        )
+        return await self._get_study_aspect_page(stmt, limit, offset)
+
+    async def get_study_outcomes(self, study_ids: List[int]) -> Dict[int, List[Tag]]:
         if not study_ids:
             return {}
         stmt = (
@@ -357,13 +396,25 @@ class StudyRepository:
 
         return await self._get_study_aspect(stmt)
 
-    async def get_study_outcomes_single(self, study_id : int) -> List[Dict[str, Any]]:
+    async def get_study_outcomes_single(self, study_id : int) -> List[Tag]:
         result =await self.get_study_outcomes(study_ids=[study_id])
         if study_id in result.keys():
             return result[study_id]
         return []
 
-    async def get_study_participants(self, study_ids: List[int]) -> Dict[int, List[str]]:
+    async def get_study_outcomes_single_page(self, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
+        stmt = (
+            select(
+                StudyOutcome.outcome_id.label("id"),
+                Outcome.description.label("description"),
+            )
+            .join(Outcome, Outcome.id == StudyOutcome.outcome_id)
+            .where(StudyOutcome.study_id == study_id)
+            .order_by(StudyOutcome.outcome_id)
+        )
+        return await self._get_study_aspect_page(stmt, limit, offset)
+
+    async def get_study_participants(self, study_ids: List[int]) -> Dict[int, List[Tag]]:
         if not study_ids:
             return {}
         stmt = (
@@ -378,13 +429,25 @@ class StudyRepository:
 
         return await self._get_study_aspect(stmt)
 
-    async def get_study_participants_single(self, study_id: int) -> List[str]:
+    async def get_study_participants_single(self, study_id: int) -> List[Tag]:
         result = await self.get_study_participants(study_ids=[study_id])
         if study_id in result.keys():
             return result[study_id]
         return []
 
-    async def get_study_design(self, study_ids: List[int]) -> Dict[int, List[str]]:
+    async def get_study_participants_single_page(self, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
+        stmt = (
+            select(
+                StudyParticipant.participant_id.label("id"),
+                Participant.description.label("description"),
+            )
+            .join(Participant, Participant.id == StudyParticipant.participant_id)
+            .where(StudyParticipant.study_id == study_id)
+            .order_by(StudyParticipant.participant_id)
+        )
+        return await self._get_study_aspect_page(stmt, limit, offset)
+
+    async def get_study_design(self, study_ids: List[int]) -> Dict[int, List[Tag]]:
         if not study_ids:
             return {}
         stmt = (
@@ -399,11 +462,23 @@ class StudyRepository:
 
         return await self._get_study_aspect(stmt)
 
-    async def get_study_design_single(self, study_id : int) -> List[str]:
+    async def get_study_design_single(self, study_id : int) -> List[Tag]:
         result = await self.get_study_design(study_ids=[study_id])
         if study_id in result.keys():
             return result[study_id]
         return []
+
+    async def get_study_design_single_page(self, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
+        stmt = (
+            select(
+                StudyDesign.design_id.label("id"),
+                Design.description.label("description"),
+            )
+            .join(Design, Design.id == StudyDesign.design_id)
+            .where(StudyDesign.study_id == study_id)
+            .order_by(StudyDesign.design_id)
+        )
+        return await self._get_study_aspect_page(stmt, limit, offset)
 
     async def get_all_studies_connected_to_trial_id(self):
         # Define the reusable regex pattern block for PostgreSQL (~ operator)

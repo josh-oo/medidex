@@ -262,7 +262,7 @@ async def fetch_tags_associated_with_study(study_id: int, tag_category: StudyTag
     else:
         raise ValueError(f"Unsupported tag category: {tag_category}")
 
-    return [item["Description"] for item in response]
+    return [item.keyword for item in response]
 
 @tool
 async def fetch_study_by_shortname(
