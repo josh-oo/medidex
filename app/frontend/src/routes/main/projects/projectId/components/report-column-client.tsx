@@ -8,20 +8,20 @@ import {
 } from "@/components/ui/resizable";
 import { DetailsSheetProvider } from "@/context/details-sheet-context";
 import StudySheet from "../study-sheet";
-import { ReportDetailDto } from "@/types/apiDTOs";
+import { ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
 import { ReportList } from "@/components/ui/report-view/report-list";
 import { useReportStore } from "@/hooks/use-report-store";
+import { getProjectReports } from "@/lib/api/projectApi";
 
-const reportFilterOptions = [
-  { value: "assigned", label: "Assigned" },
-  { value: "unassigned", label: "Unassigned" },
-  { value: "newStudy", label: "New" },
-  { value: "flagged", label: "Flagged" },
+const reportFilterDimensions: ReportFilterDimension[] = [
+  { field: "processed", label: "Status", onlyLabel: "Processed", excludeLabel: "Unprocessed" },
+  { field: "newStudy", label: "Type", onlyLabel: "New study", excludeLabel: "Existing study" },
+  { field: "flagged", label: "Flag", onlyLabel: "Flagged", excludeLabel: "Unflagged" },
 ];
 
 interface ReportColumnClientProps {
   children: ReactNode;
-  reports: ReportDetailDto[];
+  reports: ReportCurationDto[];
   projectId: string;
 }
 
@@ -52,9 +52,10 @@ export function ReportColumnClient({ children, reports, projectId }: ReportColum
         >
           <ReportList
             baseUrl="projects"
-            queryParams={{ k: 10 }}
             editMode={true}
-            filterOptions={reportFilterOptions}
+            filterDimensions={reportFilterDimensions}
+            fetchReports={getProjectReports}
+            initialReports={reports}
           />
         </ResizablePanel>
 

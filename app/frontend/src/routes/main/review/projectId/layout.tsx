@@ -3,14 +3,14 @@ import { useEffect, useState } from "react";
 import { useParams, Outlet } from "react-router-dom";
 import { AdminGuard } from "@/components/auth/admin-guard";
 import { ReportColumnClient } from "./components/report-column-client";
-import type { ProjectAnnotationsDto, ReportDetailDto } from "@/types/apiDTOs";
-import { getAnnotations, getProjectReports } from "@/lib/api/projectApi";
+import type { ProjectAnnotationsDto, ReportCurationDto } from "@/types/apiDTOs";
+import { getAnnotations, getProjectReportsReview } from "@/lib/api/projectApi";
 import { ReviewAnnotationsProvider } from "./components/review-annotations-context";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuthStore } from "@/hooks/use-auth";
 
 interface ProjectReviewData {
-  reports: ReportDetailDto[];
+  reports: ReportCurationDto[];
   annotations: ProjectAnnotationsDto;
 }
 
@@ -29,18 +29,13 @@ export default function AnnotationsReviewPage() {
 
     (async () => {
       try {
-        const [reports, annotations] = await Promise.all([
-          getProjectReports(projectId, false),
+        const [reportsPage, annotations] = await Promise.all([
+          getProjectReportsReview(projectId),
           getAnnotations(projectId),
         ]);
 
-        const annotatedReportIds = new Set(Object.keys(annotations ?? {}));
-        const filteredReports = (reports ?? []).filter((report) =>
-          annotatedReportIds.has(String(report.report.reportId))
-        );
-
         if (!cancelled) {
-          setData({ reports: filteredReports, annotations: annotations ?? {} });
+          setData({ reports: reportsPage?.items ?? [], annotations: annotations ?? {} });
         }
       } catch (error) {
         if (cancelled) return;

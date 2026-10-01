@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, X } from "lucide-react";
 import React, { useState } from "react";
 
-import type { StudyDto, ReportDto, ReportDetailDto} from "../../../types/apiDTOs";
+import type { StudyPreviewDto, ReportDto, ReportCurationDto} from "../../../types/apiDTOs";
 
 import { toast } from "sonner";
 
@@ -23,7 +23,7 @@ import { useReportStore } from "@/hooks/use-report-store";
 import { useDetailsSheet } from "@/context/details-sheet-context";
 
 interface ReportAssignedStudiesBadgesProps {
-  report: ReportDetailDto;
+  report: ReportCurationDto;
 }
 
 export function ReportAssignedStudiesBadges({
@@ -32,13 +32,13 @@ export function ReportAssignedStudiesBadges({
 
   // All hooks must be called unconditionally, before any return
   const removeAssignedStudy = useReportStore((state) => state.removeAssignedStudy);
-  const reportInStore = useReportStore((state) => state.reports[report.report.reportId]);
+  const reportInStore = useReportStore((state) => state.reports[report.reportId]);
   const assignedStudies = reportInStore?.assignedStudies ?? report.assignedStudies;
   const [removingAssignments, setRemovingAssignments] = useState<Set<string>>(new Set());
   const [removing, setRemoving] = useState<Set<string>>(new Set());
   const [studyToRemove, setStudyToRemove] = useState<{
     report: ReportDto;
-    study: StudyDto;
+    study: StudyPreviewDto;
   } | null>(null);
   const getAssignmentKey = (reportId: number, studyId: number) => `${reportId}-${studyId}`;
   const isRemovalDialogOpen = Boolean(studyToRemove);
@@ -79,7 +79,7 @@ export function ReportAssignedStudiesBadges({
   };
 
   // Open dialog for confirmation instead of removing directly
-  const onRemoveAssignedStudy = async (report : ReportDto, study : StudyDto) => {
+  const onRemoveAssignedStudy = async (report : ReportDto, study : StudyPreviewDto) => {
         if (report && study) {
             setStudyToRemove({ report: report, study: study });
         }
@@ -111,7 +111,7 @@ export function ReportAssignedStudiesBadges({
   const handleRemoveClick = async (
     event: React.MouseEvent,
     report: ReportDto,
-    study: StudyDto
+    study: StudyPreviewDto
   ) => {
     event.stopPropagation();
     event.preventDefault();
@@ -131,12 +131,12 @@ export function ReportAssignedStudiesBadges({
   return (
     <div className="flex flex-wrap gap-1 mt-4">
       {assignedStudies.map((study) => {
-        const assignmentKey = getAssignmentKey(report.report.reportId, study.studyId);
+        const assignmentKey = getAssignmentKey(report.reportId, study.studyId);
         // Use local removing state in addition to parent removingAssignments
         const isRemovingAssignment = removingAssignments.has(assignmentKey) || removing.has(assignmentKey);
         const isNewStudy = isNewStudyAssignment(
           study.createdAt,
-          report.report.createdAt
+          report.createdAt
         );
         return (
           <Badge
@@ -157,7 +157,7 @@ export function ReportAssignedStudiesBadges({
               onClick={(event) => {
                 event.stopPropagation();
                 event.preventDefault();
-                handleRemoveClick(event, report.report, study);
+                handleRemoveClick(event, report, study);
               }}
               disabled={isRemovingAssignment}
             >

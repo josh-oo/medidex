@@ -3,15 +3,15 @@ import { useEffect, useState } from "react";
 import { useParams, Outlet } from "react-router-dom";
 import { AdminGuard } from "@/components/auth/admin-guard";
 import { ReportColumnClient } from "./components/report-column-client";
-import type { ReportDetailDto } from "@/types/apiDTOs";
-import { getProjectReports } from "@/lib/api/projectApi";
+import type { ReportIntakeDto } from "@/types/apiDTOs";
+import { getProjectReportsIntake } from "@/lib/api/projectApi";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuthStore } from "@/hooks/use-auth";
 
 export default function PdfUploadPage() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
   const isAdmin = useAuthStore((s) => s.user?.isAdmin ?? false);
-  const [reports, setReports] = useState<ReportDetailDto[] | null>(null);
+  const [reports, setReports] = useState<ReportIntakeDto[] | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
@@ -21,9 +21,9 @@ export default function PdfUploadPage() {
     setReports(null);
     setNotFound(false);
 
-    getProjectReports(projectId, true)
+    getProjectReportsIntake(projectId)
       .then((result) => {
-        if (!cancelled) setReports(result ?? []);
+        if (!cancelled) setReports(result?.items ?? []);
       })
       .catch((error) => {
         if (cancelled) return;

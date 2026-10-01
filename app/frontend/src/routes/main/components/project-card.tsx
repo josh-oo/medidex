@@ -22,9 +22,9 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Search, Calendar, UserPlus, Check, Settings, FileUp, ClipboardCheck, Trash2, Bot, ArrowDown, Microscope, AlertTriangle } from "lucide-react";
+import { Search, Calendar, UserPlus, Check, Settings, FileUp, ClipboardCheck, Trash2, ArrowDown, Microscope, AlertTriangle } from "lucide-react";
 import RelativeTime from "@/components/ui/relative-time";
-import type { ProjectDetailsDto, ProjectAssigneeDto } from "@/types/apiDTOs";
+import type { ProjectDto, AssigneeDto } from "@/types/apiDTOs";
 import type { UserDto } from "@/types/user/user.dto";
 import {
   assignUserToProject,
@@ -32,23 +32,16 @@ import {
   deleteProjectById,
   streamProjectUpdates,
 } from "@/lib/api/projectApi";
+import {
+  useAssigneeOptionsSlot,
+  type AssigneeOption,
+  type AssigneeOptionsGroup,
+} from "@/context/assignee-options-context";
 
 const EMPTY_USERS: UserDto[] = [];
-const MEDIBOT_USER: UserDto = {
-  id: "bot",
-  name: "MediBot",
-  email: "",
-  roles: [],
-  isApproved: true,
-};
-
-const withMediBot = (users: UserDto[]) => {
-  const hasMediBot = users.some((user) => user.id === MEDIBOT_USER.id);
-  return hasMediBot ? users : [...users, MEDIBOT_USER];
-};
 
 interface ProjectCardProps {
-  project: ProjectDetailsDto;
+  project: ProjectDto;
   index?: number;
   assignableUsers?: UserDto[];
   onAssigneesChange?: (payload: { projectId: string; userIds: string[] }) => void;
@@ -87,7 +80,7 @@ export function ProjectCard({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [pendingAssigneeId, setPendingAssigneeId] = useState<string | null>(null);
-  const availableUsers = useMemo(() => withMediBot(assignableUsers), [assignableUsers]);
+  const extraGroups = useAssigneeOptionsSlot(project.projectId);
   const isUpdatingAssignees = pendingAssigneeId !== null;
 
   useEffect(() => {
@@ -127,27 +120,35 @@ export function ProjectCard({
   }, [project.projectId, onProjectUpdate]);
 
   const sortedUsers = useMemo(
-    () => [...availableUsers].sort((a, b) => a.email.localeCompare(b.email)),
-    [availableUsers],
+    () => [...assignableUsers].sort((a, b) => a.email.localeCompare(b.email)),
+    [assignableUsers],
   );
+
+  const extraOptionsById = useMemo(() => {
+    const map = new Map<string, AssigneeOption>();
+    extraGroups.forEach((group) => group.options.forEach((option) => map.set(option.id, option)));
+    return map;
+  }, [extraGroups]);
+
+  const extraToggleById = useMemo(() => {
+    const map = new Map<string, AssigneeOptionsGroup["onToggle"]>();
+    extraGroups.forEach((group) => group.options.forEach((option) => map.set(option.id, group.onToggle)));
+    return map;
+  }, [extraGroups]);
 
   const knownUsers = useMemo(() => {
     const map = new Map<string, UserDto>();
     sortedUsers.forEach((user) => map.set(user.id, user));
+    extraOptionsById.forEach((option, id) => {
+      if (!map.has(id)) {
+        map.set(id, { id: option.id, name: option.name, email: "", roles: [], isApproved: true });
+      }
+    });
     return map;
-  }, [sortedUsers]);
-
-  const automationUsers = useMemo(
-    () => sortedUsers.filter((user) => user.id === MEDIBOT_USER.id),
-    [sortedUsers]
-  );
-  const humanUsers = useMemo(
-    () => sortedUsers.filter((user) => user.id !== MEDIBOT_USER.id),
-    [sortedUsers]
-  );
+  }, [sortedUsers, extraOptionsById]);
 
   const assigneeMap = useMemo(() => {
-    const map = new Map<string, ProjectAssigneeDto>();
+    const map = new Map<string, AssigneeDto>();
     (project.assignees ?? []).forEach((assignee) => map.set(assignee.userId, assignee));
     return map;
   }, [project.assignees]);
@@ -169,10 +170,13 @@ export function ProjectCard({
         return;
       }
       const isSelected = assigneeIds.includes(normalizedUserId);
+      const customToggle = extraToggleById.get(normalizedUserId);
 
       setPendingAssigneeId(normalizedUserId);
       try {
-        if (isSelected) {
+        if (customToggle) {
+          await customToggle(normalizedUserId, isSelected);
+        } else if (isSelected) {
           await removeUserFromProject(project.projectId, normalizedUserId);
         } else {
           await assignUserToProject(project.projectId, normalizedUserId);
@@ -196,7 +200,7 @@ export function ProjectCard({
         setPendingAssigneeId(null);
       }
     },
-    [assigneeIds, isUpdatingAssignees, onAssigneesChange, project.projectId]
+    [assigneeIds, isUpdatingAssignees, onAssigneesChange, project.projectId, extraToggleById]
   );
 
   const handleDeleteProject = useCallback(async () => {
@@ -289,18 +293,12 @@ export function ProjectCard({
       linkedReports,
     };
   });
-  const orderedAssigneePanels = assigneeProgressPanels.length
-    ? [
-        ...assigneeProgressPanels.filter((panel) => panel.userId === MEDIBOT_USER.id),
-        ...assigneeProgressPanels.filter((panel) => panel.userId !== MEDIBOT_USER.id),
-      ]
-    : assigneeProgressPanels;
-  const hasAssigneePanels = orderedAssigneePanels.length > 0;
-  const isSingleAssigneePanel = orderedAssigneePanels.length === 1;
+  const hasAssigneePanels = assigneeProgressPanels.length > 0;
+  const isSingleAssigneePanel = assigneeProgressPanels.length === 1;
 
-  const renderUserCommandItem = (user: UserDto) => {
+  const renderUserCommandItem = (user: { id: string; name: string }) => {
     const isSelected = assigneeIds.includes(user.id);
-    const isMediBotUser = user.id === MEDIBOT_USER.id;
+    const Icon = extraOptionsById.get(user.id)?.icon;
     return (
       <CommandItem
         key={user.id}
@@ -313,7 +311,7 @@ export function ProjectCard({
       >
         <Avatar className="h-7 w-7 border border-border/70 bg-muted">
           <AvatarFallback className="text-[11px] font-semibold">
-            {isMediBotUser ? <Bot className="h-3.5 w-3.5" aria-hidden /> : getUserInitials(user.name)}
+            {Icon ? <Icon className="h-3.5 w-3.5" aria-hidden /> : getUserInitials(user.name)}
           </AvatarFallback>
         </Avatar>
         <div className="flex-1 truncate">
@@ -472,9 +470,9 @@ export function ProjectCard({
             }`}
           >
             {hasAssigneePanels ? (
-              orderedAssigneePanels.map((panel) => {
-                const isMediBot = panel.userId === MEDIBOT_USER.id;
-                
+              assigneeProgressPanels.map((panel) => {
+                const Icon = extraOptionsById.get(panel.userId)?.icon;
+
                 return (
                   <div
                     key={panel.userId}
@@ -482,7 +480,7 @@ export function ProjectCard({
                   >
                     <div className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       <span className="truncate flex items-center gap-1.5">
-                        {isMediBot && <Bot className="h-3.5 w-3.5" aria-hidden />}
+                        {Icon && <Icon className="h-3.5 w-3.5" aria-hidden />}
                         <span className="truncate">{panel.name}</span>
                       </span>
                         <span className="shrink-0 text-foreground">
@@ -570,16 +568,18 @@ export function ProjectCard({
                 <CommandInput placeholder="Search users..." />
                 <CommandList className="max-h-64 overflow-y-auto">
                   <CommandEmpty>No users found.</CommandEmpty>
-                  {sortedUsers.length ? (
+                  {sortedUsers.length || extraGroups.some((group) => group.options.length > 0) ? (
                     <>
-                      {automationUsers.length > 0 && (
-                        <CommandGroup heading="Automation">
-                          {automationUsers.map(renderUserCommandItem)}
-                        </CommandGroup>
+                      {extraGroups.map((group) =>
+                        group.options.length > 0 ? (
+                          <CommandGroup key={group.heading} heading={group.heading}>
+                            {group.options.map(renderUserCommandItem)}
+                          </CommandGroup>
+                        ) : null
                       )}
-                      {humanUsers.length > 0 && (
+                      {sortedUsers.length > 0 && (
                         <CommandGroup heading="Team">
-                          {humanUsers.map(renderUserCommandItem)}
+                          {sortedUsers.map(renderUserCommandItem)}
                         </CommandGroup>
                       )}
                     </>

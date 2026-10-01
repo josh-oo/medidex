@@ -1,27 +1,21 @@
 import { Button } from "@/components/ui/button";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Spinner } from "@/components/ui/spinner";
 
-export function LoadMoreStudiesButton() {
-  const { pathname } = useLocation();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+interface LoadMoreStudiesButtonProps {
+  onClick?: () => void;
+  loading?: boolean;
+}
 
-  const currentLimit = Number(searchParams.get("k") ?? "10");
-  const nextLimit = currentLimit + 10;
-
+export function LoadMoreStudiesButton({ onClick, loading }: LoadMoreStudiesButtonProps) {
   return (
     <div className="flex justify-center pt-4 pb-2">
       <Button
         variant="outline"
-        onClick={() => {
-          const params = new URLSearchParams(searchParams.toString());
-          params.set("k", String(nextLimit));
-          const queryString = params.toString();
-          navigate(queryString ? `${pathname}?${queryString}` : pathname);
-        }}
+        onClick={onClick}
+        disabled={loading}
         className="min-w-32"
       >
-        Load More
+        {loading ? <Spinner /> : "Load More"}
       </Button>
     </div>
   );

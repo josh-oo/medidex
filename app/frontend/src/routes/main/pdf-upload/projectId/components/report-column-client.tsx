@@ -6,19 +6,19 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { ReportDetailDto } from "@/types/apiDTOs";
+import { ReportIntakeDto, ReportFilterDimension } from "@/types/apiDTOs";
 import { ReportList } from "@/components/ui/report-view/report-list";
 import { useReportStore } from "@/hooks/use-report-store";
+import { getProjectReportsIntake } from "@/lib/api/projectApi";
 
 interface ReportColumnClientProps {
   children: ReactNode;
-  reports: ReportDetailDto[];
+  reports: ReportIntakeDto[];
   projectId: string;
 }
 
-const reportFilterOptions = [
-  { value: "withPdf", label: "PDF" },
-  { value: "withoutPdf", label: "No PDF" },
+const reportFilterDimensions: ReportFilterDimension[] = [
+  { field: "withPdf", label: "PDF", onlyLabel: "Has PDF", excludeLabel: "No PDF" },
 ];
 
 export function ReportColumnClient({ children, reports, projectId }: ReportColumnClientProps) {
@@ -48,7 +48,9 @@ export function ReportColumnClient({ children, reports, projectId }: ReportColum
           <ReportList
             baseUrl="pdf-upload"
             editMode={false}
-            filterOptions={reportFilterOptions}
+            filterDimensions={reportFilterDimensions}
+            fetchReports={getProjectReportsIntake}
+            initialReports={reports}
           />
         </ResizablePanel>
 

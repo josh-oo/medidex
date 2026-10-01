@@ -18,16 +18,14 @@ import {
 import type { StudyDto } from "@/types/apiDTOs";
 import type { ReactNode } from "react";
 
-interface StudyCardProps {
-  study: StudyDto;
+interface StudyCardProps extends StudyDto {
   /** Omitted for globally searched studies, which carry no relevance score. */
   relevance?: number | null;
-  isLinked: boolean;
-  /** Shown for search results that are also part of the recommendations. */
+  isAssigned: boolean;
   alsoRecommended?: boolean;
+  badge?: ReactNode;
   onClick: (study: StudyDto) => void;
-  onLink: (study: StudyDto) => void;
-  aiBadge?: ReactNode;
+  onAssign: (study: StudyDto) => void;
 }
 
 const formatParticipantCount = (value?: string | null) => {
@@ -54,13 +52,13 @@ const getRelevanceBadgeStyle = (relevance: number) => {
 };
 
 export function StudyCard({
-  study,
   relevance,
-  isLinked,
+  isAssigned,
   alsoRecommended = false,
+  badge,
   onClick,
-  onLink,
-  aiBadge,
+  onAssign,
+  ...study
 }: StudyCardProps) {
   const hasRelevance = typeof relevance === "number";
 
@@ -88,21 +86,21 @@ export function StudyCard({
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-pressed={isLinked}
-                aria-label={isLinked ? "Study linked" : "Link study"}
-                disabled={isLinked}
+                aria-pressed={isAssigned}
+                aria-label={isAssigned ? "Study linked" : "Link study"}
+                disabled={isAssigned}
                 onClick={() => {
-                  if (!isLinked) {
-                    onLink(study);
+                  if (!isAssigned) {
+                    onAssign(study);
                   }
                 }}
                 className={`p-1 rounded-full transition-colors ${
-                  isLinked
+                  isAssigned
                     ? "text-primary/70 cursor-default"
                     : "text-muted-foreground/60 hover:text-primary"
                 }`}
               >
-                {isLinked ? (
+                {isAssigned ? (
                   <Link className="h-6 w-6" />
                 ) : (
                   <Plus className="h-6 w-6" />
@@ -110,7 +108,7 @@ export function StudyCard({
               </button>
             </TooltipTrigger>
             <TooltipContent>
-              {isLinked ? "Already linked" : "Link study"}
+              {isAssigned ? "Already linked" : "Link study"}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -147,10 +145,10 @@ export function StudyCard({
                   className="font-normal text-xs px-2 py-0.5 gap-1"
                 >
                   <Sparkles className="h-3 w-3" />
-                  Also recommended
+                  Also similar
                 </Badge>
               )}
-              {aiBadge}
+              {badge}
             </div>
           </div>
         </div>

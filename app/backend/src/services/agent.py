@@ -128,17 +128,17 @@ async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentCont
     visited_candidate_studies = runtime.context.visited_candidate_studies
     cutoff = runtime.context.cutoff_date
     
-    response = await runtime.context.study_similarity_service.get_similar_studies_by_id(
+    response, _has_more = await runtime.context.study_similarity_service.get_similar_studies_by_id(
         report_id,
-        aspect='default',
         cutoff=cutoff,
         negative_reports=None,
         negative_studies=None,
-        k=visited_candidate_studies + 1,
+        limit=visited_candidate_studies + 1,
+        offset=0,
         return_details=False
     )
 
-    study_id = response['id'][visited_candidate_studies]
+    study_id = response[visited_candidate_studies].id
 
     response = await runtime.context.study_repo.get_study_by_id(study_id=study_id)
 
@@ -232,8 +232,8 @@ async def fetch_reports_linked_to_study(
 
     return [
         {
-            "reportId": item["id"],
-            "title": item["title"],
+            "reportId": item.id,
+            "title": item.title,
         }
         for item in response
     ]
@@ -261,7 +261,7 @@ async def fetch_tags_associated_with_study(study_id: int, tag_category: StudyTag
     else:
         raise ValueError(f"Unsupported tag category: {tag_category}")
 
-    return [item["Description"] for item in response]
+    return [item.keyword for item in response]
 
 @tool
 async def fetch_study_by_shortname(

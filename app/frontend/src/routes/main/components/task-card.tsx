@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
-import type { ProjectTaskDto } from "@/types/apiDTOs";
+import type { TaskDto } from "@/types/apiDTOs";
 
 interface TaskCardProps {
-  task: ProjectTaskDto;
+  task: TaskDto;
   ownerName?: string;
 }
 
@@ -12,14 +12,14 @@ const clamp = (value: number, min = 0, max = Number.POSITIVE_INFINITY) => {
 };
 
 export function TaskCard({ task, ownerName }: TaskCardProps) {
-  const totalProcessable = clamp(task.project.numberReportsReadyForProcessing ?? 0);
+  const totalProcessable = clamp(task.numberReportsReadyForProcessing ?? 0);
   const processed = clamp(task.numberReportsProcessed ?? 0, 0, totalProcessable || Number.POSITIVE_INFINITY);
   const progressPercent = totalProcessable > 0 ? Math.round((processed / totalProcessable) * 100) : 0;
-  const displayOwner = ownerName ?? task.project.owner;
+  const displayOwner = ownerName ?? task.owner;
 
   return (
     <Link
-      to={`/projects/${task.project.projectId}`}
+      to={`/projects/${task.projectId}`}
       className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
     >
       <div className="group relative border bg-card p-5 transition hover:border-primary/40">
@@ -27,7 +27,7 @@ export function TaskCard({ task, ownerName }: TaskCardProps) {
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
             <h3 className="text-base font-semibold leading-tight text-foreground truncate">
-              {task.project.name}
+              {task.name}
             </h3>
             <p className="mt-1 text-xs text-muted-foreground truncate">Owner: {displayOwner}</p>
           </div>

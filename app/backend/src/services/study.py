@@ -1,13 +1,14 @@
 from ..database.repositories.study import StudyRepository
-from ..utils.dto import StudyCreate, studies_to_dto
+from ..utils.dto import StudyPayload, studies_to_dto
+from ..utils.query_parser import QueryNode, parse_advanced_query
 
-from typing import List
+from typing import List, Tuple, Union
 
 class StudyResourceService:
     def __init__(self, study_repo : StudyRepository):
         self.study_repo = study_repo
 
-    async def add_study(self, study : StudyCreate):
+    async def add_study(self, study : StudyPayload):
         try:
             new_study = await self.study_repo.add_study(
                     short_name=study.shortName,
@@ -26,3 +27,15 @@ class StudyResourceService:
     async def get_studies(self, study_ids : List[int]):
         result = await self.study_repo.get_studies(study_ids)
         return studies_to_dto(result)
+
+    async def search_studies(self, query: str, limit: int, offset: int) -> Tuple[List, bool]:
+        result, has_more = await self.study_repo.search_studies(query, limit, offset)
+        return studies_to_dto(result), has_more
+
+    async def search_studies_advanced(self, query: Union[str, QueryNode], limit: int, offset: int) -> Tuple[List, bool]:
+        """Accepts either a raw advanced-search query string (the REST API's own case -
+        parsed here, so the router itself never has to) or an already-structured QueryNode
+        """
+        ast = parse_advanced_query(query) if isinstance(query, str) else query
+        result, has_more = await self.study_repo.search_studies_advanced(ast, limit, offset)
+        return studies_to_dto(result), has_more

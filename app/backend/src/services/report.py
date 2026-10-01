@@ -1,4 +1,4 @@
-import fitz
+import pypdf
 import re
 from rapidfuzz import fuzz
 
@@ -9,7 +9,6 @@ from ..utils.trial_registration_id import extract_trial_ids_from_text, extract_t
 from ..database import StudyRepository, ReportRepository
 from ..database.repositories.report import Report
 
-from .llm import LanguageModelService
 from .crawler import CrawlerService, DoclingService
 
 import os
@@ -53,13 +52,9 @@ class DocumentService:
     async def get_pages(self, report_id: int) -> List[str]:
         def _sync_extract(path):
             try:
-                doc = fitz.open(path)
-                parts = []
-                for page in doc:
-                    parts.append(page.get_text() or "")
-                doc.close()
-                return parts
-            except fitz.FileDataError:
+                reader = pypdf.PdfReader(path)
+                return [page.extract_text() or "" for page in reader.pages]
+            except pypdf.errors.PyPdfError:
                 return []
             except Exception as e:
                 print(f"Error extracting text from PDF: {e}")
@@ -185,6 +180,7 @@ class DocumentService:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
         await asyncio.to_thread(_write_file, txt_path, text)
+        await self.report_repo.recompute_has_pdf(report_id)
 
         return text
     
@@ -216,6 +212,7 @@ class DocumentService:
         # Clear derived artifacts and reset report number so future uploads are re-assigned cleanly.
         await asyncio.to_thread(self.delete_fulltext, report_id)
         report.report_number = -1
+        await self.report_repo.recompute_has_pdf(report_id)
         await self.report_repo.db.flush()
         await self.report_repo.db.commit()
 
@@ -236,6 +233,7 @@ class DocumentService:
             report = await self.report_repo.get_report_by_id(report_id)
             if report:
                 report.report_number = 0
+                await self.report_repo.recompute_has_pdf(report_id)
                 await self.report_repo.db.flush()
             return {"report_id": report_id, "file_path": None, "size_bytes": 0}
 
@@ -263,111 +261,49 @@ class DocumentService:
             raise
         
 class ReportService:
-    def __init__(self, report_repo : ReportRepository, study_repo : StudyRepository, document_service : DocumentService, llm_service : LanguageModelService):
+    def __init__(self, report_repo : ReportRepository, study_repo : StudyRepository, document_service : DocumentService, open_alex_service):
         self.report_repo = report_repo
         self.study_repo = study_repo
 
         self.document_service = document_service
-        self.llm_service = llm_service
+        self.open_alex_service = open_alex_service
 
         self.report_cache = {}
 
-    async def get_trial_ids(self, report_id: int, include_fulltext: bool, use_cache : bool = True) -> List:
-        if include_fulltext and use_cache:
-            data = await self.report_repo.load_report_metadata(report_id)
-            if data is not None and "trial_id" in data:
-                return data["trial_id"]
-        trial_ids = await self._get_trial_ids(report_id, include_fulltext)
-        if include_fulltext and use_cache:
-            try:
-                await self.report_repo.save_report_metadata_field(report_id, "trial_id", trial_ids)
-                await self.report_repo.commit()
-            except:
-                await self.report_repo.rollback()
-        return trial_ids
-
-    async def _get_trial_ids(self, report_id: int, include_fulltext: bool) -> List[str]:
-        """Internal function to get trial IDs from a report"""
-        report = await self.get_report(report_id)
-        if not report:
-            return None
-        
-        if include_fulltext:
-            try:
-                text = await self.document_service.get_fulltext(report_id, fast=True)
-                return extract_trial_ids_from_text(text)
-            except:
-                pass
-        
-        authors = [item.strip() for item in report.authors.split("//")]
-        all_ids = extract_trial_id(report.title, report.abstract, authors)
-        return all_ids
-    
-    async def get_study_acronyms(self, report_id: int, include_fulltext : bool) -> List[str]:
-        async def _get_study_acronyms(text):
-            acronyms = []
-            for acronym in await self.study_repo.get_study_acronyms():
-                if acronym in text:
-                    acronyms.append(acronym)
-            return acronyms
+    async def get_fulltext_links(self, report_id: int) -> List[str]:
+        """OpenAlex fulltext links for a report's DOI. Normally just reads the cache
+        the post-upload background job populates (report_added.fulltext_links - see
+        ProjectRepository.set_report_auto_searched_pdf); falls back to a live OpenAlex
+        lookup (and caches it) only for reports that cache predates - e.g. reports
+        added before this field existed, or added outside the normal project-upload
+        pipeline - so this is a live call at most once per report.
+        """
+        report_added = await self.report_repo.get_report_added(report_id)
+        if report_added is not None and report_added.fulltext_links is not None:
+            return report_added.fulltext_links
 
         report = await self.get_report(report_id)
-        if not report:
-            return None
-        
-        if include_fulltext:
-            try:
-                text = await self.document_service.get_fulltext(report_id, fast=True)
-                return await _get_study_acronyms(text)
-            except:
-                pass
-        
-        acronyms = []
-        acronyms.extend(_get_study_acronyms(report.title))
-        acronyms.extend(_get_study_acronyms(report.abstract))
-        return acronyms
-        
-    
-    async def extract_metadata(self, report_id: int) -> Dict[str, List[str]]: 
-        meta_data = {}
-        meta_data['report_type'] = None   
-        fulltext = None
-        
-        is_abstract = await self.document_service.is_abstract_collection(report_id)
-        if is_abstract:
-            meta_data['report_type'] = 'abstract'       
-        else:
-            fulltext = await self.document_service.get_fulltext(report_id, fast=False) 
+        if report is None or not report.doi:
+            return []
 
-        async def _extract_pico():
-            report = await self.get_report(report_id)
-            return await self.llm_service.extract_pico(report.title, report.abstract, fulltext)
+        links = list(await self.open_alex_service.get_pdf_links_by_doi(report.doi))
+        if report_added is not None:
+            await self.report_repo.set_fulltext_links(report_id, links)
+        return links
 
-        trial_ids_task = self.get_trial_ids(report_id, include_fulltext=not is_abstract)
-        study_acronyms_task = self.get_study_acronyms(report_id, include_fulltext=not is_abstract)
-        extract_pico_task = _extract_pico()
-        trial_ids, study_acronyms, pico_values = await asyncio.gather(trial_ids_task, study_acronyms_task, extract_pico_task)
-
-        meta_data['trial_id'] = trial_ids
-        meta_data['study_acronyms'] = study_acronyms
-
-
-        meta_data['data_extraction'] = pico_values
-
-        return meta_data
-    
-    async def get_metadata(self, report_id: int) -> Dict:
-        data = None
-        
-        if data is None:
-            # Process PDF to extract metadata
-            data = await self.extract_metadata(report_id)
-        
-        return data
-    
     async def get_report(self, report_id: int) -> Report:
         if report_id not in self.report_cache:
             self.report_cache[report_id] = await self.report_repo.get_report_by_id(report_id)
         return self.report_cache[report_id]
+
+    async def is_ready(self, report_id: int) -> bool:
+        """Whether a report has finished both embedding and PDF processing (see
+        ReportRepository.get_readiness_sets) - the same readiness definition
+        ProjectResourceService.get_vectorized_and_ready_report_ids uses per-project,
+        here for callers (e.g. StudySimilaritySearchService) that only have a
+        single report id.
+        """
+        embedded, has_pdf = await self.report_repo.get_readiness_sets([report_id])
+        return report_id in embedded and report_id in has_pdf
 
     

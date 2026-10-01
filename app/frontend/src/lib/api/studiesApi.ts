@@ -1,21 +1,27 @@
 import apiClient from "./apiClient";
-import { StudyDto, StudyCreateDto , ReportDto, InterventionDto, ConditionDto, OutcomeDto , GetPersonsResponseDto } from "../../types/apiDTOs";
+import { StudyDto, StudyFullDto, StudyBaseDto , ReportPreviewDto, TagDto, GetPersonsResponseDto, Page, GetStudySearchParams } from "../../types/apiDTOs";
 import { serializeParams } from "./helpers";
 import { AxiosRequestConfig } from "axios";
 
+// Full study details in one call - linked reports plus interventions/conditions/
+// outcomes/participants/design, each as a first page (limit, default 10 on the
+// backend). Page further through any one of them via its own dedicated endpoint
+// below (getReportsByStudyId, getInterventionsForStudy, ...) and its nextCursor.
 export const getStudyById = (
   studyId: number,
+  limit?: number,
   config?: AxiosRequestConfig
-): Promise<StudyDto> => {
+): Promise<StudyFullDto> => {
   const path = `/studies/${studyId}`;
 
   const requestConfig = {
     ...config,
+    params: { limit },
     paramsSerializer: {
       serialize: serializeParams,
     },
   };
-  return apiClient.get<StudyDto>(path, requestConfig)
+  return apiClient.get<StudyFullDto>(path, requestConfig)
     .then(response => {
       return response.data;
     })
@@ -26,47 +32,48 @@ export const getStudyById = (
 }
 
 export const searchStudies = (
-  query: string,
+  params: GetStudySearchParams,
   config?: AxiosRequestConfig
-): Promise<StudyDto[]> => {
-  const requestConfig = {
-    ...config,
-    params: {
-      ...config?.params,
-      q: query,
-    },
-    paramsSerializer: {
-      serialize: serializeParams,
-    },
+): Promise<Page<StudyDto>> => {
+  const { params: configParams, ...restConfig } = config ?? {};
+  const requestParams = {
+    ...(configParams ?? {}),
+    ...params,
   };
 
-  return apiClient.get<StudyDto[]>("/studies", requestConfig)
+  return apiClient.get<Page<StudyDto>>("/studies/search", {
+      ...restConfig,
+      params: requestParams,
+      paramsSerializer: { serialize: serializeParams },
+    })
     .then(response => {
       return response.data;
     })
     .catch(error => {
-      console.error(`Error searching studies for "${query}":`, error);
+      console.error(`Error searching studies for "${params.q}":`, error);
       throw error;
     });
 }
 
 export const getReportsByStudyId = (
   studyId: number,
-  includePdfLinks?: boolean,
+  limit?: number,
+  cursor?: string | null,
   config?: AxiosRequestConfig
-): Promise<ReportDto[]> => {
+): Promise<Page<ReportPreviewDto>> => {
   const path = `/studies/${studyId}/reports`;
 
   const requestConfig = {
     ...config,
     params: {
-      include_pdf_links: includePdfLinks,
+      limit,
+      cursor: cursor ?? undefined,
     },
     paramsSerializer: {
       serialize: serializeParams,
     },
   };
-  return apiClient.get<ReportDto[]>(path, requestConfig)
+  return apiClient.get<Page<ReportPreviewDto>>(path, requestConfig)
     .then(response => {
       return response.data;
     })
@@ -78,10 +85,16 @@ export const getReportsByStudyId = (
 
 export const getInterventionsForStudy = (
   studyId: number,
+  limit?: number,
+  cursor?: string | null,
   config?: AxiosRequestConfig
-): Promise<InterventionDto[]> => {
+): Promise<Page<TagDto>> => {
   const path = `/studies/${studyId}/interventions`;
-  return apiClient.get<InterventionDto[]>(path, config)
+  return apiClient.get<Page<TagDto>>(path, {
+      ...config,
+      params: { limit, cursor: cursor ?? undefined },
+      paramsSerializer: { serialize: serializeParams },
+    })
     .then(response => {
       return response.data;
     })
@@ -93,10 +106,16 @@ export const getInterventionsForStudy = (
 
 export const getConditionsForStudy = (
   studyId: number,
+  limit?: number,
+  cursor?: string | null,
   config?: AxiosRequestConfig
-): Promise<ConditionDto[]> => {
+): Promise<Page<TagDto>> => {
     const path = `/studies/${studyId}/conditions`;
-    return apiClient.get<ConditionDto[]>(path, config)
+    return apiClient.get<Page<TagDto>>(path, {
+        ...config,
+        params: { limit, cursor: cursor ?? undefined },
+        paramsSerializer: { serialize: serializeParams },
+      })
       .then(response => {
         return response.data;
       })
@@ -108,10 +127,16 @@ export const getConditionsForStudy = (
 
 export const getOutcomesForStudy = (
   studyId: number,
+  limit?: number,
+  cursor?: string | null,
   config?: AxiosRequestConfig
-): Promise<OutcomeDto[]> => {
+): Promise<Page<TagDto>> => {
     const path = `/studies/${studyId}/outcomes`;
-    return apiClient.get<OutcomeDto[]>(path, config)
+    return apiClient.get<Page<TagDto>>(path, {
+        ...config,
+        params: { limit, cursor: cursor ?? undefined },
+        paramsSerializer: { serialize: serializeParams },
+      })
       .then(response => {
         return response.data;
       })
@@ -122,9 +147,18 @@ export const getOutcomesForStudy = (
 }
 
 //get participants description for a study
-export const getParticipantsForStudy = (studyId: number): Promise<string[]> => {
+export const getParticipantsForStudy = (
+  studyId: number,
+  limit?: number,
+  cursor?: string | null,
+  config?: AxiosRequestConfig
+): Promise<Page<TagDto>> => {
     const path = `/studies/${studyId}/participants`;
-    return apiClient.get<string[]>(path)
+    return apiClient.get<Page<TagDto>>(path, {
+        ...config,
+        params: { limit, cursor: cursor ?? undefined },
+        paramsSerializer: { serialize: serializeParams },
+      })
       .then(response => {
         return response.data;
       })
@@ -136,10 +170,16 @@ export const getParticipantsForStudy = (studyId: number): Promise<string[]> => {
 
 export const getDesignForStudy = (
   studyId: number,
+  limit?: number,
+  cursor?: string | null,
   config?: AxiosRequestConfig
-): Promise<string[]> => {
+): Promise<Page<TagDto>> => {
     const path = `/studies/${studyId}/design`;
-    return apiClient.get<string[]>(path, config)
+    return apiClient.get<Page<TagDto>>(path, {
+        ...config,
+        params: { limit, cursor: cursor ?? undefined },
+        paramsSerializer: { serialize: serializeParams },
+      })
       .then(response => {
         return response.data;
       })
@@ -165,7 +205,7 @@ export const getPersonsForStudy = (
 };
 
 export const createStudy = (
-  payload: StudyCreateDto,
+  payload: StudyBaseDto,
   config?: AxiosRequestConfig
 ): Promise<StudyDto> => {
   return apiClient

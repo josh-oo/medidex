@@ -1,6 +1,6 @@
 import apiClient from "./apiClient";
 import { AxiosRequestConfig } from "axios";
-import { ReportChatDto, ReportSourcesDto, SimilarTagDto, SimilarStudyDto, GetSimilarStudiesParams, GetSimilarTagsParams, StudyDto} from "../../types/apiDTOs";
+import { ReportChatDto, TagCandidateDto, StudyCandidateDto, Page, GetSimilarStudiesParams, GetSimilarTagsParams, StudyDto} from "../../types/apiDTOs";
 import { serializeParams } from "./helpers";    
 
 export interface ReportFlagDto {
@@ -17,14 +17,14 @@ export const getSimilarStudiesByReportId = (
   reportId: number,
   params: GetSimilarStudiesParams = {},
   config?: AxiosRequestConfig
-): Promise<SimilarStudyDto[]> => { 
+): Promise<Page<StudyCandidateDto>> => {
   const path = `/reports/${reportId}/similar-studies`;
   const { params: configParams, ...restConfig } = config ?? {};
   const requestParams = {
     ...(configParams ?? {}),
     ...params,
   };
-  return apiClient.get<SimilarStudyDto[]>(path, {
+  return apiClient.get<Page<StudyCandidateDto>>(path, {
       ...restConfig,
       params: requestParams,
       paramsSerializer: { serialize: serializeParams }
@@ -123,14 +123,14 @@ export const getSimilarTagsByReportId = (
   reportId: number,
   params: GetSimilarTagsParams = {},
   config?: AxiosRequestConfig
-): Promise<SimilarTagDto[]> => {
+): Promise<TagCandidateDto[]> => {
   const path = `/reports/${reportId}/similar-studies/tags`;
   const { params: configParams, ...restConfig } = config ?? {};
   const requestParams = {
     ...(configParams ?? {}),
     ...params,
   };
-  return apiClient.get<SimilarTagDto[]>(path, {
+  return apiClient.get<TagCandidateDto[]>(path, {
       ...restConfig,
       params: requestParams,
       paramsSerializer: { serialize: serializeParams }
@@ -217,21 +217,6 @@ export const deleteReportPdf = (
       throw error;
     });
 };
-
-export const getReportSources = (
-  reportId: number,
-  config?: AxiosRequestConfig
-): Promise<ReportSourcesDto> => {
-  const path = `/reports/${reportId}/sources`;
-  return apiClient.get<ReportSourcesDto>(path, config)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error(`Error fetching links for report ${reportId}:`, error.message || error);
-      throw error;
-    });
-}
 
 export const getReportChat = (
   reportId: number,

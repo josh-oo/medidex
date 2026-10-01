@@ -1,45 +1,41 @@
 import axios from "axios";
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
-import { StudyRelevanceTable } from "@/components/ui/study-view/study-relevance-table";
+import { useParams } from "react-router-dom";
+import { toast } from "sonner";
+import { CandidateStudyTable } from "@/components/ui/study-view/candidate-study-table";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { SimilarStudyDto } from "@/types/apiDTOs";
-import type { RelevanceStudy } from "@/types/reports";
+import type { StudyCandidateDto } from "@/types/apiDTOs";
 import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
-import { ReportChatButtons } from "./ai-actions";
+import { ReportActionsSlot } from "@/context/study-report-slots-context";
 
-const mapResponseToRelevanceStudies = (
-  response: SimilarStudyDto[]
-): RelevanceStudy[] => {
-  return response.map((study) => ({
-    ...study,
-    isLinked: false
-  }));
-};
+const PAGE_SIZE = 10;
 
 export default function StudyList() {
   const { projectId, reportId } = useParams<{ projectId: string; reportId: string }>() as {
     projectId: string;
     reportId: string;
   };
-  const [searchParams] = useSearchParams();
-  const k = searchParams.get("k") ?? undefined;
   const source = projectId;
   const reportIdNumber = Number(reportId);
 
-  const [studies, setStudies] = useState<RelevanceStudy[] | null>(null);
+  const [studies, setStudies] = useState<StudyCandidateDto[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setStudies(null);
+    setNextCursor(null);
     setNotFound(false);
     setLoadError(false);
 
-    getSimilarStudiesByReportId(reportIdNumber, undefined, { params: { k, source } })
+    getSimilarStudiesByReportId(reportIdNumber, undefined, { params: { limit: PAGE_SIZE, source } })
       .then((response) => {
-        if (!cancelled) setStudies(mapResponseToRelevanceStudies(response));
+        if (cancelled) return;
+        setStudies(response.items);
+        setNextCursor(response.nextCursor);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -54,7 +50,27 @@ export default function StudyList() {
     return () => {
       cancelled = true;
     };
-  }, [reportIdNumber, k, source]);
+  }, [reportIdNumber, source]);
+
+  const handleLoadMore = () => {
+    if (!nextCursor || isLoadingMore) return;
+
+    setIsLoadingMore(true);
+    getSimilarStudiesByReportId(reportIdNumber, undefined, {
+      params: { limit: PAGE_SIZE, cursor: nextCursor, source },
+    })
+      .then((response) => {
+        setStudies((prev) => [...(prev ?? []), ...response.items]);
+        setNextCursor(response.nextCursor);
+      })
+      .catch((error) => {
+        console.error(`Error loading more studies for report ${reportIdNumber}:`, error);
+        toast.error("Failed to load more studies");
+      })
+      .finally(() => {
+        setIsLoadingMore(false);
+      });
+  };
 
   if (notFound) {
     return (
@@ -78,11 +94,14 @@ export default function StudyList() {
 
   return (
     <>
-      <StudyRelevanceTable
+      <CandidateStudyTable
         reportId={reportIdNumber}
         studies={studies}
+        nextCursor={nextCursor}
+        isLoadingMore={isLoadingMore}
+        onLoadMore={handleLoadMore}
       />
-      <ReportChatButtons reportId={reportIdNumber} studies={studies}/>
+      <ReportActionsSlot reportId={reportIdNumber} studies={studies} />
     </>
   );
 }

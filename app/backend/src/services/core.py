@@ -1,15 +1,28 @@
 from ..database.repositories.study import StudyRepository
 from ..database.repositories.project import ProjectRepository
+from ..database.repositories.report import ReportRepository
+from ..utils.dto import Page, StudyCandidate, candidate_studies_to_dto
+from ..utils.pagination import decode_cursor, encode_cursor
+from .authorization import get_authorized_project_id
 from .authors import AuthorFeatureService
 from .vectorstore import VectorstoreService
 from .report import ReportService
-from .aspects import TagScoringService, TagCategories
+from .aspects import TagScoringService, TagCategories, UnsupportedAspectError
 
-from typing import List, Any
+from typing import List, Any, Optional
+from types import SimpleNamespace
 
 import math
 
-    
+
+class ReportNotReadyError(Exception):
+    """The report hasn't finished embedding/PDF processing yet."""
+
+
+class ReportNotInSourceProjectError(Exception):
+    """The report isn't part of the given source project."""
+
+
 class StudySimilaritySearchService:
     def __init__(self, user_id : str, vectorstore : VectorstoreService, study_repo : StudyRepository, project_repo : ProjectRepository, author_feature_service : AuthorFeatureService, report_service : ReportService):
         self.user_id = user_id
@@ -24,8 +37,8 @@ class StudySimilaritySearchService:
         if not self.user_id:
             self.user_id = "user"
 
-    async def get_similar_study_by_query(self, query : Any, cutoff: str, k: int, negative_studies: List[int], trial_ids: List[str], authors:List[str], return_details: bool):
-    
+    async def get_similar_study_by_query(self, query : Any, cutoff: str, limit: int, negative_studies: List[int], authors:List[str], return_details: bool):
+
         #Convert TagCategories:
 
         found_study_ids = {}
@@ -33,43 +46,24 @@ class StudySimilaritySearchService:
         debug_map = {}
 
         return_details= return_details or self.debug
-        
-        
-        if len(trial_ids) > 0:
-            response = await self.study_repo.get_study_id_by_trial_ids(trial_ids, cutoff)
-            penalty = 0.00
-            if response:
-                for trial_id in trial_ids:
-                    study_ids = response[trial_id]
-                    for study_id in study_ids:
-                        if study_id in negative_studies:
-                            continue
-                        found_study_ids[study_id] = 1.00 - penalty
-                        debug_map[study_id] = [{"source_id":trial_id}]
-                        penalty += 0.01
 
-        k = k - len(found_study_ids.keys())
-        if k > 0:
+        blacklist = negative_studies
+        reranked_results = await self.vectorstore.search_similar_studies(query, limit, cutoff, blacklist, False)
 
-            blacklist = list(found_study_ids.keys()) + negative_studies
-            exclude_trial_related_studies = len(found_study_ids.keys()) > 0
-            reranked_results = await self.vectorstore.search_similar_studies(query, k, cutoff, blacklist, exclude_trial_related_studies)
-
-            for result in reranked_results:
-                for hit in result.hits:
-                    candidates = hit.payload['belongs_to_study']
-                    for item in candidates:
-                        #item = int(item) #TODO remove later
-                        if item not in found_study_ids:
-                            found_study_ids[item] = hit.score
-                        info = dict(hit.payload)
-                        info['score'] = hit.score
-                        debug_map[item] = debug_map.get(item, []) + [info]
+        for result in reranked_results:
+            for hit in result.hits:
+                candidates = hit.payload['belongs_to_study']
+                for item in candidates:
+                    #item = int(item) #TODO remove later
+                    if item not in found_study_ids:
+                        found_study_ids[item] = hit.score
+                    info = dict(hit.payload)
+                    info['score'] = hit.score
+                    debug_map[item] = debug_map.get(item, []) + [info]
 
         if len(found_study_ids.keys()) == 0:
-            return {'id': [] , 'Relevance' : []}
+            return []
         all_studies = await self.study_repo.get_studies(list(found_study_ids.keys()))
-        #list of dicts to dict of lists:
 
         #Remove this block for evaluation without authors
         #scores_authors = await self.author_feature_service.get_author_scores(report_authors=authors, study_ids=list(found_study_ids.keys()), cutoff=cutoff)
@@ -77,36 +71,35 @@ class StudySimilaritySearchService:
         #    debug_map[study_id].append({'source_id': 'author_reranking', 'score': 0.65 * score})
         #    found_study_ids[study_id] = min(1.00, found_study_ids[study_id] + 0.65 * score)
 
-        for i in range(0, len(all_studies)):
-            item = all_studies[i].dict()
-            item['Relevance'] = found_study_ids[item['id']]
-            all_studies[i] = item
-
-        result = {}
+        rows = []
         for study in all_studies:
-            for key, value in study.items():
-                result.setdefault(key, []).append(value)
+            row = SimpleNamespace(**study.model_dump())
+            row.relevance = found_study_ids[row.id]
+            if return_details:
+                row.details = list({d['source_id']: d for d in debug_map[row.id]}.values())
+            rows.append(row)
 
-        order = ['id', 'Relevance', 'short_name', 'number_participants', 'duration', 'comparison', 'countries', 'date_entered', 'date_edited', 'status', 'trial_registration_id']
-        reordered = {key: result[key] for key in order}
+        rows.sort(key=lambda study: study.relevance, reverse=True)
 
-        if return_details:
-            reordered['details'] = [list({d['source_id']: d for d in debug_map[key]}.values()) for key in reordered['id']]
-
-        sorted_indices = sorted(range(len(reordered['Relevance'])), key=lambda i: reordered['Relevance'][i], reverse=True)
-        for k in reordered:
-            reordered[k] = [reordered[k][i] for i in sorted_indices]
-
-        # Add this right before "return reordered"
-        for study_id, relevance in zip(reordered['id'], reordered['Relevance']):
-            if isinstance(relevance, float) and math.isnan(relevance):
-                print(f"CRITICAL: NaN detected for Study ID {study_id}")
+        for study in rows:
+            if isinstance(study.relevance, float) and math.isnan(study.relevance):
+                print(f"CRITICAL: NaN detected for Study ID {study.id}")
                 # Optionally look into debug_map for this ID to see the source
-                print(f"Debug info for culprit: {debug_map.get(study_id)}")
+                print(f"Debug info for culprit: {debug_map.get(study.id)}")
 
-        return reordered
+        return rows
 
-    async def get_similar_studies_by_id(self, report_id : int, cutoff: str, k: int, negative_studies: List[int], negative_reports: List[int], return_details: bool):
+    async def get_similar_studies_by_id(self, report_id : int, cutoff: str, limit: int, offset: int, negative_studies: List[int], negative_reports: List[int], return_details: bool):
+        """Returns (page, has_more): `page` is the [offset, offset + limit) slice of the
+        relevance-ranked candidate pool, `has_more` says whether a further page exists.
+        Purely semantic (vectorstore hits plus project studies, then re-sorted by score) -
+        trial-id matches are surfaced separately, via the explicit study search
+        (StudyRepository.search_studies), not mixed into this ranking. The candidate pool
+        has no stable id ordering to page by, so pagination is offset-based rather than
+        keyset-based like ProjectReportPage - see src/utils/pagination.py. One extra
+        candidate beyond the page (`pool_target`) is fetched/kept so has_more can be
+        determined without a separate count query.
+        """
 
         if not negative_studies:
             negative_studies = []
@@ -114,78 +107,119 @@ class StudySimilaritySearchService:
         report = await self.report_service.get_report(report_id)
 
         authors = [item.strip() for item in report.authors.split("//")]
-        trial_ids = await self.report_service.get_trial_ids(report_id, include_fulltext=True)
 
         query = self.vectorstore.build_recommandation_based_on_report_id(report.id, negative_reports)
 
-
-        result = await self.get_similar_study_by_query(query,cutoff,k,negative_studies, trial_ids, authors, return_details=return_details)
+        pool_target = offset + limit + 1
+        rows = await self.get_similar_study_by_query(query,cutoff,pool_target,negative_studies, authors, return_details=return_details)
 
         # Check if there are any similar items in the same project which are more similar than already retrieved existing studies
-        if result.get('Relevance'):
-            min_score = min(result['Relevance'])
+        if rows:
+            min_score = min(row.relevance for row in rows)
             project_studies = await self.project_repo.get_similar_report_studies(report.id, min_score)
 
-            # Create a map of existing study IDs to their positions and scores
-            existing_study_map = {}
-            for idx, study_id in enumerate(result.get('id', [])):
-                existing_study_map[study_id] = {
-                    'index': idx,
-                    'score': result['Relevance'][idx]
-                }
+            # Map of existing study IDs to their row, so project matches can update in place
+            existing_study_map = {row.id: row for row in rows}
 
             for study, score in project_studies:
-                study_dict = study.dict()
-                study_id = study_dict.get('id')
-                
+                study_id = study.id
+
                 # If study already exists, update with higher score
                 if study_id in existing_study_map:
-                    existing_info = existing_study_map[study_id]
-                    if score > existing_info['score']:
-                        # Update the existing entry with the higher score
-                        result['Relevance'][existing_info['index']] = score
+                    existing_row = existing_study_map[study_id]
+                    if score > existing_row.relevance:
+                        existing_row.relevance = score
                 else:
                     # Add new study
-                    result['Relevance'].append(score)
-                    for key in result.keys():
-                        if key == "Relevance":
-                            continue
-                        result[key].append(study_dict.get(key))
-                    
-                    # Track the new study in our map
-                    existing_study_map[study_id] = {
-                        'index': len(result['Relevance']) - 1,
-                        'score': score
-                    }
-            
+                    new_row = SimpleNamespace(**study.model_dump())
+                    new_row.relevance = score
+                    rows.append(new_row)
+                    existing_study_map[study_id] = new_row
+
             # Reorder all results by relevance score (descending)
-            if result['Relevance']:
-                sorted_indices = sorted(
-                    range(len(result['Relevance'])), 
-                    key=lambda i: result['Relevance'][i], 
-                    reverse=True
-                )
-                for key in result.keys():
-                    result[key] = [result[key][i] for i in sorted_indices]
+            rows.sort(key=lambda row: row.relevance, reverse=True)
 
-                # Truncate to k results if we have more
-                if len(result['Relevance']) > k:
-                    for key in result.keys():
-                        result[key] = result[key][:k]
+            # Truncate to the pool target (one more than the page) if we have more
+            if len(rows) > pool_target:
+                rows = rows[:pool_target]
 
-        return result
-    
+        has_more = len(rows) > offset + limit
+        page = rows[offset:offset + limit]
+        return page, has_more
+
+    async def get_similar_studies_page(
+        self,
+        report_id: int,
+        cutoff: Optional[str],
+        limit: int,
+        cursor: Optional[str],
+        source: Optional[str],
+        negative_studies: Optional[List[int]],
+        negative_reports: Optional[List[int]],
+        return_details: bool,
+        user_id: Optional[str],
+    ) -> Page[StudyCandidate]:
+        """Full request-level wrapper around get_similar_studies_by_id: access check,
+        readiness/source checks, cursor decoding, and DTO assembly, shared by both heads
+        (previously inline in fastapi_app/core.py's similarity_search_studies_by_id, gated
+        by a separate check_report_access FastAPI dependency). `user_id` is the caller's
+        authenticated id for that access check - kept as an explicit argument rather than
+        reusing self.user_id, which this service coerces to a "user" placeholder for
+        vectorstore query personalization (see __init__) and so can't double as an
+        "is this request even authenticated" signal.
+
+        Raises (from get_authorized_project_id, src/services/authorization.py)
+        ReportNotFoundError/AuthenticationRequiredError/ReportAccessDeniedError for the
+        access check; ReportNotReadyError unless the report has finished embedding/PDF
+        processing (skipped when `cutoff` is given - that's a test-only path over
+        historical data, where "ready" doesn't apply); ReportNotInSourceProjectError if
+        `source` is given and doesn't match the report's actual project; and
+        InvalidCursorError (src/utils/pagination.py) for a malformed cursor.
+        """
+        project_id = await get_authorized_project_id(report_id, self.report_service.report_repo, self.project_repo, user_id)
+
+        if not cutoff and not await self.report_service.is_ready(report_id):
+            raise ReportNotReadyError(f"Report {report_id} is not ready for processing")
+
+        if source is not None and project_id != source:
+            raise ReportNotInSourceProjectError(f"Report {report_id} not found in project {source}")
+
+        offset = decode_cursor(cursor) if cursor else 0
+
+        result, has_more = await self.get_similar_studies_by_id(
+            report_id,
+            cutoff,
+            limit,
+            offset,
+            negative_studies,
+            negative_reports,
+            return_details,
+        )
+        studies = candidate_studies_to_dto(result)
+        next_cursor = encode_cursor(offset + limit) if has_more else None
+        return Page[StudyCandidate](items=studies, nextCursor=next_cursor)
+
 
 class RelatedTagSearchService:
 
-    def __init__(self, vectorstore : VectorstoreService, tag_scoring_service : TagScoringService, study_similarity_service : StudySimilaritySearchService, study_repo : StudyRepository):
+    def __init__(
+        self,
+        vectorstore : VectorstoreService,
+        tag_scoring_service : TagScoringService,
+        study_similarity_service : StudySimilaritySearchService,
+        study_repo : StudyRepository,
+        report_repo : ReportRepository,
+        project_repo : ProjectRepository,
+    ):
         self.vectorstore = vectorstore
         self.tag_scoring_service = tag_scoring_service
         self.study_similarity_service = study_similarity_service
         self.study_repo = study_repo
+        self.report_repo = report_repo
+        self.project_repo = project_repo
 
     async def search_related_tags_by_study_ids(self, study_ids: List[int], aspect : TagCategories, vectors : Any):
-        
+
         related_tags = []
         if aspect == TagCategories.interventions:
             related_tags = await self.study_repo.get_study_interventions(study_ids)
@@ -199,12 +233,22 @@ class RelatedTagSearchService:
             related_tags = await self.study_repo.get_study_outcomes(study_ids=study_ids)
             related_ids = {item["ID"] for items in related_tags.values() for item in items}
             return await self.tag_scoring_service.score_related_tags(related_ids, vectors, TagCategories.outcomes)
-    
-    async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : str):
-        
+        else:
+            raise UnsupportedAspectError(f"No related-tag search is defined for aspect '{aspect}'")
+
+    async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : str, user_id: Optional[str] = None):
+        """`user_id` gates access the same way get_similar_studies_page does (see that
+        method's docstring) - previously enforced by a separate check_report_access
+        FastAPI dependency ahead of this call.
+        """
+        await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
+
+        if aspect not in (TagCategories.interventions, TagCategories.conditions, TagCategories.outcomes):
+            raise UnsupportedAspectError(f"No related-tag search is defined for aspect '{aspect}'")
+
         #similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, TagCategories.default, cutoff, k, None, None, False)
-        similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, cutoff, k, None, None, False)
-        predicted_studies = similar_studies['id']
+        similar_studies, _has_more = await self.study_similarity_service.get_similar_studies_by_id(report_id, cutoff, k, 0, None, None, False)
+        predicted_studies = [row.id for row in similar_studies]
 
         vectors = await self.vectorstore.get_vectors_by_report_id(report_id)
         

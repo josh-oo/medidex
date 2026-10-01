@@ -1,1 +1,0 @@
-"""Medidex backend package."""

@@ -4,7 +4,7 @@ import {
   UploadSection,
   type UploadSectionHandle,
 } from "@/components/ui/upload/upload-section";
-import { ReportSourcesDto } from "@/types/apiDTOs";
+import { ReportIntakeDto } from "@/types/apiDTOs";
 import { useReportStore } from "@/hooks/use-report-store";
 import {
   AlertDialog,
@@ -24,7 +24,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { deleteReportPdf, getReportPdf, getReportSources, uploadPdf } from "@/lib/api/reportApi";
+import { deleteReportPdf, getReportPdf, uploadPdf } from "@/lib/api/reportApi";
 import { toast } from "sonner";
 
 export default function PdfDetailsPage() {
@@ -39,9 +39,12 @@ export default function PdfDetailsPage() {
 
   const [iframeKey, setIframeKey] = useState(0);
 
-  const [links, setLinks] = useState<ReportSourcesDto | null>(null);
-  const [linksLoading, setLinksLoading] = useState(true);
-  const [linksError, setLinksError] = useState<string | null>(null);
+  // This route is only ever reached via the pdf-upload layout, which populates the store
+  // from getProjectReportsIntake (ReportIntakeDto rows) before rendering it - so doi/
+  // fulltextLinks are already here, no separate GET /reports/{id} needed.
+  const report = useReportStore(
+    (state) => state.reports[Number(reportId)] as ReportIntakeDto | undefined
+  );
 
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfMissing, setPdfMissing] = useState(false);
@@ -68,24 +71,6 @@ export default function PdfDetailsPage() {
       toast.error("Could not delete the PDF. Please try again.");
     }
   }, [reportId, setHasPdf]);
-
-  useEffect(() => {
-    async function fetchLinks() {
-      setLinksLoading(true);
-      setLinksError(null);
-
-      try {
-        const data = await getReportSources(Number(reportId));
-        setLinks(data);
-      } catch (err: any) {
-        setLinksError(err.message || "Error fetching links");
-      } finally {
-        setLinksLoading(false);
-      }
-    }
-
-    fetchLinks();
-  }, [reportId]);
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -129,14 +114,12 @@ export default function PdfDetailsPage() {
         <div className="flex items-center gap-2">
           <Upload className="h-6 w-6 text-primary" />
           <h2 className="text-xl font-semibold">Upload PDF</h2>
-          {linksLoading ? (
+          {!report ? (
             <span className="text-muted-foreground">Loading doi...</span>
-          ) : linksError ? (
-            <span className="text-red-600 dark:text-red-400">{linksError}</span>
-          ) : links?.doi === "undefined" ? (
+          ) : !report.doi ? (
             <span className="text-muted-foreground">No doi found for this report.</span>
           ) : (
-            <a target="_blank" href={`https://www.doi.org/${links?.doi}`} className="truncate max-w-xs" style={{ display: 'inline-block', verticalAlign: 'middle', color: 'inherit', textDecoration: 'none' }}>{links?.doi}</a>
+            <a target="_blank" href={`https://www.doi.org/${report.doi}`} className="truncate max-w-xs" style={{ display: 'inline-block', verticalAlign: 'middle', color: 'inherit', textDecoration: 'none' }}>{report.doi}</a>
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             {hasPdf && (
@@ -177,17 +160,15 @@ export default function PdfDetailsPage() {
 
       <div className="mb-3 p-4">
 
-        {linksLoading ? (
+        {!report ? (
           <div className="text-muted-foreground">Loading links...</div>
-        ) : linksError ? (
-          <div className="text-red-600 dark:text-red-400">{linksError}</div>
-        ) : links?.links.length === 0 ? (
+        ) : report.fulltextLinks.length === 0 ? (
           <div className="text-muted-foreground">
             No links found for this report.
           </div>
         ) : (
           <div>
-            {links?.links.map((link, idx) => (
+            {report.fulltextLinks.map((link, idx) => (
               <div key={link + idx} className="flex items-center gap-2 mb-1">
                 <FileText className="h-4 w-4 flex-shrink-0" />
                 <a

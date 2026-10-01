@@ -57,10 +57,10 @@ async def calculate_rank_score(report_id, cutoff, client, semaphore, fixed_k=Non
         if len(ground_truth) == 1:
             ground_truth = ground_truth[0]
             for k in ks:
-                params = {"cutoff":cutoff, 'k': k}
+                params = {"cutoff":cutoff, 'limit': k}
                 response = await client.get(BACKEND_API + f"/reports/{report_id}/similar-studies",params=params)
                 response.raise_for_status()
-                result = response.json()
+                result = response.json()['items']
                 predicted_studies = [item['study']['studyId'] for item in result]
 
                 if ground_truth in predicted_studies:
@@ -91,11 +91,11 @@ async def calculate_rank_score_negative_hints(report_id, cutoff, client, fixed_k
     if len(ground_truth) == 1:
         ground_truth = ground_truth[0]
         for k in ks:
-            #params = {"cutoff":cutoff, 'k': k, 'negative_studies': negative_studies, 'negative_reports': negative_reports}
-            params = {"cutoff":cutoff, 'k': k, 'negative_reports': negative_reports}
+            #params = {"cutoff":cutoff, 'limit': k, 'negative_studies': negative_studies, 'negative_reports': negative_reports}
+            params = {"cutoff":cutoff, 'limit': k, 'negative_reports': negative_reports}
             response = await client.get(BACKEND_API + f"/reports/{report_id}/similar-studies",params=params)
             response.raise_for_status()
-            result = response.json()
+            result = response.json()['items']
             predicted_studies = [item['study']['studyId'] for item in result]
 
             if ground_truth in predicted_studies:

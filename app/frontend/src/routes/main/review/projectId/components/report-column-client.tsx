@@ -7,23 +7,21 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import { DetailsSheetProvider } from "@/context/details-sheet-context";
-import { ReportDetailDto } from "@/types/apiDTOs";
+import { ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
 import { ReportList } from "@/components/ui/report-view/report-list";
 import { useReportStore } from "@/hooks/use-report-store";
-import { useReviewAnnotations } from "./review-annotations-context";
+import { getProjectReportsReview } from "@/lib/api/projectApi";
 import StudySheet from "../../../projects/projectId/study-sheet";
 
 interface ReportColumnClientProps {
   children: ReactNode;
-  reports: ReportDetailDto[];
+  reports: ReportCurationDto[];
   projectId: string;
 }
 
-const reportFilterOptions = [
-  { value: "annotatorConsensus", label: "Consensus" },
-  { value: "annotatorConflict", label: "Conflict" },
-  { value: "annotationsReview", label: "Reviewed" },
-  { value: "annotationsNoReview", label: "Pending Review" },
+const reportFilterDimensions: ReportFilterDimension[] = [
+  { field: "consensus", label: "Agreement", onlyLabel: "Consensus", excludeLabel: "Conflict" },
+  { field: "reviewed", label: "Review", onlyLabel: "Reviewed", excludeLabel: "Pending review" },
 ];
 
 export function ReportColumnClient({ children, reports, projectId}: ReportColumnClientProps) {
@@ -31,7 +29,6 @@ export function ReportColumnClient({ children, reports, projectId}: ReportColumn
   const reportsPanelId = `${panelBaseId}-reports`;
   const detailsPanelId = `${panelBaseId}-details`;
   const resizeHandleId = `${panelBaseId}-resize-handle`;
-  const annotations = useReviewAnnotations();
 
   const setReports = useReportStore((state) => state.setReports);
     
@@ -55,8 +52,9 @@ export function ReportColumnClient({ children, reports, projectId}: ReportColumn
             <ReportList
               baseUrl="review"
               editMode={false}
-              filterOptions={reportFilterOptions}
-              annotations={annotations}
+              filterDimensions={reportFilterDimensions}
+              fetchReports={getProjectReportsReview}
+              initialReports={reports}
             />
           </ResizablePanel>
 

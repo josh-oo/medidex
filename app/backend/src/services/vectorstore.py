@@ -8,6 +8,8 @@ import os
 import numpy as np
 from typing import List, Any, Optional, Dict
 
+from src.utils.dto import TagCandidate
+
 from datetime import datetime, timezone
 
 from .embedding import EmbeddingService
@@ -285,11 +287,11 @@ class VectorstoreService():
                 with_payload=["belongs_to_study", f"temporary.{self.user_id}.belongs_to_study", "title", "authors", "source_id"],
             )
     
-    async def get_similar_tags_by_string(self, text : str, sources: List[str], aspect: str, k: int):
+    async def get_similar_tags_by_string(self, text : str, sources: List[str], aspect: str, k: int) -> List[TagCandidate]:
         vector = await self.embedding_service.embed(text)
         return await self.get_similar_tags(query=vector, sources=sources, aspect=aspect, k=k)
 
-    async def get_similar_tags(self, query : Any, sources: List[str], aspect: str, k: int):
+    async def get_similar_tags(self, query : Any, sources: List[str], aspect: str, k: int) -> List[TagCandidate]:
     
         #TODO implement more sophisticated tree based search here
 
@@ -314,16 +316,9 @@ class VectorstoreService():
             query_filter=filter,
         )
 
-        results = {'ID': [], 'Keyword':[], 'Relevance': []}
-
-        for result in search_results.points:
-            results['ID'].append(result.payload['source_id'])
-            results['Keyword'].append(result.payload['display_name'])
-            results['Relevance'].append(result.score)
-
-        return results
+        return [TagCandidate(id=result.payload['source_id'], keyword=result.payload['display_name'], relevance=result.score) for result in search_results.points]
     
-    async def score_tags(self, embedding : List[float], tag_ids : List[int], aspect : str):
+    async def score_tags(self, embedding : List[float], tag_ids : List[int], aspect : str) -> List[TagCandidate]:
         tag_filter = models.Filter(
             must=[
                 models.FieldCondition(key="source", match=models.MatchValue(value="internal")),
@@ -341,10 +336,7 @@ class VectorstoreService():
 
         related_tags = []
         for point in result.points:
-            item = {}
-            item['id'] = int(point.payload['source_id'])
-            item['score'] = point.score
-            related_tags.append(item)
+            related_tags.append(TagCandidate(id=point.payload['source_id'], keyword=point.payload['display_name'], relevance=point.score))
 
         return related_tags
     

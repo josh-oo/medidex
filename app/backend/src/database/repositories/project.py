@@ -16,6 +16,7 @@ from ..models import (
     StudyReportAdded,
     ProjectAssignees,
 )
+from .report import ReportRepository
 from typing import Any, Dict, List, Set, Tuple, Optional
 
 
@@ -25,7 +26,7 @@ class ProjectRepository:
         self.db = db
         self.user_id = str(user_id)
 
-    async def add_new_project(self, project_id : str, batch_description : str, reports : List[Report]):
+    async def add_new_project(self, project_id : str, batch_description : str, reports : List[Report], trial_ids : Optional[List[Optional[str]]] = None):
         try:
             new_project = Project(
                 id=project_id,
@@ -38,10 +39,15 @@ class ProjectRepository:
             self.db.add_all(reports)
             await self.db.flush()  # Flush once to get all IDs
 
-            # Create all ReportAdded entries
+            # Create all ReportAdded entries - trial_ids (parallel to reports, from
+            # ProjectResourceService.build_reports_from_entries's .ris-upload parse)
+            # lands here rather than on Report itself, since it's an unconfirmed,
+            # project-scoped guess - see ReportAdded.trial_registration_id in models.py.
+            if trial_ids is None:
+                trial_ids = [None] * len(reports)
             report_added_entries = [
-                ReportAdded(report_id=report.id, project_id=project_id)
-                for report in reports
+                ReportAdded(report_id=report.id, project_id=project_id, trial_registration_id=trial_id)
+                for report, trial_id in zip(reports, trial_ids)
             ]
             self.db.add_all(report_added_entries)
 
@@ -136,8 +142,13 @@ class ProjectRepository:
         )
         return result.scalars().all()
 
-    async def set_report_auto_searched_pdf(self, report_id: int) -> None:
-        print("Set auto searched: ", report_id,flush=True)
+    async def set_report_auto_searched_pdf(self, report_id: int, fulltext_links: Optional[List[str]] = None) -> None:
+        """`fulltext_links`, when given, is the OpenAlex lookup this same background
+        pass already did to find a PDF to auto-download (see
+        src/background/wrapper.py's _auto_search_report_pdf) - cached here alongside
+        the flag so report detail views don't have to re-query OpenAlex live
+        (see report_added.fulltext_links's comment in models.py).
+        """
         stmt = (
             select(ReportAdded)
             .where(ReportAdded.report_id == report_id)
@@ -147,9 +158,27 @@ class ProjectRepository:
             return
 
         report_added.auto_searched_pdf = True
+        if fulltext_links is not None:
+            report_added.fulltext_links = fulltext_links
         await self.db.flush()
-        print("Set auto searched: ", report_added,flush=True)
-        #await self.db.commit()
+
+        # auto_searched_pdf gates report.has_pdf's eligibility (see
+        # ReportRepository._compute_has_pdf) - a fulltext file may already exist and just
+        # been waiting on this flag, so re-derive it now instead of leaving it stale until
+        # something else happens to touch this report's PDF/fulltext state. Same session,
+        # different repo class - both just wrap self.db.
+        await ReportRepository(db=self.db, user_id=self.user_id).recompute_has_pdf(report_id)
+
+    async def is_project_assignee(self, project_id: str) -> bool:
+        if not self.user_id:
+            return False
+
+        stmt = select(ProjectAssignees).where(
+            (ProjectAssignees.project_id == project_id)
+            & (ProjectAssignees.assignee == self.user_id)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none() is not None
 
     async def get_assigned_projects(self) -> List[Project]:
         if not self.user_id:
@@ -189,15 +218,6 @@ class ProjectRepository:
         )
         result = await self.db.execute(stmt)
         return int(result.scalar_one() or 0)
-
-    async def get_auto_searched_pdf_for_project(self, project_id: str) -> List[int]:
-        stmt = (
-            select(ReportAdded.report_id)
-            .where(ReportAdded.project_id == project_id)
-            .where(ReportAdded.auto_searched_pdf.is_(True))
-        )
-        result = await self.db.execute(stmt)
-        return result.scalars().all()
 
     async def get_user_link_counts_by_project(self) -> Dict[str, int]:
         if not self.user_id:

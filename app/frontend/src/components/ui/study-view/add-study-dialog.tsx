@@ -41,9 +41,8 @@ import { getSimilarTagsByReportId } from "@/lib/api/reportApi";
 import { getInterventions } from "@/lib/api/interventionsApi";
 import type {
   DurationUnit,
-  InterventionDto,
   NewStudySuggestion,
-  StudyCreateDto,
+  StudyBaseDto,
   ComparisonGroup as SuggestedComparisonGroup,
 } from "@/types/apiDTOs";
 import type {
@@ -84,10 +83,10 @@ type SuggestionField = {
 
 type StudyDurationUnit = DurationUnit | "Uncertain";
 
-interface AddStudyDialogProps {
+export interface AddStudyDialogProps {
   currentReportId?: number;
   suggestedValues?: NewStudySuggestion;
-  onSaveStudy: (values: StudyCreateDto) => Promise<void>;
+  onSaveStudy: (values: StudyBaseDto) => Promise<void>;
 }
 
 const buildComparisonPayload = (groups: ComparisonGroup[]) =>
@@ -113,6 +112,10 @@ export function AddStudyDialog({
 
   const [countryOpen, setCountryOpen] = useState(false);
 
+  // Exposed as a `data-highlighted` attribute below rather than a class here,
+  // so a downstream build can style a suggestion-prefilled dialog however it
+  // wants without this component owning
+  // any particular look.
   const highlight = Boolean(suggestedValues);
 
   const [comparisonGroups, setComparisonGroups] = useState<ComparisonGroup[]>(
@@ -202,10 +205,10 @@ export function AddStudyDialog({
         );
         const parsedSuggestions = Array.isArray(data)
           ? data
-              .map((entry: { name?: string } | string | null) => {
+              .map((entry: { keyword?: string } | string | null) => {
                 if (typeof entry === "string") return entry;
-                if (entry && typeof entry === "object" && typeof entry.name === "string") {
-                  return entry.name;
+                if (entry && typeof entry === "object" && typeof entry.keyword === "string") {
+                  return entry.keyword;
                 }
                 return null;
               })
@@ -245,7 +248,7 @@ export function AddStudyDialog({
         const data = await getInterventions({ signal: controller.signal });
         const descriptions = Array.isArray(data)
           ? data
-              .map((entry) => entry?.Description)
+              .map((entry) => entry?.keyword)
               .filter((entry): entry is string => Boolean(entry))
           : [];
 
@@ -335,7 +338,7 @@ export function AddStudyDialog({
         ? selectedCountries.map((country) => country.trim()).filter(Boolean)
         : ["Unclear"];
 
-    const payload: StudyCreateDto = {
+    const payload: StudyBaseDto = {
       shortName: shortName.trim(),
       status: statusOfStudy.trim(),
       countries: normalizedCountries,
@@ -648,7 +651,8 @@ export function AddStudyDialog({
       <Button
         type="button"
         size="sm"
-        className={`h-8 ${highlight ? "ai-new-study-glow" : ""}`}
+        className="h-8"
+        data-highlighted={highlight || undefined}
         aria-haspopup="dialog"
         aria-expanded={addStudyDialogOpen}
         onClick={handleOpenDialog}

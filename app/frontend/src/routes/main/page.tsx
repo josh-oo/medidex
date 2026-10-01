@@ -5,10 +5,9 @@ import { ProjectCard } from "./components/project-card";
 import { TaskCard } from "./components/task-card";
 import { HomeHero } from "./components/home-hero";
 import { QuickStats } from "./components/quick-stats";
-import { FeaturesShowcase } from "./components/features-showcase";
 import { Button } from "@/components/ui/button";
 import { FileText, Plus } from "lucide-react";
-import type { ProjectDetailsDto, ProjectTaskDto } from "@/types/apiDTOs";
+import type { ProjectDto, TaskDto } from "@/types/apiDTOs";
 import type { UserDto } from "@/types/user/user.dto";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 import { useAuthStore } from "@/hooks/use-auth";
@@ -19,8 +18,8 @@ export default function Home() {
   const isAdmin = user?.isAdmin ?? false;
 
   const [loading, setLoading] = useState(true);
-  const [projects, setProjects] = useState<ProjectDetailsDto[]>([]);
-  const [tasks, setTasks] = useState<ProjectTaskDto[]>([]);
+  const [projects, setProjects] = useState<ProjectDto[]>([]);
+  const [tasks, setTasks] = useState<TaskDto[]>([]);
   const [ownerNameById, setOwnerNameById] = useState<Map<string, string>>(new Map());
   const [assignableUsers, setAssignableUsers] = useState<UserDto[]>([]);
 
@@ -29,18 +28,18 @@ export default function Home() {
       const [projectsResult, tasksResult] = await Promise.all([
         getProjects().catch((error) => {
           console.error("Failed to fetch projects:", error);
-          return [] as ProjectDetailsDto[];
+          return [] as ProjectDto[];
         }),
         getTasks().catch((error) => {
           console.error("Failed to fetch tasks:", error);
-          return [] as ProjectTaskDto[];
+          return [] as TaskDto[];
         }),
       ]);
 
       const ownerIds = Array.from(
         new Set(
           tasksResult
-            .map((task) => task.project.owner)
+            .map((task) => task.owner)
             .filter((ownerId): ownerId is string => Boolean(ownerId))
         )
       );
@@ -82,7 +81,7 @@ export default function Home() {
 
   const handleProjectDeleted = useCallback((projectId: string) => {
     setProjects((prev) => prev.filter((project) => project.projectId !== projectId));
-    setTasks((prev) => prev.filter((task) => task.project.projectId !== projectId));
+    setTasks((prev) => prev.filter((task) => task.projectId !== projectId));
   }, []);
 
   if (loading) {
@@ -134,9 +133,9 @@ export default function Home() {
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {tasks.map((task) => (
                 <TaskCard
-                  key={task.project.projectId}
+                  key={task.projectId}
                   task={task}
-                  ownerName={ownerNameById.get(task.project.owner)}
+                  ownerName={ownerNameById.get(task.owner)}
                 />
               ))}
             </div>
@@ -199,8 +198,6 @@ export default function Home() {
             )}
           </div>
         )}
-
-        <FeaturesShowcase />
       </div>
     </div>
   );

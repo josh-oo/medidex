@@ -5,7 +5,7 @@ from sqlalchemy import Column
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import UniqueConstraint
 from sqlalchemy import FetchedValue
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import datetime
 
 """
@@ -60,6 +60,8 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
     publisher: Optional[str]
     city: Optional[str]
     doi: Optional[str]
+    # Confirmed trial registration id - only set once a reviewer has confirmed it, unlike
+    # ReportAdded.trial_registration_id below (the unconfirmed .ris-upload/fulltext guess).
     trial_registration_id: Optional[str]
 
     __table_args__ = (
@@ -199,9 +201,39 @@ class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
     report_id: int = Field(primary_key=True, foreign_key="report.id", ondelete="CASCADE")
     project_id: str = Field(foreign_key="project.id", ondelete="CASCADE")
     auto_searched_pdf: bool = Field(default=False, nullable=False)
+    # Denormalized mirrors of external state (Qdrant vector existence / fulltext file
+    # existence on disk), scoped here rather than on Report because they're only
+    # meaningful for the lifetime of this report's project association: cascading away
+    # with this row when the project is deleted is the wanted behavior, not a gap to work
+    # around - Report itself shouldn't carry project-scoped, temporary metadata. Kept in
+    # sync at every write site that changes the underlying state - see
+    # ReportRepository.set_embedded()/recompute_has_pdf() and their callers - rather than
+    # computed on read.
+    embedded: bool = Field(default=False, nullable=False)
+    has_pdf: bool = Field(default=False, nullable=False)
+    # Cached OpenAlex fulltext-link search result for this report's DOI (see
+    # OpenAlexService.get_pdf_links_by_doi) - populated by the post-upload background
+    # job (src/background/wrapper.py's _auto_search_report_pdf, via
+    # ProjectRepository.set_report_auto_searched_pdf) so report detail views
+    # (ReportService.get_fulltext_links) don't re-hit OpenAlex on every read. None means
+    # "not searched yet" (falls back to a live lookup); an empty list means "searched,
+    # nothing found" - that distinction matters so the fallback doesn't refetch forever.
+    fulltext_links: Optional[List[str]] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    # Best-effort, UNCONFIRMED trial registration id guess for this report - parsed from
+    # the .ris upload (src/services/project.py's build_reports_from_entries) or from the
+    # report's fulltext (ReportService.get_trial_ids). Report.trial_registration_id above
+    # is the confirmed counterpart; this one is never written there automatically - a
+    # reviewer has to confirm a guess before it counts as authoritative.
+    trial_registration_id: Optional[str] = Field(default=None)
 
     __table_args__ = (
         Index('idx_report_added_project_report', 'project_id', 'report_id'),
+        Index('idx_report_added_embedded', 'embedded'),  # For readiness filtering
+        Index('idx_report_added_has_pdf', 'has_pdf'),  # For readiness/with_pdf filtering
+        Index('idx_report_added_trial_id', 'trial_registration_id'),  # For trial ID searches
     )
 
 class ProjectInnerScore(SQLModel, table=True, metadata=metadata_resources):

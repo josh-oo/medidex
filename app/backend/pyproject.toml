@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "medidex-core"
+version = "0.1.0"
+description = "Medidex's framework-agnostic domain layer and REST API head - the open-source core other deployables build on."
+readme = "README.md"
+requires-python = ">=3.13"
+dynamic = ["dependencies"]
+
+# Deliberately NOT namespaced under a `medidex_core` package: the existing
+# code imports these as top-level packages (`from src...`, `from
+# fastapi_app...`) everywhere, and that's unlikely to change - rewriting
+# every import to gain a namespace prefix isn't worth the churn for a package
+# that's only ever installed into its own dedicated venv (this repo's own
+# container, or a downstream deployable's). A consumer installs this and
+# gets `src`, `fastapi_app` importable as-is.
+[tool.setuptools]
+packages = [
+    "src",
+    "src.database",
+    "src.database.repositories",
+    "src.services",
+    "src.utils",
+    "src.background",
+    "fastapi_app",
+]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }

@@ -2,13 +2,13 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import {
   FileText,
   Calendar,
+  ChevronDown,
   Users,
   Download,
   ExternalLink,
   Flag,
   FlagOff,
   MoreVertical,
-  Sparkles,
   Search,
   X,
 } from "lucide-react";
@@ -35,10 +35,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
-import { filterReports, ReportFilterType } from "@/lib/filterUtils";
+import { ReportStatusSlot } from "@/context/study-report-slots-context";
 import { useReportStore } from "@/hooks/use-report-store";
-import { ProjectAnnotationsDto } from "@/types/apiDTOs";
+import { FilterMode, GetProjectReportsParams, ReportCurationDto, ReportFilterDimension, ReportFiltersState, Page } from "@/types/apiDTOs";
 import { toast } from "sonner";
 import { Abstract } from "./report-abstract";
 import {
@@ -48,23 +47,54 @@ import {
   getReportPdf,
 } from "@/lib/api/reportApi";
 
+function reportFilterMode(filters: ReportFiltersState, field: keyof ReportFiltersState): FilterMode {
+  return filters[field] ?? "any";
+}
+
+// Each dimension's 3 states (Any/Only/Exclude) are independent of every other dimension's -
+// setting one never touches another field.
+function setReportFilterMode(
+  filters: ReportFiltersState,
+  field: keyof ReportFiltersState,
+  mode: FilterMode
+): ReportFiltersState {
+  if (mode === "any") {
+    const next = { ...filters };
+    delete next[field];
+    return next;
+  }
+  return { ...filters, [field]: mode };
+}
+
 interface ReportListProps {
   baseUrl: string;
   editMode: boolean;
-  filterOptions?: { value: string; label: string }[];
+  filterDimensions?: ReportFilterDimension[];
   queryParams?: Record<string, string | number | boolean | undefined>;
-  annotations?: ProjectAnnotationsDto;
+  // Which endpoint backs this view (getProjectReports / getProjectReportsIntake /
+  // getProjectReportsReview) - each bakes in its own readiness/scope rules server-side, so
+  // this component never needs to know or override those.
+  fetchReports: (
+    projectId: string,
+    filters: GetProjectReportsParams
+  ) => Promise<Page<ReportCurationDto>>;
+  // The parent layout's own initial, unfiltered fetch (same endpoint as `fetchReports` with no
+  // filters/search) - used only to seed the very first render so the list doesn't flash empty
+  // while that same data is re-fetched below; every filter/search change after that always goes
+  // through fetchReports, never falls back to a cached snapshot.
+  initialReports: ReportCurationDto[];
 }
 
 export function ReportList({
   baseUrl,
-  queryParams = { }, 
+  queryParams = { },
   editMode,
-  filterOptions = [],
-  annotations = { },
+  filterDimensions = [],
+  fetchReports,
+  initialReports,
 }: ReportListProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [assignmentFilter, setAssignmentFilter] = useState<ReportFilterType>("all");
+  const [filters, setFilters] = useState<ReportFiltersState>({});
   const [flagDialogOpen, setFlagDialogOpen] = useState(false);
   const [selectedFlagReport, setSelectedFlagReport] = useState<{ id: number; title: string } | null>(null);
   const [flagDetails, setFlagDetails] = useState("");
@@ -104,14 +134,118 @@ export function ReportList({
     }
   }, [selectedReportId]);
 
-  const storeResults = useGenAIEvaluationStore((state) => state.results);
-  const runningEvaluations = useGenAIEvaluationStore((state) => state.runningEvaluations);
-
-  const reportsDict = useReportStore((state) => state.reports);
   const setReportFlag = useReportStore((state) => state.setFlag);
-  const reportsList = useMemo(() => Object.values(reportsDict), [reportsDict]);
+  const addReports = useReportStore((state) => state.addReports);
 
-  const filteredReports = filterReports(reportsList, annotations, searchQuery, assignmentFilter);
+  // Seeded from the parent layout's own initial fetch so the list doesn't flash empty while
+  // the (functionally identical) fetch below is still in flight.
+  const [filteredReports, setFilteredReports] = useState<ReportCurationDto[]>(initialReports);
+  const [isLoading, setIsLoading] = useState(false);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  // Cursor for the next page of the *current* search/filter combination - reset to null
+  // whenever that combination changes, since a cursor from one filter set is meaningless
+  // against another.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  // Only the free-text search is debounced (it fires on every keystroke); a filter chip click
+  // is already a single, deliberate action, so it fetches immediately below instead of also
+  // waiting out a debounce window on top of the network round trip.
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(handle);
+  }, [searchQuery]);
+
+  // Guards against a slow handleLoadMore response landing after a newer filter/search/project
+  // fetch has already replaced the list it was appending to - every effect/handler below that
+  // starts a fetch bumps this first and checks it's still current before applying the result.
+  const requestIdRef = useRef(0);
+
+  // A project switch swaps in the new project's own initial data right away, same as on
+  // first mount, rather than showing the previous project's reports until the fetch below
+  // (also triggered by the projectId change) resolves.
+  useEffect(() => {
+    requestIdRef.current += 1;
+    setFilteredReports(initialReports);
+    setNextCursor(null);
+  }, [projectId, initialReports]);
+
+  // Always the single source of truth for what's rendered - no separate "use the client store's
+  // snapshot when no filter is active" path, so clearing a filter/search always re-fetches
+  // from the server instead of silently falling back to a possibly-stale local cache. Always
+  // fetches the first page - a filter/search change starts pagination over, it never resumes
+  // from wherever the previous combination's cursor left off.
+  useEffect(() => {
+    if (!projectId) {
+      return;
+    }
+
+    const requestId = ++requestIdRef.current;
+    let cancelled = false;
+    setIsLoading(true);
+
+    fetchReports(projectId, {
+      search: debouncedSearch || undefined,
+      ...filters,
+    })
+      .then((result) => {
+        if (cancelled || requestIdRef.current !== requestId) return;
+        setFilteredReports(result.items);
+        setNextCursor(result.nextCursor);
+        addReports(result.items);
+      })
+      .catch((error) => {
+        console.error("Error fetching reports:", error);
+        if (!cancelled && requestIdRef.current === requestId) {
+          setFilteredReports([]);
+          setNextCursor(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, debouncedSearch, filters, fetchReports, addReports]);
+
+  const handleLoadMore = () => {
+    if (!projectId || !nextCursor || isLoadingMore) {
+      return;
+    }
+
+    const requestId = requestIdRef.current;
+    setIsLoadingMore(true);
+
+    fetchReports(projectId, {
+      search: debouncedSearch || undefined,
+      ...filters,
+      cursor: nextCursor,
+    })
+      .then((result) => {
+        // A filter/search/project change since this request started means the list it would
+        // append to no longer belongs to the current view - drop it rather than corrupt the
+        // new list with reports (and a cursor) from a stale filter combination.
+        if (requestIdRef.current !== requestId) return;
+        setFilteredReports((prev) => [...prev, ...result.items]);
+        setNextCursor(result.nextCursor);
+        addReports(result.items);
+      })
+      .catch((error) => {
+        console.error("Error fetching more reports:", error);
+        toast.error("Could not load more reports. Please try again.");
+      })
+      .finally(() => {
+        setIsLoadingMore(false);
+      });
+  };
+
+  const patchFilteredReportFlag = (reportId: number, flag: string | undefined) => {
+    setFilteredReports((prev) =>
+      prev.map((r) => (r.reportId === reportId ? { ...r, flag } : r))
+    );
+  };
 
   useEffect(() => {
     if (!flagDialogOpen || !selectedFlagReport) {
@@ -187,6 +321,7 @@ export function ReportList({
       });
 
       setReportFlag(selectedFlagReport.id, flagDetails.trim());
+      patchFilteredReportFlag(selectedFlagReport.id, flagDetails.trim());
 
       toast.success("Flag saved.");
       handleFlagDialogChange(false);
@@ -204,6 +339,7 @@ export function ReportList({
       await deleteReportFlagByReportId(reportId);
 
       setReportFlag(reportId, undefined);
+      patchFilteredReportFlag(reportId, undefined);
       toast.success("Flag deleted.");
 
       if (selectedFlagReport?.id === reportId) {
@@ -253,13 +389,26 @@ export function ReportList({
   const handleOpenReportPdf = async (reportId: number) => {
     // Open the tab synchronously (still tied to the user gesture) so
     // browsers don't treat the later navigation as a blocked popup.
-    const newTab = window.open("", "_blank", "noopener,noreferrer");
+    // Note: "noopener" makes window.open() return null, which would
+    // leave us with no reference to navigate once the PDF is fetched.
+    const newTab = window.open("", "_blank");
     try {
       const buffer = await getReportPdf(reportId);
       const blob = new Blob([buffer], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       if (newTab) {
-        newTab.location.href = url;
+        // Navigating a popup's top-level location to a blob: URL renders
+        // blank in some browsers (Safari in particular); embedding it in
+        // the popup's own document works reliably everywhere instead.
+        newTab.document.title = `Report ${reportId}`;
+        const style = newTab.document.createElement("style");
+        style.textContent = "html,body,embed{margin:0;height:100%;width:100%}";
+        newTab.document.head.appendChild(style);
+        const embed = newTab.document.createElement("embed");
+        embed.src = url;
+        embed.type = "application/pdf";
+        newTab.document.body.appendChild(embed);
+        newTab.focus();
       }
     } catch (error) {
       console.error("Error opening report PDF:", error);
@@ -275,9 +424,9 @@ export function ReportList({
           <FileText className="h-6 w-6 text-primary" />
           <h2 className="text-xl font-semibold">Reports</h2>
           <span className="text-sm text-muted-foreground">
-            ({filteredReports.length})
-            {searchQuery && ` of ${reportsList.length}`}
+            ({filteredReports.length}{nextCursor ? "+" : ""})
           </span>
+          {isLoading && <Spinner className="h-3.5 w-3.5 text-muted-foreground" />}
         </div>
 
         <div className="mt-4 space-y-3">
@@ -303,32 +452,53 @@ export function ReportList({
               )}
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                Filter:
-              </span>
-              <div className="flex gap-1">
-                <Button
-                  key="all"
-                  variant={assignmentFilter === "all" ? "default" : "outline"}
-                  size="sm"
-                  className="h-7 text-xs px-3"
-                  onClick={() => setAssignmentFilter("all" as ReportFilterType)}
-                >
-                  {"All"}
-                </Button>
-                {filterOptions.map((filter) => (
-                  <Button
-                    key={filter.value}
-                    variant={assignmentFilter === filter.value ? "default" : "outline"}
-                    size="sm"
-                    className="h-7 text-xs px-3"
-                    onClick={() => setAssignmentFilter(filter.value as ReportFilterType)}
-                  >
-                    {filter.label}
-                  </Button>
-                ))}
-              </div>
+            <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+              {filterDimensions.map((dimension) => {
+                const mode = reportFilterMode(filters, dimension.field);
+                const currentLabel =
+                  mode === "only"
+                    ? dimension.onlyLabel
+                    : mode === "exclude"
+                    ? dimension.excludeLabel
+                    : dimension.label;
+                return (
+                  <DropdownMenu key={dimension.field}>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant={mode === "any" ? "outline" : "default"}
+                        size="sm"
+                        className="h-7 gap-1 text-xs px-3"
+                      >
+                        {currentLabel}
+                        <ChevronDown className="h-3 w-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setFilters((prev) => setReportFilterMode(prev, dimension.field, "any"))
+                        }
+                      >
+                        Any
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setFilters((prev) => setReportFilterMode(prev, dimension.field, "only"))
+                        }
+                      >
+                        {dimension.onlyLabel}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setFilters((prev) => setReportFilterMode(prev, dimension.field, "exclude"))
+                        }
+                      >
+                        {dimension.excludeLabel}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -346,16 +516,13 @@ export function ReportList({
             </div>
           ) : (
             filteredReports.map((report, idx) => {
-              const displayDate = report.report.year
-                ? report.report.year.toString()
+              const displayDate = report.year
+                ? report.year.toString()
                 : null;
 
-              const hasAbstract = report.report.abstract && report.report.abstract.length > 0;
-              const isSelected = selectedReportId === report.report.reportId;
+              const hasAbstract = report.abstract && report.abstract.length > 0;
+              const isSelected = selectedReportId === report.reportId;
               const isExpanded = isSelected && hasAbstract;
-              const isRunningEvaluation = runningEvaluations.includes(report.report.reportId);
-              const reportResults = storeResults[report.report.reportId];
-              const resultCount = reportResults ? Object.keys(reportResults).length : 0;
               const flagMessage = report.flag?.trim() ?? "";
               const hasFlag = Boolean(flagMessage);
               const params = new URLSearchParams(
@@ -363,14 +530,14 @@ export function ReportList({
                   .filter(([_, v]) => v !== undefined)
                   .map(([k, v]) => [k, String(v)])
               ).toString();
-              const reportHref = `/${baseUrl}/${projectId}/${report.report.reportId}${params ? `?${params}` : ""}`;
+              const reportHref = `/${baseUrl}/${projectId}/${report.reportId}${params ? `?${params}` : ""}`;
 
               if (!reportHref) {
                 return null;
               }
 
               return (
-                <div key={report.report.reportId || idx} className="relative">
+                <div key={report.reportId || idx} className="relative">
                   <div
                     ref={isSelected ? selectedCardRef : undefined}
                     tabIndex={0}
@@ -392,13 +559,8 @@ export function ReportList({
                     <div className="p-4">
                       <div className="relative mb-2.5 pr-9">
                         <h3 className="min-w-0 text-sm font-semibold leading-snug text-foreground">
-                          {editMode &&
-                            (isRunningEvaluation ? (
-                              <Spinner className="mr-1 inline h-3 w-3 text-primary" />
-                            ) : resultCount > 0 ? (
-                              <Sparkles className="mr-1 inline h-3 w-3" />
-                            ) : null)}
-                          {report.report.title}
+                          {editMode && <ReportStatusSlot reportId={report.reportId} />}
+                          {report.title}
                         </h3>
                         <div
                           className={`absolute right-0 top-0 inline-flex items-center gap-1 ${
@@ -415,7 +577,7 @@ export function ReportList({
                                   size="icon"
                                   disabled={!isSelected}
                                   className="h-8 w-8 shrink-0 text-muted-foreground"
-                                  aria-label={`More actions for ${report.report.title}`}
+                                  aria-label={`More actions for ${report.title}`}
                                   onClick={(e) => e.stopPropagation()}
                                 >
                                   <MoreVertical className="h-4 w-4" />
@@ -427,7 +589,7 @@ export function ReportList({
                               >
                                 <DropdownMenuItem
                                   onSelect={() => {
-                                    void handleOpenReportPdf(report.report.reportId);
+                                    void handleOpenReportPdf(report.reportId);
                                   }}
                                 >
                                   <ExternalLink className="h-4 w-4" />
@@ -436,8 +598,8 @@ export function ReportList({
                                 <DropdownMenuItem
                                   onSelect={() => {
                                     void handleDownloadReportPdf(
-                                      report.report.reportId,
-                                      report.report.title
+                                      report.reportId,
+                                      report.title
                                     );
                                   }}
                                 >
@@ -448,7 +610,7 @@ export function ReportList({
                                 {editMode && (
                                   <DropdownMenuItem
                                     onSelect={() => {
-                                      handleOpenFlagDialog(report.report.reportId, report.report.title);
+                                      handleOpenFlagDialog(report.reportId, report.title);
                                     }}
                                   >
                                     <Flag className="h-4 w-4" />
@@ -457,13 +619,13 @@ export function ReportList({
                                 )}
                                 {editMode && hasFlag && (
                                   <DropdownMenuItem
-                                    disabled={isDeletingFlagReportId === report.report.reportId}
+                                    disabled={isDeletingFlagReportId === report.reportId}
                                     onSelect={() => {
-                                      void handleDeleteFlag(report.report.reportId);
+                                      void handleDeleteFlag(report.reportId);
                                     }}
                                   >
                                     <FlagOff className="h-4 w-4" />
-                                    {isDeletingFlagReportId === report.report.reportId
+                                    {isDeletingFlagReportId === report.reportId
                                       ? "Deleting flag..."
                                       : "Delete flag"}
                                   </DropdownMenuItem>
@@ -480,11 +642,11 @@ export function ReportList({
                             <span>{displayDate}</span>
                           </div>
                         )}
-                        {report.report.authors && report.report.authors.length > 0 && (
+                        {report.authors && report.authors.length > 0 && (
                           <div className="flex items-center gap-1.5">
                             <Users className="h-3.5 w-3.5 shrink-0" />
                             <span className={isExpanded ? "" : "truncate max-w-[200px]"}>
-                              {report.report.authors.join(", ")}
+                              {report.authors.join(", ")}
                             </span>
                           </div>
                         )}
@@ -492,18 +654,20 @@ export function ReportList({
 
                       {hasAbstract && !isExpanded && (
                         <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 mt-2">
-                          {report.report.abstract}
+                          {report.abstract}
                         </p>
                       )}
                       {editMode && (
-                        <ReportAssignedStudiesBadges report={report} />
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <ReportAssignedStudiesBadges report={report} />
+                        </div>
                       )}
                     </div>
 
                     {hasAbstract && isExpanded && (
                       <div className="px-4 pb-4 border-t bg-muted/30">
                         <div className="text-xs text-muted-foreground leading-relaxed mt-2 whitespace-pre-wrap">
-                          <Abstract text={report.report.abstract}></Abstract>
+                          <Abstract text={report.abstract}></Abstract>
                         </div>
                       </div>
                     )}
@@ -518,6 +682,21 @@ export function ReportList({
                 </div>
               );
             })
+          )}
+
+          {nextCursor && (
+            <div className="flex justify-center pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleLoadMore}
+                disabled={isLoadingMore || isLoading}
+              >
+                {isLoadingMore && <Spinner className="h-3.5 w-3.5" />}
+                Load more
+              </Button>
+            </div>
           )}
         </div>
       </ScrollArea>
