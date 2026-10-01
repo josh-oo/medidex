@@ -252,9 +252,10 @@ class ProjectResourceService:
         project_repo.add_project_assignee's own ValueError/PermissionError
         (no caller/ownership) propagate as-is - both heads already translate
         those generically, so there's nothing project-specific to add here.
-        Scheduling the "bot" assignee's automation run is left to the caller,
-        same as create_project leaves scheduling to the caller - which
-        background-task mechanism to use is framework-specific.
+        assignee_user_id is an opaque string - nothing here validates it
+        against a real user list, which lets a downstream build assign
+        synthetic, non-human "users" (e.g. an automation agent) without
+        needing a hook from this service.
         """
         project = await self.project_repo.get_project_by_id(project_id)
         if project is None:

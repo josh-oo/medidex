@@ -13,10 +13,7 @@ from .auth import is_verified_api_call, is_admin
 from src.context import RequestContext
 from .deps import get_context
 
-from src.background.wrapper import (
-    run_process_report_background,
-    run_start_automation_background,
-)
+from src.background.wrapper import run_process_report_background
 
 from src.services.authorization import ProjectAccessDeniedError
 from src.services.project import (
@@ -71,10 +68,8 @@ async def delete_project(project_id : str, ctx: RequestContext = Depends(get_con
 
 @router.post("/projects/{project_id}/assignees", dependencies=[Depends(is_admin)],summary="Assign a user to a project",status_code=201,)
 async def assign_user_to_project(
-    background_tasks: BackgroundTasks,
     project_id: str = project_id_path,
     assignee_user_id: str = Body(..., embed=False, description="User ID to assign"),
-    model: str = Query("gpt-5-nano", description="LLM model name to use for study prediction"),
     ctx: RequestContext = Depends(get_context),
 ) -> Assignee:
     try:
@@ -87,9 +82,6 @@ async def assign_user_to_project(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-
-    if assignee_user_id == "bot":
-        background_tasks.add_task(run_start_automation_background, project_id, ctx.user_id, model)
 
     return assignee
 

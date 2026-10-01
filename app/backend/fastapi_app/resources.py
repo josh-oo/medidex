@@ -334,10 +334,6 @@ async def get_fulltext(report_id: int = report_id_path, ctx: RequestContext = De
         if str(e) == "Upstream request timed out":
             raise HTTPException(status_code=504, detail="Upstream request timed out.")
 
-@router.get("/reports/{report_id}/metadata", summary="Get pdf metadata.")
-async def get_pdf_metadata(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> Dict:
-    return await ctx.report_service.get_metadata(report_id)
-
 @router.get("/reports/{report_id}/flag", summary="Get your report flag for a specific report.")
 async def get_report_flag(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> Optional[Flag]:
     report = await ctx.report_repo.get_report_by_id(report_id)

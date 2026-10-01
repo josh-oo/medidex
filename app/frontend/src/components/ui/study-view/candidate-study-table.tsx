@@ -16,14 +16,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { StudyCard } from "./study-card";
 import { AddStudyDialog } from "./add-study-dialog";
 import { AdvancedSearchDialog } from "./advanced-search-dialog";
-import { AIMatchSettingsDialog } from "./ai-match-settings-dialog";
 import { LoadMoreStudiesButton } from "./load-more-studies-button";
-import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
-import type { StudyCandidateDto, NewStudySuggestion, StudyDto, StudyBaseDto } from "@/types/apiDTOs";
-import { StudyAIBadge } from "./study-ai-badge";
-import { StudyAIReasonDialog } from "./study-ai-reason-dialog";
-import { AiEvaluationProgress } from "./ai-evaluation-progress";
-import { AiEvaluationHistoryDialog } from "./ai-evaluation-history-dialog";
+import type { StudyCandidateDto, StudyDto, StudyBaseDto } from "@/types/apiDTOs";
+import { ReportBannerSlot, StudyBadgeSlot } from "@/context/study-report-slots-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import { useDetailsSheet } from "@/context/details-sheet-context";
 import { assignNewStudyToReportByReportId } from "@/lib/api/reportApi";
@@ -67,54 +62,6 @@ export function CandidateStudyTable({
 
   const {openWithStudyItem } = useDetailsSheet()
 
-  const results = useGenAIEvaluationStore((state) => state.results);
-  const evaluationsByReport = useGenAIEvaluationStore((state) => state.evaluationsByReport);
-  const runningEvaluations = useGenAIEvaluationStore((state) => state.runningEvaluations);
-  const getStudyResult = useGenAIEvaluationStore((state) => state.getStudyResult);
-  const dismissSuggestion = useGenAIEvaluationStore((state) => state.dismissSuggestion);
-
-  const evalState = reportId ? evaluationsByReport[reportId] || null : null;
-  const isRunning = reportId ? runningEvaluations.includes(reportId) : false;
-  const studyResults = reportId ? results[reportId] : undefined;
-
-  const [reasonDialogOpen, setReasonDialogOpen] = useState(false);
-  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
-  const [selectedAIStudy, setSelectedAIStudy] = useState<{
-    studyId: number;
-    studyName: string;
-  } | null>(null);
-  // Extracted AI dialog state and methods
-
-  //const wasAddStudyDialogOpen = useRef(false);
-  const [progressCollapsedByReport, setProgressCollapsedByReport] = useState<Record<string, boolean>>({});
-  const [aiDialogOpen, setAiDialogOpen] = useState(false);
-
-  const summaryEvent = useMemo(
-    () =>
-      evalState?.streamMessages
-        ? [...evalState.streamMessages]
-          .reverse()
-          .find((event) => event.node === "summarize_evaluation")
-        : undefined,
-    [evalState?.streamMessages]
-  );
-  const suggestionEvent = useMemo(
-    () =>
-      evalState?.streamMessages
-        ? [...evalState.streamMessages]
-          .reverse()
-          .find((event) => event.node === "suggest_new_study")
-        : undefined,
-    [evalState?.streamMessages]
-  );
-  const newStudySuggestion: NewStudySuggestion | undefined =
-    suggestionEvent?.details?.new_study ? suggestionEvent.details.new_study : undefined;
-
-
-  const suggestionKey = newStudySuggestion
-    ? `${reportId}:${JSON.stringify(newStudySuggestion)}`
-    : null;
-
   const handleAssignStudy = useCallback(
     async (study: StudyDto) => {
       if (reportId === undefined) {
@@ -157,18 +104,9 @@ export function CandidateStudyTable({
       }
 
       syncAssignedStudy(reportId, createdStudy);
-
-      if (suggestionKey) {
-        dismissSuggestion(suggestionKey);
-      }
     },
-    [reportId, suggestionKey, dismissSuggestion, syncAssignedStudy]
+    [reportId, syncAssignedStudy]
   );
-
-  // Reset evaluation state when report changes
-  //useEffect(() => {
-  //  closeAIDialog();
-  //}, []);
 
   const candidateStudies = useMemo(
     () => [...studies].sort((a, b) => b.relevance - a.relevance),
@@ -296,39 +234,12 @@ export function CandidateStudyTable({
     }
   }, [reportId, currentReport?.trialId, currentReport?.preliminaryTrialId, runSearch, clearSearch]);
 
-  const handleAIBadgeClick = (studyId: number, studyName: string) => {
-    setSelectedAIStudy({ studyId, studyName });
-    setReasonDialogOpen(true);
-  };
-
   const handleStudyClick = (study: StudyDto) => {
     openWithStudyItem(study)
   };
 
-  const progressMessage = evalState?.isStreaming
-    ? (evalState?.currentMessage ||
-       (evalState?.streamMessages && evalState.streamMessages.length > 0
-         ? evalState.streamMessages[evalState.streamMessages.length - 1]?.message
-         : null) ||
-       null)
-    : (summaryEvent?.message ||
-       evalState?.currentMessage ||
-       (evalState?.streamMessages && evalState.streamMessages.length > 0
-         ? evalState.streamMessages[evalState.streamMessages.length - 1]?.message
-         : null) ||
-       null);
-
-  const shouldShowProgress = (evalState?.isStreaming ?? false) || Boolean(progressMessage);
-
   return (
     <div className="h-full flex flex-col pt-5">
-
-      <AIMatchSettingsDialog
-        open={aiDialogOpen}
-        onOpenChange={setAiDialogOpen}
-        reportId={reportId}
-        studies={candidateStudies}
-      />
 
       {/* Header - Sticky */}
       <div className="px-4 pb-4 border-b border-border">
@@ -342,7 +253,6 @@ export function CandidateStudyTable({
           <div className="flex items-center gap-2">
               <AddStudyDialog
                 currentReportId={reportId}
-                suggestedValues={newStudySuggestion}
                 onSaveStudy={handleSaveNewStudy}
               />
           </div>
@@ -387,22 +297,7 @@ export function CandidateStudyTable({
         </div>
       </div>
 
-      {shouldShowProgress ? (
-          <AiEvaluationProgress
-            message={progressMessage}
-            isStreaming={evalState?.isStreaming ?? false}
-            hasSummary={Boolean(summaryEvent?.message)}
-            collapsed={progressCollapsedByReport[reportId !== undefined ? String(reportId) : ""] ?? false}
-            onCollapsedChange={(collapsed) => {
-              if (reportId !== undefined) {
-                setProgressCollapsedByReport(prev => ({ ...prev, [String(reportId)]: collapsed }));
-              }
-            }}
-            onShowStepHistory={() => {
-              setHistoryDialogOpen(true)
-            }}
-          />
-      ) : null}
+      <ReportBannerSlot reportId={reportId} />
 
       {/* Scrollable Content */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4">
@@ -486,20 +381,7 @@ export function CandidateStudyTable({
                     isAssigned={assignedStudyIds.has(study.studyId)}
                     onClick={handleStudyClick}
                     onAssign={(target) => void handleAssignStudy(target)}
-                    aiBadge={
-                      studyResults?.[study.studyId] && (
-                        <StudyAIBadge
-                          classification={studyResults[study.studyId].classification}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAIBadgeClick(
-                              study.studyId,
-                              study.shortName
-                            );
-                          }}
-                        />
-                      )
-                    }
+                    badge={<StudyBadgeSlot reportId={reportId} study={study} />}
                   />
                 ))}
 
@@ -513,32 +395,6 @@ export function CandidateStudyTable({
         </div>
       </div>
 
-      {/* AI Reason Dialog */}
-      {selectedAIStudy && reportId !== undefined && (
-        <StudyAIReasonDialog
-          open={reasonDialogOpen}
-          onOpenChange={setReasonDialogOpen}
-          studyName={selectedAIStudy.studyName}
-          classification={
-            getStudyResult(
-              reportId,
-              selectedAIStudy.studyId
-            )?.classification || "unsure"
-          }
-          reason={
-            getStudyResult(
-              reportId,
-              selectedAIStudy.studyId
-            )?.reason || "No reason available"
-          }
-        />
-      )}
-
-      <AiEvaluationHistoryDialog
-        open={historyDialogOpen}
-        onOpenChange={setHistoryDialogOpen}
-        streamMessages={evalState?.streamMessages || []}
-      />
     </div>
   );
 }

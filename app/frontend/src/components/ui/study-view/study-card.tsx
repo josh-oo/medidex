@@ -23,7 +23,7 @@ interface StudyCardProps extends StudyDto {
   relevance?: number | null;
   isAssigned: boolean;
   alsoRecommended?: boolean;
-  aiBadge?: ReactNode;
+  badge?: ReactNode;
   onClick: (study: StudyDto) => void;
   onAssign: (study: StudyDto) => void;
 }
@@ -55,7 +55,7 @@ export function StudyCard({
   relevance,
   isAssigned,
   alsoRecommended = false,
-  aiBadge,
+  badge,
   onClick,
   onAssign,
   ...study
@@ -148,7 +148,7 @@ export function StudyCard({
                   Also similar
                 </Badge>
               )}
-              {aiBadge}
+              {badge}
             </div>
           </div>
         </div>

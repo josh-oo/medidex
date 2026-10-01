@@ -130,7 +130,6 @@ async def fetch_next_candidate_study(reason: str, runtime: ToolRuntime[AgentCont
     
     response, _has_more = await runtime.context.study_similarity_service.get_similar_studies_by_id(
         report_id,
-        aspect='default',
         cutoff=cutoff,
         negative_reports=None,
         negative_studies=None,

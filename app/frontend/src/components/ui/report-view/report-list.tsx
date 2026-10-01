@@ -9,7 +9,6 @@ import {
   Flag,
   FlagOff,
   MoreVertical,
-  Sparkles,
   Search,
   X,
 } from "lucide-react";
@@ -36,7 +35,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useGenAIEvaluationStore } from "@/hooks/use-genai-evaluation-store";
+import { ReportStatusSlot } from "@/context/study-report-slots-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import { FilterMode, GetProjectReportsParams, ReportCurationDto, ReportFilterDimension, ReportFiltersState, Page } from "@/types/apiDTOs";
 import { toast } from "sonner";
@@ -134,9 +133,6 @@ export function ReportList({
       });
     }
   }, [selectedReportId]);
-
-  const storeResults = useGenAIEvaluationStore((state) => state.results);
-  const runningEvaluations = useGenAIEvaluationStore((state) => state.runningEvaluations);
 
   const setReportFlag = useReportStore((state) => state.setFlag);
   const addReports = useReportStore((state) => state.addReports);
@@ -527,9 +523,6 @@ export function ReportList({
               const hasAbstract = report.abstract && report.abstract.length > 0;
               const isSelected = selectedReportId === report.reportId;
               const isExpanded = isSelected && hasAbstract;
-              const isRunningEvaluation = runningEvaluations.includes(report.reportId);
-              const reportResults = storeResults[report.reportId];
-              const resultCount = reportResults ? Object.keys(reportResults).length : 0;
               const flagMessage = report.flag?.trim() ?? "";
               const hasFlag = Boolean(flagMessage);
               const params = new URLSearchParams(
@@ -566,12 +559,7 @@ export function ReportList({
                     <div className="p-4">
                       <div className="relative mb-2.5 pr-9">
                         <h3 className="min-w-0 text-sm font-semibold leading-snug text-foreground">
-                          {editMode &&
-                            (isRunningEvaluation ? (
-                              <Spinner className="mr-1 inline h-3 w-3 text-primary" />
-                            ) : resultCount > 0 ? (
-                              <Sparkles className="mr-1 inline h-3 w-3" />
-                            ) : null)}
+                          {editMode && <ReportStatusSlot reportId={report.reportId} />}
                           {report.title}
                         </h3>
                         <div

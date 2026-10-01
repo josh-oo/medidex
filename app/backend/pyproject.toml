@@ -24,10 +24,8 @@ packages = [
     "src.database.repositories",
     "src.services",
     "src.utils",
-    "src.utils.llm",
     "src.background",
     "fastapi_app",
-    "fastapi_app.genai_evaluation",
 ]
 
 [tool.setuptools.dynamic]

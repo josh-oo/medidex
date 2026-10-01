@@ -1,14 +1,4 @@
-"""FastAPI-specific dependency-injection glue.
-
-get_session() itself is framework-agnostic and lives in src/database - MCP
-reuses it directly (see mcp_server/context.py). get_context() is the one
-piece that's actually FastAPI-specific: it resolves get_session() and
-auth.py's get_user() through FastAPI's own Depends() graph and hands back
-a RequestContext (src/context.py's composition root). It lives here, not in
-src/database, so the framework-agnostic src/ layer never imports anything
-FastAPI-specific - this module (plus auth.py's Security/Depends wrappers) is
-the one place that does.
-"""
+"""FastAPI-specific dependency-injection glue."""
 
 from typing import Optional
 

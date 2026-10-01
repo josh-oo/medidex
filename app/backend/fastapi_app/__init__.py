@@ -1,6 +1,5 @@
 """The REST API head: builds a self-contained FastAPI app from this package's
-own routers. Has no knowledge of mcp_server - see app/backend/main.py for how
-this app and the MCP head get combined into one deployable process.
+own routers.
 """
 
 import os
@@ -9,8 +8,7 @@ from typing import Iterable
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import auth, resources, core, agents, projects, admin, maintenance
-from .genai_evaluation import agent as agent_service
+from . import auth, resources, core, projects, admin, maintenance
 
 
 def create_app(extra_routers: Iterable[APIRouter] = ()) -> FastAPI:
@@ -46,8 +44,6 @@ def create_app(extra_routers: Iterable[APIRouter] = ()) -> FastAPI:
     app.include_router(core.router)
     app.include_router(resources.router)
     app.include_router(maintenance.router)
-    app.include_router(agent_service.router)  # TODO remove this later
-    app.include_router(agents.router)
 
     for extra_router in extra_routers:
         app.include_router(extra_router)

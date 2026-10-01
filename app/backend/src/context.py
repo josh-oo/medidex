@@ -23,7 +23,6 @@ from .services.core import RelatedTagSearchService, StudySimilaritySearchService
 from .services.crawler import CrawlerService, DoclingService, OpenAlexService, crawler_service, docling_service, open_alex_service
 from .services.embedding import EmbeddingService, embedding_service
 from .services.linkage import LinkageService
-from .services.llm import LanguageModelService
 from .services.maintenance import MaintenanceService
 from .services.project import ProjectResourceService
 from .services.pubsub import ProjectPubSubService
@@ -96,16 +95,11 @@ class RequestContext:
         )
 
     @cached_property
-    def llm_service(self) -> LanguageModelService:
-        return LanguageModelService(tag_similarity_service=self.tag_similarity_service)
-
-    @cached_property
     def report_service(self) -> ReportService:
         return ReportService(
             report_repo=self.report_repo,
             study_repo=self.study_repo,
             document_service=self.document_service,
-            llm_service=self.llm_service,
             open_alex_service=self.open_alex_service,
         )
 
