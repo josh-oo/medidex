@@ -14,6 +14,14 @@ export interface ReportActionsSlotProps {
   studies: StudyCandidateDto[]
 }
 
+export interface UserMenuItemProps {
+  user: {
+    name: string
+    email: string
+    avatar: string
+  }
+}
+
 export interface AssigneeOption {
   id: string
   name: string
@@ -49,6 +57,7 @@ export type AddStudyTriggerSlotProps = Pick<
 >
 
 export interface ExtensionRegistry {
+  userMenuItems: ComponentType<UserMenuItemProps>[]
   reportActions: ComponentType<ReportActionsSlotProps>[]
   assigneeOptions: AssigneeOptionsResolver[]
   studyBadges: ComponentType<StudyBadgeSlotProps>[]
@@ -59,6 +68,7 @@ export interface ExtensionRegistry {
 }
 
 const emptyExtensions: ExtensionRegistry = {
+  userMenuItems: [],
   reportActions: [],
   assigneeOptions: [],
   studyBadges: [],

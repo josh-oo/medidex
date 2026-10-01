@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { getKeycloak } from "@/lib/client/keycloak";
+import { useExtensionRegistry } from "@/context/extension-registry-context";
 
 function getInitials(name: string) {
   const names = name.split(" ");
@@ -29,6 +30,7 @@ export function HeaderUser({
   };
 }) {
   const initials = getInitials(user.name);
+  const { userMenuItems } = useExtensionRegistry();
 
   const handleLogout = () => {
     getKeycloak().logout({ redirectUri: `${window.location.origin}/login` });
@@ -66,6 +68,9 @@ export function HeaderUser({
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {userMenuItems.map((MenuItem, index) => (
+          <MenuItem key={`${MenuItem.displayName || MenuItem.name || "item"}-${index}`} user={user} />
+        ))}
         <DropdownMenuItem onClick={handleLogout}>
           <LogOut className="mr-2 h-4 w-4" />
           Log out
