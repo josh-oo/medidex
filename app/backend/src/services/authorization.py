@@ -1,8 +1,4 @@
-"""Report/project access authorization - shared by the REST API and the MCP
-server. Framework-agnostic: raises plain exceptions rather than HTTPException,
-so non-FastAPI callers (mcp_server/) don't need to depend on FastAPI or on
-fastapi_app/core.py's presentation-tier dependency function.
-"""
+"""Report/project access authorization."""
 
 from typing import List, Optional
 
@@ -39,11 +35,6 @@ def has_role(roles: List[str], role: str) -> bool:
 
 
 def require_approved(roles: List[str]) -> None:
-    """Shared "is this token allowed to use the app at all" check - same
-    definition of APPROVED for both the REST API (fastapi_app/auth.py) and
-    the MCP server (mcp_server/auth.py), so the role name isn't duplicated
-    across heads.
-    """
     if not has_role(roles, "APPROVED"):
         raise NotApprovedError("Account not approved")
 
@@ -58,10 +49,6 @@ class ResourceMismatchError(Exception):
 
 
 def require_resource_audience(claims: dict, resource_url: str) -> None:
-    """RFC 8707 resource binding check used by the MCP server: require the
-    resource-indicator audience mapper's value to be present in the token's
-    audience, not just a valid client audience/azp.
-    """
     aud = claims.get("aud")
     aud_list = aud if isinstance(aud, list) else [aud] if aud else []
     if resource_url not in aud_list:

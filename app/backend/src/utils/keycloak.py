@@ -1,13 +1,4 @@
-"""Framework-agnostic Keycloak token verification core.
-
-Shared by fastapi_app/auth.py (the REST API's FastAPI-facing auth dependencies)
-and mcp_server/auth.py (the MCP server's TokenVerifier) - both validate
-against the same realm's JWKS, they just decode against different Keycloak
-clients (different audiences) and wrap failures differently (HTTPException
-for FastAPI, None for the MCP TokenVerifier protocol). Nothing in this module
-imports FastAPI or raises HTTP-specific errors, so it can be reused outside
-the REST API's presentation tier.
-"""
+"""Framework-agnostic Keycloak token verification core."""
 
 import os
 from typing import Optional
@@ -20,10 +11,6 @@ from keycloak import KeycloakOpenID
 load_dotenv()
 
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL")
-# Browser/host-reachable Keycloak URL - used wherever a redirect or discovery
-# document needs to be resolvable from outside the Docker network (the
-# Swagger UI's OAuth redirect, the MCP server's advertised issuer). Falls
-# back to KEYCLOAK_URL for setups where that's already publicly reachable.
 KEYCLOAK_PUBLIC_URL = os.getenv("KEYCLOAK_PUBLIC_URL", KEYCLOAK_URL)
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "medidex")
 
@@ -41,8 +28,7 @@ def create_keycloak_openid(client_id: str) -> KeycloakOpenID:
 
     python-keycloak's a_decode_token() validates a token's aud/azp against
     whichever client_id the instance was constructed with, so each Keycloak
-    client that issues tokens for this backend to consume (medidex-frontend,
-    medidex-mcp, ...) needs its own instance.
+    client that issues tokens for this backend to consume needs its own instance.
     """
     return KeycloakOpenID(
         server_url=KEYCLOAK_URL,
@@ -103,12 +89,6 @@ class TokenExpiredError(InvalidTokenError):
 async def verify_token(token: Optional[str], keycloak_openid: KeycloakOpenID) -> dict:
     """Single token-verification entry point for both heads: turns a bearer
     token into decoded claims, or raises InvalidTokenError/TokenExpiredError.
-
-    This used to be reimplemented separately in fastapi_app/auth.py (raising
-    HTTPException) and mcp_server/auth.py (swallowing to None) - both now call
-    this and translate the same two exception types into their own
-    presentation-layer convention, instead of each owning its own decode +
-    error-handling logic.
     """
     if not token:
         raise InvalidTokenError("Not authenticated")

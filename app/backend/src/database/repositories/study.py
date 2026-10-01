@@ -273,19 +273,6 @@ class StudyRepository:
         has_more = len(reports) > limit
         return reports[:limit], has_more
 
-    async def get_linked_reports(self, study_id: int) -> List[Report]:
-        """Full Report entities linked to a study - the inverse of
-        ReportRepository.get_linked_studies(). Like
-        get_study_reports_by_study_id() above, but without cutoff filtering -
-        used by mcp_server's resources, which have no notion of a cutoff date.
-        """
-        stmt = (
-            select(Report)
-            .join(StudyReport, StudyReport.report_id == Report.id)
-            .where(StudyReport.study_id == study_id)
-        )
-        return (await self.db.execute(stmt)).scalars().all()
-
     async def get_study_persons(self, study_ids: Optional[List[int]] = None, cutoff: Optional[str] = None, normalize_names: bool = True) -> Dict[int, List[str]]:
         stmt = (
             select(StudyReport.study_id.label("study_id"), Report.authors)

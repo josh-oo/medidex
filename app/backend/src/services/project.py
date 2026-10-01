@@ -39,15 +39,7 @@ class ProjectAssigneeNotFoundError(Exception):
 
 
 class ProjectResourceService:
-    """Project overview/progress logic shared by the REST API (fastapi_app/projects.py)
-    and the MCP server (mcp_server/resources.py, mcp_server/tools.py) - a project's
-    stats/task view is assembled from several repos plus the vectorstore, and project
-    creation parses an uploaded bibliography file into report rows, so both live here
-    instead of being duplicated per presentation head. Also owns the project's
-    paginated report list views (the normal/intake/review pages that used to live in
-    fastapi_app/projects.py as REST-only helpers) for the same reason - none of it
-    needs FastAPI, so both heads can query the same project the same way.
-    """
+    """Project overview/progress logic."""
 
     def __init__(
         self,
@@ -210,16 +202,12 @@ class ProjectResourceService:
         """Parse a bibliography file (.ris/.cgi/.nbib, selected by `upload.filename`'s
         extension) into a new project, persist it, and notify subscribers. Who's
         allowed to call this at all (ADMIN role) is a coarse, data-independent
-        permission - enforced at the API layer (FastAPI's Depends(is_admin), the MCP
-        tool's require_admin()), not re-checked here: this method only owns the
-        actual business logic of turning an uploaded file into a project, not the
-        perimeter check for reaching it.
+        permission.
 
         Scheduling the background PDF-search/embedding pass
         (src/background/wrapper.py's run_process_report_background) is left to the
         caller: how to fire it without blocking the response is framework-specific
-        (FastAPI's BackgroundTasks vs the MCP tool's bare asyncio.create_task, see
-        that module's docstring) - this just hands back the report ids to schedule
+        (e.g. FastAPI's BackgroundTasks) - this just hands back the report ids to schedule
         it with.
 
         Raises RisParseError if the file can't be parsed. Returns None if a project
@@ -481,10 +469,7 @@ class ProjectResourceService:
     ) -> Page[ReportCuration]:
         """The normal curation view: never includes reports that are still being
         processed (not yet embedded/PDF-ready) - see get_intake_reports_page for that.
-        Restricted to project assignees (or whoever uploaded it), enforced here
-        rather than via a FastAPI-level dependency, so every caller (REST or a
-        future MCP one) goes through it, not just the ones that remember to
-        declare it.
+        Restricted to project assignees (or whoever uploaded it).
         """
         await self.ensure_project_access(project_id)
         cursor_id = decode_cursor(cursor) if cursor else None
@@ -510,8 +495,8 @@ class ProjectResourceService:
         limit: int = 50,
     ) -> Page[ReportIntake]:
         """The admin intake view: unlike get_reports_page, always includes reports that
-        have been auto-searched for a PDF but aren't fully processed yet, so an admin (or
-        an MCP client) can watch reports as they arrive. Returns the richer ReportIntake
+        have been auto-searched for a PDF but aren't fully processed yet, so an admin
+        can watch reports as they arrive. Returns the richer ReportIntake
         shape (DOI + fulltext links included) so the pdf-upload UI can read a report's
         DOI/links straight off this list instead of a separate per-report fetch.
         """

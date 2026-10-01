@@ -54,21 +54,13 @@ Identity, roles ("USER"/"ADMIN") and account approval ("APPROVED") are all
 managed by Keycloak (realm: KEYCLOAK_REALM). Access tokens are validated
 locally against the realm's public key(s) - the actual JWKS fetch/decode
 logic lives in ../utils/keycloak.py so it can be reused outside this
-FastAPI-specific presentation tier (see mcp_server/auth.py).
+FastAPI-specific presentation tier.
 """
 
 keycloak_openid = create_keycloak_openid(KEYCLOAK_CLIENT_ID)
 
 async def decode_token(token: Optional[str]) -> dict:
-    """Decode a Keycloak-issued access token into its claims, or raise HTTPException.
-
-    Actual decoding (and turning failures into InvalidTokenError/
-    TokenExpiredError) lives in src/utils/keycloak.py, shared with
-    mcp_server/auth.py - this just translates those into this head's
-    HTTPException convention. Every other dependency in this module
-    (get_roles, is_admin, get_user) builds on this one function rather than
-    decoding independently.
-    """
+    """Decode a Keycloak-issued access token into its claims, or raise HTTPException."""
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 

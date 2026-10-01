@@ -1,22 +1,5 @@
 """The advanced study-search query language: a tree of field==value comparisons
-combined with AND/OR groups. Modeled as pydantic types (Comparison/AndGroup/OrGroup
-below) rather than a bespoke AST class, for two reasons:
-
-- It's the type an MCP tool can take directly as a structured argument
-  (mcp_server/tools.py's search_studies) - a client fills in the JSON schema pydantic
-  derives from these models, so there's no string grammar for a model to get wrong in
-  the first place, and no field-name typo to reject at runtime (AdvancedSearchField is
-  a closed enum, validated before the tool body ever runs).
-- The REST API (fastapi_app/resources.py) still takes a plain query string, since
-  that's what a URL query param is - parse_advanced_query() below turns that string
-  into the same pydantic tree, so both callers end up with one shape and
-  StudyRepository.search_studies_advanced only has to translate one thing to SQL.
-
-Precedence note: the string grammar has AND bind tighter than OR (both
-left-associative), matching how most people read "A and B or C". The structured
-(pydantic) form has no such ambiguity to begin with - AndGroup/OrGroup nesting *is*
-the precedence, spelled out explicitly - which is one of the reasons it's the better
-fit for a tool-calling model.
+combined with AND/OR groups. Modeled as pydantic types.
 """
 
 from enum import Enum
@@ -133,11 +116,6 @@ _value = _quoted_value | _bare_value
 
 
 def _to_comparison(tokens):
-    # ParseFatalException (unlike plain ParseException) aborts parsing immediately with
-    # this exact message instead of being swallowed as an ordinary backtracking failure
-    # by infix_notation trying other alternatives - both failures below are unambiguous
-    # (the comparison already matched the field==value shape), so there's nothing useful
-    # left to backtrack into.
     field, _op, value = tokens[0]
     if not value:
         raise ParseFatalException(f"Empty value for field '{field}'")
@@ -170,8 +148,7 @@ _SYNTAX_HINT = (
 
 
 def parse_advanced_query(query: str) -> "QueryNode":
-    """Parse an advanced-search query string (REST API only - the MCP tool takes the
-    Comparison/AndGroup/OrGroup tree directly) into that same tree.
+    """Parse an advanced-search query string into that same tree.
 
     Raises QuerySyntaxError on malformed input (bad syntax, empty value, unknown field,
     unmatched parentheses, ...) - the message always restates the expected grammar and

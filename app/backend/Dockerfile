@@ -13,7 +13,6 @@ RUN pip3 install --no-cache-dir --no-compile -r requirements.txt
 COPY app/backend/main.py .
 COPY app/backend/src/ ./src/
 COPY app/backend/fastapi_app/ ./fastapi_app/
-COPY app/backend/mcp_server/ ./mcp_server/
 COPY ops/app-init/data/placeholder.pdf /app/placeholder.pdf
 
 ARG APP_UID=1000

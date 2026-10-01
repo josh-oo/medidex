@@ -34,9 +34,8 @@ class StudyResourceService:
 
     async def search_studies_advanced(self, query: Union[str, QueryNode], limit: int, offset: int) -> Tuple[List, bool]:
         """Accepts either a raw advanced-search query string (the REST API's own case -
-        parsed here, so the router itself never has to) or an already-structured
-        QueryNode (the MCP tool's case - it hands over a validated Comparison/AndGroup/
-        OrGroup tree directly, so there's nothing left to parse)."""
+        parsed here, so the router itself never has to) or an already-structured QueryNode
+        """
         ast = parse_advanced_query(query) if isinstance(query, str) else query
         result, has_more = await self.study_repo.search_studies_advanced(ast, limit, offset)
         return studies_to_dto(result), has_more

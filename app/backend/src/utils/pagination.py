@@ -1,8 +1,8 @@
 """Opaque pagination cursors, shared across every list endpoint that pages results -
-framework-agnostic so every head (the REST API, and any MCP tool doing the same) can
-mint and consume the same cursor values. The encoded integer means whatever the caller
-needs it to: a keyset cursor (the last row id, e.g. Page[ReportCuration].nextCursor) for
-results ordered by a stable id, or a plain offset for results ordered by something else
+framework-agnostic so every head can mint and consume the same cursor values. 
+The encoded integer means whatever the caller needs it to: a keyset cursor 
+(the last row id, e.g. Page[ReportCuration].nextCursor) for results ordered 
+by a stable id, or a plain offset for results ordered by something else
 (e.g. Page[StudyCandidate].nextCursor, which pages a relevance-ranked list).
 """
 

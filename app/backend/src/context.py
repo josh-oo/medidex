@@ -1,14 +1,10 @@
 """Composition root: builds the repository/service object graph for one
-caller (a REST request or an MCP tool/resource call), given just a DB session
-and the caller's user id.
+caller (a REST request), given just a DB session and the caller's user id.
 
 This is the single place that knows how repos/services are wired together.
 Deliberately has no FastAPI import: FastAPI callers get a RequestContext via
 `Depends(get_context)` (fastapi_app/deps.py, a thin adapter over this
-file), while the MCP server - which isn't a FastAPI app and can't resolve a
-`Depends(...)` graph - builds one directly (mcp_server/context.py). Either
-way, both heads ask the same object for what they need instead of each
-constructing repos/services by hand.
+file).
 """
 
 from functools import cached_property

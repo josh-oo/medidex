@@ -21,8 +21,7 @@ class FilterMode(str, Enum):
     "two booleans that both default true, and setting exactly one to false narrows things
     down" pairing - the equivalent of "only" used to require knowing to leave the *other*
     field at its default rather than being a single, self-contained choice. Shared by every
-    head that filters a report list (fastapi_app/projects.py's Query params, and any MCP
-    tool with the same tri-state filter needs).
+    head that filters a report list (fastapi_app/projects.py's Query params).
     """
     any = "any"
     only = "only"

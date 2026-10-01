@@ -5,18 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "medidex-core"
 version = "0.1.0"
-description = "Medidex's framework-agnostic domain layer and both API heads (REST, MCP) - the open-source core other deployables build on."
+description = "Medidex's framework-agnostic domain layer and REST API head - the open-source core other deployables build on."
 readme = "README.md"
 requires-python = ">=3.13"
 dynamic = ["dependencies"]
 
 # Deliberately NOT namespaced under a `medidex_core` package: the existing
 # code imports these as top-level packages (`from src...`, `from
-# fastapi_app...`, `from mcp_server...`) everywhere, and that's unlikely to
-# change - rewriting every import to gain a namespace prefix isn't worth the
-# churn for a package that's only ever installed into its own dedicated venv
-# (this repo's own container, or a downstream deployable's). A consumer
-# installs this and gets `src`, `fastapi_app`, `mcp_server` importable as-is.
+# fastapi_app...`) everywhere, and that's unlikely to change - rewriting
+# every import to gain a namespace prefix isn't worth the churn for a package
+# that's only ever installed into its own dedicated venv (this repo's own
+# container, or a downstream deployable's). A consumer installs this and
+# gets `src`, `fastapi_app` importable as-is.
 [tool.setuptools]
 packages = [
     "src",
@@ -28,14 +28,7 @@ packages = [
     "src.background",
     "fastapi_app",
     "fastapi_app.genai_evaluation",
-    "mcp_server",
 ]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
-
-# setuptools only bundles .py files by default - mcp_server/server.py reads
-# favicon.ico off disk at import time (base64-encodes it into the MCP
-# server's icon), so it has to ship inside the installed package too.
-[tool.setuptools.package-data]
-mcp_server = ["favicon.ico"]

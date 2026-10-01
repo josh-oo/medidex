@@ -12,7 +12,7 @@ class RisParseError(ValueError):
     Carries the HTTP status code the REST API originally responded with
     (fastapi_app/projects.py translates it back to an HTTPException) so that
     mapping stays out of this framework-agnostic module - callers that don't
-    care about HTTP (mcp_server/tools.py) can just treat it as the ValueError
+    care about HTTP can just treat it as the ValueError
     it already is.
     """
 
@@ -24,7 +24,7 @@ class RisParseError(ValueError):
 class UploadedFile(Protocol):
     """Structural type for what parse_file() needs from an uploaded file -
     satisfied by FastAPI's UploadFile without importing it, and just as well
-    by a plain in-memory stand-in (see mcp_server/tools.py's _InMemoryUpload).
+    by a plain in-memory stand-in.
     """
 
     filename: str
