@@ -658,7 +658,9 @@ export function ReportList({
                         </p>
                       )}
                       {editMode && (
-                        <ReportAssignedStudiesBadges report={report} />
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <ReportAssignedStudiesBadges report={report} />
+                        </div>
                       )}
                     </div>
 
