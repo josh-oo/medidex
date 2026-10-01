@@ -5,13 +5,7 @@ import type { StudyCandidateDto } from "@/types/apiDTOs"
 
 // Extension points for a downstream build to attach extra, per-study or
 // per-report information to the shared OSS study/report views without this
-// app knowing what that information is - currently used by the private
-// repo's enterprise-only AI study-matching feature (a badge per study, a
-// banner on the report's study panel, a status icon in the report list),
-// but deliberately generic so a future, unrelated feature can reuse the same
-// three slots instead of adding new ones. Mirrors ReportActionsSlot
-// (report-actions-context.tsx) - this app never calls any of the
-// *SlotProvider components itself, so by default each slot renders nothing.
+// app knowing what that information is.
 
 export interface StudyBadgeSlotProps {
   reportId?: number

@@ -5,7 +5,6 @@ import { ProjectCard } from "./components/project-card";
 import { TaskCard } from "./components/task-card";
 import { HomeHero } from "./components/home-hero";
 import { QuickStats } from "./components/quick-stats";
-import { FeaturesShowcase } from "./components/features-showcase";
 import { Button } from "@/components/ui/button";
 import { FileText, Plus } from "lucide-react";
 import type { ProjectDto, TaskDto } from "@/types/apiDTOs";
@@ -199,8 +198,6 @@ export default function Home() {
             )}
           </div>
         )}
-
-        <FeaturesShowcase />
       </div>
     </div>
   );

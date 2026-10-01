@@ -79,9 +79,7 @@ resource schema and data:
 
 # Configuration
 All configuration lives in a single `.env` file in the repository root; every variable is
-documented in [`.env.example`](.env.example). The values that must be changed before any
-non-local use are `POSTGRES_PASSWORD`, `JWT_SECRET`, `BETTER_AUTH_SECRET` and
-`BACKEND_API_KEY`. `OPENAI_API_KEY` is required for the agent and extraction features only.
+documented in [`.env.example`](.env.example).
 
 # Services
 The application is divided into multiple services to facilitate hosting it on different

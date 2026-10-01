@@ -13,8 +13,7 @@ from . import auth, resources, core, projects, admin, maintenance
 
 def create_app(extra_routers: Iterable[APIRouter] = ()) -> FastAPI:
     """Build the OSS REST API app, plus any additional routers a downstream
-    deployable wants mounted on top (e.g. an enterprise build adding its own
-    endpoints without forking this package). Swapping or extending individual
+    deployable wants mounted on top. Swapping or extending individual
     dependencies - auth checks, get_context - is done separately, via
     FastAPI's own `app.dependency_overrides` on the returned app; that's
     already the idiomatic FastAPI extension point, so it isn't duplicated

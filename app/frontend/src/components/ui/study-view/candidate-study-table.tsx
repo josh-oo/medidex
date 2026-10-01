@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { StudyCard } from "./study-card";
-import { AddStudyDialog } from "./add-study-dialog";
+import { AddStudyTriggerSlot } from "@/context/add-study-trigger-context";
 import { AdvancedSearchDialog } from "./advanced-search-dialog";
 import { LoadMoreStudiesButton } from "./load-more-studies-button";
 import type { StudyCandidateDto, StudyDto, StudyBaseDto } from "@/types/apiDTOs";
@@ -251,7 +251,7 @@ export function CandidateStudyTable({
             <h2 className="text-lg font-semibold">Relevant Studies</h2>
           </div>
           <div className="flex items-center gap-2">
-              <AddStudyDialog
+              <AddStudyTriggerSlot
                 currentReportId={reportId}
                 onSaveStudy={handleSaveNewStudy}
               />

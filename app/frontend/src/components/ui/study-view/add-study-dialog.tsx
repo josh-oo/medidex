@@ -83,7 +83,7 @@ type SuggestionField = {
 
 type StudyDurationUnit = DurationUnit | "Uncertain";
 
-interface AddStudyDialogProps {
+export interface AddStudyDialogProps {
   currentReportId?: number;
   suggestedValues?: NewStudySuggestion;
   onSaveStudy: (values: StudyBaseDto) => Promise<void>;
@@ -112,6 +112,10 @@ export function AddStudyDialog({
 
   const [countryOpen, setCountryOpen] = useState(false);
 
+  // Exposed as a `data-highlighted` attribute below rather than a class here,
+  // so a downstream build can style a suggestion-prefilled dialog however it
+  // wants without this component owning
+  // any particular look.
   const highlight = Boolean(suggestedValues);
 
   const [comparisonGroups, setComparisonGroups] = useState<ComparisonGroup[]>(
@@ -647,7 +651,8 @@ export function AddStudyDialog({
       <Button
         type="button"
         size="sm"
-        className={`h-8 ${highlight ? "ai-new-study-glow" : ""}`}
+        className="h-8"
+        data-highlighted={highlight || undefined}
         aria-haspopup="dialog"
         aria-expanded={addStudyDialogOpen}
         onClick={handleOpenDialog}

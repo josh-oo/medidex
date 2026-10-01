@@ -49,7 +49,7 @@ export function AppRoutes({ extraRoutes }: { extraRoutes?: ReactNode } = {}) {
           <Route path=":reportId" element={<ReviewReportPage />} />
         </Route>
 
-        {/* Extension point: a downstream build (e.g. an enterprise edition)
+        {/* Extension point: a downstream build
             passes its own <Route> elements here to mount extra pages inside
             the same RootLayout shell, without forking this file. Mirrors
             fastapi_app.create_app(extra_routers=...) on the backend. */}

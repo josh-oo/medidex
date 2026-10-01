@@ -274,63 +274,6 @@ export interface ReportAnnotationsDto {
 
 export type ProjectAnnotationsDto = Record<string, ReportAnnotationsDto>;
 
-// ---------------------------------------------------------------------------
-// GenAI evaluation backend DTOs
-// ---------------------------------------------------------------------------
-
-export interface EvaluateRequest {
-  report: ReportDto;
-  studies: StudyDto[];
-  model?: "gpt-5.2" | "gpt-5" | "gpt-5-mini" | "gpt-4.1" | null;
-  include_pdf?: boolean | null;
-  prompt_overrides?: PromptOverrides | null;
-}
-
-export interface PromptOverrides {
-  background_prompt?: string | null;
-  initial_eval_prompt?: string | null;
-  likely_group_prompt?: string | null;
-  likely_compare_prompt?: string | null;
-  likely_review_prompt?: string | null;
-  unsure_review_prompt?: string | null;
-  summary_prompt?: string | null;
-  pdf_prompt?: string | null;
-}
-
-export interface DefaultPrompts {
-  background_prompt: string;
-  initial_eval_prompt: string;
-  likely_group_prompt: string;
-  likely_compare_prompt: string;
-  likely_review_prompt: string;
-  unsure_review_prompt: string;
-  summary_prompt: string;
-  pdf_prompt: string;
-}
-
-export interface StudyDecision {
-  study_id: string;
-  decision: "match" | "not_match" | "unsure" | "likely_match";
-  reason: string;
-}
-
-export interface VeryLikelyDecision {
-  study_id: string;
-  prior_reason: string | null;
-  group_reason: string | null;
-}
-
-export interface EvaluateResponse {
-  match: StudyDecision | null;
-  not_matches: StudyDecision[];
-  unsure: StudyDecision[];
-  likely_matches: StudyDecision[];
-  very_likely: VeryLikelyDecision[];
-  evaluation_has_match?: boolean | null;
-  evaluation_summary?: string | null;
-  evaluation_new_study?: NewStudySuggestion | null;
-}
-
 export type StudyStatus = "Closed" | "Stopped early" | "Open/Ongoing" | "Planned";
 
 export type DurationUnit = "hours" | "days" | "weeks" | "months" | "years";
@@ -350,44 +293,18 @@ export interface NewStudySuggestion {
   comparison: ComparisonGroup[];
 }
 
-export type StreamEventNode =
-  | "prepare_report_pdf"
-  | "load_next_initial"
-  | "classify_initial"
-  | "select_very_likely"
-  | "compare_very_likely"
-  | "prepare_likely_review"
-  | "load_next_likely"
-  | "classify_likely_review"
-  | "prepare_unsure_review"
-  | "load_next_unsure"
-  | "classify_unsure"
-  | "match_not_found_end"
-  | "summarize_evaluation"
-  | "suggest_new_study";
-
 export type StreamEventType = "node" | "complete" | "error" | "unknown";
 
-export interface StreamEventDetails {
-  study_id?: string | number;
-  short_name?: string;
-  decision?: "match" | "likely_match" | "unsure" | "not_match";
-  reason?: string;
-  idx?: number;
-  very_likely_study_ids?: Array<string | number>;
-  very_likely_names?: string[];
-  match_study_id?: string;
-  count?: number;
-  has_match?: boolean;
-  summary?: string;
-  new_study?: NewStudySuggestion | null;
-}
-
+// Generic shape for any backend SSE stream (currently only
+// GET /projects/{id}/stream's batch-progress feed). `node`/`details` are
+// deliberately untyped beyond this - a downstream build consuming a
+// different stream can narrow them
+// to its own node/detail shapes without this type needing to know about it.
 export interface StreamEvent {
   event: StreamEventType;
-  node?: StreamEventNode;
+  node?: string;
   message?: string;
-  details?: StreamEventDetails;
+  details?: Record<string, unknown>;
   timestamp: number;
 }
 
