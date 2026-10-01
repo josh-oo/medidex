@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
 import { Routes, Route } from "react-router-dom";
+import { useExtensionRegistry } from "./context/extension-registry-context";
 
 import LoginPage from "./routes/auth/login/page";
 import RegisterPage from "./routes/auth/register/page";
@@ -22,7 +22,9 @@ import ReviewProjectLayout from "./routes/main/review/projectId/layout";
 import ReviewProjectPage from "./routes/main/review/projectId/page";
 import ReviewReportPage from "./routes/main/review/projectId/reportId/page";
 
-export function AppRoutes({ extraRoutes }: { extraRoutes?: ReactNode } = {}) {
+export function AppRoutes() {
+  const { routes } = useExtensionRegistry();
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
@@ -49,11 +51,7 @@ export function AppRoutes({ extraRoutes }: { extraRoutes?: ReactNode } = {}) {
           <Route path=":reportId" element={<ReviewReportPage />} />
         </Route>
 
-        {/* Extension point: a downstream build
-            passes its own <Route> elements here to mount extra pages inside
-            the same RootLayout shell, without forking this file. Mirrors
-            fastapi_app.create_app(extra_routers=...) on the backend. */}
-        {extraRoutes}
+        {routes}
       </Route>
     </Routes>
   );
