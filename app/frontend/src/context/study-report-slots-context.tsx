@@ -3,12 +3,14 @@
 import { useExtensionRegistry } from "./extension-registry-context"
 
 import type {
+  ReportActionsSlotProps,
   ReportBannerSlotProps,
   ReportStatusSlotProps,
   StudyBadgeSlotProps,
 } from "./extension-registry-context"
 
 export type {
+  ReportActionsSlotProps,
   ReportBannerSlotProps,
   ReportStatusSlotProps,
   StudyBadgeSlotProps,
@@ -27,4 +29,9 @@ export function ReportBannerSlot(props: ReportBannerSlotProps) {
 export function ReportStatusSlot(props: ReportStatusSlotProps) {
   const { reportStatuses } = useExtensionRegistry()
   return <>{reportStatuses.map((Slot, index) => <Slot key={index} {...props} />)}</>
+}
+
+export function ReportActionsSlot(props: ReportActionsSlotProps) {
+  const { reportActions } = useExtensionRegistry()
+  return <>{reportActions.map((Slot, index) => <Slot key={index} {...props} />)}</>
 }

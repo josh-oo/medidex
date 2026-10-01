@@ -6,7 +6,7 @@ import { CandidateStudyTable } from "@/components/ui/study-view/candidate-study-
 import { Skeleton } from "@/components/ui/skeleton";
 import type { StudyCandidateDto } from "@/types/apiDTOs";
 import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
-import { ReportActionsSlot } from "@/context/report-actions-context";
+import { ReportActionsSlot } from "@/context/study-report-slots-context";
 
 const PAGE_SIZE = 10;
 
