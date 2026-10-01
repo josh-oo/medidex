@@ -320,64 +320,6 @@ class StudyRepository:
             return result[study_id]
         return []
 
-    async def get_study_id_by_trial_ids(self, trial_ids: List[str], cutoff: Optional[str] = None) -> Dict[str, List[int]]:
-        trial_ids_norm = [trial_id.replace("/", "-") for trial_id in trial_ids]
-        result_map = {}
-
-        for orig_trial_id, trial_id in zip(trial_ids, trial_ids_norm):
-            alternative_ids = [trial_id]
-            if trial_id in trial_id_mapping.keys():
-                alternative_ids.extend(trial_id_mapping[trial_id])
-            alternative_ids = [current_id.replace("/", "-") for current_id in alternative_ids]
-
-            # Build dynamic LIKE conditions for Authors
-            authors_filter = func.replace(Report.authors, "/", "-").like(f"%{alternative_ids[0]}%")
-            for current_id in alternative_ids[1:]:
-                authors_filter = authors_filter | func.replace(Report.authors, "/", "-").like(f"%{current_id}%")
-
-            trial_filter = (
-                func.replace(Report.trial_registration_id, "/", "-").in_(alternative_ids)
-                | func.replace(ReportAdded.trial_registration_id, "/", "-").in_(alternative_ids)
-            )
-
-            stmt_study = select(Study.id, text("'study' as source")).where(
-                (Study.short_name.in_(alternative_ids)) |
-                (Study.trial_registration_id.in_(alternative_ids))
-            )
-
-            stmt_reports = (
-                select(StudyReport.study_id, text("'report' as source"))
-                .join(Report, Report.id == StudyReport.report_id)
-                .outerjoin(ReportAdded, ReportAdded.report_id == Report.id)
-                .where(authors_filter | trial_filter)
-            )
-
-            if cutoff is not None:
-                stmt_study = stmt_study.where(Study.date_entered < cutoff)
-                stmt_reports = stmt_reports.where(Report.date_entered < cutoff)
-
-            combined_stmt = stmt_study.union_all(stmt_reports)
-            rows = (await self.db.execute(combined_stmt)).all()  # [(study_id, source), ...]
-
-            # Sort: 'study' source first, then 'report'
-            sorted_rows = sorted(rows, key=lambda x: 0 if x[1] == 'study' else 1)
-
-            # Remove duplicates, preserving order (study > report)
-            seen = set()
-            ordered_ids = []
-            for study_id, _ in sorted_rows:
-                if study_id not in seen:
-                    seen.add(study_id)
-                    ordered_ids.append(study_id)
-            result_map[orig_trial_id] = ordered_ids
-
-        return result_map
-
-    async def get_study_id_by_trial_id(self, trial_id: str, cutoff: Optional[str] = None) -> List[int]:
-        result = (await self.get_study_id_by_trial_ids([trial_id],cutoff))
-        if trial_id in result:
-            return result[trial_id]
-        return None
 
     async def get_study_date_by_id(self, study_id: int) -> str:
         stmt = select(Study.date_entered).where(Study.id == study_id)
