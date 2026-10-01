@@ -4,15 +4,24 @@ this app and the MCP head get combined into one deployable process.
 """
 
 import os
+from typing import Iterable
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import auth, resources, core, agents, projects, admin, maintenance
 from .genai_evaluation import agent as agent_service
 
 
-def create_app() -> FastAPI:
+def create_app(extra_routers: Iterable[APIRouter] = ()) -> FastAPI:
+    """Build the OSS REST API app, plus any additional routers a downstream
+    deployable wants mounted on top (e.g. an enterprise build adding its own
+    endpoints without forking this package). Swapping or extending individual
+    dependencies - auth checks, get_context - is done separately, via
+    FastAPI's own `app.dependency_overrides` on the returned app; that's
+    already the idiomatic FastAPI extension point, so it isn't duplicated
+    here.
+    """
     app = FastAPI(
         root_path="/backend/api",
         # Lets the /docs "Authorize" button drive Keycloak's authorization-code +
@@ -39,5 +48,8 @@ def create_app() -> FastAPI:
     app.include_router(maintenance.router)
     app.include_router(agent_service.router)  # TODO remove this later
     app.include_router(agents.router)
+
+    for extra_router in extra_routers:
+        app.include_router(extra_router)
 
     return app

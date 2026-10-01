@@ -1,66 +1,11 @@
-"""Builds the Medidex MCP server.
+"""The MCP (Model Context Protocol) head: exposes study/report search and
+retrieval as tools, built and spliced into a FastAPI app via server.py.
 
-Runs in the same process/container as the REST API (see app/backend/CLAUDE.md),
-but this module only builds the MCPServer instance. Splicing it into the
-shared FastAPI app is main.py's job, not this package's - main.py is the one
-place allowed to know that fastapi_app and mcp_server are being combined into
-one process; this module has no idea it's being mounted into anything.
+Re-exports server.py's public surface so callers write `from mcp_server
+import create_server, mount` rather than reaching into the submodule -
+mirrors fastapi_app's create_app() being the package's one entry point.
 """
 
-import base64
-from pathlib import Path
+from .server import create_server, mount, MCP_STREAMABLE_HTTP_PATH
 
-from mcp.server import MCPServer
-from mcp.server.auth.settings import AuthSettings
-from mcp.server.subscriptions import InMemorySubscriptionBus
-from mcp.types import Icon
-from pydantic import AnyHttpUrl
-
-from .auth import KeycloakMCPTokenVerifier, MCP_RESOURCE_URL
-from . import live_updates
-from . import tools
-from src.utils.keycloak import KEYCLOAK_PUBLIC_URL, KEYCLOAK_REALM
-
-MCP_STREAMABLE_HTTP_PATH = "/mcp"
-
-FAVICON_B64 = base64.b64encode((Path(__file__).parent / "favicon.ico").read_bytes()).decode()
-
-
-def create_server() -> MCPServer:
-    # Own bus instance (rather than the server's default) so live_updates'
-    # lifespan task can publish to the exact same object passed to
-    # subscriptions= below, without reaching into MCPServer's private state.
-    subscriptions = InMemorySubscriptionBus()
-
-    server = MCPServer(
-        name="Medidex",
-        icons=[Icon(src=f"data:image/x-icon;base64,{FAVICON_B64}")],
-        instructions=(
-            "Search and retrieve clinical study and report records from Medidex, "
-            "including which reports are already linked to a study. Also exposes "
-            "project management: reviewing projects and tasks, and (admin-only) "
-            "creating projects and assigning/removing review tasks."
-        ),
-        token_verifier=KeycloakMCPTokenVerifier(),
-        subscriptions=subscriptions,
-        lifespan=live_updates.lifespan(subscriptions),
-        auth=AuthSettings(
-            # Must be the browser/host-reachable Keycloak URL (same one used for
-            # the Swagger UI's OAuth redirect in fastapi_app/auth.py), not KEYCLOAK_URL
-            # (the internal Docker hostname) - MCP clients like mcp-remote run on
-            # the host and fetch this URL directly, they can't resolve "keycloak".
-            issuer_url=AnyHttpUrl(f"{KEYCLOAK_PUBLIC_URL}/realms/{KEYCLOAK_REALM}"),
-            resource_server_url=AnyHttpUrl(MCP_RESOURCE_URL),
-            validate_token_resource=True,
-            # Without this, PRM's scopes_supported is omitted and MCP clients
-            # (e.g. mcp-remote) fall back to requesting every scope Keycloak's
-            # realm advertises in its own OIDC discovery document - most of
-            # which medidex-mcp isn't entitled to, so Keycloak rejects the
-            # authorization request outright (invalid_scope). "openid" is
-            # always valid for any OIDC client; access control here is by
-            # role + audience (see mcp_server/auth.py), not OAuth scopes.
-            required_scopes=["openid"],
-        ),
-    )
-    tools.register(server)
-    return server
+__all__ = ["create_server", "mount", "MCP_STREAMABLE_HTTP_PATH"]
