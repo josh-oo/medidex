@@ -6,7 +6,7 @@ import { CandidateStudyTable } from "@/components/ui/study-view/candidate-study-
 import { Skeleton } from "@/components/ui/skeleton";
 import type { StudyCandidateDto } from "@/types/apiDTOs";
 import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
-import { ReportChatButtons } from "./ai-actions";
+import { ReportActionsSlot } from "@/context/report-actions-context";
 
 const PAGE_SIZE = 10;
 
@@ -101,7 +101,7 @@ export default function StudyList() {
         isLoadingMore={isLoadingMore}
         onLoadMore={handleLoadMore}
       />
-      <ReportChatButtons reportId={reportIdNumber} studies={studies}/>
+      <ReportActionsSlot reportId={reportIdNumber} studies={studies} />
     </>
   );
 }
