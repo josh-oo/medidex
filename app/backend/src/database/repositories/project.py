@@ -142,12 +142,18 @@ class ProjectRepository:
         )
         return result.scalars().all()
 
-    async def set_report_auto_searched_pdf(self, report_id: int, fulltext_links: Optional[List[str]] = None) -> None:
+    async def set_report_auto_searched_pdf(
+        self,
+        report_id: int,
+        fulltext_links: Optional[List[str]] = None,
+        referenced_dois: Optional[List[str]] = None,
+    ) -> None:
         """`fulltext_links`, when given, is the OpenAlex lookup this same background
         pass already did to find a PDF to auto-download (see
         src/background/wrapper.py's _auto_search_report_pdf) - cached here alongside
         the flag so report detail views don't have to re-query OpenAlex live
-        (see report_added.fulltext_links's comment in models.py).
+        (see report_added.fulltext_links's comment in models.py). `referenced_dois` is
+        the same pass's list of cited DOIs (see report_added.referenced_dois).
         """
         stmt = (
             select(ReportAdded)
@@ -160,6 +166,8 @@ class ProjectRepository:
         report_added.auto_searched_pdf = True
         if fulltext_links is not None:
             report_added.fulltext_links = fulltext_links
+        if referenced_dois is not None:
+            report_added.referenced_dois = referenced_dois
         await self.db.flush()
 
         # auto_searched_pdf gates report.has_pdf's eligibility (see

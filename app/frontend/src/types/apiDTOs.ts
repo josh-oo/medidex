@@ -163,10 +163,6 @@ export interface GetStudySearchParams {
   q: string;
   limit?: number;
   cursor?: string;
-  // Parse `q` as an advanced AND/OR field==value expression (see src/utils/query_parser.py
-  // on the backend) instead of a free-text search. Omitted (not `false`) for a plain search,
-  // matching the backend's own default.
-  advanced?: boolean;
 }
 
 // A study suggested as a possible match for a report by the similarity search
@@ -178,10 +174,12 @@ export interface StudyCandidateDto extends StudyDto {
 
 export interface GetSimilarStudiesParams {
   aspect?: string;
+  // Search studies (same syntax as GetStudySearchParams) instead of recommending them;
+  // the matches then carry their relevance for the report.
+  q?: string;
   cutoff?: string;
   limit?: number;
   cursor?: string;
-  return_details?: boolean;
 }
 
 export interface TagCandidateDto extends TagDto {

@@ -6,6 +6,7 @@ import pypdf
 from ..utils.trial_registration_id import extract_trial_ids_from_text
 from ..database import StudyRepository, ReportRepository
 from ..database.repositories.report import Report
+from ..utils.dto import Study, studies_to_dto
 
 import os
 from dotenv import load_dotenv
@@ -159,6 +160,29 @@ class ReportService:
         if report_added is not None:
             await self.report_repo.set_fulltext_links(report_id, links)
         return links
+
+    async def get_referenced_dois(self, report_id: int) -> List[str]:
+        """DOIs this report cites. Cache-first, with a live OpenAlex fallback (that also
+        refreshes the cached fulltext links) for reports the post-upload job hasn't
+        covered - same strategy as get_fulltext_links.
+        """
+        report_added = await self.report_repo.get_report_added(report_id)
+        if report_added is not None and report_added.referenced_dois is not None:
+            return report_added.referenced_dois
+
+        report = await self.get_report(report_id)
+        if report is None or not report.doi:
+            return []
+
+        work = await self.open_alex_service.get_work_by_doi(report.doi)
+        if report_added is not None:
+            await self.report_repo.set_referenced_dois(report_id, work.referenced_dois)
+        return work.referenced_dois
+
+    async def get_referenced_studies(self, report_id: int) -> List[Study]:
+        """Studies belonging to reports in the database whose DOI this report cites."""
+        dois = await self.get_referenced_dois(report_id)
+        return studies_to_dto(await self.study_repo.get_studies_by_report_dois(dois))
 
     async def get_report(self, report_id: int) -> Report:
         if report_id not in self.report_cache:

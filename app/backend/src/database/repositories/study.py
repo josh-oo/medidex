@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Tuple
 
-from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport
+from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport, StudyReportAdded
 from ..models import StudyIntervention, Intervention, StudyCondition, Condition, StudyOutcome, Outcome, StudyDesign, Design, StudyParticipant, Participant
 
 from ...utils.postprocessing import normalize_author_names
@@ -220,6 +220,29 @@ class StudyRepository:
 
         #await asyncio.gather(*[log_event(-1, Event(event_type=f"study::{study_id}::visited", timestamp=datetime.now(timezone.utc).isoformat()), self.user_id) for study_id in study_ids])
         return result
+
+    async def get_studies_by_report_dois(self, dois: List[str]) -> List[Study]:
+        """Studies linked to any report whose DOI is in `dois` (normalized: lowercase, no
+        resolver prefix - see crawler.normalize_doi). Report DOIs are stored as uploaded,
+        so the bare and https://doi.org/-prefixed spellings are both matched. Link scoping
+        mirrors ReportRepository.get_linked_studies: links created by this user or
+        unattributed ones, not other users' pending links.
+        """
+        if not dois:
+            return []
+
+        spellings = set(dois) | {f"https://doi.org/{doi}" for doi in dois}
+        stmt = (
+            select(Study)
+            .join(StudyReport, StudyReport.study_id == Study.id)
+            .join(Report, Report.id == StudyReport.report_id)
+            .outerjoin(StudyReportAdded, StudyReportAdded.study_report_id == StudyReport.id)
+            .where(func.lower(Report.doi).in_(spellings))
+            .where(or_(StudyReportAdded.created_by == self.user_id, StudyReportAdded.created_by.is_(None)))
+            .distinct()
+            .order_by(Study.id)
+        )
+        return (await self.db.execute(stmt)).scalars().all()
 
     async def get_study_by_id(self, study_id: int) -> Study:
         return await self.db.get(Study, study_id)

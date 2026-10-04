@@ -222,6 +222,15 @@ class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
         default=None,
         sa_column=Column(JSONB, nullable=True),
     )
+    # Normalized DOIs of the works this report cites, from the same OpenAlex lookup as
+    # fulltext_links (see OpenAlexService.get_works_by_dois) and cached the same way:
+    # None means "not looked up yet", an empty list "looked up, nothing found". Matched
+    # against Report.doi at read time (ReportService.get_referenced_studies), not stored
+    # as links, so it stays correct as reports are added later.
+    referenced_dois: Optional[List[str]] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
     # Best-effort, UNCONFIRMED trial registration id guess for this report - parsed from
     # the .ris upload (src/services/project.py's build_reports_from_entries) or from the
     # report's fulltext (ReportService.get_trial_ids). Report.trial_registration_id above

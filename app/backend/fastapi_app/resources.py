@@ -5,7 +5,7 @@ from starlette.responses import Response
 import enum
 import logging
 
-from typing import List, Optional
+from typing import List, Optional, Union
 from datetime import datetime, timezone
 from pydantic import BaseModel
 
@@ -17,7 +17,7 @@ from src.database.models import Report as DbReport, Study as DbStudy
 from src.database.models import Participant as DbParticipant, Design as DbDesign
 
 from src.database.repositories.study import DuplicateShortNameError
-from src.utils.query_parser import QuerySyntaxError
+from src.utils.query_parser import QuerySyntaxError, SEARCH_QUERY_DESCRIPTION
 from src.context import RequestContext
 from .deps import get_context
 
@@ -52,6 +52,12 @@ report_id_path = Path(..., description="ReportID")
 Study Endpoints
 """
 
+async def _search_studies_or_400(ctx: RequestContext, q: str, limit: int, cursor: Optional[str]) -> Page[Study]:
+    try:
+        return await ctx.study_service.search_studies_page(q, limit, cursor)
+    except (InvalidCursorError, QuerySyntaxError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
 @router.put("/studies", summary="Add new study to the database.")
 async def add_study(study_params: StudyPayload, ctx: RequestContext = Depends(get_context)) -> Study:
     try:
@@ -59,33 +65,26 @@ async def add_study(study_params: StudyPayload, ctx: RequestContext = Depends(ge
     except DuplicateShortNameError:
         raise HTTPException(status_code=409, detail="Shortname already exists")
 
-@router.get("/studies", summary="Get study details for all studies specified in the query.")
-async def get_studies(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> List[Study]:
+@router.get("/studies", summary="Get study details for all studies specified in the query, or - if `q` is given - search studies by name, trial ID, author or intervention (free-text, or advanced AND/OR field matching).")
+async def get_studies(
+    study_ids: List[int] = study_ids_query,
+    q: Optional[str] = Query(None, min_length=3, description=SEARCH_QUERY_DESCRIPTION),
+    limit: int = Query(25, ge=1, le=100, description="Search only: maximum number of results to return per page."),
+    cursor: Optional[str] = Query(None, description="Search only: opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
+    ctx: RequestContext = Depends(get_context),
+) -> Union[List[Study], Page[Study]]:
+    if q is not None:
+        return await _search_studies_or_400(ctx, q, limit, cursor)
     return await ctx.study_service.get_studies(study_ids)
 
 @router.get("/studies/search", summary="Search studies by name, trial ID, author or intervention - free-text, or advanced AND/OR field matching.")
 async def search_studies(
-    q: str = Query(..., min_length=3, description="Search text. In free-text mode (default), matched against study name, trial ID, author and intervention. In advanced mode, a boolean expression of field==value (or field=value) comparisons combined with AND/OR (AND binds tighter than OR) and optional parentheses, e.g. 'intervention==Drug A AND condition==Sick OR condition==Healthy'. Quote a value (\"...\" or '...') to include literal AND/OR/)/whitespace. Valid fields: name/shortName, trialId, author, status, country, intervention, condition, outcome, participant, design (plurals accepted too, e.g. conditions)."),
-    advanced: bool = Query(False, description="Parse q as an advanced AND/OR field==value expression instead of a free-text search."),
+    q: str = Query(..., min_length=3, description=SEARCH_QUERY_DESCRIPTION),
     limit: int = Query(25, ge=1, le=100, description="Maximum number of results to return per page."),
     cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
     ctx: RequestContext = Depends(get_context),
 ) -> Page[Study]:
-    try:
-        offset = decode_cursor(cursor) if cursor else 0
-    except InvalidCursorError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    if advanced:
-        try:
-            studies, has_more = await ctx.study_service.search_studies_advanced(q, limit, offset)
-        except QuerySyntaxError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    else:
-        studies, has_more = await ctx.study_service.search_studies(q, limit, offset)
-
-    next_cursor = encode_cursor(offset + limit) if has_more else None
-    return Page[Study](items=studies, nextCursor=next_cursor)
+    return await _search_studies_or_400(ctx, q, limit, cursor)
 
 @router.get("/studies/reports", include_in_schema=False)
 async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[DbReport]]:

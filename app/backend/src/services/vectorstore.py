@@ -340,23 +340,15 @@ class VectorstoreService():
 
         return related_tags
     
-    def build_recommandation_based_on_report_id(self, report_id : int, negative_reports : Optional[List[int]] = None):
-
-        if not negative_reports:
-            negative_reports = []
-        
-        positive_ids = [transform_to_uuid(report_id)]
-        negative_ids = [transform_to_uuid(negative_id) for negative_id in negative_reports]
-
+    def build_recommandation_based_on_report_id(self, report_id : int):
         return models.RecommendQuery(
                     recommend=models.RecommendInput(
-                        positive=positive_ids,
-                        negative=negative_ids,
+                        positive=[transform_to_uuid(report_id)],
                         strategy=models.RecommendStrategy.AVERAGE_VECTOR,
                     )
                 )
     
-    async def search_similar_studies(self, query : Any, k : int, cutoff : str, excluded_studies : List[int], exclude_trial_related_studies : bool):
+    async def search_similar_studies(self, query : Any, k : int, cutoff : str):
         filters = [models.FieldCondition(key="is_report",match=models.MatchValue(value=True))]
         if cutoff:
             filters.append(Filter(
@@ -365,36 +357,32 @@ class VectorstoreService():
                 ]
             ))    
 
-        if len(excluded_studies) > 0:
-                
-            if exclude_trial_related_studies:
-                filters.append(
-                    Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="belongs_to_trial_id",
-                                match=models.MatchValue(value=False)
-                            )
-                        ],
-                    )
-                )
-            filters.append(
-                    Filter(
-                        must_not=[
-                            models.FieldCondition(
-                                key="belongs_to_study",
-                                match=models.MatchAny(any=excluded_studies)
-                            )
-                        ]
-                    )
-                )
-        
         filter = models.Filter(must=filters)
     
         search_results = await self.search_report(query,k,filter)
 
         return search_results.groups
     
+    async def score_studies(self, query : Any, study_ids : List[int]) -> Dict[int, float]:
+        """Relevance of specific studies for `query`, scored exactly like search_similar_studies
+        (best-matching report per study) but restricted to the given studies, so the result
+        doesn't depend on whether they'd have made the top-k of an unrestricted search.
+        Studies without any embedded report are absent from the result.
+        """
+        if not study_ids:
+            return {}
+        wanted = set(study_ids)
+        filter = models.Filter(must=[
+            models.FieldCondition(key="is_report", match=models.MatchValue(value=True)),
+            models.FieldCondition(key="belongs_to_study", match=models.MatchAny(any=list(wanted))),
+        ])
+        results = await self.search_report(query, len(wanted), filter)
+        scores: Dict[int, float] = {}
+        for group in results.groups:
+            if group.id in wanted and group.hits:
+                scores[group.id] = group.hits[0].score
+        return scores
+
     async def readyz(self):
         # Check vector store connectivity
         try:

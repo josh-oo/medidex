@@ -10,13 +10,14 @@ it.
 import asyncio
 import io
 import logging
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import httpx
 
 from ..context import RequestContext
 from ..database.sessions import AsyncSessionLocal
 from ..database.models import Report as DbReport
+from ..services.crawler import OpenAlexWork, normalize_doi
 from ..utils.trial_registration_id import is_trial_registration
 
 logger = logging.getLogger(__name__)
@@ -65,40 +66,58 @@ async def _download_pdf_bytes(client: httpx.AsyncClient, url: str) -> Optional[b
     return None
 
 
-async def _auto_search_report_pdf(client: httpx.AsyncClient, report: DbReport, open_alex_service, crawler_service) -> Tuple[Optional[_InMemoryPdfUpload], List[str]]:
-    """Look up a report's OpenAlex fulltext links by DOI, and try to download one as
-    the report's PDF if it doesn't already have one. Links are looked up (and
-    returned for the caller to cache on report_added.fulltext_links - see
-    ProjectRepository.set_report_auto_searched_pdf) even when a PDF already exists,
-    since the report detail view wants them regardless of PDF status.
+async def _fetch_openalex_works(reports: List[DbReport], open_alex_service) -> Optional[Dict[str, OpenAlexWork]]:
+    """One batched OpenAlex lookup (fulltext links + cited DOIs) for every report with a
+    DOI, instead of one request per report. None means the lookup failed, which callers
+    must tell apart from "OpenAlex doesn't know this DOI" (a missing key) so a transient
+    failure isn't cached as "nothing found".
+    """
+    dois = [report.doi for report in reports if report.doi]
+    if not dois:
+        return {}
+    try:
+        return await open_alex_service.get_works_by_dois(dois)
+    except Exception as exc:
+        logger.warning("OpenAlex batch lookup failed for %d reports: %s", len(dois), exc)
+        return None
+
+
+async def _auto_search_report_pdf(
+    client: httpx.AsyncClient, report: DbReport, works: Optional[Dict[str, OpenAlexWork]], crawler_service
+) -> Tuple[Optional[_InMemoryPdfUpload], Optional[List[str]], Optional[List[str]]]:
+    """Try to download one of a report's OpenAlex fulltext links (from the batched lookup
+    in _fetch_openalex_works) as its PDF if it doesn't already have one. Returns
+    (pdf, fulltext links, cited DOIs) for the caller to cache on report_added - see
+    ProjectRepository.set_report_auto_searched_pdf. Links are returned even when a PDF
+    already exists, since the report detail view wants them regardless of PDF status;
+    both are None if the lookup failed (nothing to cache).
     """
     if report.report_number <= 0 and is_trial_registration(report.authors):
         # A bare trial registration has no DOI or published PDF - render its
         # registry record as the report's PDF instead.
         try:
-            return _InMemoryPdfUpload(await crawler_service.get_pdf_for_trial_id(report.authors)), []
+            return _InMemoryPdfUpload(await crawler_service.get_pdf_for_trial_id(report.authors)), [], []
         except Exception as exc:
             logger.warning("Trial registry PDF failed for report %s: %s", report.id, exc)
-            return None, []
+            return None, [], []
 
     if not report.doi:
-        return None, []
+        return None, [], []
+    if works is None:
+        return None, None, None
 
-    try:
-        links = list(await open_alex_service.get_pdf_links_by_doi(report.doi))
-    except Exception as exc:
-        logger.warning("OpenAlex lookup failed for report %s: %s", report.id, exc)
-        return None, []
+    work = works.get(normalize_doi(report.doi), OpenAlexWork())
+    links = work.pdf_links
 
     if report.report_number > 0:  # report already has a pdf, skip the download attempt
-        return None, links
+        return None, links, work.referenced_dois
 
     for link in links:
         payload = await _download_pdf_bytes(client, link)
         if payload is not None:
-            return _InMemoryPdfUpload(payload), links
+            return _InMemoryPdfUpload(payload), links, work.referenced_dois
 
-    return None, links
+    return None, links, work.referenced_dois
 
 
 async def _finalize_project_upload(project_id: str, project_repo, vectorstore, maintenance_service, pubsub_service) -> None:
@@ -123,17 +142,22 @@ async def process_report(reports: List[DbReport], project_id: str, ctx: RequestC
     """
     timeout = httpx.Timeout(30.0, connect=10.0)
 
+    openalex_works = asyncio.ensure_future(_fetch_openalex_works(reports, ctx.open_alex_service))
+
     async def load_pdf(report, client):
+        works = await openalex_works
         async with _write_semaphore:
             async with AsyncSessionLocal() as write_session:
                 write_ctx = RequestContext(db=write_session, user_id=ctx.user_id)
                 project = await write_ctx.project_repo.get_project_by_id(project_id)
                 if not project:  # project already deleted
                     return
-                pdf_file, fulltext_links = await _auto_search_report_pdf(client, report, write_ctx.open_alex_service, write_ctx.crawler_service)
+                pdf_file, fulltext_links, referenced_dois = await _auto_search_report_pdf(client, report, works, write_ctx.crawler_service)
                 if pdf_file:
                     await write_ctx.document_service.upload_pdf(report.id, pdf_file)
-                await write_ctx.project_repo.set_report_auto_searched_pdf(report.id, fulltext_links=fulltext_links)
+                await write_ctx.project_repo.set_report_auto_searched_pdf(
+                    report.id, fulltext_links=fulltext_links, referenced_dois=referenced_dois
+                )
                 await write_session.commit()
                 await ctx.pubsub_service.publish_project_update(project_id)
 

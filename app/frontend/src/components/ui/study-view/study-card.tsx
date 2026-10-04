@@ -13,7 +13,6 @@ import {
   CheckCircle2,
   Plus,
   Link,
-  Sparkles,
 } from "lucide-react";
 import type { StudyDto } from "@/types/apiDTOs";
 import type { ReactNode } from "react";
@@ -22,7 +21,6 @@ interface StudyCardProps extends StudyDto {
   /** Omitted for globally searched studies, which carry no relevance score. */
   relevance?: number | null;
   isAssigned: boolean;
-  alsoRecommended?: boolean;
   badge?: ReactNode;
   onClick: (study: StudyDto) => void;
   onAssign: (study: StudyDto) => void;
@@ -54,7 +52,6 @@ const getRelevanceBadgeStyle = (relevance: number) => {
 export function StudyCard({
   relevance,
   isAssigned,
-  alsoRecommended = false,
   badge,
   onClick,
   onAssign,
@@ -118,6 +115,23 @@ export function StudyCard({
         {/* Top row: Short Name and badges */}
         <div className="flex items-start gap-3">
           <div className="flex items-center gap-2 flex-1 min-w-0">
+            {hasRelevance && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge
+                      variant="secondary"
+                      className={`font-semibold text-xs px-2 py-0.5 w-12 justify-center shrink-0 tabular-nums ${getRelevanceBadgeStyle(relevance!)}`}
+                    >
+                      {Math.round(relevance! * 100)}%
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Relevance</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -131,23 +145,6 @@ export function StudyCard({
               </Tooltip>
             </TooltipProvider>
             <div className="flex items-center gap-1 text-xs text-muted-foreground whitespace-nowrap">
-              {hasRelevance && (
-                <Badge
-                  variant="secondary"
-                  className={`font-semibold text-xs px-2 py-0.5 ${getRelevanceBadgeStyle(relevance!)}`}
-                >
-                  Relevance {(relevance! * 100).toFixed(1)}%
-                </Badge>
-              )}
-              {alsoRecommended && (
-                <Badge
-                  variant="secondary"
-                  className="font-normal text-xs px-2 py-0.5 gap-1"
-                >
-                  <Sparkles className="h-3 w-3" />
-                  Also similar
-                </Badge>
-              )}
               {badge}
             </div>
           </div>

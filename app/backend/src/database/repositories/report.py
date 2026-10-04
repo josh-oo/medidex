@@ -53,6 +53,17 @@ class ReportRepository:
         report_added.fulltext_links = links
         await self.db.commit()
 
+    async def set_referenced_dois(self, report_id: int, dois: List[str]) -> None:
+        """Persists the DOIs a report cites (see report_added.referenced_dois's comment in
+        models.py); silently skipped for a report with no report_added row, like
+        set_fulltext_links.
+        """
+        report_added = await self.db.get(ReportAdded, report_id)
+        if report_added is None:
+            return
+        report_added.referenced_dois = dois
+        await self.db.commit()
+
     async def get_fulltext_links_for_reports(self, report_ids: List[int]) -> Dict[int, List[str]]:
         """Bulk read of the cached report_added.fulltext_links column (see its comment
         in models.py) for a page of reports - the intake list's version of

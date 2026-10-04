@@ -38,6 +38,19 @@ export const getSimilarStudiesByReportId = (
     });
 }
 
+// studies of reports in the database whose DOI the given report cites
+export const getReferencedStudiesByReportId = (
+  reportId: number,
+  config?: AxiosRequestConfig
+): Promise<StudyCandidateDto[]> => {
+  return apiClient.get<StudyCandidateDto[]>(`/reports/${reportId}/referenced-studies`, config)
+    .then(response => response.data)
+    .catch(error => {
+      console.error(`Error fetching referenced studies for report ${reportId}:`, error);
+      throw error;
+    });
+}
+
 //assign studies to a report
 export const assignStudyToReportByReportId = (
   reportId: number,

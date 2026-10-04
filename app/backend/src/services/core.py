@@ -1,7 +1,7 @@
 from ..database.repositories.study import StudyRepository
 from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
-from ..utils.dto import Page, StudyCandidate, candidate_studies_to_dto
+from ..utils.dto import Page, Study, StudyCandidate, candidate_studies_to_dto
 from ..utils.pagination import decode_cursor, encode_cursor
 from .authorization import get_authorized_project_id
 from .authors import AuthorFeatureService
@@ -19,10 +19,6 @@ class ReportNotReadyError(Exception):
     """The report hasn't finished embedding/PDF processing yet."""
 
 
-class ReportNotInSourceProjectError(Exception):
-    """The report isn't part of the given source project."""
-
-
 class StudySimilaritySearchService:
     def __init__(self, user_id : str, vectorstore : VectorstoreService, study_repo : StudyRepository, project_repo : ProjectRepository, author_feature_service : AuthorFeatureService, report_service : ReportService):
         self.user_id = user_id
@@ -32,12 +28,10 @@ class StudySimilaritySearchService:
         self.author_feature_service = author_feature_service
         self.report_service = report_service
 
-        self.debug = False
-
         if not self.user_id:
             self.user_id = "user"
 
-    async def get_similar_study_by_query(self, query : Any, cutoff: str, limit: int, negative_studies: List[int], authors:List[str], return_details: bool):
+    async def get_similar_study_by_query(self, query : Any, cutoff: str, limit: int, authors:List[str]):
 
         #Convert TagCategories:
 
@@ -45,10 +39,7 @@ class StudySimilaritySearchService:
         #found_study_titles = {}
         debug_map = {}
 
-        return_details= return_details or self.debug
-
-        blacklist = negative_studies
-        reranked_results = await self.vectorstore.search_similar_studies(query, limit, cutoff, blacklist, False)
+        reranked_results = await self.vectorstore.search_similar_studies(query, limit, cutoff)
 
         for result in reranked_results:
             for hit in result.hits:
@@ -75,8 +66,6 @@ class StudySimilaritySearchService:
         for study in all_studies:
             row = SimpleNamespace(**study.model_dump())
             row.relevance = found_study_ids[row.id]
-            if return_details:
-                row.details = list({d['source_id']: d for d in debug_map[row.id]}.values())
             rows.append(row)
 
         rows.sort(key=lambda study: study.relevance, reverse=True)
@@ -89,7 +78,7 @@ class StudySimilaritySearchService:
 
         return rows
 
-    async def get_similar_studies_by_id(self, report_id : int, cutoff: str, limit: int, offset: int, negative_studies: List[int], negative_reports: List[int], return_details: bool):
+    async def get_similar_studies_by_id(self, report_id : int, cutoff: str, limit: int, offset: int):
         """Returns (page, has_more): `page` is the [offset, offset + limit) slice of the
         relevance-ranked candidate pool, `has_more` says whether a further page exists.
         Purely semantic (vectorstore hits plus project studies, then re-sorted by score) -
@@ -101,17 +90,14 @@ class StudySimilaritySearchService:
         determined without a separate count query.
         """
 
-        if not negative_studies:
-            negative_studies = []
-
         report = await self.report_service.get_report(report_id)
 
         authors = [item.strip() for item in report.authors.split("//")]
 
-        query = self.vectorstore.build_recommandation_based_on_report_id(report.id, negative_reports)
+        query = self.vectorstore.build_recommandation_based_on_report_id(report.id)
 
         pool_target = offset + limit + 1
-        rows = await self.get_similar_study_by_query(query,cutoff,pool_target,negative_studies, authors, return_details=return_details)
+        rows = await self.get_similar_study_by_query(query,cutoff,pool_target, authors)
 
         # Check if there are any similar items in the same project which are more similar than already retrieved existing studies
         if rows:
@@ -147,20 +133,44 @@ class StudySimilaritySearchService:
         page = rows[offset:offset + limit]
         return page, has_more
 
+    async def get_referenced_studies(self, report_id: int, user_id: Optional[str]) -> List[StudyCandidate]:
+        """Studies of reports in the database that this report cites by DOI (see
+        ReportService.get_referenced_studies), each with its relevance for the report.
+        `user_id` gates access like get_similar_studies_page does; no readiness
+        requirement, since this needs neither the embedding nor the PDF.
+        """
+        await get_authorized_project_id(report_id, self.report_service.report_repo, self.project_repo, user_id)
+        studies = await self.report_service.get_referenced_studies(report_id)
+        return await self._with_relevance(report_id, studies)
+
+    async def add_relevance(self, report_id: int, studies: List[Study], user_id: Optional[str]) -> List[StudyCandidate]:
+        """Access-checked `_with_relevance`, for callers (e.g. the study search) that
+        score studies they retrieved by other means against a report."""
+        await get_authorized_project_id(report_id, self.report_service.report_repo, self.project_repo, user_id)
+        return await self._with_relevance(report_id, studies)
+
+    async def _with_relevance(self, report_id: int, studies: List[Study]) -> List[StudyCandidate]:
+        """Scores exactly these studies against the report in the vectorstore (see
+        VectorstoreService.score_studies), independent of the top-k cap of the
+        similar-studies search. relevance is 0 for studies without an embedded report, or
+        for every study if the report itself isn't embedded yet.
+        """
+        scores = {}
+        if studies and report_id in await self.vectorstore.reports_exist([report_id]):
+            query = self.vectorstore.build_recommandation_based_on_report_id(report_id)
+            scores = await self.vectorstore.score_studies(query, [study.studyId for study in studies])
+        return [StudyCandidate(**study.model_dump(), relevance=scores.get(study.studyId, 0.0)) for study in studies]
+
     async def get_similar_studies_page(
         self,
         report_id: int,
         cutoff: Optional[str],
         limit: int,
         cursor: Optional[str],
-        source: Optional[str],
-        negative_studies: Optional[List[int]],
-        negative_reports: Optional[List[int]],
-        return_details: bool,
         user_id: Optional[str],
     ) -> Page[StudyCandidate]:
         """Full request-level wrapper around get_similar_studies_by_id: access check,
-        readiness/source checks, cursor decoding, and DTO assembly, shared by both heads
+        readiness check, cursor decoding, and DTO assembly, shared by both heads
         (previously inline in fastapi_app/core.py's similarity_search_studies_by_id, gated
         by a separate check_report_access FastAPI dependency). `user_id` is the caller's
         authenticated id for that access check - kept as an explicit argument rather than
@@ -172,17 +182,12 @@ class StudySimilaritySearchService:
         ReportNotFoundError/AuthenticationRequiredError/ReportAccessDeniedError for the
         access check; ReportNotReadyError unless the report has finished embedding/PDF
         processing (skipped when `cutoff` is given - that's a test-only path over
-        historical data, where "ready" doesn't apply); ReportNotInSourceProjectError if
-        `source` is given and doesn't match the report's actual project; and
-        InvalidCursorError (src/utils/pagination.py) for a malformed cursor.
+        historical data, where "ready" doesn't apply); and InvalidCursorError (src/utils/pagination.py) for a malformed cursor.
         """
-        project_id = await get_authorized_project_id(report_id, self.report_service.report_repo, self.project_repo, user_id)
+        await get_authorized_project_id(report_id, self.report_service.report_repo, self.project_repo, user_id)
 
         if not cutoff and not await self.report_service.is_ready(report_id):
             raise ReportNotReadyError(f"Report {report_id} is not ready for processing")
-
-        if source is not None and project_id != source:
-            raise ReportNotInSourceProjectError(f"Report {report_id} not found in project {source}")
 
         offset = decode_cursor(cursor) if cursor else 0
 
@@ -191,9 +196,6 @@ class StudySimilaritySearchService:
             cutoff,
             limit,
             offset,
-            negative_studies,
-            negative_reports,
-            return_details,
         )
         studies = candidate_studies_to_dto(result)
         next_cursor = encode_cursor(offset + limit) if has_more else None
