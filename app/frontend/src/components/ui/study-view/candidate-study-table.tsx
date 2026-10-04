@@ -412,6 +412,7 @@ export function CandidateStudyTable({
                     onClick={handleStudyClick}
                     onAssign={(target) => void handleAssignStudy(target)}
                     badge={<StudyBadgeSlot reportId={reportId} study={study} />}
+                    reportId={reportId}
                   />
                 ))}
 

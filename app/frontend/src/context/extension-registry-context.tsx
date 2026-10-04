@@ -43,6 +43,19 @@ export interface StudyBadgeSlotProps {
   study: StudyCandidateDto
 }
 
+export interface StudyCardStyleProps {
+  reportId?: number
+  studyId: number
+}
+
+/**
+ * Called as a React hook while a study card renders; returns extra class names
+ * for the card (or undefined). Resolvers must be stable across renders.
+ */
+export type StudyCardClassNameResolver = (
+  props: StudyCardStyleProps,
+) => string | undefined
+
 export interface ReportBannerSlotProps {
   reportId?: number
 }
@@ -61,6 +74,7 @@ export interface ExtensionRegistry {
   reportActions: ComponentType<ReportActionsSlotProps>[]
   assigneeOptions: AssigneeOptionsResolver[]
   studyBadges: ComponentType<StudyBadgeSlotProps>[]
+  studyCardClassNames: StudyCardClassNameResolver[]
   reportBanners: ComponentType<ReportBannerSlotProps>[]
   reportStatuses: ComponentType<ReportStatusSlotProps>[]
   addStudyTrigger?: ComponentType<AddStudyTriggerSlotProps>
@@ -72,6 +86,7 @@ const emptyExtensions: ExtensionRegistry = {
   reportActions: [],
   assigneeOptions: [],
   studyBadges: [],
+  studyCardClassNames: [],
   reportBanners: [],
   reportStatuses: [],
 }

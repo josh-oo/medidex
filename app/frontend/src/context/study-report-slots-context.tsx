@@ -4,6 +4,7 @@ import { useExtensionRegistry } from "./extension-registry-context"
 
 import type {
   ReportActionsSlotProps,
+  StudyCardStyleProps,
   ReportBannerSlotProps,
   ReportStatusSlotProps,
   StudyBadgeSlotProps,
@@ -15,6 +16,14 @@ export type {
   ReportStatusSlotProps,
   StudyBadgeSlotProps,
 } from "./extension-registry-context"
+
+export function useStudyCardClassName(props: StudyCardStyleProps) {
+  const { studyCardClassNames } = useExtensionRegistry()
+  return studyCardClassNames
+    .map((resolve) => resolve(props))
+    .filter(Boolean)
+    .join(" ")
+}
 
 export function StudyBadgeSlot(props: StudyBadgeSlotProps) {
   const { studyBadges } = useExtensionRegistry()

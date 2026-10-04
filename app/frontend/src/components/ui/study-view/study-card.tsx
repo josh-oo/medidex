@@ -16,12 +16,16 @@ import {
 } from "lucide-react";
 import type { StudyDto } from "@/types/apiDTOs";
 import type { ReactNode } from "react";
+import { useStudyCardClassName } from "@/context/study-report-slots-context";
+import { cn } from "@/lib/utils";
 
 interface StudyCardProps extends StudyDto {
   /** Omitted for globally searched studies, which carry no relevance score. */
   relevance?: number | null;
   isAssigned: boolean;
   badge?: ReactNode;
+  /** Report the card is shown for; lets extensions style it per report. */
+  reportId?: number;
   onClick: (study: StudyDto) => void;
   onAssign: (study: StudyDto) => void;
 }
@@ -53,11 +57,13 @@ export function StudyCard({
   relevance,
   isAssigned,
   badge,
+  reportId,
   onClick,
   onAssign,
   ...study
 }: StudyCardProps) {
   const hasRelevance = typeof relevance === "number";
+  const extensionClassName = useStudyCardClassName({ reportId, studyId: study.studyId });
 
   return (
     <div
@@ -65,7 +71,10 @@ export function StudyCard({
       tabIndex={0}
       aria-label={`View details for ${study.shortName}`}
       onClick={() => onClick(study)}
-      className="p-4 mb-2 bg-card hover:bg-muted/50 rounded-lg relative w-full max-w-full overflow-hidden transition-all duration-200 border border-border/60 hover:border-border group-hover:shadow-sm flex items-center gap-4"
+      className={cn(
+        "p-4 mb-2 bg-card hover:bg-muted/50 rounded-lg relative w-full max-w-full overflow-hidden transition-all duration-200 border border-border/60 hover:border-border group-hover:shadow-sm flex items-center gap-4",
+        extensionClassName,
+      )}
     >
       {/* Left indicator bar with relevance color */}
       <div
