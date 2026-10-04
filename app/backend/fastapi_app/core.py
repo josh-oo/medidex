@@ -99,6 +99,13 @@ async def similarity_search_studies_by_id(
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+@router.get("/reports/{report_id}/referenced-studies", dependencies=[Depends(is_verified_api_call)], summary="Get the studies belonging to reports in the database whose DOI the given report cites (according to OpenAlex).")
+async def referenced_studies_by_report(report_id: int, ctx: RequestContext = Depends(get_context)) -> List[Study]:
+    try:
+        return await ctx.study_similarity_service.get_referenced_studies(report_id, ctx.user_id)
+    except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
+        _raise_for_report_access(exc)
+
 @router.get("/reports/{report_id}/similar-studies/tags", dependencies=[Depends(is_verified_api_call)], summary="")
 async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(10, description="The number of related studies considered for retrieving relevant tags."), ctx: RequestContext = Depends(get_context)):
     try:

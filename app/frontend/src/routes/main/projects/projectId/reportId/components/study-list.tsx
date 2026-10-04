@@ -4,8 +4,8 @@ import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CandidateStudyTable } from "@/components/ui/study-view/candidate-study-table";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { StudyCandidateDto } from "@/types/apiDTOs";
-import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
+import type { StudyCandidateDto, StudyDto } from "@/types/apiDTOs";
+import { getReferencedStudiesByReportId, getSimilarStudiesByReportId } from "@/lib/api/reportApi";
 import { ReportActionsSlot } from "@/context/study-report-slots-context";
 
 const PAGE_SIZE = 10;
@@ -21,6 +21,7 @@ export default function StudyList() {
   const [studies, setStudies] = useState<StudyCandidateDto[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [referencedStudies, setReferencedStudies] = useState<StudyDto[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
@@ -51,6 +52,23 @@ export default function StudyList() {
       cancelled = true;
     };
   }, [reportIdNumber, source]);
+
+  // Secondary, best-effort section - a failure here just leaves it hidden rather than
+  // blocking the similar studies.
+  useEffect(() => {
+    let cancelled = false;
+    setReferencedStudies([]);
+
+    getReferencedStudiesByReportId(reportIdNumber)
+      .then((response) => {
+        if (!cancelled) setReferencedStudies(response);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reportIdNumber]);
 
   const handleLoadMore = () => {
     if (!nextCursor || isLoadingMore) return;
@@ -97,6 +115,7 @@ export default function StudyList() {
       <CandidateStudyTable
         reportId={reportIdNumber}
         studies={studies}
+        referencedStudies={referencedStudies}
         nextCursor={nextCursor}
         isLoadingMore={isLoadingMore}
         onLoadMore={handleLoadMore}

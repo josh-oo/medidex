@@ -1,7 +1,7 @@
 from ..database.repositories.study import StudyRepository
 from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
-from ..utils.dto import Page, StudyCandidate, candidate_studies_to_dto
+from ..utils.dto import Page, Study, StudyCandidate, candidate_studies_to_dto
 from ..utils.pagination import decode_cursor, encode_cursor
 from .authorization import get_authorized_project_id
 from .authors import AuthorFeatureService
@@ -146,6 +146,15 @@ class StudySimilaritySearchService:
         has_more = len(rows) > offset + limit
         page = rows[offset:offset + limit]
         return page, has_more
+
+    async def get_referenced_studies(self, report_id: int, user_id: Optional[str]) -> List[Study]:
+        """Studies of reports in the database that this report cites by DOI (see
+        ReportService.get_referenced_studies). `user_id` gates access like
+        get_similar_studies_page does; no readiness requirement, since this needs
+        neither the embedding nor the PDF.
+        """
+        await get_authorized_project_id(report_id, self.report_service.report_repo, self.project_repo, user_id)
+        return await self.report_service.get_referenced_studies(report_id)
 
     async def get_similar_studies_page(
         self,

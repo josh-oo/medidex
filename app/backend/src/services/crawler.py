@@ -3,7 +3,8 @@ import httpx
 from bs4 import BeautifulSoup
 from httpx import ReadTimeout
 
-from typing import Any, List
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List
 
 class CrawlerService:
     def __init__(self):
@@ -124,39 +125,120 @@ class CrawlerService:
 <body><h1>{title}</h1>{table_html}</body></html>"""
         return HTML(string=document).write_pdf()
 
+def normalize_doi(doi: str) -> str:
+    """Canonical form used to compare DOIs: lowercase, no resolver prefix."""
+    doi = (doi or "").strip().lower()
+    for prefix in ("https://doi.org/", "http://doi.org/", "https://dx.doi.org/", "http://dx.doi.org/", "doi:"):
+        if doi.startswith(prefix):
+            return doi[len(prefix):].strip()
+    return doi
+
+@dataclass
+class OpenAlexWork:
+    pdf_links: List[str] = field(default_factory=list)
+    referenced_dois: List[str] = field(default_factory=list)
+
 class OpenAlexService:
-    OPEN_ALEX_API = "https://api.openalex.org/works/https://doi.org/{doi}"
+    OPEN_ALEX_API = "https://api.openalex.org/works"
+    # Max values per OR-filter ("a|b|c") OpenAlex accepts, and the page size we ask for.
+    BATCH_SIZE = 50
+
     def __init__(self):
         # OPEN Alex is limited to 10 requests per second
         self.sem = asyncio.Semaphore(1)
 
-    async def get_data_by_doi(self, doi : str) -> Any:
-        url = OpenAlexService.OPEN_ALEX_API.format(doi=doi)
+    async def _get_json(self, client: httpx.AsyncClient, params: dict) -> Any:
         async with self.sem:
             try:
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
+                resp = await client.get(OpenAlexService.OPEN_ALEX_API, params=params)
+                resp.raise_for_status()
             except ReadTimeout:
                 raise Exception("Upstream request timed out")
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 404:
-                    return {}
-                else:
-                    raise
             await asyncio.sleep(0.1)  # Non-blocking cooldown after each request
         return resp.json()
-    
+
+    @staticmethod
+    def _chunks(items: List[str], size: int):
+        for i in range(0, len(items), size):
+            yield items[i:i + size]
+
+    @staticmethod
+    def _short_id(openalex_id: str) -> str:
+        return openalex_id.rsplit("/", 1)[-1]
+
+    @staticmethod
+    def _pdf_links(record: dict) -> List[str]:
+        links = []
+        for loc in record.get('locations') or []:
+            url = loc.get('pdf_url')
+            if url and url not in links:
+                links.append(url)
+        return links
+
+    async def _resolve_dois_by_openalex_ids(self, client: httpx.AsyncClient, openalex_ids: List[str]) -> Dict[str, str]:
+        """Batched OpenAlex work id -> normalized DOI; works without a DOI are left out."""
+        resolved = {}
+        for chunk in self._chunks(openalex_ids, self.BATCH_SIZE):
+            data = await self._get_json(client, {
+                "filter": "openalex:" + "|".join(chunk),
+                "per-page": self.BATCH_SIZE,
+                "select": "id,doi",
+            })
+            for record in data.get('results', []):
+                if record.get('id') and record.get('doi'):
+                    resolved[self._short_id(record['id'])] = normalize_doi(record['doi'])
+        return resolved
+
+    async def get_works_by_dois(self, dois: Iterable[str]) -> Dict[str, OpenAlexWork]:
+        """Batched lookup of PDF links and referenced DOIs for many DOIs at once: one
+        request per BATCH_SIZE DOIs, plus one more per BATCH_SIZE distinct referenced
+        works to turn OpenAlex's reference ids into DOIs. Keys are normalized DOIs;
+        DOIs OpenAlex doesn't know are absent from the result. Raises on upstream errors.
+        """
+        wanted = list(dict.fromkeys(normalize_doi(d) for d in dois if d))
+        # "," and "|" are filter syntax in OpenAlex and can't be escaped
+        wanted = [d for d in wanted if d and "," not in d and "|" not in d]
+        if not wanted:
+            return {}
+
+        records: Dict[str, dict] = {}
+        async with httpx.AsyncClient(timeout=30) as client:
+            for chunk in self._chunks(wanted, self.BATCH_SIZE):
+                data = await self._get_json(client, {
+                    "filter": "doi:" + "|".join(chunk),
+                    "per-page": self.BATCH_SIZE,
+                    "select": "id,doi,locations,referenced_works",
+                })
+                for record in data.get('results', []):
+                    if record.get('doi'):
+                        records[normalize_doi(record['doi'])] = record
+
+            reference_ids = list(dict.fromkeys(
+                self._short_id(ref)
+                for record in records.values()
+                for ref in record.get('referenced_works') or []
+            ))
+            resolved = await self._resolve_dois_by_openalex_ids(client, reference_ids)
+
+        works = {}
+        for doi, record in records.items():
+            referenced_dois = list(dict.fromkeys(
+                resolved[self._short_id(ref)]
+                for ref in record.get('referenced_works') or []
+                if self._short_id(ref) in resolved
+            ))
+            works[doi] = OpenAlexWork(
+                pdf_links=self._pdf_links(record),
+                referenced_dois=referenced_dois,
+            )
+        return works
+
+    async def get_work_by_doi(self, doi: str) -> OpenAlexWork:
+        works = await self.get_works_by_dois([doi])
+        return works.get(normalize_doi(doi), OpenAlexWork())
+
     async def get_pdf_links_by_doi(self, doi : str) -> List[str]:
-        record = await self.get_data_by_doi(doi)
-        urls = []
-        try:
-            for loc in record.get('locations', []):
-                if loc.get('pdf_url'):
-                    urls.append(loc['pdf_url'])
-        except:
-            pass
-        return set(urls)
+        return set((await self.get_work_by_doi(doi)).pdf_links)
 
 # Singletons: OpenAlexService's semaphore is meant to cap concurrent calls to
 # OpenAlex process-wide (CrawlerService is stateless but kept consistent with

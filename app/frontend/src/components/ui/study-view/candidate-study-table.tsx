@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
   FileText,
+  BookMarked,
   Search,
   Sparkles,
   X,
@@ -27,6 +28,9 @@ import { searchStudies } from "@/lib/api/studiesApi";
 interface CandidateStudyTableProps {
   reportId?: number;
   studies: StudyCandidateDto[];
+  // Studies of reports in the database that this report cites by DOI - the section is
+  // only shown when this is non-empty.
+  referencedStudies?: StudyDto[];
   nextCursor?: string | null;
   isLoadingMore?: boolean;
   onLoadMore?: () => void;
@@ -40,6 +44,7 @@ const SEARCH_PAGE_SIZE = 10;
 export function CandidateStudyTable({
   reportId,
   studies,
+  referencedStudies = [],
   nextCursor = null,
   isLoadingMore = false,
   onLoadMore,
@@ -352,9 +357,33 @@ export function CandidateStudyTable({
             </div>
           )}
 
+          {/* Studies of reports this report cites by DOI */}
+          {referencedStudies.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 pb-2">
+                <BookMarked className="h-4 w-4 text-muted-foreground" />
+                <h3 className="text-sm font-semibold">Referenced studies</h3>
+                <Badge variant="secondary" className="text-xs font-normal">
+                  {referencedStudies.length}
+                </Badge>
+              </div>
+              {referencedStudies.map((study) => (
+                <StudyCard
+                  key={`referenced-${study.studyId}`}
+                  {...study}
+                  isAssigned={assignedStudyIds.has(study.studyId)}
+                  alsoRecommended={candidateStudyIds.has(study.studyId)}
+                  onClick={handleStudyClick}
+                  onAssign={(target) => void handleAssignStudy(target)}
+                />
+              ))}
+              <div className="pt-4 border-b border-border" />
+            </div>
+          )}
+
           {/* Similar studies */}
           <div>
-            {searchResults && (
+            {(searchResults || referencedStudies.length > 0) && (
               <div className="flex items-center gap-2 pb-2">
                 <Sparkles className="h-4 w-4 text-muted-foreground" />
                 <h3 className="text-sm font-semibold">Similar studies</h3>
