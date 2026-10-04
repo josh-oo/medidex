@@ -1,5 +1,3 @@
-"use client"
-
 import { useExtensionRegistry } from "./extension-registry-context"
 
 import type {

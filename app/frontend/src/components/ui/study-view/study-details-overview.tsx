@@ -1,5 +1,3 @@
-"use client";
-
 import { StudyDto } from "@/types/apiDTOs";
 import { Badge } from "@/components/ui/badge";
 import {
