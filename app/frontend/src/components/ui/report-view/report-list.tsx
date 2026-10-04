@@ -193,6 +193,22 @@ export function ReportList({
         setFilteredReports(result.items);
         setNextCursor(result.nextCursor);
         addReports(result.items);
+        // The open report fell out of the filtered list (only decidable once the whole
+        // result is in, i.e. no further page) - drop it from the URL too.
+        const filtersActive = Boolean(debouncedSearch) || Object.keys(filters).length > 0;
+        if (
+          filtersActive &&
+          selectedReportId !== null &&
+          result.nextCursor === null &&
+          !result.items.some((r) => r.reportId === selectedReportId)
+        ) {
+          const query = new URLSearchParams(
+            Object.entries({ ...queryParams })
+              .filter(([_, v]) => v !== undefined)
+              .map(([k, v]) => [k, String(v)])
+          ).toString();
+          navigate(`/${baseUrl}/${projectId}${query ? `?${query}` : ""}`, { replace: true });
+        }
       })
       .catch((error) => {
         console.error("Error fetching reports:", error);
@@ -208,6 +224,8 @@ export function ReportList({
     return () => {
       cancelled = true;
     };
+    // selectedReportId is deliberately not a dependency: selecting a report must not refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, debouncedSearch, filters, fetchReports, addReports]);
 
   const handleLoadMore = () => {

@@ -435,7 +435,18 @@ class ReportRepository:
                 .where(StudyReport.report_id == Report.id)
                 .where(Study.date_entered > Report.date_entered)
             ).exists()
-            stmt = stmt.where(new_study_exists if new_study else ~new_study_exists)
+            if new_study:
+                stmt = stmt.where(new_study_exists)
+            else:
+                # "Existing study" means the report is linked to a study, none of them new -
+                # unlinked (unprocessed) reports have no study at all, so they're neither.
+                any_study_exists = self._user_scoped_linked_study_query(
+                    select(StudyReport.report_id)
+                    .select_from(StudyReport)
+                    .outerjoin(StudyReportAdded, StudyReportAdded.study_report_id == StudyReport.id)
+                    .where(StudyReport.report_id == Report.id)
+                ).exists()
+                stmt = stmt.where(any_study_exists, ~new_study_exists)
 
         if flagged is not None:
             flagged_exists = (
