@@ -25,8 +25,8 @@ Install *docker* if you have not already: [Windows](https://docs.docker.com/desk
    The first run builds the images and downloads the embedding model, so it takes a while.
 4. Once the containers are up:
    - Frontend: http://localhost:3000
-   - API docs: http://localhost:8002/backend/api/docs
-   - Readiness/health of all sub-services: http://localhost:8002/backend/api/readyz
+   - API docs: http://localhost:8002/api/v1/docs
+   - Readiness/health of all sub-services: http://localhost:8002/api/v1/readyz
    - Qdrant dashboard: http://localhost:6333/dashboard
 
 # Data and databases
