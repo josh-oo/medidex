@@ -18,19 +18,20 @@ import { StudyCard } from "./study-card";
 import { AddStudyTriggerSlot } from "@/context/add-study-trigger-context";
 import { AdvancedSearchDialog } from "./advanced-search-dialog";
 import { LoadMoreStudiesButton } from "./load-more-studies-button";
-import type { StudyCandidateDto, StudyDto, StudyBaseDto } from "@/types/apiDTOs";
+import type { StudyCandidateDto, StudyDto, StudyBaseDto, Page } from "@/types/apiDTOs";
 import { ReportBannerSlot, StudyBadgeSlot } from "@/context/study-report-slots-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import { useDetailsSheet } from "@/context/details-sheet-context";
 import { assignNewStudyToReportByReportId } from "@/lib/api/reportApi";
 import { searchStudies } from "@/lib/api/studiesApi";
+import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
 
 interface CandidateStudyTableProps {
   reportId?: number;
   studies: StudyCandidateDto[];
   // Studies of reports in the database that this report cites by DOI - the section is
   // only shown when this is non-empty.
-  referencedStudies?: StudyDto[];
+  referencedStudies?: StudyCandidateDto[];
   nextCursor?: string | null;
   isLoadingMore?: boolean;
   onLoadMore?: () => void;
@@ -40,6 +41,20 @@ interface CandidateStudyTableProps {
 const MIN_SEARCH_QUERY_LENGTH = 3;
 // Page size for both the explicit search and its "Load more" pagination.
 const SEARCH_PAGE_SIZE = 10;
+
+// Only searches within a report carry a relevance.
+type SearchResult = StudyDto | StudyCandidateDto;
+
+// Within a report the search runs through its similar-studies endpoint, so results carry
+// their relevance for it; without one it is the plain study search.
+const searchStudiesForReport = (
+  reportId: number | undefined,
+  query: string,
+  cursor?: string
+): Promise<Page<SearchResult>> =>
+  reportId !== undefined
+    ? getSimilarStudiesByReportId(reportId, { q: query, limit: SEARCH_PAGE_SIZE, cursor })
+    : searchStudies({ q: query, limit: SEARCH_PAGE_SIZE, cursor });
 
 export function CandidateStudyTable({
   reportId,
@@ -52,7 +67,7 @@ export function CandidateStudyTable({
 
   const [searchQuery, setSearchQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<StudyDto[] | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searchNextCursor, setSearchNextCursor] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingMoreSearch, setIsLoadingMoreSearch] = useState(false);
@@ -118,11 +133,6 @@ export function CandidateStudyTable({
     [studies]
   );
 
-  const candidateStudyIds = useMemo(
-    () => new Set(candidateStudies.map((study) => study.studyId)),
-    [candidateStudies]
-  );
-
   // The single source of truth for assignment state - currentReport.assignedStudies already
   // updates reactively the moment addAssignedStudy/syncAssignedStudy touch the store, so
   // there's no separate local flag to keep in sync.
@@ -131,6 +141,8 @@ export function CandidateStudyTable({
     [currentReport?.assignedStudies]
   );
 
+  // The backend tells plain from advanced queries by the query itself; `advanced` only
+  // drives how the results header displays it.
   const runSearch = useCallback(async (query: string, advanced: boolean = false) => {
     setIsSearching(true);
     setSearchError(null);
@@ -138,11 +150,7 @@ export function CandidateStudyTable({
     setIsAdvancedSearch(advanced);
 
     try {
-      const response = await searchStudies({
-        q: query,
-        limit: SEARCH_PAGE_SIZE,
-        advanced: advanced || undefined,
-      });
+      const response = await searchStudiesForReport(reportId, query);
       setSearchResults(response.items);
       setSearchNextCursor(response.nextCursor);
     } catch (error) {
@@ -154,7 +162,7 @@ export function CandidateStudyTable({
     } finally {
       setIsSearching(false);
     }
-  }, []);
+  }, [reportId]);
 
   const handleLoadMoreSearch = useCallback(() => {
     if (!searchNextCursor || isLoadingMoreSearch) {
@@ -162,12 +170,7 @@ export function CandidateStudyTable({
     }
 
     setIsLoadingMoreSearch(true);
-    searchStudies({
-      q: submittedQuery,
-      limit: SEARCH_PAGE_SIZE,
-      cursor: searchNextCursor,
-      advanced: isAdvancedSearch || undefined,
-    })
+    searchStudiesForReport(reportId, submittedQuery, searchNextCursor)
       .then((response) => {
         setSearchResults((prev) => [...(prev ?? []), ...response.items]);
         setSearchNextCursor(response.nextCursor);
@@ -182,7 +185,7 @@ export function CandidateStudyTable({
       .finally(() => {
         setIsLoadingMoreSearch(false);
       });
-  }, [submittedQuery, searchNextCursor, isLoadingMoreSearch, isAdvancedSearch]);
+  }, [submittedQuery, reportId, searchNextCursor, isLoadingMoreSearch]);
 
   const handleSearchSubmit = useCallback(
     (event: React.FormEvent<HTMLFormElement>) => {
@@ -342,7 +345,6 @@ export function CandidateStudyTable({
                       key={`search-${study.studyId}`}
                       {...study}
                       isAssigned={assignedStudyIds.has(study.studyId)}
-                      alsoRecommended={candidateStudyIds.has(study.studyId)}
                       onClick={handleStudyClick}
                       onAssign={(target) => void handleAssignStudy(target)}
                     />
@@ -372,7 +374,6 @@ export function CandidateStudyTable({
                   key={`referenced-${study.studyId}`}
                   {...study}
                   isAssigned={assignedStudyIds.has(study.studyId)}
-                  alsoRecommended={candidateStudyIds.has(study.studyId)}
                   onClick={handleStudyClick}
                   onAssign={(target) => void handleAssignStudy(target)}
                 />

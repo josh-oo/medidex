@@ -10,6 +10,7 @@ from .auth import is_verified_api_call, is_admin
 
 from src.context import RequestContext
 from .deps import get_context
+from .errors import raise_for_report_access
 
 from src.database.repositories.study import DuplicateShortNameError
 
@@ -19,7 +20,7 @@ from src.services.authorization import (
     ReportAccessDeniedError,
 )
 from src.services.aspects import TagCategories, UnsupportedAspectError
-from src.services.core import ReportNotReadyError, ReportNotInSourceProjectError
+from src.services.core import ReportNotReadyError
 from src.services.linkage import (
     ReportNotInProjectError,
     ReportProjectAccessError,
@@ -28,6 +29,7 @@ from src.services.linkage import (
 
 from src.utils.dto import StudyPayload, Study, StudyCandidate, TagCandidate, Page, studies_to_dto
 from src.utils.pagination import InvalidCursorError
+from src.utils.query_parser import QuerySyntaxError, SEARCH_QUERY_DESCRIPTION
 from datetime import datetime
 
 router = APIRouter(tags=["logic"])
@@ -52,19 +54,16 @@ async def similar_tags(tag_category: TagCategories =Path(..., description="The t
     except UnsupportedAspectError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-def _raise_for_report_access(exc: Exception):
-    """Shared translation for the report-access exceptions raised deep inside a
-    service call (get_authorized_project_id, src/services/authorization.py) -
-    every route below used to gate on these via a separate check_report_access
-    FastAPI dependency; now each service call performs its own access check, so
-    the router only needs to translate whatever it raises.
-    """
-    if isinstance(exc, ReportNotFoundError):
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if isinstance(exc, AuthenticationRequiredError):
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-    if isinstance(exc, ReportAccessDeniedError):
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+async def _search_studies_with_relevance(ctx: RequestContext, report_id: int, q: str, limit: int, cursor: Optional[str]) -> Page[StudyCandidate]:
+    try:
+        page = await ctx.study_service.search_studies_page(q, limit, cursor)
+    except (InvalidCursorError, QuerySyntaxError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        items = await ctx.study_similarity_service.add_relevance(report_id, page.items, ctx.user_id)
+    except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
+        raise_for_report_access(exc)
+    return Page[StudyCandidate](items=items, nextCursor=page.nextCursor)
 
 @router.get("/reports/{report_id}/similar-studies", dependencies=[Depends(is_verified_api_call)], summary="")
 async def similarity_search_studies_by_id(
@@ -72,46 +71,39 @@ async def similarity_search_studies_by_id(
     cutoff: str = Query(None),
     limit: int = Query(10, ge=1, description="Maximum number of results to return per page."),
     cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
-    source: str = Query(None),
-    negative_studies: List[int] = Query(None),
-    negative_reports: List[int] = Query(None),
-    return_details: bool = False,
+    q: Optional[str] = Query(None, min_length=3, description="If given, searches studies instead of recommending them and returns the matches with their relevance for this report. cutoff only applies to the recommendation. " + SEARCH_QUERY_DESCRIPTION),
     ctx: RequestContext = Depends(get_context),
 ) -> Page[StudyCandidate]:
+    if q is not None:
+        return await _search_studies_with_relevance(ctx, report_id, q, limit, cursor)
     try:
         return await ctx.study_similarity_service.get_similar_studies_page(
             report_id,
             cutoff,
             limit,
             cursor,
-            source,
-            negative_studies,
-            negative_reports,
-            return_details,
             ctx.user_id,
         )
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
-        _raise_for_report_access(exc)
+        raise_for_report_access(exc)
     except ReportNotReadyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ReportNotInSourceProjectError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.get("/reports/{report_id}/referenced-studies", dependencies=[Depends(is_verified_api_call)], summary="Get the studies belonging to reports in the database whose DOI the given report cites (according to OpenAlex).")
-async def referenced_studies_by_report(report_id: int, ctx: RequestContext = Depends(get_context)) -> List[Study]:
+async def referenced_studies_by_report(report_id: int, ctx: RequestContext = Depends(get_context)) -> List[StudyCandidate]:
     try:
         return await ctx.study_similarity_service.get_referenced_studies(report_id, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
-        _raise_for_report_access(exc)
+        raise_for_report_access(exc)
 
 @router.get("/reports/{report_id}/similar-studies/tags", dependencies=[Depends(is_verified_api_call)], summary="")
 async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(10, description="The number of related studies considered for retrieving relevant tags."), ctx: RequestContext = Depends(get_context)):
     try:
         return await ctx.related_tag_service.search_related_tags_by_report_id(report_id, aspect, k, cutoff, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
-        _raise_for_report_access(exc)
+        raise_for_report_access(exc)
     except UnsupportedAspectError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
 
@@ -124,7 +116,7 @@ async def assign_studies(
     try:
         await ctx.linkage_service.link_existing_study_to_report(report_id, study_id, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
-        _raise_for_report_access(exc)
+        raise_for_report_access(exc)
 
     payload = {"user": ctx.user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
@@ -140,7 +132,7 @@ async def delete_assigned_studies(
     try:
         await ctx.linkage_service.unlink_study_from_report(report_id, study_id, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
-        _raise_for_report_access(exc)
+        raise_for_report_access(exc)
 
     payload = {"user": ctx.user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
@@ -156,7 +148,7 @@ async def link_to_new_study(
     try:
         new_study = await ctx.linkage_service.create_study_and_link_to_report(report_id, study, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
-        _raise_for_report_access(exc)
+        raise_for_report_access(exc)
     except DuplicateShortNameError:
         raise HTTPException(status_code=409, detail="Study shortName already exists")
 

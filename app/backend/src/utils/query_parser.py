@@ -2,10 +2,11 @@
 combined with AND/OR groups. Modeled as pydantic types.
 """
 
+import re
 from enum import Enum
-from typing import Annotated, List, Literal, Union
+from typing import Annotated, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 from pyparsing import (
     CaselessKeyword,
     Group,
@@ -164,3 +165,41 @@ def parse_advanced_query(query: str) -> "QueryNode":
             f"Invalid query syntax at position {exc.col}: {exc.msg}. {_SYNTAX_HINT}"
         ) from exc
     return result[0]
+
+
+# A string only counts as an advanced query if it has a field=value / field==value
+# comparison on one of the known fields - anything else (incl. a stray "=") is plain text.
+_COMPARISON_HINT = re.compile(
+    r"(?<!\w)(?:%s)\s*={1,2}"
+    % "|".join(sorted((*(f.value for f in AdvancedSearchField), *_FIELD_ALIASES), key=len, reverse=True)),
+    re.IGNORECASE,
+)
+
+SEARCH_QUERY_DESCRIPTION = (
+    "Search text, matched against study name, trial ID, author and intervention. "
+    "If it is a boolean expression of field==value (or field=value) comparisons combined "
+    "with AND/OR (AND binds tighter than OR) and optional parentheses, or a JSON filter "
+    "object, it is treated as an advanced field search instead, e.g. "
+    "'intervention==Drug A AND condition==Sick OR condition==Healthy'. Quote a value "
+    "(\"...\" or '...') to include literal AND/OR/)/whitespace. Valid fields: "
+    "name/shortName, trialId, author, status, country, intervention, condition, outcome, "
+    "participant, design (plurals accepted too, e.g. conditions)."
+)
+
+
+def parse_search_query(query: str) -> Optional["QueryNode"]:
+    """The advanced query tree for a search string, or None if it is a plain free-text
+    search: a JSON filter object (the structured form, as a string) or a string with
+    field==value comparisons is advanced, anything else plain.
+
+    Raises QuerySyntaxError for a string that is clearly meant as advanced but malformed.
+    """
+    stripped = query.strip()
+    if stripped.startswith("{"):
+        try:
+            return TypeAdapter(QueryNode).validate_json(stripped)
+        except ValidationError as exc:
+            raise QuerySyntaxError(f"Invalid JSON filter: {exc.errors()[0]['msg']}") from exc
+    if _COMPARISON_HINT.search(stripped):
+        return parse_advanced_query(stripped)
+    return None

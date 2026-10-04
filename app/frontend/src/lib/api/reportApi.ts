@@ -42,8 +42,8 @@ export const getSimilarStudiesByReportId = (
 export const getReferencedStudiesByReportId = (
   reportId: number,
   config?: AxiosRequestConfig
-): Promise<StudyDto[]> => {
-  return apiClient.get<StudyDto[]>(`/reports/${reportId}/referenced-studies`, config)
+): Promise<StudyCandidateDto[]> => {
+  return apiClient.get<StudyCandidateDto[]>(`/reports/${reportId}/referenced-studies`, config)
     .then(response => response.data)
     .catch(error => {
       console.error(`Error fetching referenced studies for report ${reportId}:`, error);

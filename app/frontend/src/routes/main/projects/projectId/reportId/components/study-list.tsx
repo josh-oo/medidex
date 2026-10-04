@@ -4,24 +4,20 @@ import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CandidateStudyTable } from "@/components/ui/study-view/candidate-study-table";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { StudyCandidateDto, StudyDto } from "@/types/apiDTOs";
+import type { StudyCandidateDto } from "@/types/apiDTOs";
 import { getReferencedStudiesByReportId, getSimilarStudiesByReportId } from "@/lib/api/reportApi";
 import { ReportActionsSlot } from "@/context/study-report-slots-context";
 
 const PAGE_SIZE = 10;
 
 export default function StudyList() {
-  const { projectId, reportId } = useParams<{ projectId: string; reportId: string }>() as {
-    projectId: string;
-    reportId: string;
-  };
-  const source = projectId;
+  const { reportId } = useParams<{ reportId: string }>() as { reportId: string };
   const reportIdNumber = Number(reportId);
 
   const [studies, setStudies] = useState<StudyCandidateDto[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [referencedStudies, setReferencedStudies] = useState<StudyDto[]>([]);
+  const [referencedStudies, setReferencedStudies] = useState<StudyCandidateDto[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
@@ -32,7 +28,7 @@ export default function StudyList() {
     setNotFound(false);
     setLoadError(false);
 
-    getSimilarStudiesByReportId(reportIdNumber, undefined, { params: { limit: PAGE_SIZE, source } })
+    getSimilarStudiesByReportId(reportIdNumber, undefined, { params: { limit: PAGE_SIZE } })
       .then((response) => {
         if (cancelled) return;
         setStudies(response.items);
@@ -51,7 +47,7 @@ export default function StudyList() {
     return () => {
       cancelled = true;
     };
-  }, [reportIdNumber, source]);
+  }, [reportIdNumber]);
 
   // Secondary, best-effort section - a failure here just leaves it hidden rather than
   // blocking the similar studies.
@@ -75,7 +71,7 @@ export default function StudyList() {
 
     setIsLoadingMore(true);
     getSimilarStudiesByReportId(reportIdNumber, undefined, {
-      params: { limit: PAGE_SIZE, cursor: nextCursor, source },
+      params: { limit: PAGE_SIZE, cursor: nextCursor },
     })
       .then((response) => {
         setStudies((prev) => [...(prev ?? []), ...response.items]);

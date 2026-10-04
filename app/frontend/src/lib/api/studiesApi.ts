@@ -41,7 +41,8 @@ export const searchStudies = (
     ...params,
   };
 
-  return apiClient.get<Page<StudyDto>>("/studies/search", {
+  // the plain study listing doubles as the search when given `q`
+  return apiClient.get<Page<StudyDto>>("/studies", {
       ...restConfig,
       params: requestParams,
       paramsSerializer: { serialize: serializeParams },
