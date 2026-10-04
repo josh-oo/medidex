@@ -339,6 +339,8 @@ export function CandidateStudyTable({
                       isAssigned={assignedStudyIds.has(study.studyId)}
                       onClick={handleStudyClick}
                       onAssign={(target) => void handleAssignStudy(target)}
+                      badge={<StudyBadgeSlot reportId={reportId} study={study} />}
+                      reportId={reportId}
                     />
                   ))}
                   {searchNextCursor && (
@@ -368,6 +370,8 @@ export function CandidateStudyTable({
                   isAssigned={assignedStudyIds.has(study.studyId)}
                   onClick={handleStudyClick}
                   onAssign={(target) => void handleAssignStudy(target)}
+                  badge={<StudyBadgeSlot reportId={reportId} study={study} />}
+                  reportId={reportId}
                 />
               ))}
               <div className="pt-4 border-b border-border" />

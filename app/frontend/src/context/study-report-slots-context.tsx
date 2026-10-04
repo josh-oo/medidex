@@ -6,6 +6,7 @@ import type {
   ReportBannerSlotProps,
   ReportStatusSlotProps,
   StudyBadgeSlotProps,
+  StudyContextMenuItemProps,
 } from "./extension-registry-context"
 
 export type {
@@ -13,6 +14,7 @@ export type {
   ReportBannerSlotProps,
   ReportStatusSlotProps,
   StudyBadgeSlotProps,
+  StudyContextMenuItemProps,
 } from "./extension-registry-context"
 
 export function useStudyCardClassName(props: StudyCardStyleProps) {
@@ -26,6 +28,11 @@ export function useStudyCardClassName(props: StudyCardStyleProps) {
 export function StudyBadgeSlot(props: StudyBadgeSlotProps) {
   const { studyBadges } = useExtensionRegistry()
   return <>{studyBadges.map((Slot, index) => <Slot key={index} {...props} />)}</>
+}
+
+export function StudyContextMenuSlot(props: StudyContextMenuItemProps) {
+  const { studyContextMenuItems } = useExtensionRegistry()
+  return <>{studyContextMenuItems.map((Slot, index) => <Slot key={index} {...props} />)}</>
 }
 
 export function ReportBannerSlot(props: ReportBannerSlotProps) {

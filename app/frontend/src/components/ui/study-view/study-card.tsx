@@ -14,7 +14,13 @@ import {
 } from "lucide-react";
 import type { StudyDto } from "@/types/apiDTOs";
 import type { ReactNode } from "react";
-import { useStudyCardClassName } from "@/context/study-report-slots-context";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { useExtensionRegistry } from "@/context/extension-registry-context";
+import { StudyContextMenuSlot, useStudyCardClassName } from "@/context/study-report-slots-context";
 import { cn } from "@/lib/utils";
 
 interface StudyCardProps extends StudyDto {
@@ -62,8 +68,9 @@ export function StudyCard({
 }: StudyCardProps) {
   const hasRelevance = typeof relevance === "number";
   const extensionClassName = useStudyCardClassName({ reportId, studyId: study.studyId });
+  const hasContextMenu = useExtensionRegistry().studyContextMenuItems.length > 0;
 
-  return (
+  const card = (
     <div
       role="button"
       tabIndex={0}
@@ -200,5 +207,16 @@ export function StudyCard({
         </div>
       </div>
     </div>
+  );
+
+  if (!hasContextMenu) return card;
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{card}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <StudyContextMenuSlot reportId={reportId} study={study} />
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

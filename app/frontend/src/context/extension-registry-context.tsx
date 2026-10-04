@@ -4,7 +4,7 @@ import {
   type ComponentType,
   type ReactNode,
 } from "react"
-import type { StudyCandidateDto } from "@/types/apiDTOs"
+import type { StudyCandidateDto, StudyDto } from "@/types/apiDTOs"
 import type { AddStudyDialogProps } from "@/components/ui/study-view/add-study-dialog"
 
 export interface ReportActionsSlotProps {
@@ -38,7 +38,12 @@ export type AssigneeOptionsResolver = (
 
 export interface StudyBadgeSlotProps {
   reportId?: number
-  study: StudyCandidateDto
+  study: StudyDto
+}
+
+export interface StudyContextMenuItemProps {
+  reportId?: number
+  study: StudyDto
 }
 
 export interface StudyCardStyleProps {
@@ -73,6 +78,8 @@ export interface ExtensionRegistry {
   assigneeOptions: AssigneeOptionsResolver[]
   studyBadges: ComponentType<StudyBadgeSlotProps>[]
   studyCardClassNames: StudyCardClassNameResolver[]
+  /** Rendered inside the right-click menu of a study card (as ContextMenuItem elements). */
+  studyContextMenuItems: ComponentType<StudyContextMenuItemProps>[]
   reportBanners: ComponentType<ReportBannerSlotProps>[]
   reportStatuses: ComponentType<ReportStatusSlotProps>[]
   addStudyTrigger?: ComponentType<AddStudyTriggerSlotProps>
@@ -85,6 +92,7 @@ const emptyExtensions: ExtensionRegistry = {
   assigneeOptions: [],
   studyBadges: [],
   studyCardClassNames: [],
+  studyContextMenuItems: [],
   reportBanners: [],
   reportStatuses: [],
 }
