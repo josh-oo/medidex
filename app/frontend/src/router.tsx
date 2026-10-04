@@ -7,7 +7,6 @@ import PendingApprovalPage from "./routes/auth/pending-approval/page";
 
 import RootLayout from "./routes/main/layout";
 import HomePage from "./routes/main/page";
-import ApiKeysPage from "./routes/main/settings/api-keys/page";
 import UserManagementPage from "./routes/main/user-management/page";
 
 import PdfUploadProjectLayout from "./routes/main/pdf-upload/projectId/layout";
@@ -33,7 +32,6 @@ export function AppRoutes() {
 
       <Route element={<RootLayout />}>
         <Route index element={<HomePage />} />
-        <Route path="settings/api-keys" element={<ApiKeysPage />} />
         <Route path="user-management" element={<UserManagementPage />} />
 
         <Route path="pdf-upload/:projectId" element={<PdfUploadProjectLayout />}>
