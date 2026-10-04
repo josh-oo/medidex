@@ -5,7 +5,7 @@ import { getAccessToken } from "@/lib/client/keycloak";
 // server hop between the app and the FastAPI backend anymore. The backend's
 // CORS policy (allow_origins=["*"]) and its own JWT verification are the
 // real security boundary, same as before.
-const API_BASE_URL = `${import.meta.env.VITE_BACKEND_API_URL}/api`;
+const API_BASE_URL = `${import.meta.env.VITE_BACKEND_API_URL}/api/v1`;
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,

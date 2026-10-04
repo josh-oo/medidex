@@ -3,9 +3,40 @@ import { Upload, FileText, X, CheckCircle2, AlertCircle } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { getAccessToken } from "@/lib/client/keycloak";
+import axios from "axios";
+import apiClient from "@/lib/api/apiClient";
 
-const DEFAULT_UPLOAD_URL = `${import.meta.env.VITE_BACKEND_API_URL}/api/projects`;
+// Relative to apiClient's baseURL.
+const DEFAULT_UPLOAD_URL = "/projects";
+
+// Turns an upload failure into something a user can act on. The backend answers
+// with FastAPI's {detail: ...} body: a string for the explicit HTTPExceptions
+// (400 unsupported extension, 401 not an admin, 409 project already exists,
+// 500 unparseable file), or a list of {loc, msg} for 422 validation errors.
+function getUploadErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    if (!error.response) {
+      return "Could not reach the server. Check your connection and try again.";
+    }
+    const { status, data } = error.response;
+    const detail = data?.detail;
+    if (typeof detail === "string" && detail) {
+      if (status === 401) return "You are not allowed to upload. Your session may have expired - sign in again.";
+      if (status === 409) return "This file has already been uploaded as a project.";
+      return detail;
+    }
+    if (Array.isArray(detail) && detail.length) {
+      return detail
+        .map((issue) => (typeof issue?.msg === "string" ? issue.msg : null))
+        .filter(Boolean)
+        .join("; ");
+    }
+    if (status === 413) return "The file is too large to upload.";
+    if (status >= 500) return "The server failed to process the file. Please try again later.";
+    return `Upload failed (HTTP ${status}).`;
+  }
+  return error instanceof Error && error.message ? error.message : "Failed to upload file";
+}
 
 interface UploadFile {
   id: string;
@@ -56,6 +87,8 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
 ) {
   const [currentFile, setCurrentFile] = useState<UploadFile | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  // A dropped file we refuse client-side; kept out of currentFile so it can't be uploaded.
+  const [rejection, setRejection] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const createFormData = useCallback(
@@ -95,6 +128,7 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
       status: "pending",
     };
 
+    setRejection(null);
     setCurrentFile(newFile);
     if (autoStart) {
       void uploadFileToServer(newFile);
@@ -144,22 +178,7 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
           return;
         }
 
-        const token = await getAccessToken();
-        const response = await fetch(uploadUrl, {
-          method: "POST",
-          body: formData,
-          cache: "no-store",
-          headers: {
-            "Cache-Control": "no-cache",
-            Pragma: "no-cache",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        });
-
-        if (!response.ok) {
-          const errorMessage = await response.text();
-          throw new Error(errorMessage || "Failed to upload file.");
-        }
+        await apiClient.post(uploadUrl, formData);
       }
 
       if (progressInterval) {
@@ -178,20 +197,7 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
         clearInterval(progressInterval);
       }
 
-      let errorMessage = "Failed to upload file";
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === "object" && error !== null) {
-        const errorObj = error as Record<string, unknown>;
-        const detail = (errorObj as any)?.response?.data?.detail;
-        if (typeof detail === "string") {
-          errorMessage = detail;
-        } else if (detail) {
-          errorMessage = JSON.stringify(detail);
-        } else if (typeof (errorObj as any)?.message === "string") {
-          errorMessage = (errorObj as any).message;
-        }
-      }
+      const errorMessage = getUploadErrorMessage(error);
 
       setCurrentFile((prev) =>
         prev && prev.id === uploadFile.id
@@ -228,7 +234,12 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
     const risFile = Array.from(droppedFiles).find((file) =>
       file.name.toLowerCase().endsWith(allowedFileExtension),
     );
-    if (!risFile) return;
+    if (!risFile) {
+      setCurrentFile(null);
+      setRejection(`Unsupported file type. Please upload a ${allowedFileExtension} file.`);
+      return;
+    }
+    setRejection(null);
 
     const newFile: UploadFile = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -307,6 +318,14 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
           disabled={disabled}
         />
       </div>
+
+      {rejection && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>File not accepted</AlertTitle>
+          <AlertDescription>{rejection}</AlertDescription>
+        </Alert>
+      )}
 
       {currentFile ? (
         <div className="space-y-3">

@@ -20,7 +20,7 @@ def create_app(extra_routers: Iterable[APIRouter] = ()) -> FastAPI:
     here.
     """
     app = FastAPI(
-        root_path="/backend/api",
+        root_path="/api/v1",
         # Lets the /docs "Authorize" button drive Keycloak's authorization-code +
         # PKCE flow (see auth.py) without the client id being pasted in by hand.
         swagger_ui_init_oauth={
