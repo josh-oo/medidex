@@ -226,3 +226,13 @@ substantially rewritten and all author/journal/identifier metadata
 fabricated for demonstration purposes.
 M4  - Citavi
 ER  -
+
+TY  - JOUR
+AU  - NCT04267848
+T1  - Trial registration record NCT04267848 (registry-only entry for testing trial registry PDF generation)
+PY  - 2020
+U3  - Clinical Trial
+LA  - eng
+N1  - Bare trial registration: the only author is a registration ID and there is
+no DOI, so the PDF is rendered from the WHO ICTRP registry record.
+ER  -

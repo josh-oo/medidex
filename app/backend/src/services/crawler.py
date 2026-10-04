@@ -1,18 +1,9 @@
 import asyncio
 import httpx
-import os
-from httpx import ReadTimeout
 from bs4 import BeautifulSoup
-from pathlib import Path
-import pypdf
+from httpx import ReadTimeout
 
 from typing import Any, List
-
-from dotenv import load_dotenv
-
-load_dotenv()
-
-DOCLING_URL = os.getenv("DOCLING_URL")
 
 class CrawlerService:
     def __init__(self):
@@ -83,7 +74,8 @@ class CrawlerService:
         # Return only the second table
         return top_level_tables[3].prettify()
 
-    async def get_html_for_trial_id(self, trial_id : str):
+    async def _fetch_trial_table_html(self, trial_id : str) -> str:
+        """The WHO ICTRP registry record's data table for `trial_id`, as HTML."""
         url = f"https://trialsearch.who.int/Trial2.aspx?TrialID={trial_id}"
 
         headers = {
@@ -102,52 +94,36 @@ class CrawlerService:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 #TODO handle nginx 500 bad gateerror
-                parsed_html = await asyncio.to_thread(self.extract_fourth_top_level_table, resp.text)
-                markdown = await asyncio.to_thread(self.html_to_lowest_level_markdown, parsed_html)
-                return markdown
-            
+                return await asyncio.to_thread(self.extract_fourth_top_level_table, resp.text)
         except ReadTimeout:
             raise Exception("Upstream request timed out")
-        
-class DoclingService:
-    def __init__(self):
-        self.sem = asyncio.Semaphore(1)
 
-    async def parse_pdf(self, pdf_path : str) -> str:
-        url = f"{DOCLING_URL}/v1/convert/file"
+    async def get_html_for_trial_id(self, trial_id : str):
+        """The registry record as markdown tables."""
+        parsed_html = await self._fetch_trial_table_html(trial_id)
+        return await asyncio.to_thread(self.html_to_lowest_level_markdown, parsed_html)
 
-        path = Path(pdf_path)
+    async def get_pdf_for_trial_id(self, trial_id : str) -> bytes:
+        """The registry record rendered as a PDF, so a trial registration can be
+        stored and shown like any other report's PDF."""
+        parsed_html = await self._fetch_trial_table_html(trial_id)
+        return await asyncio.to_thread(self.html_to_pdf, trial_id, parsed_html)
 
-        if not path.exists():
-            raise FileNotFoundError(path)
-        
-        files = {
-            "files": (path.name, path.open("rb"), "application/pdf"),
-        }
+    @staticmethod
+    def html_to_pdf(title : str, table_html : str) -> bytes:
+        # Imported lazily: WeasyPrint loads native libraries (pango) at import time.
+        from weasyprint import HTML
 
-        payload = {
-            "from_formats": ["pdf"],
-            "to_formats": ["md"],
-            "image_export_mode": "placeholder",
-            "ocr": False,
-            "abort_on_error": False,
-            "table_mode": "fast",
-        }
+        document = f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>{title}</title>
+<style>
+  body {{ font-family: sans-serif; font-size: 10pt; }}
+  table {{ border-collapse: collapse; width: 100%; }}
+  td, th {{ border: 1px solid #999; padding: 3px 6px; vertical-align: top; text-align: left; }}
+</style></head>
+<body><h1>{title}</h1>{table_html}</body></html>"""
+        return HTML(string=document).write_pdf()
 
-        num_pages = len(pypdf.PdfReader(path).pages)
-
-        timeout = max(30, min(num_pages * 10, 120))
-
-        async with self.sem:
-            try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    resp = await client.post(url, files=files, data=payload)
-                    resp.raise_for_status()
-            except ReadTimeout:
-                raise Exception("Upstream request timed out")
-
-        return resp.json()['document']['md_content']
-    
 class OpenAlexService:
     OPEN_ALEX_API = "https://api.openalex.org/works/https://doi.org/{doi}"
     def __init__(self):
@@ -182,12 +158,11 @@ class OpenAlexService:
             pass
         return set(urls)
 
-# Singletons: DoclingService's and OpenAlexService's semaphores are meant to
-# cap concurrent calls to their respective backends process-wide (CrawlerService
-# is stateless but kept consistent with the same pattern). A new instance per
-# call site - `OpenAlexService()` in fastapi_app/resources.py and fastapi_app/projects.py,
-# the old FastAPI Depends(get_document_service) factory - gives each caller its
-# own semaphore instead, so the cap never actually applies across concurrent use.
+# Singletons: OpenAlexService's semaphore is meant to cap concurrent calls to
+# OpenAlex process-wide (CrawlerService is stateless but kept consistent with
+# the same pattern). A new instance per call site - `OpenAlexService()` in
+# fastapi_app/resources.py and fastapi_app/projects.py, the old FastAPI
+# Depends(get_document_service) factory - gives each caller its own semaphore
+# instead, so the cap never actually applies across concurrent use.
 crawler_service = CrawlerService()
-docling_service = DoclingService()
 open_alex_service = OpenAlexService()

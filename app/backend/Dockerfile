@@ -7,6 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE 1
 
 WORKDIR /app
 
+# WeasyPrint (trial registration PDFs) needs pango at runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY app/backend/requirements.txt .
 RUN pip3 install --no-cache-dir --no-compile -r requirements.txt
 
