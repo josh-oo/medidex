@@ -1,35 +1,27 @@
-import pypdf
-import re
-from rapidfuzz import fuzz
-
+import asyncio
 from typing import List, Dict
 
-from ..utils.trial_registration_id import extract_trial_ids_from_text, extract_trial_id
+import pypdf
 
+from ..utils.trial_registration_id import extract_trial_ids_from_text
 from ..database import StudyRepository, ReportRepository
 from ..database.repositories.report import Report
 
-from .crawler import CrawlerService, DoclingService
-
 import os
-import asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
 
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
 PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
-FULLTEXT_PATH = os.path.join(DATABASE_VOLUME,"resources", "fulltexts")
 PLACEHOLDER_PDF_PATH = os.getenv("PLACEHOLDER_PDF_PATH", "/app/placeholder.pdf")
 
 class DocumentService:
 
-    def __init__(self, report_repo : ReportRepository, crawler_service : CrawlerService, docling_service : DoclingService):
+    def __init__(self, report_repo : ReportRepository):
         self.path_cache = {}
         self.pages_cache = {}
         self.report_repo = report_repo
-        self.crawler_service = crawler_service
-        self.docling_service = docling_service
 
     async def get_path(self, report_id: int, mkdirs=False):
         if report_id not in self.path_cache:
@@ -50,6 +42,8 @@ class DocumentService:
         return self.path_cache[report_id]
 
     async def get_pages(self, report_id: int) -> List[str]:
+        """Plain per-page text of the report's PDF (pypdf; no layout analysis or
+        OCR), cached per report. Empty list when the PDF can't be parsed."""
         def _sync_extract(path):
             try:
                 reader = pypdf.PdfReader(path)
@@ -68,127 +62,12 @@ class DocumentService:
                 raise
             self.pages_cache[report_id] = await asyncio.to_thread(_sync_extract, path)
         return self.pages_cache[report_id]
-    
-    async def is_trial_registration(self, report_id: int) -> bool:
-        report = await self.report_repo.get_report_by_id(report_id)
-        authors = report.authors.split("//")
-        if len(authors) != 1:
-            return False
-        trial_ids = extract_trial_id(None, None,authors)
-        if trial_ids == authors:
-            return True
-        return False
 
-    async def is_abstract_collection(self, report_id: int) -> bool:
-        """
-        gets pdf_file_path
-        returns if it is an abstract collection and the number of pages
-        """
-
-        #a dict of suspicious abstract collection patterns and their corresponding "occurences per page"
-        PATTERNS_PER_PAGE = {
-                        r"\n[A-Z]\.\d\.[a-z]\.\d\d\d\s": 2,
-                        r"\nPS\d\d-\d\d\d\n" : 2,
-                        r"BIOL PSYCHIATRY [0-9][0-9][0-9][0-9].*S": 1,
-                        r"ACNP [0-9][0-9][0-9][0-9] Annual Meeting": 1,
-                        r"\nP[0-9]+\n" : 3,
-                        r"\nO[0-9][0-9][A-Z]?\n": 3,
-                        r"\nS-?[0-9][0-9]-?[0-9][0-9]\s": 2,
-                        r"\n[A-Z]-[0-9][0-9]-[0-9][0-9][0-9]\s":2,
-                        r"Talk\s[0-9]+\n":2,
-                        r"Poster\s[0-9]+\n":2,
-                        r"SIRS [0-9][0-9][0-9][0-9] Abstracts": 1,
-                        r"\s[A-Z][0-9][0-9]\.[0-9][0-9]:?\s": 2,
-                        r"\n[A-Z][A-Z_\W]*\n([A-Z]\.\s?)+ [A-Za-z]*(,|\n)": 2,
-                        r"\n[A-Z][A-Z_\W]*\n[A-Z][A-Za-z-]+ ([A-Z]\. )*[A-Z][A-Za-z-]+," : 2,
-                        r"(?i)summary": 3,
-                        r"(?i)references": 3,
-                        r"(?i)CORRESPONDING":2,
-                        r"Year.*Volume.*Issue.*Pages.*Abstract.*www.pdffactory.com": 1,
-                        "doi:10.1016":2,
-                        "Symposium of AGNP, Nuremberg": 0.85,
-                        "International Conference on Early Psychosis":0.9,
-                        "International Congress on Schizophrenia Research": 0.9,
-                        "Abstracts of the _ Biennial Schizophrenia International Research Conference / Schizophrenia Research": 0.85,
-                        "Abstracts for the": 0.9,
-                        "CONFERENCE SUMMARY": 0.9,
-                        "Chairman": 0.9,
-                        #"www.nrr.nhs.uk":-1
-                        }
-                        #Not found:
-                        #cleaned_Tarrier 1996 - The use of cognitive behaviour.pdf
-                        #cleaned_Bell, Milstein et al. 1993 - Pay and participation in work.pdf
-                        #cleaned_Matthews 1981 - The process and outcome.pdf (last two pages)
-        
-        found_words = []
-        num_pages = 0
+    async def find_registration_ids(self, report_id: int) -> List[str]:
+        """Trial registration ids (NCT, ISRCTN, DRKS, ...) mentioned anywhere in
+        the report's PDF, in order of first appearance."""
         pages = await self.get_pages(report_id)
-        for page_text in pages:
-            for key, threshold in PATTERNS_PER_PAGE.items():
-                #look for all marker pattersn in the dict
-                if threshold < 0: #just look for one occurence in the whole document
-                    if key in page_text:
-                        return True, len(pages)
-                elif threshold > 0 and threshold < 1: #we can do fuzzy search in this case
-                    ratio = fuzz.partial_ratio(key.lower(), page_text.lower())
-                    if ratio > threshold * 100:
-                        found_words.append(key)
-                else:
-                    pattern = re.compile(key)
-                    results = pattern.findall(page_text)
-                    if len(results) >= threshold:
-                        found_words.append(key)
-            num_pages += 1
-        
-        for key in PATTERNS_PER_PAGE.keys():
-            #return true if the requirements are met on every second page:
-            if found_words.count(key) > (num_pages-1)/2.0:
-                return True
-        return False
-    
-    async def get_fulltext(self, report_id: int, fast : bool) -> str:
-        if fast:
-            pages = await self.get_pages(report_id)
-            return " ".join(pages)
-        # Use report_id as the filename, zero-padded to 5 digits
-        txt_name = str(report_id).zfill(5) + ".txt"
-        txt_path = os.path.join(FULLTEXT_PATH, txt_name)
-
-        # Try to read cached fulltext asynchronously
-        if os.path.exists(txt_path):
-            def _read_file(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    return f.read()
-            return await asyncio.to_thread(_read_file, txt_path)
-
-        # Otherwise, generate the fulltext
-        if await self.is_abstract_collection(report_id):
-            text = ""
-        elif await self.is_trial_registration(report_id):
-            report = await self.report_repo.get_report_by_id(report_id)
-            text = await self.crawler_service.get_html_for_trial_id(report.authors)
-        else:
-            text = await self.docling_service.parse_pdf(await self.get_path(report_id))
-            #pages = await self.get_pages()
-            #text = " ".join(pages)
-
-        # Ensure the directory exists
-        os.makedirs(FULLTEXT_PATH, exist_ok=True)
-
-        # Write the fulltext asynchronously
-        def _write_file(path, content):
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
-        await asyncio.to_thread(_write_file, txt_path, text)
-        await self.report_repo.recompute_has_pdf(report_id)
-
-        return text
-    
-    def delete_fulltext(self, report_id: int):
-        txt_name = str(report_id).zfill(5) + ".txt"
-        txt_path = os.path.join(FULLTEXT_PATH, txt_name)
-        if os.path.exists(txt_path):
-            os.remove(txt_path)
+        return await asyncio.to_thread(extract_trial_ids_from_text, "\n".join(pages))
 
     async def delete_pdf(self, report_id: int) -> Dict[str, object]:
         report = await self.report_repo.get_report_by_id(report_id)
@@ -196,7 +75,6 @@ class DocumentService:
             raise Exception("Report not found")
 
         deleted_pdf = False
-        deleted_fulltext = False
         previous_report_number = report.report_number
         if previous_report_number is not None and previous_report_number > 0:
             pdf_name = str(previous_report_number).zfill(5) + ".pdf"
@@ -205,24 +83,17 @@ class DocumentService:
                 os.remove(pdf_path)
                 deleted_pdf = True
 
-        txt_name = str(report_id).zfill(5) + ".txt"
-        txt_path = os.path.join(FULLTEXT_PATH, txt_name)
-        deleted_fulltext = os.path.exists(txt_path)
-
-        # Clear derived artifacts and reset report number so future uploads are re-assigned cleanly.
-        await asyncio.to_thread(self.delete_fulltext, report_id)
+        # Reset the report number so future uploads are re-assigned cleanly.
         report.report_number = -1
         await self.report_repo.recompute_has_pdf(report_id)
         await self.report_repo.db.flush()
         await self.report_repo.db.commit()
 
         self.path_cache.pop(report_id, None)
-        self.pages_cache.pop(report_id, None)
 
         return {
             "report_id": report_id,
             "deleted_pdf": deleted_pdf,
-            "deleted_fulltext": deleted_fulltext,
             "previous_report_number": previous_report_number,
         }
     
@@ -245,8 +116,7 @@ class DocumentService:
                 content = await file.read()
                 f.write(content)
 
-            await asyncio.to_thread(self.delete_fulltext, report_id)
-            await self.get_fulltext(report_id, fast=False)
+            await self.report_repo.recompute_has_pdf(report_id)
 
             return {
                 "report_id": report_id,
@@ -255,7 +125,6 @@ class DocumentService:
             }
         except Exception:
             self.path_cache.pop(report_id, None)
-            self.pages_cache.pop(report_id, None)
             if path and os.path.exists(path):
                 os.remove(path)
             raise

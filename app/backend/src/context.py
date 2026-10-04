@@ -20,7 +20,7 @@ from .database.repositories.study import StudyRepository
 from .services.aspects import TagScoringService, TagSimilaritySearchService
 from .services.authors import AuthorFeatureService
 from .services.core import RelatedTagSearchService, StudySimilaritySearchService
-from .services.crawler import CrawlerService, DoclingService, OpenAlexService, crawler_service, docling_service, open_alex_service
+from .services.crawler import CrawlerService, OpenAlexService, crawler_service, open_alex_service
 from .services.embedding import EmbeddingService, embedding_service
 from .services.linkage import LinkageService
 from .services.maintenance import MaintenanceService
@@ -73,10 +73,6 @@ class RequestContext:
         return crawler_service
 
     @property
-    def docling_service(self) -> DoclingService:
-        return docling_service
-
-    @property
     def open_alex_service(self) -> OpenAlexService:
         return open_alex_service
 
@@ -88,11 +84,7 @@ class RequestContext:
 
     @cached_property
     def document_service(self) -> DocumentService:
-        return DocumentService(
-            report_repo=self.report_repo,
-            crawler_service=self.crawler_service,
-            docling_service=self.docling_service,
-        )
+        return DocumentService(report_repo=self.report_repo)
 
     @cached_property
     def report_service(self) -> ReportService:

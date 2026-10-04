@@ -118,7 +118,7 @@ This service hosts routines like searching for unindexed reports in the backend 
 the index properly. It is not part of `docker compose up`; the scripts in `ops/tools`
 are run on demand and use `BACKEND_API_URL` / `BACKEND_API_KEY` to talk to the logic service.
 
-## qdrant / postgres / redis / docling
-Vector store, relational database, task/cache backend and PDF conversion service. They run
+## qdrant / postgres / redis
+Vector store, relational database and task/cache backend. They run
 from upstream images and need no configuration beyond the variables above.
 

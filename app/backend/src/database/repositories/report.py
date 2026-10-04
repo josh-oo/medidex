@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 import os
 
 DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
-FULLTEXT_PATH = os.path.join(DATABASE_VOLUME,"resources", "fulltexts")
+PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
 
 class ReportRepository:
     def __init__(self, db : AsyncSession, user_id : str):
@@ -551,21 +551,20 @@ class ReportRepository:
             if report_number == 0:
                 result.append(report_id)
                 continue
-            txt_name = str(report_id).zfill(5) + ".txt"
-            txt_path = os.path.join(FULLTEXT_PATH, txt_name)
-            if os.path.exists(txt_path):
+            pdf_name = str(report_number).zfill(5) + ".pdf"
+            if os.path.exists(os.path.join(PDF_PATH, pdf_name)):
                 result.append(report_id)
         return result
 
     def _compute_has_pdf(self, report: Report, report_added: ReportAdded) -> bool:
         """Single-report version of get_pdf_availabilities()'s rules - kept in sync with
         that method's logic since both express the same "does this report have a usable
-        PDF/fulltext" rule, just for different callers (a live filter there, a value to
+        PDF" rule, just for different callers (a live filter there, a value to
         persist here). Unlike get_pdf_availabilities, always has a report_added row to
         check (see recompute_has_pdf), so - unlike that method - always requires
         auto_searched_pdf rather than treating "no report_added row" as an ignore case.
         The auto_searched_pdf gate is checked first, matching get_pdf_availabilities'
-        order: report_number == 0 does NOT bypass it there, only the fulltext-file check.
+        order: report_number == 0 does NOT bypass it there, only the PDF-file check.
         """
         if not report_added.auto_searched_pdf:
             return False
@@ -574,13 +573,12 @@ class ReportRepository:
         if report.report_number == 0:
             return True
 
-        txt_name = str(report.id).zfill(5) + ".txt"
-        txt_path = os.path.join(FULLTEXT_PATH, txt_name)
-        return os.path.exists(txt_path)
+        pdf_name = str(report.report_number).zfill(5) + ".pdf"
+        return os.path.exists(os.path.join(PDF_PATH, pdf_name))
 
     async def recompute_has_pdf(self, report_id: int) -> bool:
         """Re-derives and persists report_added.has_pdf for one report - call after
-        anything that could change its outcome (fulltext written/removed, report_number
+        anything that could change its outcome (PDF written/removed, report_number
         changed, or the project's auto_searched_pdf flag flipped). A report with no
         report_added row (no current project association) has nowhere to record this and
         is silently skipped. Commits on its own - see set_embedded()'s docstring for why

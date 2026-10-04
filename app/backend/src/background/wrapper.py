@@ -17,6 +17,7 @@ import httpx
 from ..context import RequestContext
 from ..database.sessions import AsyncSessionLocal
 from ..database.models import Report as DbReport
+from ..utils.trial_registration_id import is_trial_registration
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +65,22 @@ async def _download_pdf_bytes(client: httpx.AsyncClient, url: str) -> Optional[b
     return None
 
 
-async def _auto_search_report_pdf(client: httpx.AsyncClient, report: DbReport, open_alex_service) -> Tuple[Optional[_InMemoryPdfUpload], List[str]]:
+async def _auto_search_report_pdf(client: httpx.AsyncClient, report: DbReport, open_alex_service, crawler_service) -> Tuple[Optional[_InMemoryPdfUpload], List[str]]:
     """Look up a report's OpenAlex fulltext links by DOI, and try to download one as
     the report's PDF if it doesn't already have one. Links are looked up (and
     returned for the caller to cache on report_added.fulltext_links - see
     ProjectRepository.set_report_auto_searched_pdf) even when a PDF already exists,
     since the report detail view wants them regardless of PDF status.
     """
+    if report.report_number <= 0 and is_trial_registration(report.authors):
+        # A bare trial registration has no DOI or published PDF - render its
+        # registry record as the report's PDF instead.
+        try:
+            return _InMemoryPdfUpload(await crawler_service.get_pdf_for_trial_id(report.authors)), []
+        except Exception as exc:
+            logger.warning("Trial registry PDF failed for report %s: %s", report.id, exc)
+            return None, []
+
     if not report.doi:
         return None, []
 
@@ -120,7 +130,7 @@ async def process_report(reports: List[DbReport], project_id: str, ctx: RequestC
                 project = await write_ctx.project_repo.get_project_by_id(project_id)
                 if not project:  # project already deleted
                     return
-                pdf_file, fulltext_links = await _auto_search_report_pdf(client, report, write_ctx.open_alex_service)
+                pdf_file, fulltext_links = await _auto_search_report_pdf(client, report, write_ctx.open_alex_service, write_ctx.crawler_service)
                 if pdf_file:
                     await write_ctx.document_service.upload_pdf(report.id, pdf_file)
                 await write_ctx.project_repo.set_report_auto_searched_pdf(report.id, fulltext_links=fulltext_links)
