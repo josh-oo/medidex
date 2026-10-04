@@ -258,12 +258,6 @@ export function CandidateStudyTable({
             </div>
             <h2 className="text-lg font-semibold">Relevant Studies</h2>
           </div>
-          <div className="flex items-center gap-2">
-              <AddStudyTriggerSlot
-                currentReportId={reportId}
-                onSaveStudy={handleSaveNewStudy}
-              />
-          </div>
         </div>
 
         {/* Global search across all studies */}
@@ -422,6 +416,17 @@ export function CandidateStudyTable({
                 )}
               </>
             )}
+          </div>
+
+          {/* Only needed when none of the candidates above match */}
+          <div className="pt-2 border-t border-dashed border-border">
+            <p className="text-xs text-muted-foreground pb-2 pt-3 text-center">
+              None of these match?
+            </p>
+            <AddStudyTriggerSlot
+              currentReportId={reportId}
+              onSaveStudy={handleSaveNewStudy}
+            />
           </div>
         </div>
       </div>

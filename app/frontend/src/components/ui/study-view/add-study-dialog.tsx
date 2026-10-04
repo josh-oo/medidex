@@ -29,7 +29,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Check, X } from "lucide-react";
+import { Check, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { COUNTRY_OPTIONS } from "./constants";
 import {
@@ -650,14 +650,15 @@ export function AddStudyDialog({
     <Dialog open={addStudyDialogOpen} onOpenChange={setAddStudyDialogOpen}>
       <Button
         type="button"
-        size="sm"
-        className="h-8"
+        variant="outline"
+        className="w-full h-10 border-dashed text-muted-foreground hover:text-foreground"
         data-highlighted={highlight || undefined}
         aria-haspopup="dialog"
         aria-expanded={addStudyDialogOpen}
         onClick={handleOpenDialog}
       >
-        Add New Study
+        <Plus className="h-4 w-4" />
+        Add as new study
       </Button>
       <DialogContent
         className="max-w-[900px] sm:max-w-[720px] w-[min(92vw,900px)] max-h-[90vh] overflow-y-auto"
