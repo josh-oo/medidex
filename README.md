@@ -113,11 +113,6 @@ because vectors from different models are not comparable. Set `HF_TOKEN` only if
 private model. Currently this service runs on CPU; depending on the workload it might make
 sense to move it to a GPU machine later.
 
-## tools
-This service hosts routines like searching for unindexed reports in the backend to add them to
-the index properly. It is not part of `docker compose up`; the scripts in `ops/tools`
-are run on demand and use `BACKEND_API_URL` / `BACKEND_API_KEY` to talk to the logic service.
-
 ## qdrant / postgres / redis
 Vector store, relational database and task/cache backend. They run
 from upstream images and need no configuration beyond the variables above.
