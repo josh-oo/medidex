@@ -1,7 +1,7 @@
 import apiClient from "./apiClient";
+import { unwrap, logAndRethrow } from "./requests";
 import { AxiosRequestConfig } from "axios";
 import { ReportChatDto, TagCandidateDto, StudyCandidateDto, Page, GetSimilarStudiesParams, GetSimilarTagsParams, StudyDto} from "../../types/apiDTOs";
-import { serializeParams } from "./helpers";    
 
 export interface ReportFlagDto {
   message: string;
@@ -27,15 +27,9 @@ export const getSimilarStudiesByReportId = (
   return apiClient.get<Page<StudyCandidateDto>>(path, {
       ...restConfig,
       params: requestParams,
-      paramsSerializer: { serialize: serializeParams }
     })
-    .then(response => {
-    return response.data;
-    })
-    .catch(error => {
-    console.error(`Error fetching similar studies for report ${reportId}:`, error);
-    throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching similar studies for report ${reportId}:`));
 }
 
 // studies of reports in the database whose DOI the given report cites
@@ -44,11 +38,8 @@ export const getReferencedStudiesByReportId = (
   config?: AxiosRequestConfig
 ): Promise<StudyCandidateDto[]> => {
   return apiClient.get<StudyCandidateDto[]>(`/reports/${reportId}/referenced-studies`, config)
-    .then(response => response.data)
-    .catch(error => {
-      console.error(`Error fetching referenced studies for report ${reportId}:`, error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching referenced studies for report ${reportId}:`));
 }
 
 //assign studies to a report
@@ -60,9 +51,8 @@ export const assignStudyToReportByReportId = (
   const path = `/reports/${reportId}/studies/${studyId}`;
   const requestConfig = {
     ...config,
-    paramsSerializer: { serialize: serializeParams } 
   };
-  return apiClient.put<void>(path, null, requestConfig).then(response => response.data);
+  return apiClient.put<void>(path, null, requestConfig).then(unwrap);
 }
 
 export const confirmStudyForReportByReportId = (
@@ -73,10 +63,9 @@ export const confirmStudyForReportByReportId = (
   const path = `/reports/${reportId}/studies/${studyId}/confirmation`;
   const requestConfig = {
     ...config,
-    paramsSerializer: { serialize: serializeParams }
   };
 
-  return apiClient.put<void>(path, null, requestConfig).then(response => response.data);
+  return apiClient.put<void>(path, null, requestConfig).then(unwrap);
 }
 
 export const unconfirmStudyForReportByReportId = (
@@ -88,11 +77,8 @@ export const unconfirmStudyForReportByReportId = (
 
   return apiClient
     .delete<void>(path, config)
-    .then(response => response.data)
-    .catch(error => {
-      console.error(`Error removing confirmation for study ${studyId} in report ${reportId}:`, error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error removing confirmation for study ${studyId} in report ${reportId}:`));
 }
 
 //remove studies from a report
@@ -104,13 +90,8 @@ export const removeStudyFromReportByReportId = (
   const path = `/reports/${reportId}/studies/${studyId}`;
   return apiClient
     .delete<void>(path, config)
-    .then(response => {
-      return;
-    })
-    .catch(error => {
-      console.error(`Error removing studies from report ${reportId}:`, error);
-      throw error;
-    });
+    .then(() => undefined)
+    .catch(logAndRethrow(`Error removing studies from report ${reportId}:`));
 }
 
 //create and assign a brand-new study to a report
@@ -122,13 +103,8 @@ export const assignNewStudyToReportByReportId = (
   const path = `/reports/${reportId}/studies`;
   return apiClient
     .post<void>(path, study, config)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error(`Error assigning new study to report ${reportId}:`, error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error assigning new study to report ${reportId}:`));
 }
 
 //remove studies from a report
@@ -146,41 +122,10 @@ export const getSimilarTagsByReportId = (
   return apiClient.get<TagCandidateDto[]>(path, {
       ...restConfig,
       params: requestParams,
-      paramsSerializer: { serialize: serializeParams }
     })
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error(`Error fetching similar studies for report ${reportId}:`, error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching similar studies for report ${reportId}:`));
 }
-
-export const getStudiesByReportId = (
-  reportId: number,
-  params?: { date_from?: string | null; date_to?: string | null },
-  config?: AxiosRequestConfig
-): Promise<StudyDto[]> => {
-  const path = `/reports/${reportId}/studies`;
-
-  const requestConfig: AxiosRequestConfig = {
-    ...config,
-    params: params,
-    paramsSerializer: { serialize: serializeParams },
-  };
-
-  return apiClient
-    .get<StudyDto[]>(path, requestConfig)
-    .then((response) => response.data)
-    .catch((error) => {
-      console.error(
-        `Error fetching studies for report ${reportId}:`,
-        error.message || error
-      );
-      throw error;
-    });
-};
 
 export const getReportPdf = (
   reportId: number,
@@ -191,10 +136,7 @@ export const getReportPdf = (
     .then(response => {
       return response.data;
     })  
-    .catch(error => {
-      console.error(`Error fetching PDF for report ${reportId}:`, error.message || error);
-      throw error;
-    });
+    .catch(logAndRethrow(`Error fetching PDF for report ${reportId}:`, true));
 }
 
 export const uploadPdf = (
@@ -210,11 +152,8 @@ export const uploadPdf = (
 
   const path = `/reports/${reportId}/pdf`;
   return apiClient.put<void>(path, formData, config)
-    .then(() => {})
-    .catch(error => {
-      console.error(`Error fetching PDF for report ${reportId}:`, error.message || error);
-      throw error;
-    });
+    .then(() => undefined)
+    .catch(logAndRethrow(`Error fetching PDF for report ${reportId}:`, true));
 }
 
 export const deleteReportPdf = (
@@ -224,11 +163,8 @@ export const deleteReportPdf = (
   const path = `/reports/${reportId}/pdf`;
   return apiClient
     .delete<void>(path, config)
-    .then(() => {})
-    .catch(error => {
-      console.error(`Error deleting PDF for report ${reportId}:`, error.message || error);
-      throw error;
-    });
+    .then(() => undefined)
+    .catch(logAndRethrow(`Error deleting PDF for report ${reportId}:`, true));
 };
 
 export const getReportChat = (
@@ -238,11 +174,8 @@ export const getReportChat = (
   const path = `/reports/${reportId}/chat`;
   return apiClient
     .get<ReportChatDto>(path, config)
-    .then((response) => response.data)
-    .catch((error) => {
-      console.error(`Error fetching chat for report ${reportId}:`, error.message || error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching chat for report ${reportId}:`, true));
 }
 
 export const postReportChat = (
@@ -261,11 +194,8 @@ export const postReportChat = (
 
   return apiClient
     .post<ReportChatDto>(path, message, requestConfig)
-    .then((response) => response.data)
-    .catch((error) => {
-      console.error(`Error posting chat message for report ${reportId}:`, error.message || error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error posting chat message for report ${reportId}:`, true));
 }
 
 export const deleteReportChat = (
@@ -275,11 +205,8 @@ export const deleteReportChat = (
   const path = `/reports/${reportId}/chat`;
   return apiClient
     .delete<void>(path, config)
-    .then(() => {})
-    .catch((error) => {
-      console.error(`Error deleting chat for report ${reportId}:`, error.message || error);
-      throw error;
-    });
+    .then(() => undefined)
+    .catch(logAndRethrow(`Error deleting chat for report ${reportId}:`, true));
 }
 
 export const getReportFlagByReportId = (
@@ -289,11 +216,8 @@ export const getReportFlagByReportId = (
   const path = `/reports/${reportId}/flag`;
   return apiClient
     .get<ReportFlagDto | null>(path, config)
-    .then((response) => response.data)
-    .catch((error) => {
-      console.error(`Error fetching flag for report ${reportId}:`, error.message || error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching flag for report ${reportId}:`, true));
 }
 
 export const upsertReportFlagByReportId = (
@@ -304,11 +228,8 @@ export const upsertReportFlagByReportId = (
   const path = `/reports/${reportId}/flag`;
   return apiClient
     .put<ReportFlagDto>(path, payload, config)
-    .then((response) => response.data)
-    .catch((error) => {
-      console.error(`Error upserting flag for report ${reportId}:`, error.message || error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error upserting flag for report ${reportId}:`, true));
 }
 
 export const deleteReportFlagByReportId = (
@@ -318,11 +239,8 @@ export const deleteReportFlagByReportId = (
   const path = `/reports/${reportId}/flag`;
   return apiClient
     .delete<void>(path, config)
-    .then(() => {})
-    .catch((error) => {
-      console.error(`Error deleting flag for report ${reportId}:`, error.message || error);
-      throw error;
-    });
+    .then(() => undefined)
+    .catch(logAndRethrow(`Error deleting flag for report ${reportId}:`, true));
 }
 
 export const deleteReportById = (
@@ -332,9 +250,6 @@ export const deleteReportById = (
   const path = `/reports/${reportId}`;
   return apiClient
     .delete<void>(path, config)
-    .then(() => {})
-    .catch((error) => {
-      console.error(`Error deleting report ${reportId}:`, error.message || error);
-      throw error;
-    });
+    .then(() => undefined)
+    .catch(logAndRethrow(`Error deleting report ${reportId}:`, true));
 };

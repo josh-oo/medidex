@@ -1,4 +1,5 @@
 import apiClient from "./apiClient";
+import { unwrap, logAndRethrow } from "./requests";
 import { AxiosRequestConfig } from "axios";
 import { getAccessToken } from "@/lib/client/keycloak";
 import {
@@ -18,58 +19,18 @@ import {
 export const getProjects = (config?: AxiosRequestConfig): Promise<ProjectDto[]> => {
   return apiClient
     .get<ProjectDto[]>("/projects", config)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error("Error fetching project:", error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow("Error fetching project:"));
 }
 
 //get all projects
 export const getTasks = (config?: AxiosRequestConfig): Promise<TaskDto[]> => {
   return apiClient
     .get<TaskDto[]>("/tasks", config)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error("Error fetching project:", error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow("Error fetching project:"));
 }
 
-//create a new project by uploading a .ris file
-export const createProject = (
-  file: File,
-  projectName: string,
-  config?: AxiosRequestConfig
-): Promise<string> => {
-  const formData = new FormData();
-  formData.append("projectName", projectName)
-  formData.append("file", file, file.name);
-  
-  // The apiClient has a request interceptor that automatically removes Content-Type
-  // when FormData is detected, allowing axios to set it with the correct boundary.
-  return apiClient.post<string>("/projects", formData, config)
-      .then(response => {
-          return response.data;
-      })
-      .catch(error => {
-          console.error("Error uploading project:", error);
-          // Extract error message from API response
-          if (error.response?.data?.detail) {
-              const errorMessage = typeof error.response.data.detail === 'string' 
-                  ? error.response.data.detail 
-                  : JSON.stringify(error.response.data.detail);
-              throw new Error(errorMessage);
-          }
-          throw error;
-      });
-}
-
-//delete a project by its id
 export const deleteProjectById = (
   projectId: string,
   config?: AxiosRequestConfig
@@ -111,13 +72,8 @@ export const getProjectReports = (
 
   return apiClient
     .get<Page<ReportCurationDto>>(`/projects/${projectId}/reports`, requestConfig)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error(`Error fetching reports for project ${projectId}:`, error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching reports for project ${projectId}:`));
 }
 
 //get incoming reports for a project, including still-processing ones - the admin intake view.
@@ -139,13 +95,8 @@ export const getProjectReportsIntake = (
 
   return apiClient
     .get<Page<ReportIntakeDto>>(`/projects/${projectId}/reports/intake`, requestConfig)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error(`Error fetching intake reports for project ${projectId}:`, error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching intake reports for project ${projectId}:`));
 }
 
 //get fully-annotated reports for a project - the admin annotator-review view. Always
@@ -169,13 +120,8 @@ export const getProjectReportsReview = (
 
   return apiClient
     .get<Page<ReportCurationDto>>(`/projects/${projectId}/reports/review`, requestConfig)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error(`Error fetching review reports for project ${projectId}:`, error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching review reports for project ${projectId}:`));
 }
 
 export const getAnnotations = (
@@ -184,13 +130,8 @@ export const getAnnotations = (
 ): Promise<ProjectAnnotationsDto> => {
   return apiClient
     .get<ProjectAnnotationsDto>(`/projects/${projectId}/annotations`, config)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error(`Error fetching annotations for project ${projectId}:`, error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching annotations for project ${projectId}:`));
 };
 
 export const assignUserToProject = (
@@ -316,7 +257,7 @@ export const streamProjectUpdates = (
             const parsed = JSON.parse(data) as Partial<StreamEvent>;
 
             if (parsed.event === "complete") {
-              onComplete();
+              onComplete?.();
               return;
             }
 
@@ -341,7 +282,7 @@ export const streamProjectUpdates = (
         }
       }
 
-      onComplete();
+      onComplete?.();
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         return;

@@ -310,6 +310,6 @@ export interface StreamEvent {
 
 export interface StreamCallbacks {
   onEvent: (event: StreamEvent) => void;
-  onComplete: () => void;
+  onComplete?: () => void;
   onError: (error: Error) => void;
 }

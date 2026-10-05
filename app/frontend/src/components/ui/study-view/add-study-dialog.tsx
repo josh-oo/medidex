@@ -36,7 +36,9 @@ import {
   createComparisonGroup,
   hasValidComparisonGroups,
 } from "@/lib/comparisonUtils";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useAbortableEffect } from "@/hooks/use-abortable-effect";
+import { useElementHeight } from "@/hooks/use-element-height";
 import { getSimilarTagsByReportId } from "@/lib/api/reportApi";
 import { getInterventions } from "@/lib/api/interventionsApi";
 import type {
@@ -52,8 +54,7 @@ import type {
 
 const CATALOG_SEARCH_MIN_CHARS = 2;
 const COMPARISON_CARD_VERTICAL_GAP = 12; // matches space-y-3 spacing to prevent clipping
-const COMPARISON_PANEL_MAX_HEIGHT = 1.1; // portion of viewport for comparisons scroll region (roughly 2x previous)
-const COMPARISON_PANEL_MAX_PIXEL = 900; // hard cap so dialog never exceeds viewport
+const COMPARISON_PANEL_MAX_HEIGHT = "min(110vh, 900px)"; // hard cap so dialog never exceeds viewport
 const buildEmptyComparisonGroups = () => [createComparisonGroup()];
 
 const buildComparisonGroupsFromSuggestion = (
@@ -96,6 +97,17 @@ const buildComparisonPayload = (groups: ComparisonGroup[]) =>
       control: group.b.map((value) => value.trim()).filter(Boolean),
     }))
     .filter((group) => group.intervention.length > 0 && group.control.length > 0);
+const uniqueKeywords = (data: unknown): string[] => {
+  if (!Array.isArray(data)) return [];
+  const keywords = data
+    .map((entry) => (typeof entry === "string" ? entry : entry?.keyword))
+    .filter((keyword): keyword is string => typeof keyword === "string" && keyword.length > 0);
+  return Array.from(new Set(keywords));
+};
+
+const buildDuration = (unit: StudyDurationUnit | undefined, value: string) =>
+  unit === "Uncertain" ? "Uncertain" : unit && value.trim() ? `${value.trim()} ${unit}` : "";
+
 export function AddStudyDialog({
   currentReportId,
   suggestedValues,
@@ -133,8 +145,7 @@ export function AddStudyDialog({
 
   const [addStudyDialogOpen, setAddStudyDialogOpen] = useState(false);
   const [creatingStudy, setCreatingStudy] = useState(false);
-  const firstComparisonRef = useRef<HTMLDivElement | null>(null);
-  const [comparisonPanelHeight, setComparisonPanelHeight] = useState<number | null>(null);
+  const [firstComparisonElement, setFirstComparisonElement] = useState<HTMLDivElement | null>(null);
 
   const resetLocalFormState = useCallback(() => {
     if (suggestedValues) {
@@ -174,130 +185,61 @@ export function AddStudyDialog({
   useEffect(() => {
     if (!addStudyDialogOpen) {
       resetLocalFormState();
-      return;
     }
   }, [
     addStudyDialogOpen,
     resetLocalFormState,
   ]);
 
-  useEffect(() => {
-    if (!addStudyDialogOpen) return;
+  useAbortableEffect(
+    async (signal) => {
+      if (!addStudyDialogOpen) return;
 
-    if (!currentReportId) {
-      setSuggestionError("Select a report to load intervention suggestions.");
-      setSuggestions([]);
-      setIsFetchingSuggestions(false);
-      return;
-    }
+      if (!currentReportId) {
+        setSuggestionError("Select a report to load intervention suggestions.");
+        setSuggestions([]);
+        setIsFetchingSuggestions(false);
+        return;
+      }
 
-    const controller = new AbortController();
-
-    const loadInterventionTags = async () => {
       setIsFetchingSuggestions(true);
       setSuggestionError(null);
 
       try {
-        const data = await getSimilarTagsByReportId(
-          Number(currentReportId),
-          {},
-          { signal: controller.signal },
-        );
-        const parsedSuggestions = Array.isArray(data)
-          ? data
-              .map((entry: { keyword?: string } | string | null) => {
-                if (typeof entry === "string") return entry;
-                if (entry && typeof entry === "object" && typeof entry.keyword === "string") {
-                  return entry.keyword;
-                }
-                return null;
-              })
-              .filter((entry): entry is string => Boolean(entry))
-          : [];
-
-        setSuggestions(Array.from(new Set(parsedSuggestions)));
+        const data = await getSimilarTagsByReportId(Number(currentReportId), {}, { signal });
+        setSuggestions(uniqueKeywords(data));
       } catch (error) {
-        if (controller.signal.aborted) return;
+        if (signal.aborted) return;
         setSuggestionError(
-          error instanceof Error
-            ? error.message
-            : "Failed to load intervention tags."
+          error instanceof Error ? error.message : "Failed to load intervention tags."
         );
         setSuggestions([]);
       } finally {
-        if (!controller.signal.aborted) {
-          setIsFetchingSuggestions(false);
-        }
+        if (!signal.aborted) setIsFetchingSuggestions(false);
       }
-    };
+    },
+    [addStudyDialogOpen, currentReportId]
+  );
 
-    loadInterventionTags();
+  useAbortableEffect(
+    async (signal) => {
+      if (!addStudyDialogOpen || allInterventions.length > 0) return;
 
-    return () => {
-      controller.abort();
-    };
-  }, [addStudyDialogOpen, currentReportId]);
-
-  useEffect(() => {
-    if (!addStudyDialogOpen || allInterventions.length > 0) return;
-
-    const controller = new AbortController();
-
-    const loadAllInterventions = async () => {
       try {
-        const data = await getInterventions({ signal: controller.signal });
-        const descriptions = Array.isArray(data)
-          ? data
-              .map((entry) => entry?.keyword)
-              .filter((entry): entry is string => Boolean(entry))
-          : [];
-
-        setAllInterventions(Array.from(new Set(descriptions)));
+        setAllInterventions(uniqueKeywords(await getInterventions({ signal })));
       } catch (error) {
-        if (controller.signal.aborted) return;
+        if (signal.aborted) return;
         console.error("Failed to load interventions:", error);
         setAllInterventions([]);
       }
-    };
+    },
+    [addStudyDialogOpen, allInterventions.length]
+  );
 
-    loadAllInterventions();
-
-    return () => {
-      controller.abort();
-    };
-  }, [addStudyDialogOpen, allInterventions.length]);
-
-  useLayoutEffect(() => {
-    if (!addStudyDialogOpen) {
-      setComparisonPanelHeight(null);
-      return;
-    }
-
-    if (comparisonGroups.length <= 1) {
-      setComparisonPanelHeight(null);
-      return;
-    }
-
-    const measureHeight = () => {
-      if (!firstComparisonRef.current) {
-        setComparisonPanelHeight(null);
-        return;
-      }
-
-      const measuredHeight = firstComparisonRef.current.getBoundingClientRect().height;
-      if (measuredHeight > 0) {
-        const baseHeight = measuredHeight + COMPARISON_CARD_VERTICAL_GAP;
-        setComparisonPanelHeight(baseHeight);
-      }
-    };
-
-    measureHeight();
-    window.addEventListener("resize", measureHeight);
-
-    return () => {
-      window.removeEventListener("resize", measureHeight);
-    };
-  }, [comparisonGroups, addStudyDialogOpen]);
+  // With several comparisons the panel is capped at one card's height and scrolls.
+  const firstCardHeight = useElementHeight(firstComparisonElement, comparisonGroups.length > 1);
+  const comparisonPanelHeight =
+    firstCardHeight === null ? null : firstCardHeight + COMPARISON_CARD_VERTICAL_GAP;
 
   const handleAddStudySubmit = async (
     event: React.FormEvent<HTMLFormElement>
@@ -315,12 +257,7 @@ export function AddStudyDialog({
       return;
     }
 
-    const normalizedDuration =
-      durationUnit === "Uncertain"
-        ? "Uncertain"
-        : durationUnit && durationValue.trim()
-          ? `${durationValue.trim()} ${durationUnit}`
-          : "";
+    const normalizedDuration = buildDuration(durationUnit, durationValue);
 
     if (!normalizedDuration) {
       toast.error("Provide a duration value and unit, or mark it as Uncertain.");
@@ -622,12 +559,7 @@ export function AddStudyDialog({
     );
   };
 
-  const computedDuration =
-    durationUnit === "Uncertain"
-      ? "Uncertain"
-      : durationValue && durationUnit
-        ? `${durationValue} ${durationUnit}`
-        : "";
+  const computedDuration = buildDuration(durationUnit, durationValue);
   const normalizedCountry =
     selectedCountries.length > 0 ? selectedCountries.join(", ") : "Unclear";
   const hasMultipleComparisonGroups = comparisonGroups.length > 1;
@@ -637,14 +569,9 @@ export function AddStudyDialog({
     creatingStudy ||
     shortName.trim().length === 0 ||
     statusOfStudy.trim().length === 0 ||
-    normalizedCountry.trim().length === 0 ||
-    computedDuration.trim().length === 0 ||
+    computedDuration.length === 0 ||
     !comparisonValid ||
     numberOfParticipants.trim().length === 0;
-
-  const handleOpenDialog = useCallback(() => {
-    setAddStudyDialogOpen(true);
-  }, [setAddStudyDialogOpen]);
 
   return (
     <Dialog open={addStudyDialogOpen} onOpenChange={setAddStudyDialogOpen}>
@@ -655,7 +582,7 @@ export function AddStudyDialog({
         data-highlighted={highlight || undefined}
         aria-haspopup="dialog"
         aria-expanded={addStudyDialogOpen}
-        onClick={handleOpenDialog}
+        onClick={() => setAddStudyDialogOpen(true)}
       >
         <Plus className="h-4 w-4" />
         Add as new study
@@ -813,15 +740,13 @@ export function AddStudyDialog({
                       ? `${Math.round(comparisonPanelHeight)}px`
                       : undefined,
                   maxHeight: hasMultipleComparisonGroups
-                    ? `min(${Math.round(
-                        COMPARISON_PANEL_MAX_HEIGHT * 100
-                      )}vh, ${COMPARISON_PANEL_MAX_PIXEL}px)`
+                    ? COMPARISON_PANEL_MAX_HEIGHT
                     : undefined,
                 }}
               >
                 {comparisonGroups.map((group, index) => (
                   <div
-                    ref={index === 0 ? firstComparisonRef : undefined}
+                    ref={index === 0 ? setFirstComparisonElement : undefined}
                     key={group.id}
                     className="space-y-3 rounded-lg border border-border/40 p-3.5"
                   >

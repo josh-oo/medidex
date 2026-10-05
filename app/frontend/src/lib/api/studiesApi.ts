@@ -1,6 +1,6 @@
 import apiClient from "./apiClient";
-import { StudyDto, StudyFullDto, StudyBaseDto , ReportPreviewDto, TagDto, GetPersonsResponseDto, Page, GetStudySearchParams } from "../../types/apiDTOs";
-import { serializeParams } from "./helpers";
+import { unwrap, logAndRethrow } from "./requests";
+import { StudyDto, StudyFullDto, ReportPreviewDto, TagDto, Page, GetStudySearchParams } from "../../types/apiDTOs";
 import { AxiosRequestConfig } from "axios";
 
 // Full study details in one call - linked reports plus interventions/conditions/
@@ -17,18 +17,10 @@ export const getStudyById = (
   const requestConfig = {
     ...config,
     params: { limit },
-    paramsSerializer: {
-      serialize: serializeParams,
-    },
   };
   return apiClient.get<StudyFullDto>(path, requestConfig)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error('Error fetching study:', error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow('Error fetching study:'));
 }
 
 export const searchStudies = (
@@ -45,15 +37,9 @@ export const searchStudies = (
   return apiClient.get<Page<StudyDto>>("/studies", {
       ...restConfig,
       params: requestParams,
-      paramsSerializer: { serialize: serializeParams },
     })
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error(`Error searching studies for "${params.q}":`, error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error searching studies for "${params.q}":`));
 }
 
 export const getReportsByStudyId = (
@@ -70,18 +56,10 @@ export const getReportsByStudyId = (
       limit,
       cursor: cursor ?? undefined,
     },
-    paramsSerializer: {
-      serialize: serializeParams,
-    },
   };
   return apiClient.get<Page<ReportPreviewDto>>(path, requestConfig)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error(`Error fetching reports for study ${studyId}:`, error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching reports for study ${studyId}:`));
 }
 
 export const getInterventionsForStudy = (
@@ -94,15 +72,9 @@ export const getInterventionsForStudy = (
   return apiClient.get<Page<TagDto>>(path, {
       ...config,
       params: { limit, cursor: cursor ?? undefined },
-      paramsSerializer: { serialize: serializeParams },
     })
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error(`Error fetching interventions for study ${studyId}:`, error);
-      throw error;
-    });
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching interventions for study ${studyId}:`));
 }
 
 export const getConditionsForStudy = (
@@ -115,15 +87,9 @@ export const getConditionsForStudy = (
     return apiClient.get<Page<TagDto>>(path, {
         ...config,
         params: { limit, cursor: cursor ?? undefined },
-        paramsSerializer: { serialize: serializeParams },
       })
-      .then(response => {
-        return response.data;
-      })
-      .catch(error => {
-        console.error(`Error fetching conditions for study ${studyId}:`, error);
-        throw error;
-      });
+      .then(unwrap)
+    .catch(logAndRethrow(`Error fetching conditions for study ${studyId}:`));
 }
 
 export const getOutcomesForStudy = (
@@ -136,15 +102,9 @@ export const getOutcomesForStudy = (
     return apiClient.get<Page<TagDto>>(path, {
         ...config,
         params: { limit, cursor: cursor ?? undefined },
-        paramsSerializer: { serialize: serializeParams },
       })
-      .then(response => {
-        return response.data;
-      })
-      .catch(error => {
-        console.error(`Error fetching outcomes for study ${studyId}:`, error);
-        throw error;
-      });
+      .then(unwrap)
+    .catch(logAndRethrow(`Error fetching outcomes for study ${studyId}:`));
 }
 
 //get participants description for a study
@@ -158,15 +118,9 @@ export const getParticipantsForStudy = (
     return apiClient.get<Page<TagDto>>(path, {
         ...config,
         params: { limit, cursor: cursor ?? undefined },
-        paramsSerializer: { serialize: serializeParams },
       })
-      .then(response => {
-        return response.data;
-      })
-      .catch(error => {
-        console.error(`Error fetching participants description for study ${studyId}:`, error);
-        throw error;
-      });
+      .then(unwrap)
+    .catch(logAndRethrow(`Error fetching participants description for study ${studyId}:`));
 }
 
 export const getDesignForStudy = (
@@ -179,15 +133,9 @@ export const getDesignForStudy = (
     return apiClient.get<Page<TagDto>>(path, {
         ...config,
         params: { limit, cursor: cursor ?? undefined },
-        paramsSerializer: { serialize: serializeParams },
       })
-      .then(response => {
-        return response.data;
-      })
-      .catch(error => {
-        console.error(`Error fetching design for study ${studyId}:`, error);
-        throw error;
-      });
+      .then(unwrap)
+    .catch(logAndRethrow(`Error fetching design for study ${studyId}:`));
 }
 
 export const getPersonsForStudy = (
@@ -201,25 +149,6 @@ export const getPersonsForStudy = (
     })
     .catch(error => {
       console.error(`Error fetching persons for study ${studyId}:`, error);
-      throw error;
-    });
-};
-
-export const createStudy = (
-  payload: StudyBaseDto,
-  config?: AxiosRequestConfig
-): Promise<StudyDto> => {
-  return apiClient
-    .put<StudyDto>("/studies", payload, config)
-    .then((response) => response.data)
-    .catch((error) => {
-      console.error("Error creating study:", error);
-      if (error.response?.data?.detail) {
-        const detail = error.response.data.detail;
-        const message =
-          typeof detail === "string" ? detail : JSON.stringify(detail);
-        throw new Error(message);
-      }
       throw error;
     });
 };

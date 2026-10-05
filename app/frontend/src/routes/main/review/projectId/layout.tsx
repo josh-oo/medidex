@@ -1,64 +1,47 @@
-import axios from "axios";
-import { useEffect, useState } from "react";
 import { useParams, Outlet } from "react-router-dom";
 import { AdminGuard } from "@/components/auth/admin-guard";
-import { ReportColumnClient } from "./components/report-column-client";
-import type { ProjectAnnotationsDto, ReportCurationDto } from "@/types/apiDTOs";
+import type { ProjectAnnotationsDto, ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
 import { getAnnotations, getProjectReportsReview } from "@/lib/api/projectApi";
 import { ReviewAnnotationsProvider } from "./components/review-annotations-context";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuthStore } from "@/hooks/use-auth";
+import { useProjectResource } from "@/hooks/use-project-resource";
+import { ProjectNotFound } from "@/components/reports/project-not-found";
+import { ReportSplitView } from "@/components/reports/report-split-view";
+import StudySheet from "../../projects/projectId/study-sheet";
 
 interface ProjectReviewData {
   reports: ReportCurationDto[];
   annotations: ProjectAnnotationsDto;
 }
 
+const reportFilterDimensions: ReportFilterDimension[] = [
+  { field: "consensus", label: "Agreement", onlyLabel: "Consensus", excludeLabel: "Conflict" },
+  { field: "reviewed", label: "Review", onlyLabel: "Reviewed", excludeLabel: "Pending review" },
+];
+
+const emptyReviewData: ProjectReviewData = { reports: [], annotations: {} };
+
 export default function AnnotationsReviewPage() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
   const isAdmin = useAuthStore((s) => s.user?.isAdmin ?? false);
-  const [data, setData] = useState<ProjectReviewData | null>(null);
-  const [notFound, setNotFound] = useState(false);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-
-    let cancelled = false;
-    setData(null);
-    setNotFound(false);
-
-    (async () => {
-      try {
-        const [reportsPage, annotations] = await Promise.all([
-          getProjectReportsReview(projectId),
-          getAnnotations(projectId),
-        ]);
-
-        if (!cancelled) {
-          setData({ reports: reportsPage?.items ?? [], annotations: annotations ?? {} });
-        }
-      } catch (error) {
-        if (cancelled) return;
-        if (axios.isAxiosError(error) && error.response?.status === 404) {
-          setNotFound(true);
-        } else {
-          console.error("Failed to load project reports and annotations:", error);
-          setData({ reports: [], annotations: {} });
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, isAdmin]);
+  const { data, notFound } = useProjectResource<ProjectReviewData>(
+    async () => {
+      const [reportsPage, annotations] = await Promise.all([
+        getProjectReportsReview(projectId),
+        getAnnotations(projectId),
+      ]);
+      return { reports: reportsPage?.items ?? [], annotations: annotations ?? {} };
+    },
+    emptyReviewData,
+    [projectId],
+    isAdmin
+  );
 
   return (
     <AdminGuard>
       {notFound ? (
-        <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-          Project not found.
-        </div>
+        <ProjectNotFound />
       ) : data === null ? (
         <div className="flex h-full w-full items-center justify-center">
           <Spinner className="h-6 w-6" />
@@ -67,9 +50,17 @@ export default function AnnotationsReviewPage() {
         <div className="h-full flex flex-col overflow-hidden">
           <div className="flex-1 min-h-0 bg-background">
             <ReviewAnnotationsProvider annotations={data.annotations}>
-              <ReportColumnClient projectId={projectId} reports={data.reports}>
+              <ReportSplitView
+                projectId={projectId}
+                reports={data.reports}
+                baseUrl="review"
+                editMode={false}
+                filterDimensions={reportFilterDimensions}
+                fetchReports={getProjectReportsReview}
+                sheet={<StudySheet />}
+              >
                 <Outlet />
-              </ReportColumnClient>
+              </ReportSplitView>
             </ReviewAnnotationsProvider>
           </div>
         </div>

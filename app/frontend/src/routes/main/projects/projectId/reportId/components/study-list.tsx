@@ -1,4 +1,4 @@
-import axios from "axios";
+import { isNotFound } from "@/lib/api/errors";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -36,7 +36,7 @@ export default function StudyList() {
       })
       .catch((error) => {
         if (cancelled) return;
-        if (axios.isAxiosError(error) && error.response?.status === 404) {
+        if (isNotFound(error)) {
           setNotFound(true);
         } else {
           console.error(`Error fetching similar studies for report ${reportIdNumber}:`, error);

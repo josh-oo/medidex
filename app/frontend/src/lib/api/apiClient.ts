@@ -1,5 +1,6 @@
 import axios from "axios";
 import { getAccessToken } from "@/lib/client/keycloak";
+import { serializeParams } from "./helpers";
 
 // Public because this now runs entirely in the browser - there is no Next.js
 // server hop between the app and the FastAPI backend anymore. The backend's
@@ -12,6 +13,8 @@ export const apiClient = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
+  // Repeat array params (a=1&a=2) instead of axios's default a[]=1 format.
+  paramsSerializer: { serialize: serializeParams },
 });
 
 apiClient.interceptors.request.use(async (config) => {
