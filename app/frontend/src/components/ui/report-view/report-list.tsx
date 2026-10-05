@@ -35,11 +35,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ReportStatusSlot } from "@/context/study-report-slots-context";
+import { useExtensionRegistry } from "@/context/extension-registry-context";
+import { ReportAbstractSlot, ReportCardExtrasSlot, ReportStatusSlot } from "@/context/study-report-slots-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import { FilterMode, GetProjectReportsParams, ReportCurationDto, ReportFilterDimension, ReportFiltersState, Page } from "@/types/apiDTOs";
 import { toast } from "sonner";
-import { Abstract } from "./report-abstract";
 import {
   getReportFlagByReportId,
   upsertReportFlagByReportId,
@@ -93,6 +93,8 @@ export function ReportList({
   fetchReports,
   initialReports,
 }: ReportListProps) {
+  // An extension rendering the abstract may have content for reports without one (e.g. extracted tags).
+  const hasAbstractExtension = Boolean(useExtensionRegistry().reportAbstract);
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ReportFiltersState>({});
   const [flagDialogOpen, setFlagDialogOpen] = useState(false);
@@ -540,7 +542,7 @@ export function ReportList({
 
               const hasAbstract = report.abstract && report.abstract.length > 0;
               const isSelected = selectedReportId === report.reportId;
-              const isExpanded = isSelected && hasAbstract;
+              const isExpanded = isSelected && (hasAbstract || hasAbstractExtension);
               const flagMessage = report.flag?.trim() ?? "";
               const hasFlag = Boolean(flagMessage);
               const params = new URLSearchParams(
@@ -675,6 +677,9 @@ export function ReportList({
                           {report.abstract}
                         </p>
                       )}
+                      <div className="min-w-0" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                        <ReportCardExtrasSlot reportId={report.reportId} />
+                      </div>
                       {editMode && (
                         <div onClick={(e) => e.stopPropagation()}>
                           <ReportAssignedStudiesBadges report={report} />
@@ -682,10 +687,10 @@ export function ReportList({
                       )}
                     </div>
 
-                    {hasAbstract && isExpanded && (
+                    {isExpanded && (
                       <div className="px-4 pb-4 border-t bg-muted/30">
                         <div className="text-xs text-muted-foreground leading-relaxed mt-2 whitespace-pre-wrap">
-                          <Abstract text={report.abstract}></Abstract>
+                          <ReportAbstractSlot reportId={report.reportId} title={report.title} text={report.abstract} />
                         </div>
                       </div>
                     )}

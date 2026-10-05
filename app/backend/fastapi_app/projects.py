@@ -3,6 +3,7 @@ from fastapi import APIRouter, Request
 from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks, Body, Form
 from fastapi.responses import Response, StreamingResponse
 from typing import Dict, List, Any, Optional
+import json
 import logging
 
 from src.utils.ris_parser import RisParseError
@@ -36,11 +37,18 @@ async def get_user_tasks(ctx: RequestContext = Depends(get_context)) -> List[Tas
     return await ctx.project_service.get_user_tasks()
 
 @router.post("/projects", dependencies=[Depends(is_admin)], summary="Upload a project (batch of new reports that need to be assigned to studies) (usually in the .ris file format)", status_code=201)
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), ctx: RequestContext = Depends(get_context)) -> Project:
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), options: str = Form("{}", description="JSON object of upload options; each registered report postprocessor reads its own keys (see src/background/postprocessing.py)."), ctx: RequestContext = Depends(get_context)) -> Project:
 
     # dependencies=[Depends(is_admin)] above is the actual (and only) admin check -
     # who's allowed to create a project is an API-layer permission, not a business
     # rule, so ProjectResourceService.create_project doesn't re-check it.
+    try:
+        parsed_options = json.loads(options)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="options must be a JSON object") from exc
+    if not isinstance(parsed_options, dict):
+        raise HTTPException(status_code=400, detail="options must be a JSON object")
+
     try:
         result = await ctx.project_service.create_project(projectName, file)
     except RisParseError as exc:
@@ -49,7 +57,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
         raise HTTPException(status_code=409, detail="Project already exists")
     project, report_ids = result
 
-    background_tasks.add_task(run_process_report_background, project.projectId, report_ids, ctx.user_id)
+    background_tasks.add_task(run_process_report_background, project.projectId, report_ids, ctx.user_id, parsed_options)
 
     return project
 

@@ -182,6 +182,9 @@ class Project(BaseModel):
     numberReportsReadyForReview: int = 0
     numberReportsAutoSearchedPdf: int = 0
     numberReportsConfirmed: int = 0
+    # Reports put through a postprocessor (chosen at upload) and how many of them have finished it.
+    numberReportsPostprocessing: int = 0
+    numberReportsPostprocessed: int = 0
     assignees: List[Assignee] = Field(default_factory=list)
 
 class Task(BaseModel):

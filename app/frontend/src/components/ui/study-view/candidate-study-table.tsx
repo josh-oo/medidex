@@ -22,6 +22,7 @@ import { useReportStore } from "@/hooks/use-report-store";
 import { useDetailsSheet } from "@/context/details-sheet-context";
 import { assignNewStudyToReportByReportId } from "@/lib/api/reportApi";
 import { searchStudies } from "@/lib/api/studiesApi";
+import { onStudySearchRequest } from "@/lib/study-search-request";
 import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
 
 interface CandidateStudyTableProps {
@@ -239,6 +240,17 @@ export function CandidateStudyTable({
       clearSearch();
     }
   }, [reportId, currentReport?.trialId, currentReport?.preliminaryTrialId, runSearch, clearSearch]);
+
+  // Searches requested from elsewhere in the UI (e.g. a clicked tag in a report abstract).
+  useEffect(
+    () =>
+      onStudySearchRequest((query) => {
+        const trimmed = query.trim();
+        setSearchQuery(trimmed);
+        if (trimmed.length >= MIN_SEARCH_QUERY_LENGTH) void runSearch(trimmed);
+      }),
+    [runSearch]
+  );
 
   const handleStudyClick = (study: StudyDto) => {
     openWithStudyItem(study)

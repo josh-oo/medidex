@@ -4,7 +4,7 @@ import {
   type ComponentType,
   type ReactNode,
 } from "react"
-import type { StudyCandidateDto, StudyDto } from "@/types/apiDTOs"
+import type { ProjectDto, StudyCandidateDto, StudyDto } from "@/types/apiDTOs"
 import type { AddStudyDialogProps } from "@/components/ui/study-view/add-study-dialog"
 
 export interface ReportActionsSlotProps {
@@ -72,6 +72,29 @@ export type AddStudyTriggerSlotProps = Pick<
   "currentReportId" | "onSaveStudy"
 >
 
+export interface ReportCardSlotProps {
+  reportId: number
+}
+
+export interface ReportAbstractSlotProps {
+  reportId: number
+  title: string | null
+  text: string | null
+}
+
+export interface ProjectCardSlotProps {
+  project: ProjectDto
+}
+
+/**
+ * Rendered in the "Create Project" dialog. `options` is the free-form object sent
+ * with the upload as `options` (JSON); each slot owns its own keys.
+ */
+export interface ProjectUploadOptionsSlotProps {
+  options: Record<string, unknown>
+  onChange: (options: Record<string, unknown>) => void
+}
+
 export interface ExtensionRegistry {
   userMenuItems: ComponentType<UserMenuItemProps>[]
   reportActions: ComponentType<ReportActionsSlotProps>[]
@@ -82,6 +105,13 @@ export interface ExtensionRegistry {
   studyContextMenuItems: ComponentType<StudyContextMenuItemProps>[]
   reportBanners: ComponentType<ReportBannerSlotProps>[]
   reportStatuses: ComponentType<ReportStatusSlotProps>[]
+  /** Rendered at the bottom of every report card in the report list. */
+  reportCardExtras: ComponentType<ReportCardSlotProps>[]
+  projectUploadOptions: ComponentType<ProjectUploadOptionsSlotProps>[]
+  /** Rendered below the processing progress bars of every project card (as progress sections). */
+  projectCardProgress: ComponentType<ProjectCardSlotProps>[]
+  /** Replaces the rendering of a report's abstract in the expanded report card. */
+  reportAbstract?: ComponentType<ReportAbstractSlotProps>
   addStudyTrigger?: ComponentType<AddStudyTriggerSlotProps>
   routes?: ReactNode
 }
@@ -95,6 +125,9 @@ const emptyExtensions: ExtensionRegistry = {
   studyContextMenuItems: [],
   reportBanners: [],
   reportStatuses: [],
+  reportCardExtras: [],
+  projectUploadOptions: [],
+  projectCardProgress: [],
 }
 
 const ExtensionRegistryContext = createContext<ExtensionRegistry>(emptyExtensions)

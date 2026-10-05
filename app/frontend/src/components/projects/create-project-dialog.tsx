@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProjectUploadOptionsSlot } from "@/context/study-report-slots-context";
 import { UploadSection, type UploadSectionHandle, type UploadSectionSnapshot } from "@/components/ui/upload/upload-section";
 
 interface CreateProjectDialogProps {
@@ -13,11 +14,13 @@ interface CreateProjectDialogProps {
 export function CreateProjectDialog({ trigger, onProjectCreated }: CreateProjectDialogProps) {
   const [open, setOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
+  const [options, setOptions] = useState<Record<string, unknown>>({});
   const uploadSectionRef = useRef<UploadSectionHandle>(null);
   const [uploadSnapshot, setUploadSnapshot] = useState<UploadSectionSnapshot>({ hasFile: false, status: null });
 
   const resetState = useCallback(() => {
     setProjectName("");
+    setOptions({});
     setUploadSnapshot({ hasFile: false, status: null });
   }, []);
 
@@ -39,9 +42,10 @@ export function CreateProjectDialog({ trigger, onProjectCreated }: CreateProject
       const formData = new FormData();
       formData.append("projectName", trimmedName);
       formData.append("file", file, file.name);
+      formData.append("options", JSON.stringify(options));
       return formData;
     },
-    [projectName],
+    [projectName, options],
   );
 
   const canUpload = projectName.trim().length > 0;
@@ -88,6 +92,7 @@ export function CreateProjectDialog({ trigger, onProjectCreated }: CreateProject
               onStateChange={setUploadSnapshot}
             />
           </div>
+          <ProjectUploadOptionsSlot options={options} onChange={setOptions} />
         </div>
         <DialogFooter className="gap-2 sm:gap-2">
           <Button

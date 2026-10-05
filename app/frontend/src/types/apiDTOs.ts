@@ -208,6 +208,8 @@ export interface ProjectDto{
   numberReportsAutoSearchedPdf: number,
   numberReportsReadyForReview: number;
   numberReportsConfirmed: number;
+  numberReportsPostprocessing: number;
+  numberReportsPostprocessed: number;
   assignees : AssigneeDto[]
 }
 

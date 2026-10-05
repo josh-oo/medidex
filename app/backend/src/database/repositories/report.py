@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import String, cast, func, or_
 from sqlmodel import select, delete
 
+from ...background.postprocessing import postprocessor_registry
 from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions, ReportFlag
 from typing import List, Dict, Any, Optional, Set, Tuple
 
@@ -131,6 +132,29 @@ class ReportRepository:
         embedded = {report_id for report_id, is_embedded, _ in rows if is_embedded}
         has_pdf = {report_id for report_id, _, pdf_ready in rows if pdf_ready}
         return embedded, has_pdf
+
+    async def get_postprocessing_pending(self, report_ids: List[int]) -> Set[int]:
+        """The given reports whose registered postprocessors (src/background/postprocessing.py)
+        have not finished yet; such reports are not ready for review."""
+        if not report_ids:
+            return set()
+        pending: Set[int] = set()
+        for pending_select in postprocessor_registry.pending_report_ids_selects():
+            rows = await self.db.execute(pending_select.where(pending_select.selected_columns[0].in_(report_ids)))
+            pending.update(report_id for (report_id,) in rows.all())
+        return pending
+
+    async def get_postprocessing_progress(self, report_ids: List[int]) -> Tuple[int, int]:
+        """(requested, finished) number of the given reports that were put through a registered
+        postprocessor (src/background/postprocessing.py) and that have finished it."""
+        if not report_ids:
+            return 0, 0
+        tracked: Set[int] = set()
+        for tracked_select in postprocessor_registry.tracked_report_ids_selects():
+            rows = await self.db.execute(tracked_select.where(tracked_select.selected_columns[0].in_(report_ids)))
+            tracked.update(report_id for (report_id,) in rows.all())
+        pending = await self.get_postprocessing_pending(report_ids)
+        return len(tracked), len(tracked - pending)
 
     async def _remove_orphaned_studies(self, affected_study_ids : set) -> List[int]:
         """
@@ -395,6 +419,8 @@ class ReportRepository:
 
         if require_ready:
             stmt = stmt.where(ReportAdded.embedded.is_(True)).where(ReportAdded.has_pdf.is_(True))
+            for pending_select in postprocessor_registry.pending_report_ids_selects():
+                stmt = stmt.where(ReportAdded.report_id.not_in(pending_select))
 
         if with_pdf is not None:
             stmt = stmt.where(ReportAdded.has_pdf.is_(with_pdf))
