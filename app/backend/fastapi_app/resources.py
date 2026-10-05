@@ -1,5 +1,6 @@
 from fastapi import APIRouter, File, UploadFile
-from fastapi import Depends, HTTPException, Query, Path
+from fastapi import BackgroundTasks, Depends, HTTPException, Query, Path
+from src.background.wrapper import run_pending_postprocessing
 from fastapi.responses import FileResponse
 from starlette.responses import Response
 import enum
@@ -290,7 +291,7 @@ async def get_report_studies_by_id(
     return studies_to_dto(result)
 
 @router.put("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
-async def uploaed_pdf(report_id: int = report_id_path, file: UploadFile = File(None, description="PDF file to upload"), ctx: RequestContext = Depends(get_context)) -> Dict[str, Any]:
+async def uploaed_pdf(background_tasks: BackgroundTasks, report_id: int = report_id_path, file: UploadFile = File(None, description="PDF file to upload"), ctx: RequestContext = Depends(get_context)) -> Dict[str, Any]:
     # Validate file is a PDF
     if file:
         if not file.content_type == "application/pdf":
@@ -302,6 +303,8 @@ async def uploaed_pdf(report_id: int = report_id_path, file: UploadFile = File(N
         result = await ctx.document_service.upload_pdf(report_id, file)
         await ctx.report_repo.db.commit()
         await ctx.pubsub_service.publish_report_update(report_id)
+        # Postprocessing of a report without an auto-retrieved PDF waits for this upload.
+        background_tasks.add_task(run_pending_postprocessing, report_id, ctx.user_id)
         return result
     except:
         await ctx.report_repo.db.rollback()

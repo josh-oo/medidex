@@ -1,4 +1,4 @@
-import { Users, KeyRound } from "lucide-react";
+import { Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeaderUser } from "./header-user";
 import { Link, useLocation } from "react-router-dom";
@@ -40,22 +40,6 @@ export function AppHeader() {
         <div className="flex items-center gap-1">
           {/* Navigation buttons */}
           <nav className="flex items-center gap-1 mr-2">
-            {user && (
-              <Button
-                variant={pathname === "/settings/api-keys" ? "secondary" : "ghost"}
-                size="sm"
-                asChild
-                className={cn(
-                  "gap-2",
-                  pathname === "/settings/api-keys" && "bg-secondary"
-                )}
-              >
-                <Link to="/settings/api-keys">
-                  <KeyRound className="h-4 w-4" />
-                  <span className="hidden sm:inline">API Keys</span>
-                </Link>
-              </Button>
-            )}
             {isAdmin && (
               <Button
                 variant={pathname === "/user-management" ? "secondary" : "ghost"}

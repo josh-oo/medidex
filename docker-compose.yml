@@ -135,9 +135,8 @@ services:
       - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-medidex-frontend}
       # Service-account credential used by the backend's admin API
       # (fastapi_app/admin.py) to call the Keycloak Admin REST API - user
-      # management and API-key (client) management. Never exposed to the
-      # frontend; the frontend calls the backend's /admin/* and
-      # /users/me/api_keys routes instead.
+      # management. Never exposed to the
+      # frontend; the frontend calls the backend's /admin/* routes instead.
       - KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID:-medidex-backoffice}
       - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}
       - POSTGRES_USER=${POSTGRES_USER:-postgres}

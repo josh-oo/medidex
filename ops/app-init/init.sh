@@ -410,7 +410,7 @@ fi
 
 # --- 5a. grant medidex-backoffice its realm-management client roles -------
 # Needed so the backend's admin API (app/backend/fastapi_app/admin.py) can
-# manage users and manage Keycloak clients (API keys). realm-medidex.json
+# manage users. realm-medidex.json
 # declares these too, but that file is only applied on a fresh realm import,
 # so this makes an already-provisioned realm self-heal on every run.
 #

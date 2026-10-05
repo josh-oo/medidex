@@ -16,8 +16,9 @@ import httpx
 
 from ..context import RequestContext
 from ..database.sessions import AsyncSessionLocal
-from ..database.models import Report as DbReport
+from ..database.models import Report as DbReport, ReportAdded
 from ..services.crawler import OpenAlexWork, normalize_doi
+from .postprocessing import PostprocessingOptions, postprocessor_registry
 from ..utils.trial_registration_id import is_trial_registration
 
 logger = logging.getLogger(__name__)
@@ -136,10 +137,19 @@ async def _finalize_project_upload(project_id: str, project_repo, vectorstore, m
     await pubsub_service.publish_project_update(project_id)
 
 
-async def process_report(reports: List[DbReport], project_id: str, ctx: RequestContext) -> None:
+async def process_report(
+    reports: List[DbReport], project_id: str, ctx: RequestContext, options: Optional[PostprocessingOptions] = None
+) -> None:
     """Auto-search + download each report's PDF and compute its embedding, then
-    finalize the project once every report has settled.
+    finalize the project once every report has settled. Postprocessors enabled by
+    `options` (see postprocessing.py) run per report once both are done; they don't
+    delay finalizing the project, but are awaited before this returns.
     """
+    options = options or {}
+    postprocessors = postprocessor_registry.enabled_for(options)
+    for postprocessor in postprocessors:
+        await postprocessor.prepare(project_id, [report.id for report in reports], options, ctx)
+
     timeout = httpx.Timeout(30.0, connect=10.0)
 
     openalex_works = asyncio.ensure_future(_fetch_openalex_works(reports, ctx.open_alex_service))
@@ -178,11 +188,35 @@ async def process_report(reports: List[DbReport], project_id: str, ctx: RequestC
                 await session.commit()
                 await ctx.pubsub_service.publish_project_update(project_id)
 
+    postprocess_tasks: List[asyncio.Future] = []
+
+    async def postprocess(report):
+        async with AsyncSessionLocal() as session:
+            write_ctx = RequestContext(db=session, user_id=ctx.user_id)
+            if not await write_ctx.project_repo.get_project_by_id(project_id):  # project already deleted
+                return
+            for postprocessor in postprocessors:
+                try:
+                    await postprocessor.process(report.id, project_id, options, write_ctx)
+                except Exception:
+                    logger.exception("Postprocessing failed for report %s", report.id)
+                    await session.rollback()
+            await ctx.pubsub_service.publish_project_update(project_id)
+
+    async def has_pdf_file(report) -> bool:
+        async with AsyncSessionLocal() as session:
+            current = await RequestContext(db=session, user_id=ctx.user_id).report_repo.get_report_by_id(report.id)
+            return current is not None and (current.report_number or 0) > 0
+
+    async def settle(report, client):
+        await asyncio.gather(prepare_vectorstore(report), load_pdf(report, client))
+        # Without a PDF the postprocessing waits (stays pending) until one is uploaded manually,
+        # which triggers it (see run_pending_postprocessing).
+        if postprocessors and await has_pdf_file(report):
+            postprocess_tasks.append(asyncio.ensure_future(postprocess(report)))
+
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
-        await asyncio.gather(
-            *(prepare_vectorstore(report) for report in reports),
-            *(load_pdf(report, client) for report in reports),
-        )
+        await asyncio.gather(*(settle(report, client) for report in reports))
 
         # Finalize with a new session
         async with AsyncSessionLocal() as session:
@@ -191,11 +225,14 @@ async def process_report(reports: List[DbReport], project_id: str, ctx: RequestC
                 project_id, finalize_ctx.project_repo, ctx.vectorstore_service, ctx.maintenance_service, ctx.pubsub_service
             )
 
+    await asyncio.gather(*postprocess_tasks)
+
 
 async def run_process_report_background(
     project_id: str,
     report_ids: List[int],
     user_id: str,
+    options: Optional[PostprocessingOptions] = None,
 ) -> None:
     async with AsyncSessionLocal() as db:
         ctx = RequestContext(db=db, user_id=user_id)
@@ -206,4 +243,27 @@ async def run_process_report_background(
             if report is not None:
                 reports.append(report)
 
-        await process_report(reports, project_id, ctx)
+        await process_report(reports, project_id, ctx, options)
+
+
+async def run_pending_postprocessing(report_id: int, user_id: str) -> None:
+    """Runs the postprocessors that are still pending for a report whose PDF was just
+    uploaded manually (they wait for the PDF, see process_report)."""
+    async with AsyncSessionLocal() as session:
+        ctx = RequestContext(db=session, user_id=user_id)
+        report_added = await session.get(ReportAdded, report_id)
+        if report_added is None:
+            return
+        project_id = report_added.project_id
+        for postprocessor in postprocessor_registry.all():
+            pending_select = postprocessor.pending_report_ids()
+            rows = await session.execute(pending_select.where(pending_select.selected_columns[0] == report_id))
+            if rows.first() is None:
+                continue
+            try:
+                # The upload options are not stored; postprocessors only rely on their own pending marker here.
+                await postprocessor.process(report_id, project_id, {}, ctx)
+            except Exception:
+                logger.exception("Postprocessing failed for report %s", report_id)
+                await session.rollback()
+        await ctx.pubsub_service.publish_project_update(project_id)

@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import { UserDto } from "../../../types/user/user.dto";
 import { Role } from "../../../enums/role.enum";

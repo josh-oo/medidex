@@ -1,5 +1,3 @@
-"use client";
-
 import { StudyDetails } from "@/components/ui/study-view/study-details";
 import { useDetailsSheet } from "@/context/details-sheet-context";
 import { Sheet } from "@/components/ui/sheet";

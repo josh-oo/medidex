@@ -1,5 +1,3 @@
-"use client"
-
 import { AddStudyDialog } from "@/components/ui/study-view/add-study-dialog"
 import { useExtensionRegistry, type AddStudyTriggerSlotProps } from "./extension-registry-context"
 

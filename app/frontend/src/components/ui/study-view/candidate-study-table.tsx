@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useMemo, useCallback, useEffect} from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +22,7 @@ import { useReportStore } from "@/hooks/use-report-store";
 import { useDetailsSheet } from "@/context/details-sheet-context";
 import { assignNewStudyToReportByReportId } from "@/lib/api/reportApi";
 import { searchStudies } from "@/lib/api/studiesApi";
+import { onStudySearchRequest } from "@/lib/study-search-request";
 import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
 
 interface CandidateStudyTableProps {
@@ -242,6 +241,17 @@ export function CandidateStudyTable({
     }
   }, [reportId, currentReport?.trialId, currentReport?.preliminaryTrialId, runSearch, clearSearch]);
 
+  // Searches requested from elsewhere in the UI (e.g. a clicked tag in a report abstract).
+  useEffect(
+    () =>
+      onStudySearchRequest((query) => {
+        const trimmed = query.trim();
+        setSearchQuery(trimmed);
+        if (trimmed.length >= MIN_SEARCH_QUERY_LENGTH) void runSearch(trimmed);
+      }),
+    [runSearch]
+  );
+
   const handleStudyClick = (study: StudyDto) => {
     openWithStudyItem(study)
   };
@@ -257,12 +267,6 @@ export function CandidateStudyTable({
               <Microscope className="h-6 w-6 text-primary" />
             </div>
             <h2 className="text-lg font-semibold">Relevant Studies</h2>
-          </div>
-          <div className="flex items-center gap-2">
-              <AddStudyTriggerSlot
-                currentReportId={reportId}
-                onSaveStudy={handleSaveNewStudy}
-              />
           </div>
         </div>
 
@@ -347,6 +351,8 @@ export function CandidateStudyTable({
                       isAssigned={assignedStudyIds.has(study.studyId)}
                       onClick={handleStudyClick}
                       onAssign={(target) => void handleAssignStudy(target)}
+                      badge={<StudyBadgeSlot reportId={reportId} study={study} />}
+                      reportId={reportId}
                     />
                   ))}
                   {searchNextCursor && (
@@ -376,6 +382,8 @@ export function CandidateStudyTable({
                   isAssigned={assignedStudyIds.has(study.studyId)}
                   onClick={handleStudyClick}
                   onAssign={(target) => void handleAssignStudy(target)}
+                  badge={<StudyBadgeSlot reportId={reportId} study={study} />}
+                  reportId={reportId}
                 />
               ))}
               <div className="pt-4 border-b border-border" />
@@ -412,6 +420,7 @@ export function CandidateStudyTable({
                     onClick={handleStudyClick}
                     onAssign={(target) => void handleAssignStudy(target)}
                     badge={<StudyBadgeSlot reportId={reportId} study={study} />}
+                    reportId={reportId}
                   />
                 ))}
 
@@ -421,6 +430,17 @@ export function CandidateStudyTable({
                 )}
               </>
             )}
+          </div>
+
+          {/* Only needed when none of the candidates above match */}
+          <div className="pt-2 border-t border-dashed border-border">
+            <p className="text-xs text-muted-foreground pb-2 pt-3 text-center">
+              None of these match?
+            </p>
+            <AddStudyTriggerSlot
+              currentReportId={reportId}
+              onSaveStudy={handleSaveNewStudy}
+            />
           </div>
         </div>
       </div>

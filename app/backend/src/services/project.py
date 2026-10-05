@@ -62,7 +62,9 @@ class ProjectResourceService:
         # state (see models.py) kept in sync by the app itself, so this is now a plain SQL
         # read instead of a live Qdrant retrieve + a filesystem stat per report.
         embedded_reports, pdf_ready_reports = await self.report_repo.get_readiness_sets(report_ids)
-        ready_reports = embedded_reports & pdf_ready_reports
+        # Reports still being postprocessed (e.g. metadata extraction) aren't ready yet either.
+        pending_postprocessing = await self.report_repo.get_postprocessing_pending(report_ids)
+        ready_reports = (embedded_reports & pdf_ready_reports) - pending_postprocessing
         return embedded_reports, pdf_ready_reports, ready_reports
 
     async def get_project_stats(self, project: DbProject) -> Project:
@@ -74,6 +76,8 @@ class ProjectResourceService:
         confirmed_report_count = await self.project_repo.get_confirmed_report_count_for_project(project.id)
 
         embedded_reports, reports_with_pdf, ready_reports = await self.get_vectorized_and_ready_report_ids(project.id)
+
+        postprocessing_total, postprocessing_finished = await self.report_repo.get_postprocessing_progress(report_ids)
 
         assignees = await self.project_repo.get_project_assignees(project.id)
         assignee_ids = [user_id for user_id, _ in assignees if user_id]
@@ -103,6 +107,8 @@ class ProjectResourceService:
             numberReportsReadyForReview=ready_for_review_count,
             numberReportsAutoSearchedPdf=auto_searched_pdf_count,
             numberReportsConfirmed=confirmed_report_count,
+            numberReportsPostprocessing=postprocessing_total,
+            numberReportsPostprocessed=postprocessing_finished,
             owner=project.uploaded_by,
             assignees=assignee_payload,
         )

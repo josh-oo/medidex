@@ -37,6 +37,7 @@ import {
   type AssigneeOption,
   type AssigneeOptionsGroup,
 } from "@/context/assignee-options-context";
+import { ProjectCardProgressSlot } from "@/context/study-report-slots-context";
 
 const EMPTY_USERS: UserDto[] = [];
 
@@ -418,6 +419,8 @@ export function ProjectCard({
                 style={{ width: `${pdfSerchPercent}%` }}
               />
             </div>
+
+            <ProjectCardProgressSlot project={project} />
           </div>
         )}
 

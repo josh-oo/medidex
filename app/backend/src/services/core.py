@@ -248,8 +248,7 @@ class RelatedTagSearchService:
         if aspect not in (TagCategories.interventions, TagCategories.conditions, TagCategories.outcomes):
             raise UnsupportedAspectError(f"No related-tag search is defined for aspect '{aspect}'")
 
-        #similar_studies = await self.study_similarity_service.get_similar_studies_by_id(report_id, TagCategories.default, cutoff, k, None, None, False)
-        similar_studies, _has_more = await self.study_similarity_service.get_similar_studies_by_id(report_id, cutoff, k, 0, None, None, False)
+        similar_studies, _has_more = await self.study_similarity_service.get_similar_studies_by_id(report_id, cutoff, k, 0)
         predicted_studies = [row.id for row in similar_studies]
 
         vectors = await self.vectorstore.get_vectors_by_report_id(report_id)
