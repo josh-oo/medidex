@@ -25,7 +25,7 @@ export default function Home() {
 
   const loadData = useCallback(
     async (cancelledRef?: { current: boolean }) => {
-      const [projectsResult, tasksResult] = await Promise.all([
+      const [projectsResult, tasksResult, users] = await Promise.all([
         getProjects().catch((error) => {
           console.error("Failed to fetch projects:", error);
           return [] as ProjectDto[];
@@ -34,6 +34,12 @@ export default function Home() {
           console.error("Failed to fetch tasks:", error);
           return [] as TaskDto[];
         }),
+        isAdmin
+          ? listUsers().catch((error) => {
+              console.error("Failed to fetch assignable users:", error);
+              return [] as UserDto[];
+            })
+          : Promise.resolve([] as UserDto[]),
       ]);
 
       const ownerIds = Array.from(
@@ -49,13 +55,6 @@ export default function Home() {
             return new Map<string, string>();
           })
         : new Map<string, string>();
-
-      const users = isAdmin
-        ? await listUsers().catch((error) => {
-            console.error("Failed to fetch assignable users:", error);
-            return [] as UserDto[];
-          })
-        : [];
 
       if (cancelledRef?.current) return;
       setProjects(projectsResult);

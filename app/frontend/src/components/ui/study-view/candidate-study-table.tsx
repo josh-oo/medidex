@@ -439,6 +439,7 @@ export function CandidateStudyTable({
             </p>
             <AddStudyTriggerSlot
               currentReportId={reportId}
+              extensions={currentReport?.extensions}
               onSaveStudy={handleSaveNewStudy}
             />
           </div>

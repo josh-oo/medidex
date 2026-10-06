@@ -29,16 +29,6 @@ export const listUsers = (config?: AxiosRequestConfig): Promise<UserDto[]> => {
     .then((response) => response.data.map(toUserDto));
 };
 
-export const getUserById = (id: string, config?: AxiosRequestConfig): Promise<UserDto | null> => {
-  return apiClient
-    .get<UserSummaryResponse>(`/admin/users/${id}`, config)
-    .then((response) => toUserDto(response.data))
-    .catch((error) => {
-      if (error?.response?.status === 404) return null;
-      throw error;
-    });
-};
-
 export const updateUserRoles = (
   id: string,
   roles: Role[],

@@ -1,10 +1,6 @@
 import { useExtensionRegistry } from "./extension-registry-context"
 
-import type {
-  AssigneeOption,
-  AssigneeOptionsGroup,
-  AssigneeOptionsResolver,
-} from "./extension-registry-context"
+import type { AssigneeOptionsGroup } from "./extension-registry-context"
 
 export type {
   AssigneeOption,

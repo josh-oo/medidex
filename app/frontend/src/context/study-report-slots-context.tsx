@@ -1,3 +1,4 @@
+import type { ComponentType } from "react"
 import { useExtensionRegistry } from "./extension-registry-context"
 
 import type {
@@ -26,6 +27,10 @@ export type {
   StudyContextMenuItemProps,
 } from "./extension-registry-context"
 
+const renderSlots = <P extends object>(slots: ComponentType<P>[], props: P) => (
+  <>{slots.map((Slot, index) => <Slot key={index} {...props} />)}</>
+)
+
 export function useStudyCardClassName(props: StudyCardStyleProps) {
   const { studyCardClassNames } = useExtensionRegistry()
   return studyCardClassNames
@@ -36,38 +41,38 @@ export function useStudyCardClassName(props: StudyCardStyleProps) {
 
 export function StudyBadgeSlot(props: StudyBadgeSlotProps) {
   const { studyBadges } = useExtensionRegistry()
-  return <>{studyBadges.map((Slot, index) => <Slot key={index} {...props} />)}</>
+  return renderSlots(studyBadges, props)
 }
 
 export function StudyContextMenuSlot(props: StudyContextMenuItemProps) {
   const { studyContextMenuItems } = useExtensionRegistry()
-  return <>{studyContextMenuItems.map((Slot, index) => <Slot key={index} {...props} />)}</>
+  return renderSlots(studyContextMenuItems, props)
 }
 
 export function ReportBannerSlot(props: ReportBannerSlotProps) {
   const { reportBanners } = useExtensionRegistry()
-  return <>{reportBanners.map((Slot, index) => <Slot key={index} {...props} />)}</>
+  return renderSlots(reportBanners, props)
 }
 
 export function ReportStatusSlot(props: ReportStatusSlotProps) {
   const { reportStatuses } = useExtensionRegistry()
-  return <>{reportStatuses.map((Slot, index) => <Slot key={index} {...props} />)}</>
+  return renderSlots(reportStatuses, props)
 }
 
 export function ReportActionsSlot(props: ReportActionsSlotProps) {
   const { reportActions } = useExtensionRegistry()
-  return <>{reportActions.map((Slot, index) => <Slot key={index} {...props} />)}</>
+  return renderSlots(reportActions, props)
 }
 
 
 export function ReportCardExtrasSlot(props: ReportCardSlotProps) {
   const { reportCardExtras } = useExtensionRegistry()
-  return <>{reportCardExtras.map((Slot, index) => <Slot key={index} {...props} />)}</>
+  return renderSlots(reportCardExtras, props)
 }
 
 export function ProjectUploadOptionsSlot(props: ProjectUploadOptionsSlotProps) {
   const { projectUploadOptions } = useExtensionRegistry()
-  return <>{projectUploadOptions.map((Slot, index) => <Slot key={index} {...props} />)}</>
+  return renderSlots(projectUploadOptions, props)
 }
 
 export function ReportAbstractSlot(props: ReportAbstractSlotProps) {
@@ -77,5 +82,5 @@ export function ReportAbstractSlot(props: ReportAbstractSlotProps) {
 
 export function ProjectCardProgressSlot(props: ProjectCardSlotProps) {
   const { projectCardProgress } = useExtensionRegistry()
-  return <>{projectCardProgress.map((Slot, index) => <Slot key={index} {...props} />)}</>
+  return renderSlots(projectCardProgress, props)
 }

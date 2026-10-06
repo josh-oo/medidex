@@ -22,7 +22,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Search, Calendar, UserPlus, Check, Settings, FileUp, ClipboardCheck, Trash2, ArrowDown, Microscope, AlertTriangle } from "lucide-react";
+import { Search, Calendar, UserPlus, Check, Settings, FileUp, ClipboardCheck, Trash2, ArrowDown, Microscope, AlertTriangle, type LucideIcon } from "lucide-react";
 import RelativeTime from "@/components/ui/relative-time";
 import type { ProjectDto, AssigneeDto } from "@/types/apiDTOs";
 import type { UserDto } from "@/types/user/user.dto";
@@ -64,6 +64,57 @@ const clamp = (value: number, min = 0, max = 100) => {
   return Math.min(Math.max(value, min), max);
 };
 
+interface Stage {
+  label: string;
+  icon: LucideIcon;
+  value: number;
+  total: number;
+  fillClass: string;
+}
+
+const percentOf = (value: number, total: number) =>
+  total > 0 ? Math.round((value / total) * 100) : 0;
+
+function StageProgress({ stage, tone }: { stage: Stage; tone: "muted" | "foreground" }) {
+  const textClass = tone === "muted" ? "text-muted-foreground" : "text-foreground";
+  const Icon = stage.icon;
+
+  return (
+    <>
+      <div className={`flex flex-wrap items-center justify-between gap-2 text-xs ${textClass}`}>
+        <div className="flex items-center gap-1 font-semibold uppercase tracking-wide">
+          <Icon className="h-3.5 w-3.5" />
+          <span>{stage.label}</span>
+        </div>
+        <span className={`text-sm font-semibold ${textClass}`}>
+          {stage.value} / {stage.total}
+        </span>
+      </div>
+      <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
+        <div
+          className={`h-full ${stage.fillClass}`}
+          style={{ width: `${percentOf(stage.value, stage.total)}%` }}
+        />
+      </div>
+    </>
+  );
+}
+
+function StageButton({ stage, onClick }: { stage: Stage; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="w-full rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-muted/30"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      <StageProgress stage={stage} tone="foreground" />
+    </button>
+  );
+}
+
 export function ProjectCard({
   project,
   index = 0,
@@ -74,19 +125,25 @@ export function ProjectCard({
 }: ProjectCardProps) {
   const navigate = useNavigate();
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [assigneeIds, setAssigneeIds] = useState<string[]>(() =>
-    (project.assignees ?? []).map((assignee) => assignee.userId),
-  );
+  // Optimistic assignee ids shown after a toggle until the parent hands down a fresh
+  // `project.assignees`; an override made against an older array is ignored.
+  const [assigneeOverride, setAssigneeOverride] = useState<{
+    base: ProjectDto["assignees"];
+    ids: string[];
+  } | null>(null);
   const [isAssigneePopoverOpen, setIsAssigneePopoverOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [pendingAssigneeId, setPendingAssigneeId] = useState<string | null>(null);
   const extraGroups = useAssigneeOptionsSlot(project.projectId);
+  const assigneeIds = useMemo(
+    () =>
+      assigneeOverride?.base === project.assignees
+        ? assigneeOverride.ids
+        : (project.assignees ?? []).map((assignee) => assignee.userId),
+    [assigneeOverride, project.assignees],
+  );
   const isUpdatingAssignees = pendingAssigneeId !== null;
-
-  useEffect(() => {
-    setAssigneeIds((project.assignees ?? []).map((assignee) => assignee.userId));
-  }, [project.assignees]);
 
   useEffect(() => {
     const scheduleRefresh = () => {
@@ -101,11 +158,9 @@ export function ProjectCard({
     };
 
     const stopStream = streamProjectUpdates(project.projectId, {
-      onEvent: (event) => {
-        console.log(`Project update received for ${project.projectId}:`, event);
+      onEvent: () => {
         scheduleRefresh();
       },
-      onComplete: () => {},
       onError: (error) => {
         console.error(`Project stream error for ${project.projectId}:`, error);
       },
@@ -125,28 +180,24 @@ export function ProjectCard({
     [assignableUsers],
   );
 
-  const extraOptionsById = useMemo(() => {
-    const map = new Map<string, AssigneeOption>();
-    extraGroups.forEach((group) => group.options.forEach((option) => map.set(option.id, option)));
-    return map;
-  }, [extraGroups]);
-
-  const extraToggleById = useMemo(() => {
-    const map = new Map<string, AssigneeOptionsGroup["onToggle"]>();
-    extraGroups.forEach((group) => group.options.forEach((option) => map.set(option.id, group.onToggle)));
+  const extraById = useMemo(() => {
+    const map = new Map<string, { option: AssigneeOption; onToggle: AssigneeOptionsGroup["onToggle"] }>();
+    extraGroups.forEach((group) =>
+      group.options.forEach((option) => map.set(option.id, { option, onToggle: group.onToggle }))
+    );
     return map;
   }, [extraGroups]);
 
   const knownUsers = useMemo(() => {
     const map = new Map<string, UserDto>();
     sortedUsers.forEach((user) => map.set(user.id, user));
-    extraOptionsById.forEach((option, id) => {
+    extraById.forEach(({ option }, id) => {
       if (!map.has(id)) {
         map.set(id, { id: option.id, name: option.name, email: "", roles: [], isApproved: true });
       }
     });
     return map;
-  }, [sortedUsers, extraOptionsById]);
+  }, [sortedUsers, extraById]);
 
   const assigneeMap = useMemo(() => {
     const map = new Map<string, AssigneeDto>();
@@ -171,7 +222,7 @@ export function ProjectCard({
         return;
       }
       const isSelected = assigneeIds.includes(normalizedUserId);
-      const customToggle = extraToggleById.get(normalizedUserId);
+      const customToggle = extraById.get(normalizedUserId)?.onToggle;
 
       setPendingAssigneeId(normalizedUserId);
       try {
@@ -183,13 +234,11 @@ export function ProjectCard({
           await assignUserToProject(project.projectId, normalizedUserId);
         }
 
-        setAssigneeIds((prev) => {
-          const next = isSelected
-            ? prev.filter((id) => id !== normalizedUserId)
-            : [...prev, normalizedUserId];
-          onAssigneesChange?.({ projectId: project.projectId, userIds: next });
-          return next;
-        });
+        const next = isSelected
+          ? assigneeIds.filter((id) => id !== normalizedUserId)
+          : [...assigneeIds, normalizedUserId];
+        setAssigneeOverride({ base: project.assignees, ids: next });
+        onAssigneesChange?.({ projectId: project.projectId, userIds: next });
       } catch (error) {
         console.error(`Failed to update assignee ${normalizedUserId}`, error);
         window.alert(
@@ -201,7 +250,7 @@ export function ProjectCard({
         setPendingAssigneeId(null);
       }
     },
-    [assigneeIds, isUpdatingAssignees, onAssigneesChange, project.projectId, extraToggleById]
+    [assigneeIds, isUpdatingAssignees, onAssigneesChange, project.projectId, project.assignees, extraById]
   );
 
   const handleDeleteProject = useCallback(async () => {
@@ -219,11 +268,11 @@ export function ProjectCard({
     } finally {
       setIsDeleting(false);
     }
-  }, [isDeleting, project.name, project.projectId, onDeleted]);
+  }, [isDeleting, project.projectId, onDeleted]);
 
   const totalReports = project.numberReportsTotal;
   const preprocessedCount = project.numberReportsPreProcessed;
-  const hasPdfCount = project.numberReportsWithPdf
+  const hasPdfCount = project.numberReportsWithPdf;
   const readyForProcessingCount = project.numberReportsReadyForProcessing;
   const readyForManualPdfSearch = project.numberReportsAutoSearchedPdf;
   const readyForReviewCount = project.numberReportsReadyForReview;
@@ -240,7 +289,7 @@ export function ProjectCard({
   }, [project.projectId, navigate]);
 
 
-  const processingStage = {
+  const processingStage: Stage = {
     label: "Preprocessing",
     icon: Settings,
     value: preprocessedCount,
@@ -248,7 +297,7 @@ export function ProjectCard({
     fillClass: "bg-primary/60",
   };
 
-  const pdfAutoSearchStage = {
+  const pdfAutoSearchStage: Stage = {
     label: "PDF Search",
     icon: Search,
     value: readyForManualPdfSearch,
@@ -256,31 +305,21 @@ export function ProjectCard({
     fillClass: "bg-primary/60",
   };
 
-  const pdfStage = {
+  const pdfStage: Stage = {
     label: "Upload Missing PDFs",
     icon: FileUp,
     value: hasPdfCount,
     total: readyForManualPdfSearch,
     fillClass: "bg-primary",
-    onClick: handleStartPdfUpload,
   };
 
-  const reviewStage = {
+  const reviewStage: Stage = {
     label: "Review results",
     icon: ClipboardCheck,
     value: readyConfirmedCount,
     total: readyForReviewCount,
     fillClass: "bg-emerald-500/70",
-    onClick: handleStartReview,
   };
-
-  const processingStagePercent = processingStage && processingStage.total > 0
-    ? Math.round((processingStage.value / processingStage.total) * 100)
-    : 0;
-
-  const pdfSerchPercent = pdfAutoSearchStage && pdfAutoSearchStage .total > 0
-    ? Math.round((pdfAutoSearchStage .value / pdfAutoSearchStage .total) * 100)
-    : 0;
 
   const getReviewerProgress = (userId: string) =>
     clamp(((assigneeMap.get(userId)?.numberReportsLinked ?? 0) / totalReports) * 100);
@@ -299,7 +338,7 @@ export function ProjectCard({
 
   const renderUserCommandItem = (user: { id: string; name: string }) => {
     const isSelected = assigneeIds.includes(user.id);
-    const Icon = extraOptionsById.get(user.id)?.icon;
+    const Icon = extraById.get(user.id)?.option.icon;
     return (
       <CommandItem
         key={user.id}
@@ -386,74 +425,19 @@ export function ProjectCard({
       </div>
 
       <div className="mt-4 space-y-3">
-        {processingStage && processingStage.icon && (
-          <div className="rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <div className="flex items-center gap-1 font-semibold uppercase tracking-wide">
-                {processingStage.icon && <processingStage.icon className="h-3.5 w-3.5" />}
-                <span>{processingStage.label}</span>
-              </div>
-              <span className="text-sm font-semibold text-muted-foreground">
-                {processingStage.value} / {processingStage.total}
-              </span>
-            </div>
-            <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className={`h-full ${processingStage.fillClass}`}
-                style={{ width: `${processingStagePercent}%` }}
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground pt-4">
-              <div className="flex items-center gap-1 font-semibold uppercase tracking-wide">
-                {pdfAutoSearchStage.icon && <pdfAutoSearchStage.icon className="h-3.5 w-3.5" />}
-                <span>{pdfAutoSearchStage.label}</span>
-              </div>
-              <span className="text-sm font-semibold text-muted-foreground">
-                {pdfAutoSearchStage.value} / {pdfAutoSearchStage.total}
-              </span>
-            </div>
-            <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className={`h-full ${pdfAutoSearchStage.fillClass}`}
-                style={{ width: `${pdfSerchPercent}%` }}
-              />
-            </div>
-
-            <ProjectCardProgressSlot project={project} />
+        <div className="rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2">
+          <StageProgress stage={processingStage} tone="muted" />
+          <div className="pt-4">
+            <StageProgress stage={pdfAutoSearchStage} tone="muted" />
           </div>
-        )}
+          <ProjectCardProgressSlot project={project} />
+        </div>
 
         <div className="flex justify-center py-0.5 text-muted-foreground/70" aria-hidden>
           <ArrowDown className="h-4 w-4" />
         </div>
 
-        {pdfStage && pdfStage.icon && (
-          <button
-            type="button"
-            className="w-full rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-muted/30"
-            onClick={(event) => {
-              event.stopPropagation();
-              pdfStage.onClick?.();
-            }}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-foreground">
-              <div className="flex items-center gap-1 font-semibold uppercase tracking-wide">
-                {pdfStage.icon && <pdfStage.icon className="h-3.5 w-3.5" />}
-                <span>{pdfStage.label}</span>
-              </div>
-              <span className="text-sm font-semibold text-foreground">
-                {pdfStage.value} / {pdfStage.total}
-              </span>
-            </div>
-            <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className={`h-full ${pdfStage.fillClass}`}
-                style={{ width: `${pdfStage.total > 0 ? Math.round((pdfStage.value / pdfStage.total) * 100) : 0}%` }}
-              />
-            </div>
-          </button>
-        )}
+        <StageButton stage={pdfStage} onClick={handleStartPdfUpload} />
 
         <div className="flex justify-center py-0.5 text-muted-foreground/70" aria-hidden>
           <ArrowDown className="h-4 w-4" />
@@ -474,7 +458,7 @@ export function ProjectCard({
           >
             {hasAssigneePanels ? (
               assigneeProgressPanels.map((panel) => {
-                const Icon = extraOptionsById.get(panel.userId)?.icon;
+                const Icon = extraById.get(panel.userId)?.option.icon;
 
                 return (
                   <div
@@ -508,32 +492,7 @@ export function ProjectCard({
           <ArrowDown className="h-4 w-4" />
         </div>
 
-        {reviewStage && reviewStage.icon && (
-          <button
-            type="button"
-            className="w-full rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-muted/30"
-            onClick={(event) => {
-              event.stopPropagation();
-              reviewStage.onClick?.();
-            }}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-foreground">
-              <div className="flex items-center gap-1 font-semibold uppercase tracking-wide">
-                {reviewStage.icon && <reviewStage.icon className="h-3.5 w-3.5" />}
-                <span>{reviewStage.label}</span>
-              </div>
-              <span className="text-sm font-semibold text-foreground">
-                {reviewStage.value} / {reviewStage.total}
-              </span>
-            </div>
-            <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className={`h-full ${reviewStage.fillClass}`}
-                style={{ width: `${reviewStage.total > 0 ? Math.round((reviewStage.value / reviewStage.total) * 100) : 0}%` }}
-              />
-            </div>
-          </button>
-        )}
+        <StageButton stage={reviewStage} onClick={handleStartReview} />
       </div>
 
       <div className="mt-4 space-y-3 border-t border-border/50 pt-3">

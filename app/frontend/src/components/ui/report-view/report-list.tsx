@@ -1,4 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { FlagReportDialog, type FlagTarget } from "./flag-report-dialog";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useReportPages } from "@/hooks/use-report-pages";
 import {
   FileText,
   Calendar,
@@ -18,16 +21,6 @@ import { ReportAssignedStudiesBadges } from "@/components/ui/study-view/report-a
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,8 +34,6 @@ import { useReportStore } from "@/hooks/use-report-store";
 import { FilterMode, GetProjectReportsParams, ReportCurationDto, ReportFilterDimension, ReportFiltersState, Page } from "@/types/apiDTOs";
 import { toast } from "sonner";
 import {
-  getReportFlagByReportId,
-  upsertReportFlagByReportId,
   deleteReportFlagByReportId,
   getReportPdf,
 } from "@/lib/api/reportApi";
@@ -97,11 +88,7 @@ export function ReportList({
   const hasAbstractExtension = Boolean(useExtensionRegistry().reportAbstract);
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ReportFiltersState>({});
-  const [flagDialogOpen, setFlagDialogOpen] = useState(false);
-  const [selectedFlagReport, setSelectedFlagReport] = useState<{ id: number; title: string } | null>(null);
-  const [flagDetails, setFlagDetails] = useState("");
-  const [flagVisibility, setFlagVisibility] = useState<"private" | "public">("private");
-  const [isSubmittingFlag, setIsSubmittingFlag] = useState(false);
+  const [flagTarget, setFlagTarget] = useState<FlagTarget | null>(null);
   const [isDeletingFlagReportId, setIsDeletingFlagReportId] = useState<number | null>(null);
   const params = useParams();
   const projectId =
@@ -137,221 +124,39 @@ export function ReportList({
   }, [selectedReportId]);
 
   const setReportFlag = useReportStore((state) => state.setFlag);
-  const addReports = useReportStore((state) => state.addReports);
+  const debouncedSearch = useDebouncedValue(searchQuery.trim(), 300);
 
-  // Seeded from the parent layout's own initial fetch so the list doesn't flash empty while
-  // the (functionally identical) fetch below is still in flight.
-  const [filteredReports, setFilteredReports] = useState<ReportCurationDto[]>(initialReports);
-  const [isLoading, setIsLoading] = useState(false);
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  // Cursor for the next page of the *current* search/filter combination - reset to null
-  // whenever that combination changes, since a cursor from one filter set is meaningless
-  // against another.
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-
-  // Only the free-text search is debounced (it fires on every keystroke); a filter chip click
-  // is already a single, deliberate action, so it fetches immediately below instead of also
-  // waiting out a debounce window on top of the network round trip.
-  useEffect(() => {
-    const handle = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
-    return () => clearTimeout(handle);
-  }, [searchQuery]);
-
-  // Guards against a slow handleLoadMore response landing after a newer filter/search/project
-  // fetch has already replaced the list it was appending to - every effect/handler below that
-  // starts a fetch bumps this first and checks it's still current before applying the result.
-  const requestIdRef = useRef(0);
-
-  // A project switch swaps in the new project's own initial data right away, same as on
-  // first mount, rather than showing the previous project's reports until the fetch below
-  // (also triggered by the projectId change) resolves.
-  useEffect(() => {
-    requestIdRef.current += 1;
-    setFilteredReports(initialReports);
-    setNextCursor(null);
-  }, [projectId, initialReports]);
-
-  // Always the single source of truth for what's rendered - no separate "use the client store's
-  // snapshot when no filter is active" path, so clearing a filter/search always re-fetches
-  // from the server instead of silently falling back to a possibly-stale local cache. Always
-  // fetches the first page - a filter/search change starts pagination over, it never resumes
-  // from wherever the previous combination's cursor left off.
-  useEffect(() => {
-    if (!projectId) {
-      return;
-    }
-
-    const requestId = ++requestIdRef.current;
-    let cancelled = false;
-    setIsLoading(true);
-
-    fetchReports(projectId, {
-      search: debouncedSearch || undefined,
-      ...filters,
-    })
-      .then((result) => {
-        if (cancelled || requestIdRef.current !== requestId) return;
-        setFilteredReports(result.items);
-        setNextCursor(result.nextCursor);
-        addReports(result.items);
-        // The open report fell out of the filtered list (only decidable once the whole
-        // result is in, i.e. no further page) - drop it from the URL too.
-        const filtersActive = Boolean(debouncedSearch) || Object.keys(filters).length > 0;
-        if (
-          filtersActive &&
-          selectedReportId !== null &&
-          result.nextCursor === null &&
-          !result.items.some((r) => r.reportId === selectedReportId)
-        ) {
-          const query = new URLSearchParams(
-            Object.entries({ ...queryParams })
-              .filter(([_, v]) => v !== undefined)
-              .map(([k, v]) => [k, String(v)])
-          ).toString();
-          navigate(`/${baseUrl}/${projectId}${query ? `?${query}` : ""}`, { replace: true });
-        }
-      })
-      .catch((error) => {
-        console.error("Error fetching reports:", error);
-        if (!cancelled && requestIdRef.current === requestId) {
-          setFilteredReports([]);
-          setNextCursor(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-    // selectedReportId is deliberately not a dependency: selecting a report must not refetch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, debouncedSearch, filters, fetchReports, addReports]);
-
-  const handleLoadMore = () => {
-    if (!projectId || !nextCursor || isLoadingMore) {
-      return;
-    }
-
-    const requestId = requestIdRef.current;
-    setIsLoadingMore(true);
-
-    fetchReports(projectId, {
-      search: debouncedSearch || undefined,
-      ...filters,
-      cursor: nextCursor,
-    })
-      .then((result) => {
-        // A filter/search/project change since this request started means the list it would
-        // append to no longer belongs to the current view - drop it rather than corrupt the
-        // new list with reports (and a cursor) from a stale filter combination.
-        if (requestIdRef.current !== requestId) return;
-        setFilteredReports((prev) => [...prev, ...result.items]);
-        setNextCursor(result.nextCursor);
-        addReports(result.items);
-      })
-      .catch((error) => {
-        console.error("Error fetching more reports:", error);
-        toast.error("Could not load more reports. Please try again.");
-      })
-      .finally(() => {
-        setIsLoadingMore(false);
-      });
-  };
-
-  const patchFilteredReportFlag = (reportId: number, flag: string | undefined) => {
-    setFilteredReports((prev) =>
-      prev.map((r) => (r.reportId === reportId ? { ...r, flag } : r))
-    );
-  };
-
-  useEffect(() => {
-    if (!flagDialogOpen || !selectedFlagReport) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadExistingFlag = async () => {
-      try {
-        const payload = await getReportFlagByReportId(selectedFlagReport.id);
-
-        if (cancelled) {
-          return;
-        }
-
-        if (payload && typeof payload.message === "string") {
-          setFlagDetails(payload.message);
-          setFlagVisibility(payload.public ? "public" : "private");
-          return;
-        }
-
-        setFlagDetails("");
-        setFlagVisibility("private");
-      } catch (error) {
-        console.error("Error fetching report flag:", error);
-        if (cancelled) {
-          return;
-        }
-        setFlagDetails("");
-        setFlagVisibility("private");
+  const {
+    reports: filteredReports,
+    isLoading,
+    isLoadingMore,
+    hasMore,
+    loadMore: handleLoadMore,
+    patchFlag: patchFilteredReportFlag,
+  } = useReportPages({
+    projectId,
+    fetchReports,
+    initialReports,
+    search: debouncedSearch,
+    filters,
+    onFirstPage: (page, filtersActive) => {
+      // The open report fell out of the filtered list (only decidable once the whole
+      // result is in, i.e. no further page) - drop it from the URL too.
+      if (
+        filtersActive &&
+        selectedReportId !== null &&
+        page.nextCursor === null &&
+        !page.items.some((r) => r.reportId === selectedReportId)
+      ) {
+        const query = new URLSearchParams(
+          Object.entries({ ...queryParams })
+            .filter(([_, v]) => v !== undefined)
+            .map(([k, v]) => [k, String(v)])
+        ).toString();
+        navigate(`/${baseUrl}/${projectId}${query ? `?${query}` : ""}`, { replace: true });
       }
-    };
-
-    void loadExistingFlag();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [flagDialogOpen, selectedFlagReport]);
-
-  const handleFlagDialogChange = (open: boolean) => {
-    setFlagDialogOpen(open);
-    if (!open) {
-      setFlagDetails("");
-      setFlagVisibility("private");
-      setSelectedFlagReport(null);
-    }
-  };
-
-  const handleOpenFlagDialog = (reportId: number, reportTitle: string) => {
-    setFlagDetails("");
-    setFlagVisibility("private");
-    setSelectedFlagReport({ id: reportId, title: reportTitle });
-    setFlagDialogOpen(true);
-  };
-
-  const handleSubmitFlag = async () => {
-    if (!selectedFlagReport) {
-      return;
-    }
-
-    if (!flagDetails.trim()) {
-      toast.error("Please add a short description before submitting.");
-      return;
-    }
-
-    setIsSubmittingFlag(true);
-    try {
-      await upsertReportFlagByReportId(selectedFlagReport.id, {
-        message: flagDetails.trim(),
-        public: flagVisibility === "public",
-      });
-
-      setReportFlag(selectedFlagReport.id, flagDetails.trim());
-      patchFilteredReportFlag(selectedFlagReport.id, flagDetails.trim());
-
-      toast.success("Flag saved.");
-      handleFlagDialogChange(false);
-    } catch (error) {
-      console.error("Error submitting report flag:", error);
-      toast.error("Could not submit your report. Please try again.");
-    } finally {
-      setIsSubmittingFlag(false);
-    }
-  };
+    },
+  });
 
   const handleDeleteFlag = async (reportId: number) => {
     setIsDeletingFlagReportId(reportId);
@@ -362,8 +167,8 @@ export function ReportList({
       patchFilteredReportFlag(reportId, undefined);
       toast.success("Flag deleted.");
 
-      if (selectedFlagReport?.id === reportId) {
-        handleFlagDialogChange(false);
+      if (flagTarget?.id === reportId) {
+        setFlagTarget(null);
       }
     } catch (error) {
       console.error("Error deleting report flag:", error);
@@ -444,7 +249,7 @@ export function ReportList({
           <FileText className="h-6 w-6 text-primary" />
           <h2 className="text-xl font-semibold">Reports</h2>
           <span className="text-sm text-muted-foreground">
-            ({filteredReports.length}{nextCursor ? "+" : ""})
+            ({filteredReports.length}{hasMore ? "+" : ""})
           </span>
           {isLoading && <Spinner className="h-3.5 w-3.5 text-muted-foreground" />}
         </div>
@@ -630,7 +435,7 @@ export function ReportList({
                                 {editMode && (
                                   <DropdownMenuItem
                                     onSelect={() => {
-                                      handleOpenFlagDialog(report.reportId, report.title);
+                                      setFlagTarget({ id: report.reportId, title: report.title });
                                     }}
                                   >
                                     <Flag className="h-4 w-4" />
@@ -678,7 +483,7 @@ export function ReportList({
                         </p>
                       )}
                       <div className="min-w-0" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                        <ReportCardExtrasSlot reportId={report.reportId} />
+                        <ReportCardExtrasSlot reportId={report.reportId} extensions={report.extensions} />
                       </div>
                       {editMode && (
                         <div onClick={(e) => e.stopPropagation()}>
@@ -690,7 +495,7 @@ export function ReportList({
                     {isExpanded && (
                       <div className="px-4 pb-4 border-t bg-muted/30">
                         <div className="text-xs text-muted-foreground leading-relaxed mt-2 whitespace-pre-wrap">
-                          <ReportAbstractSlot reportId={report.reportId} title={report.title} text={report.abstract} />
+                          <ReportAbstractSlot reportId={report.reportId} extensions={report.extensions} title={report.title} text={report.abstract} />
                         </div>
                       </div>
                     )}
@@ -707,7 +512,7 @@ export function ReportList({
             })
           )}
 
-          {nextCursor && (
+          {hasMore && (
             <div className="flex justify-center pt-1">
               <Button
                 type="button"
@@ -725,94 +530,14 @@ export function ReportList({
       </ScrollArea>
 
       {editMode && (
-        <Dialog open={flagDialogOpen} onOpenChange={handleFlagDialogChange}>
-        <DialogContent
-          className="sm:max-w-[560px]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <DialogHeader>
-            <DialogTitle>Flag report</DialogTitle>
-            <DialogDescription>
-              Report issues with this item so your team can review it.
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedFlagReport && (
-            <div className="space-y-4">
-              <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">Report:</span>{" "}
-                {selectedFlagReport.title}
-              </div>
-
-              <div className="space-y-2">
-                <label htmlFor="flag-details" className="text-sm font-medium">
-                  Details
-                </label>
-                <Textarea
-                  id="flag-details"
-                  value={flagDetails}
-                  onChange={(e) => setFlagDetails(e.target.value)}
-                  placeholder="Tell us what is wrong with this report..."
-                  className="h-28 min-h-28 resize-none"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Visibility</p>
-                <RadioGroup
-                  value={flagVisibility}
-                  onValueChange={(value) => setFlagVisibility(value as "private" | "public")}
-                  className="gap-2"
-                >
-                  <label
-                    htmlFor="flag-visibility-private"
-                    className="flex items-start gap-2 rounded-md border p-3 cursor-pointer"
-                  >
-                    <RadioGroupItem id="flag-visibility-private" value="private" />
-                    <span className="text-sm leading-tight">
-                      <span className="font-medium">Private</span>
-                      <span className="block text-xs text-muted-foreground">
-                        Visible to you only.
-                      </span>
-                    </span>
-                  </label>
-
-                  <label
-                    htmlFor="flag-visibility-public"
-                    className="flex items-start gap-2 rounded-md border p-3 cursor-pointer"
-                  >
-                    <RadioGroupItem id="flag-visibility-public" value="public" />
-                    <span className="text-sm leading-tight">
-                      <span className="font-medium">Public</span>
-                      <span className="block text-xs text-muted-foreground">
-                        Visible to you and the project owner.
-                      </span>
-                    </span>
-                  </label>
-                </RadioGroup>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => handleFlagDialogChange(false)}
-              disabled={isSubmittingFlag}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={handleSubmitFlag}
-              disabled={isSubmittingFlag}
-            >
-              {isSubmittingFlag ? "Submitting..." : "Submit"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        <FlagReportDialog
+          target={flagTarget}
+          onClose={() => setFlagTarget(null)}
+          onSaved={(reportId, message) => {
+            setReportFlag(reportId, message);
+            patchFilteredReportFlag(reportId, message);
+          }}
+        />
       )}
     </div>
   );

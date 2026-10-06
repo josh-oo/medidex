@@ -12,6 +12,7 @@ export default function PendingApprovalPage() {
     // refreshes) so a newly granted role takes effect immediately instead of
     // waiting for the current token to expire naturally.
     const checkApproval = async () => {
+      if (document.hidden) return;
       try {
         const authenticated = await initKeycloak({
           onLoad: "check-sso",
@@ -31,10 +32,10 @@ export default function PendingApprovalPage() {
       }
     };
 
-    // Check every 3 seconds
+    // Check every 10 seconds (skipped while the tab is hidden)
     const interval = setInterval(() => {
       void checkApproval();
-    }, 3000);
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [navigate]);

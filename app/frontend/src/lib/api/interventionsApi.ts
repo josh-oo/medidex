@@ -1,17 +1,4 @@
-import apiClient from "./apiClient";
 import { TagDto } from "../../types/apiDTOs";
-import { AxiosRequestConfig } from "axios";
+import { listGetter } from "./requests";
 
-export const getInterventions = (
-  config?: AxiosRequestConfig
-): Promise<TagDto[]> => {
-  const path = `/interventions`;
-  return apiClient.get<TagDto[]>(path, config)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error('Error fetching interventions:', error);
-      throw error;
-    });
-}
+export const getInterventions = listGetter<TagDto>("/interventions", "interventions");

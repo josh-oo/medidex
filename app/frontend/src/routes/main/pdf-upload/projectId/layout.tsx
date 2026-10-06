@@ -1,51 +1,31 @@
-import axios from "axios";
-import { useEffect, useState } from "react";
 import { useParams, Outlet } from "react-router-dom";
 import { AdminGuard } from "@/components/auth/admin-guard";
-import { ReportColumnClient } from "./components/report-column-client";
-import type { ReportIntakeDto } from "@/types/apiDTOs";
 import { getProjectReportsIntake } from "@/lib/api/projectApi";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuthStore } from "@/hooks/use-auth";
+import { useProjectResource } from "@/hooks/use-project-resource";
+import { ProjectNotFound } from "@/components/reports/project-not-found";
+import { ReportSplitView } from "@/components/reports/report-split-view";
+import type { ReportFilterDimension } from "@/types/apiDTOs";
+
+const reportFilterDimensions: ReportFilterDimension[] = [
+  { field: "withPdf", label: "PDF", onlyLabel: "Has PDF", excludeLabel: "No PDF" },
+];
 
 export default function PdfUploadPage() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
   const isAdmin = useAuthStore((s) => s.user?.isAdmin ?? false);
-  const [reports, setReports] = useState<ReportIntakeDto[] | null>(null);
-  const [notFound, setNotFound] = useState(false);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-
-    let cancelled = false;
-    setReports(null);
-    setNotFound(false);
-
-    getProjectReportsIntake(projectId)
-      .then((result) => {
-        if (!cancelled) setReports(result?.items ?? []);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        if (axios.isAxiosError(error) && error.response?.status === 404) {
-          setNotFound(true);
-        } else {
-          console.error("Failed to load project reports:", error);
-          setReports([]);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, isAdmin]);
+  const { data: reports, notFound } = useProjectResource(
+    () => getProjectReportsIntake(projectId).then((result) => result?.items ?? []),
+    [],
+    [projectId],
+    isAdmin
+  );
 
   return (
     <AdminGuard>
       {notFound ? (
-        <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-          Project not found.
-        </div>
+        <ProjectNotFound />
       ) : reports === null ? (
         <div className="flex h-full w-full items-center justify-center">
           <Spinner className="h-6 w-6" />
@@ -53,9 +33,16 @@ export default function PdfUploadPage() {
       ) : (
         <div className="h-full flex flex-col overflow-hidden">
           <div className="flex-1 min-h-0 bg-background">
-            <ReportColumnClient projectId={projectId} reports={reports}>
+            <ReportSplitView
+              projectId={projectId}
+              reports={reports}
+              baseUrl="pdf-upload"
+              editMode={false}
+              filterDimensions={reportFilterDimensions}
+              fetchReports={getProjectReportsIntake}
+            >
               <Outlet />
-            </ReportColumnClient>
+            </ReportSplitView>
           </div>
         </div>
       )}

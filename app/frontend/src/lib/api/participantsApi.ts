@@ -1,17 +1,4 @@
-import apiClient from "./apiClient";
 import { ParticipantDto } from "../../types/apiDTOs";
-import { AxiosRequestConfig } from "axios";
+import { listGetter } from "./requests";
 
-export const getParticipants = (
-  config?: AxiosRequestConfig
-): Promise<ParticipantDto[]> => {
-  const path = `/participants`;
-  return apiClient.get<ParticipantDto[]>(path, config)
-    .then(response => {
-      return response.data;
-    })
-    .catch(error => {
-      console.error('Error fetching participants:', error);
-      throw error;
-    });
-}
+export const getParticipants = listGetter<ParticipantDto>("/participants", "participants");

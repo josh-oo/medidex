@@ -1,3 +1,4 @@
+import { isNotFound } from "@/lib/api/errors";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import {
@@ -88,7 +89,7 @@ export default function PdfDetailsPage() {
       .catch((error) => {
         if (cancelled) return;
         setPdfUrl(null);
-        if (error?.response?.status === 404) {
+        if (isNotFound(error)) {
           setPdfMissing(true);
         } else {
           console.error("Error fetching report PDF:", error);

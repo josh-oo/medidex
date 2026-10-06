@@ -91,6 +91,13 @@ async def similarity_search_studies_by_id(
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+@router.get("/reports/{report_id}/study-name", dependencies=[Depends(is_verified_api_call)], summary="Get the short name proposed for a new study created from the report: its trial registration id (given or taken from the report), otherwise first author + year, with a letter appended if a study of that name exists.")
+async def study_name_by_report(report_id: int, trial_id: Optional[str] = Query(None, description="A trial registration id of the study, if known."), ctx: RequestContext = Depends(get_context)) -> str:
+    try:
+        return await ctx.study_naming_service.suggest(report_id, trial_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
 @router.get("/reports/{report_id}/referenced-studies", dependencies=[Depends(is_verified_api_call)], summary="Get the studies belonging to reports in the database whose DOI the given report cites (according to OpenAlex).")
 async def referenced_studies_by_report(report_id: int, ctx: RequestContext = Depends(get_context)) -> List[StudyCandidate]:
     try:

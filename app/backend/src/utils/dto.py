@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Mapping, Optional, List, TypeVar, Generic
+from typing import Any, Dict, Mapping, Optional, List, TypeVar, Generic
 from datetime import datetime
 from enum import Enum
 
@@ -103,6 +103,9 @@ class ReportCuration(Report):
     # value. Lets the frontend prefill a trial-id search with a best guess even before
     # anyone has confirmed it.
     preliminaryTrialId: Optional[str] = None
+    # Optional data a downstream deployable attaches on request (see fastapi_app/enrichment.py),
+    # keyed by enricher. Always empty unless the list was requested with `include`.
+    extensions: Dict[str, Any] = Field(default_factory=dict)
 
 class ReportIntake(ReportSources):
     """A ReportSources (DOI + fulltext links, so the pdf-upload view can read them

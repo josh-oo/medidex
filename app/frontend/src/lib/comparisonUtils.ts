@@ -20,33 +20,6 @@ export const createComparisonGroup = (
   b: normalizeSide(overrides?.b),
 });
 
-const serializeSide = (items: string[]) =>
-  items
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .join(" + ");
-
-export const formatComparisonGroups = (groups: ComparisonGroup[]): string => {
-  const formatted = groups
-    .map((group) => {
-      const left = serializeSide(group.a);
-      const right = serializeSide(group.b);
-      if (left && right) {
-        return `${left} vs ${right}`;
-      }
-      if (left) {
-        return left;
-      }
-      if (right) {
-        return right;
-      }
-      return "";
-    })
-    .filter(Boolean);
-
-  return formatted.join("; ");
-};
-
 export const hasValidComparisonGroups = (groups: ComparisonGroup[]): boolean =>
   groups.some(
     (group) =>

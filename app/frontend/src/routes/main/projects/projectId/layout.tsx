@@ -1,56 +1,48 @@
-import { useEffect, useState } from "react";
-import axios from "axios";
+import { useCallback } from "react";
 import { useParams, Outlet } from "react-router-dom";
-import { ReportCurationDto } from "@/types/apiDTOs";
-import { ReportColumnClient } from "./components/report-column-client";
+import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { getProjectReports } from "@/lib/api/projectApi";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useProjectResource } from "@/hooks/use-project-resource";
+import { ProjectNotFound } from "@/components/reports/project-not-found";
+import { ReportSplitView } from "@/components/reports/report-split-view";
+import type { GetProjectReportsParams, ReportFilterDimension } from "@/types/apiDTOs";
+import StudySheet from "./study-sheet";
+
+const reportFilterDimensions: ReportFilterDimension[] = [
+  { field: "processed", label: "Status", onlyLabel: "Processed", excludeLabel: "Unprocessed" },
+  { field: "newStudy", label: "Type", onlyLabel: "New study", excludeLabel: "Existing study" },
+  { field: "flagged", label: "Flag", onlyLabel: "Flagged", excludeLabel: "Unflagged" },
+];
 
 export default function ReportColumn() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
-  const [reports, setReports] = useState<ReportCurationDto[] | null>(null);
-  const [notFound, setNotFound] = useState(false);
+  const { reportIncludes } = useExtensionRegistry();
+  const fetchReports = useCallback(
+    (id: string, filters?: GetProjectReportsParams) => getProjectReports(id, { ...filters, include: reportIncludes }),
+    [reportIncludes]
+  );
+  const { data: reports, notFound } = useProjectResource(
+    () => fetchReports(projectId).then((result) => result?.items ?? []),
+    [],
+    [projectId]
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    setReports(null);
-    setNotFound(false);
-
-    getProjectReports(projectId)
-      .then((result) => {
-        if (!cancelled) setReports(result?.items ?? []);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        if (axios.isAxiosError(error) && error.response?.status === 404) {
-          setNotFound(true);
-        } else {
-          console.error("Failed to load project reports:", error);
-          setReports([]);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
-
-  if (notFound) {
-    return (
-      <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-        Project not found.
-      </div>
-    );
-  }
-
-  if (reports === null) {
-    return <ReportColumnSkeleton />;
-  }
+  if (notFound) return <ProjectNotFound />;
+  if (reports === null) return <ReportColumnSkeleton />;
 
   return (
-    <ReportColumnClient projectId={projectId} reports={reports}>
+    <ReportSplitView
+      projectId={projectId}
+      reports={reports}
+      baseUrl="projects"
+      editMode={true}
+      filterDimensions={reportFilterDimensions}
+      fetchReports={fetchReports}
+      sheet={<StudySheet />}
+    >
       <Outlet />
-    </ReportColumnClient>
+    </ReportSplitView>
   );
 }
 
