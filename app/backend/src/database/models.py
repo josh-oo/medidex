@@ -1,4 +1,4 @@
-from sqlmodel import SQLModel, Field
+from sqlmodel import SQLModel, Field, Relationship
 from sqlalchemy import MetaData
 from sqlalchemy import Index
 from sqlalchemy import Column
@@ -173,6 +173,13 @@ class Project(SQLModel, table=True, metadata=metadata_resources):
     date_created: datetime.datetime = Field(default_factory=_current_utc_datetime)
     uploaded_by: Optional[str]
 
+    # Deleting a project deletes the reports it brought in, also those already linked to a study: the
+    # cascade runs project -> report_added -> report here, everything below a report (links to studies,
+    # flags, scores, ...) is removed by the foreign keys of the database.
+    reports_added: List["ReportAdded"] = Relationship(
+        back_populates="project", sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+
 class ProjectAssignees(SQLModel, table=True, metadata=metadata_resources):
     __tablename__ = "project_assignee"
 
@@ -237,6 +244,10 @@ class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
     # is the confirmed counterpart; this one is never written there automatically - a
     # reviewer has to confirm a guess before it counts as authoritative.
     trial_registration_id: Optional[str] = Field(default=None)
+
+    project: Optional[Project] = Relationship(back_populates="reports_added")
+    # Deleting this record (as part of its project) deletes the report itself.
+    report: Optional[Report] = Relationship(sa_relationship_kwargs={"cascade": "all, delete"})
 
     __table_args__ = (
         Index('idx_report_added_project_report', 'project_id', 'report_id'),

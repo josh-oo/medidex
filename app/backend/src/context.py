@@ -40,9 +40,12 @@ class RequestContext:
     own per-request Depends caching) without needing FastAPI to do it.
     """
 
-    def __init__(self, db: AsyncSession, user_id: Optional[str]):
+    def __init__(self, db: AsyncSession, user_id: Optional[str], is_admin: bool = False):
         self.db = db
+        # The scope the request acts in (see README, "Scopes"): a user, "bot", or an MCP client.
         self.user_id = user_id
+        # Admins (reviewers) see the work of every scope; an MCP client acting for an admin does not.
+        self.is_admin = is_admin
 
     # Repositories
 
@@ -56,7 +59,7 @@ class RequestContext:
 
     @cached_property
     def study_repo(self) -> StudyRepository:
-        return StudyRepository(db=self.db, user_id=self.user_id)
+        return StudyRepository(db=self.db, user_id=self.user_id, see_all=self.is_admin)
 
     @cached_property
     def aspect_repo(self) -> AspectRepository:
@@ -163,4 +166,5 @@ class RequestContext:
             report_repo=self.report_repo,
             vectorstore_service=self.vectorstore_service,
             pubsub_service=self.pubsub_service,
+            document_service=self.document_service,
         )

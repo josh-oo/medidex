@@ -4,7 +4,7 @@ import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, exists, or_, true
 from sqlmodel import select, func, text
 
 from dotenv import load_dotenv
@@ -102,9 +102,27 @@ def _query_node_to_condition(node: QueryNode):
     return _comparison_to_condition(node)
 
 class StudyRepository:
-    def __init__(self, db : AsyncSession, user_id : str):
+    def __init__(self, db : AsyncSession, user_id : str, see_all: bool = False):
         self.db = db
         self.user_id = str(user_id)
+        self.see_all = see_all
+
+    def _visible(self):
+        """The studies this scope may see (see README, "Scopes"): those of the seed data (no study_added
+        record), those it created itself, and those with a link a reviewer confirmed. Studies another scope
+        created and nobody confirmed yet stay invisible, so that users, MediBot and MCP clients work without
+        interfering. A reviewer (see_all) sees every study."""
+        if self.see_all:
+            return true()
+        created_elsewhere = exists().where(
+            StudyAdded.study_id == Study.id, StudyAdded.created_by.isnot(None), StudyAdded.created_by != self.user_id
+        )
+        confirmed = exists().where(
+            StudyReport.study_id == Study.id,
+            StudyReportAdded.study_report_id == StudyReport.id,
+            StudyReportAdded.confirmed.is_(True),
+        )
+        return or_(~created_elsewhere, confirmed)
 
     async def commit(self):
         await self.db.commit()
@@ -174,6 +192,7 @@ class StudyRepository:
         id_stmt = (
             id_stmt
             .where(or_(*matches))
+            .where(self._visible())
             .distinct()
             .order_by(Study.short_name, Study.id)
             .offset(offset)
@@ -202,6 +221,7 @@ class StudyRepository:
         id_stmt = (
             select(Study.id, Study.short_name)
             .where(condition)
+            .where(self._visible())
             .distinct()
             .order_by(Study.short_name, Study.id)
             .offset(offset)
@@ -219,7 +239,7 @@ class StudyRepository:
         return page, has_more
 
     async def get_studies(self, study_ids: Optional[List[int]] = None) -> List[Study]:
-        stmt = select(Study)
+        stmt = select(Study).where(self._visible())
         if study_ids:
             stmt = stmt.where(Study.id.in_(study_ids))
         result = (await self.db.execute(stmt)).scalars().all()
@@ -244,17 +264,20 @@ class StudyRepository:
             .join(Report, Report.id == StudyReport.report_id)
             .outerjoin(StudyReportAdded, StudyReportAdded.study_report_id == StudyReport.id)
             .where(func.lower(Report.doi).in_(spellings))
+            .where(self._visible())
             .where(or_(StudyReportAdded.created_by == self.user_id, StudyReportAdded.created_by.is_(None)))
             .distinct()
             .order_by(Study.id)
         )
         return (await self.db.execute(stmt)).scalars().all()
 
-    async def get_study_by_id(self, study_id: int) -> Study:
-        return await self.db.get(Study, study_id)
+    async def get_study_by_id(self, study_id: int) -> Optional[Study]:
+        """None if there is no such study, or it is not visible to this scope."""
+        stmt = select(Study).where(Study.id == study_id).where(self._visible())
+        return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def search_study_by_shortname(self, shortname: str, cutoff: Optional[str] = None) -> Study:
-        stmt = select(Study).where(Study.short_name.ilike(f"%{shortname}%"))
+        stmt = select(Study).where(Study.short_name.ilike(f"%{shortname}%")).where(self._visible())
         if cutoff:
             stmt = stmt.where(Study.date_entered < cutoff)
         result = (await self.db.execute(stmt)).scalar_one_or_none()

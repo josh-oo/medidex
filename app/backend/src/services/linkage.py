@@ -9,6 +9,10 @@ from .vectorstore import VectorstoreService
 from ..services.study import StudyPayload
 
 
+class StudyNotFoundError(Exception):
+    """There is no such study, or it was created in another scope and is not confirmed (see README, "Scopes")."""
+
+
 class ReportNotInProjectError(Exception):
     """The report has no project association to confirm/unconfirm links within."""
 
@@ -48,6 +52,8 @@ class LinkageService:
         check_report_access FastAPI dependency ahead of this call.
         """
         project_id = await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
+        if await self.study_repo.get_study_by_id(study_id) is None:
+            raise StudyNotFoundError(f"Study {study_id} not found")
 
         try:
             await self.report_repo.link_study(report_id, study_id, user_id=user_id)

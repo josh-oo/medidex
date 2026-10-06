@@ -22,6 +22,7 @@ from ..utils.pagination import decode_cursor, encode_cursor
 from ..utils.ris_parser import UploadedFile, parse_file
 from ..utils.trial_registration_id import extract_trial_id
 from .authorization import ProjectAccessDeniedError
+from .report import DocumentService
 from .pubsub import ProjectPubSubService
 from .vectorstore import VectorstoreService
 
@@ -47,10 +48,12 @@ class ProjectResourceService:
         report_repo: ReportRepository,
         vectorstore_service: VectorstoreService,
         pubsub_service: ProjectPubSubService,
+        document_service: DocumentService,
     ):
         self.project_repo = project_repo
         self.report_repo = report_repo
         self.vectorstore_service = vectorstore_service
+        self.document_service = document_service
         self.pubsub_service = pubsub_service
 
     async def get_vectorized_and_ready_report_ids(self, project_id: str) -> Tuple[Set[int], Set[int], Set[int]]:
@@ -235,20 +238,19 @@ class ProjectResourceService:
         return project_full, report_ids
 
     async def delete_project(self, project_id: str) -> None:
-        """Delete a project (cascading to its reports/assignments/annotations
-        - see the DB schema) and clean up everything that isn't cascade-owned
-        by Postgres: the reports' vectorstore embeddings, plus notifying
-        subscribers. Raises ProjectNotFoundError if it doesn't exist. Who's
-        allowed to call this (ADMIN role) is enforced at the API layer, same
-        as create_project.
+        """Delete a project and everything it brought in, so that nothing of it is left: its reports
+        (also those already linked to a study), the studies created through it that have no other report,
+        the vectors of the reports and their PDF files. Raises ProjectNotFoundError if the project doesn't exist or was
+        uploaded by somebody else (only the uploader can delete a project). Who's allowed to call this
+        (ADMIN role) is enforced at the API layer, same as create_project.
         """
-        project = await self.project_repo.get_project_by_id(project_id)
-        if project is None:
+        deleted = await self.project_repo.delete_project(project_id)
+        if deleted is None:
             raise ProjectNotFoundError(f"Project {project_id} not found")
 
-        report_ids = await self.project_repo.get_project_associated_report_ids(project_id)
-        await self.project_repo.delete_project(project_id)
-        await self.vectorstore_service.delete_vectors_by_report_ids(report_ids)
+        # After the database succeeded: nothing in it refers to these any more.
+        await self.vectorstore_service.delete_vectors_by_report_ids(deleted.report_ids)
+        await self.document_service.delete_pdf_files(deleted.pdf_numbers)
         await self.pubsub_service.publish_project_update(project_id)
 
     async def assign_user_to_project(self, project_id: str, assignee_user_id: str) -> Assignee:

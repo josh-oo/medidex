@@ -24,6 +24,10 @@ class DocumentService:
         self.pages_cache = {}
         self.report_repo = report_repo
 
+    @staticmethod
+    def pdf_file_path(report_number: int) -> str:
+        return os.path.join(PDF_PATH, str(report_number).zfill(5) + ".pdf")
+
     async def get_path(self, report_id: int, mkdirs=False):
         if report_id not in self.path_cache:
             report_number = await self.report_repo.get_pdf_numbers_by_report_id(report_id)
@@ -34,8 +38,7 @@ class DocumentService:
             if report_number <= 0 and mkdirs:
                 report_number = await self.report_repo.assign_pdf_numbers_for_report_id(report_id)
             
-            pdf_name = str(report_number).zfill(5) + ".pdf"
-            file_name = os.path.join(PDF_PATH, pdf_name)
+            file_name = self.pdf_file_path(report_number)
             if report_number == 0 and not os.path.isfile(file_name):
                 file_name = PLACEHOLDER_PDF_PATH
 
@@ -70,6 +73,17 @@ class DocumentService:
         pages = await self.get_pages(report_id)
         return await asyncio.to_thread(extract_trial_ids_from_text, "\n".join(pages))
 
+    async def delete_pdf_files(self, report_numbers: List[int]) -> None:
+        """Remove the PDF files with these report numbers (of reports that are deleted); missing files are skipped."""
+        def remove() -> None:
+            for report_number in report_numbers:
+                try:
+                    os.remove(self.pdf_file_path(report_number))
+                except FileNotFoundError:
+                    pass
+
+        await asyncio.to_thread(remove)
+
     async def delete_pdf(self, report_id: int) -> Dict[str, object]:
         report = await self.report_repo.get_report_by_id(report_id)
         if not report:
@@ -78,8 +92,7 @@ class DocumentService:
         deleted_pdf = False
         previous_report_number = report.report_number
         if previous_report_number is not None and previous_report_number > 0:
-            pdf_name = str(previous_report_number).zfill(5) + ".pdf"
-            pdf_path = os.path.join(PDF_PATH, pdf_name)
+            pdf_path = self.pdf_file_path(previous_report_number)
             if os.path.exists(pdf_path):
                 os.remove(pdf_path)
                 deleted_pdf = True
