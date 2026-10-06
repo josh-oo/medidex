@@ -39,7 +39,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { useAbortableEffect } from "@/hooks/use-abortable-effect";
 import { useElementHeight } from "@/hooks/use-element-height";
-import { getSimilarTagsByReportId } from "@/lib/api/reportApi";
+import { getSimilarTagsByReportId, getSuggestedStudyName } from "@/lib/api/reportApi";
 import { getInterventions } from "@/lib/api/interventionsApi";
 import type {
   DurationUnit,
@@ -219,6 +219,23 @@ export function AddStudyDialog({
       }
     },
     [addStudyDialogOpen, currentReportId]
+  );
+
+  // Prefills the name unless the suggested values bring one.
+  const hasSuggestedName = Boolean(suggestedValues?.short_name);
+  useAbortableEffect(
+    async (signal) => {
+      if (!addStudyDialogOpen || !currentReportId || hasSuggestedName) return;
+
+      try {
+        const name = await getSuggestedStudyName(Number(currentReportId), { signal });
+        // Not over what the user has typed in the meantime.
+        if (!signal.aborted) setShortName((current) => current || name);
+      } catch (error) {
+        if (!signal.aborted) console.error("Failed to load the suggested study name:", error);
+      }
+    },
+    [addStudyDialogOpen, currentReportId, hasSuggestedName]
   );
 
   useAbortableEffect(

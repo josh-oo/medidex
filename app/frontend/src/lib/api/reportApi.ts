@@ -42,6 +42,16 @@ export const getReferencedStudiesByReportId = (
     .catch(logAndRethrow(`Error fetching referenced studies for report ${reportId}:`));
 }
 
+// the short name proposed for a new study created from the report
+export const getSuggestedStudyName = (
+  reportId: number,
+  config?: AxiosRequestConfig
+): Promise<string> => {
+  return apiClient.get<string>(`/reports/${reportId}/study-name`, config)
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching the suggested study name for report ${reportId}:`));
+}
+
 //assign studies to a report
 export const assignStudyToReportByReportId = (
   reportId: number,
