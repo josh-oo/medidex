@@ -24,6 +24,7 @@ from .services.crawler import CrawlerService, OpenAlexService, crawler_service, 
 from .services.embedding import EmbeddingService, embedding_service
 from .services.linkage import LinkageService
 from .services.maintenance import MaintenanceService
+from .services.naming import StudyNamingService
 from .services.project import ProjectResourceService
 from .services.pubsub import ProjectPubSubService
 from .services.report import DocumentService, ReportService
@@ -94,6 +95,10 @@ class RequestContext:
             document_service=self.document_service,
             open_alex_service=self.open_alex_service,
         )
+
+    @cached_property
+    def study_naming_service(self) -> StudyNamingService:
+        return StudyNamingService(db=self.db, report_repo=self.report_repo)
 
     @cached_property
     def author_feature_service(self) -> AuthorFeatureService:
