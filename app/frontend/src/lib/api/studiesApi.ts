@@ -1,12 +1,12 @@
 import apiClient from "./apiClient";
 import { unwrap, logAndRethrow } from "./requests";
-import { StudyDto, StudyFullDto, ReportPreviewDto, TagDto, Page, GetStudySearchParams } from "../../types/apiDTOs";
+import { StudyDto, StudyFullDto, StudySchemaDto, ReportPreviewDto, TagDto, Page, GetStudySearchParams } from "../../types/apiDTOs";
 import { AxiosRequestConfig } from "axios";
 
-// Full study details in one call - linked reports plus interventions/conditions/
-// outcomes/participants/design, each as a first page (limit, default 10 on the
-// backend). Page further through any one of them via its own dedicated endpoint
-// below (getReportsByStudyId, getInterventionsForStudy, ...) and its nextCursor.
+// Full study details in one call - linked reports plus the tags of each category of the
+// study schema, each as a first page (limit, default 10 on the backend). Page further
+// through any one of them via its own dedicated endpoint below (getReportsByStudyId,
+// getTagsForStudy) and its nextCursor.
 export const getStudyById = (
   studyId: number,
   limit?: number,
@@ -62,81 +62,28 @@ export const getReportsByStudyId = (
     .catch(logAndRethrow(`Error fetching reports for study ${studyId}:`));
 }
 
-export const getInterventionsForStudy = (
+// One page of the tags of a category of the study schema (see getStudySchema) of a study.
+export const getTagsForStudy = (
   studyId: number,
+  category: string,
   limit?: number,
   cursor?: string | null,
   config?: AxiosRequestConfig
 ): Promise<Page<TagDto>> => {
-  const path = `/studies/${studyId}/interventions`;
+  const path = `/studies/${studyId}/${category}`;
   return apiClient.get<Page<TagDto>>(path, {
       ...config,
       params: { limit, cursor: cursor ?? undefined },
     })
     .then(unwrap)
-    .catch(logAndRethrow(`Error fetching interventions for study ${studyId}:`));
+    .catch(logAndRethrow(`Error fetching ${category} for study ${studyId}:`));
 }
 
-export const getConditionsForStudy = (
-  studyId: number,
-  limit?: number,
-  cursor?: string | null,
-  config?: AxiosRequestConfig
-): Promise<Page<TagDto>> => {
-    const path = `/studies/${studyId}/conditions`;
-    return apiClient.get<Page<TagDto>>(path, {
-        ...config,
-        params: { limit, cursor: cursor ?? undefined },
-      })
-      .then(unwrap)
-    .catch(logAndRethrow(`Error fetching conditions for study ${studyId}:`));
-}
-
-export const getOutcomesForStudy = (
-  studyId: number,
-  limit?: number,
-  cursor?: string | null,
-  config?: AxiosRequestConfig
-): Promise<Page<TagDto>> => {
-    const path = `/studies/${studyId}/outcomes`;
-    return apiClient.get<Page<TagDto>>(path, {
-        ...config,
-        params: { limit, cursor: cursor ?? undefined },
-      })
-      .then(unwrap)
-    .catch(logAndRethrow(`Error fetching outcomes for study ${studyId}:`));
-}
-
-//get participants description for a study
-export const getParticipantsForStudy = (
-  studyId: number,
-  limit?: number,
-  cursor?: string | null,
-  config?: AxiosRequestConfig
-): Promise<Page<TagDto>> => {
-    const path = `/studies/${studyId}/participants`;
-    return apiClient.get<Page<TagDto>>(path, {
-        ...config,
-        params: { limit, cursor: cursor ?? undefined },
-      })
-      .then(unwrap)
-    .catch(logAndRethrow(`Error fetching participants description for study ${studyId}:`));
-}
-
-export const getDesignForStudy = (
-  studyId: number,
-  limit?: number,
-  cursor?: string | null,
-  config?: AxiosRequestConfig
-): Promise<Page<TagDto>> => {
-    const path = `/studies/${studyId}/design`;
-    return apiClient.get<Page<TagDto>>(path, {
-        ...config,
-        params: { limit, cursor: cursor ?? undefined },
-      })
-      .then(unwrap)
-    .catch(logAndRethrow(`Error fetching design for study ${studyId}:`));
-}
+// What a study consists of and how it is presented; the same for every study.
+export const getStudySchema = (config?: AxiosRequestConfig): Promise<StudySchemaDto> =>
+  apiClient.get<StudySchemaDto>("/study-schema", config)
+    .then(unwrap)
+    .catch(logAndRethrow("Error fetching the study schema:"));
 
 export const getPersonsForStudy = (
   studyId: number,

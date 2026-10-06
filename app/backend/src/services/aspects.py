@@ -4,14 +4,15 @@ from typing import List
 import enum
 
 from src.utils.dto import TagCandidate
+from src.utils.tagconfig import TAG_CATEGORIES
 
 
-class TagCategories(str, enum.Enum):
-    default = 'default'
-    interventions = 'interventions'
-    conditions = 'conditions'
-    outcomes = 'outcomes'
-    participants = 'participants'
+# The categories of config/study.yaml, plus the default embedding.
+TagCategories = enum.Enum(
+    "TagCategories",
+    {name: name for name in ("default", *TAG_CATEGORIES)},
+    type=str,
+)
 
 
 class UnsupportedAspectError(Exception):

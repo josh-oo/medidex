@@ -14,15 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { StudyDto, TagDto, Page } from "@/types/apiDTOs";
-import {
-  getStudyById,
-  getReportsByStudyId,
-  getInterventionsForStudy,
-  getConditionsForStudy,
-  getOutcomesForStudy,
-  getParticipantsForStudy,
-  getDesignForStudy,
-} from "@/lib/api/studiesApi";
+import { getStudyById, getReportsByStudyId, getTagsForStudy } from "@/lib/api/studiesApi";
+import { useStudySchema } from "@/hooks/use-study-schema";
 import { getReportPdf } from "@/lib/api/reportApi";
 
 type ReportListItem = {
@@ -63,11 +56,9 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
 
-  const [interventions, setInterventions] = useState<AspectPageState>(EMPTY_ASPECT_PAGE);
-  const [conditions, setConditions] = useState<AspectPageState>(EMPTY_ASPECT_PAGE);
-  const [outcomes, setOutcomes] = useState<AspectPageState>(EMPTY_ASPECT_PAGE);
-  const [participants, setParticipants] = useState<AspectPageState>(EMPTY_ASPECT_PAGE);
-  const [design, setDesign] = useState<AspectPageState>(EMPTY_ASPECT_PAGE);
+  const { schema, error: schemaError } = useStudySchema();
+  // The tags of the study per category of the study schema.
+  const [tags, setTags] = useState<Record<string, AspectPageState>>({});
 
   const [downloadingPdfs, setDownloadingPdfs] = useState<Set<number>>(new Set());
   const [downloadingSingle, setDownloadingSingle] = useState<Set<number>>(
@@ -78,11 +69,7 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
     if (!study || !isActive) {
       setReports([]);
       setReportsNextCursor(null);
-      setInterventions(EMPTY_ASPECT_PAGE);
-      setConditions(EMPTY_ASPECT_PAGE);
-      setOutcomes(EMPTY_ASPECT_PAGE);
-      setParticipants(EMPTY_ASPECT_PAGE);
-      setDesign(EMPTY_ASPECT_PAGE);
+      setTags({});
       setDetailsLoading(false);
       setDetailsError(null);
       return;
@@ -94,8 +81,8 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
     setDetailsLoading(true);
     setDetailsError(null);
 
-    // One call to the combined GET /studies/{study_id} endpoint replaces what used
-    // to be six separate requests (reports + the five aspect lists below) - each
+    // One call to the combined GET /studies/{study_id} endpoint replaces what would
+    // otherwise be a request per list (reports + the tags of each category) - each
     // comes back as just its first page, paged further via its own "Load more".
     const fetchDetails = async () => {
       try {
@@ -103,11 +90,11 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
         if (!requestActive) return;
         setReports(normalizeReports(full.reports.items));
         setReportsNextCursor(full.reports.nextCursor);
-        setInterventions(pageToAspectState(full.interventions));
-        setConditions(pageToAspectState(full.conditions));
-        setOutcomes(pageToAspectState(full.outcomes));
-        setParticipants(pageToAspectState(full.participants));
-        setDesign(pageToAspectState(full.design));
+        setTags(
+          Object.fromEntries(
+            Object.entries(full.tags).map(([category, page]) => [category, pageToAspectState(page)])
+          )
+        );
       } catch (error) {
         if (!requestActive) return;
         const message =
@@ -152,65 +139,28 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
     }
   };
 
-  const loadMoreAspect = async (
-    state: AspectPageState,
-    setState: React.Dispatch<React.SetStateAction<AspectPageState>>,
-    fetchPage: (cursor: string) => Promise<Page<TagDto>>,
-    label: string
-  ) => {
-    if (!state.nextCursor || state.loadingMore) return;
+  const handleLoadMoreTags = async (category: string) => {
+    const state = tags[category];
+    if (!state?.nextCursor || state.loadingMore) return;
 
-    setState((prev) => ({ ...prev, loadingMore: true }));
+    const update = (change: (previous: AspectPageState) => AspectPageState) =>
+      setTags((prev) => ({ ...prev, [category]: change(prev[category] ?? EMPTY_ASPECT_PAGE) }));
+
+    update((prev) => ({ ...prev, loadingMore: true }));
     try {
-      const page = await fetchPage(state.nextCursor);
-      setState((prev) => ({
+      const page = await getTagsForStudy(studyId, category, undefined, state.nextCursor);
+      update((prev) => ({
         items: [...prev.items, ...page.items],
         nextCursor: page.nextCursor,
         loadingMore: false,
       }));
     } catch (error) {
-      setState((prev) => ({ ...prev, loadingMore: false }));
+      update((prev) => ({ ...prev, loadingMore: false }));
       const message =
-        error instanceof Error ? error.message : `Unable to load more ${label}`;
-      toast.error(`Failed to load more ${label}: ${message}`);
+        error instanceof Error ? error.message : `Unable to load more ${category}`;
+      toast.error(`Failed to load more ${category}: ${message}`);
     }
   };
-
-  const handleLoadMoreInterventions = () =>
-    loadMoreAspect(
-      interventions,
-      setInterventions,
-      (cursor) => getInterventionsForStudy(studyId, undefined, cursor),
-      "interventions"
-    );
-  const handleLoadMoreConditions = () =>
-    loadMoreAspect(
-      conditions,
-      setConditions,
-      (cursor) => getConditionsForStudy(studyId, undefined, cursor),
-      "conditions"
-    );
-  const handleLoadMoreOutcomes = () =>
-    loadMoreAspect(
-      outcomes,
-      setOutcomes,
-      (cursor) => getOutcomesForStudy(studyId, undefined, cursor),
-      "outcomes"
-    );
-  const handleLoadMoreParticipants = () =>
-    loadMoreAspect(
-      participants,
-      setParticipants,
-      (cursor) => getParticipantsForStudy(studyId, undefined, cursor),
-      "participants"
-    );
-  const handleLoadMoreDesign = () =>
-    loadMoreAspect(
-      design,
-      setDesign,
-      (cursor) => getDesignForStudy(studyId, undefined, cursor),
-      "design"
-    );
 
   const handleDownloadAllReportPdfs = async () => {
     if (reports.length === 0) return;
@@ -305,24 +255,19 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
           )}
         </SheetHeader>
         <div className="space-y-6">
-          <StudyOverview study={study} />
+          <StudyOverview study={study} fields={schema?.fields ?? []} />
 
           <Separator />
 
           <StudyAspects
             study={study}
-            loading={detailsLoading}
-            error={detailsError}
-            interventions={interventions}
-            conditions={conditions}
-            outcomes={outcomes}
-            participants={participants}
-            design={design}
-            onLoadMoreInterventions={handleLoadMoreInterventions}
-            onLoadMoreConditions={handleLoadMoreConditions}
-            onLoadMoreOutcomes={handleLoadMoreOutcomes}
-            onLoadMoreParticipants={handleLoadMoreParticipants}
-            onLoadMoreDesign={handleLoadMoreDesign}
+            loading={detailsLoading || !schema}
+            error={detailsError ?? schemaError}
+            categories={schema?.tags ?? []}
+            tags={Object.fromEntries(
+              (schema?.tags ?? []).map((category) => [category.key, tags[category.key] ?? EMPTY_ASPECT_PAGE])
+            )}
+            onLoadMore={handleLoadMoreTags}
           />
 
           <Separator />
@@ -427,6 +372,26 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
               )}
             </div>
           </div>
+
+          {schema && schema.meta.length > 0 && (
+            <>
+              <Separator />
+              <div className="flex flex-wrap gap-x-6 gap-y-1 px-4 text-xs text-muted-foreground">
+                {schema.meta.map((meta) => {
+                  const value = study[meta.key];
+                  if (!value) return null;
+                  return (
+                    <span key={meta.key}>
+                      {meta.label}:{" "}
+                      <span className="font-medium text-foreground/80">
+                        {new Date(String(value)).toLocaleDateString()}
+                      </span>
+                    </span>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       </>
     </SheetContent>

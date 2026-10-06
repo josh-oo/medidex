@@ -20,3 +20,4 @@ redis==8.1.0
 openai>=1.0.0
 weasyprint==70.0
 pypdf==6.19.0
+PyYAML==6.0.2

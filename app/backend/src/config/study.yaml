@@ -1,0 +1,105 @@
+# What a study consists of, and how it is presented. This is the single source of truth for the
+# study details view (served as GET /study-schema), the tag endpoints, the tag and study search.
+#
+# A study has three kinds of data:
+#   fields      Primitive values of the study itself (numbers, durations, a status, free text).
+#   categories  Lists of tags (interventions, conditions, countries, ...).
+#   meta        Metadata of the database record (when it was entered and edited).
+#
+# Colors are names the frontend draws: blue, emerald, rose, amber, slate, sky, violet, teal.
+# Icons are names of lucide icons (https://lucide.dev/icons), in kebab-case, that the frontend
+# knows (src/lib/icons.ts); an unknown name is drawn as a generic tag icon.
+
+# Primitive values. The key is the name of the field of the study (see the Study DTO).
+#   label    Name shown to the user.
+#   type     integer | duration | enum | text
+#   values   The allowed values of an `enum` field (required for those, and only for those). Creating a
+#            study with another value is rejected.
+#   display  metric (a tile at the top of the details) | text (a paragraph below the tiles)
+fields:
+  numberParticipants:
+    label: Participants
+    type: integer
+    icon: users
+    color: blue
+    display: metric
+  duration:
+    label: Duration
+    type: duration
+    icon: clock
+    color: emerald
+    display: metric
+  status:
+    label: Status
+    type: enum
+    values: [Closed, Stopped early, Open/Ongoing, Planned]
+    icon: flag
+    color: amber
+    display: metric
+  comparison:
+    label: Comparison
+    type: text
+    icon: scale
+    color: violet
+    display: text
+
+# Database metadata. The key is the name of the field of the study.
+meta:
+  createdAt:
+    label: Entered
+    type: date
+  updatedAt:
+    label: Edited
+    type: date
+
+# Tag categories. They name the tag lists of the database, the categories of the tag search and the
+# fields of the advanced study search; the REST endpoints (/<category> and /studies/{id}/<category>) are
+# generated from them. The tags of every category are embedded, so similar and related tags can be searched
+# for all of them, and every endpoint answers with the same {id, keyword} tags.
+#
+# Every category needs a storage entry in src/database/tagstorage.py (the tables or the column its tags
+# live in); the application stops at startup if one is missing.
+#
+#   label             Plural name for display.
+#   icon, color       How the category is drawn.
+#   search_field      Singular name of the field in the advanced study search (e.g. `intervention==Placebo`).
+#   description       What the tags are, with examples. Used in the API documentation.
+#   free_text_search  The plain-text study search also matches the tags of this category (default false).
+categories:
+  interventions:
+    label: Interventions
+    icon: syringe
+    color: emerald
+    search_field: intervention
+    description: "Interventions of a study (e.g. 'Placebo', 'Group Therapy', ...)"
+    free_text_search: true
+  conditions:
+    label: Conditions
+    icon: stethoscope
+    color: blue
+    search_field: condition
+    description: "Health conditions of the participants of a study (e.g. 'COVID-19', 'Diabetes', ...)"
+  outcomes:
+    label: Outcomes
+    icon: target
+    color: rose
+    search_field: outcome
+    description: "Outcomes of a study (e.g. 'Mortality', 'Quality of Life', ...)"
+  participants:
+    label: Participants
+    icon: users
+    color: sky
+    search_field: participant
+    description: "Participant attributes of a study (e.g. Male, Female, Adult, Child, ...)"
+  design:
+    label: Study Design
+    icon: activity
+    color: teal
+    search_field: design
+    description: "Design of a study (e.g. 'Randomized Controlled Trial', 'Controlled Clinical Trial')"
+  countries:
+    label: Countries
+    icon: map-pin
+    color: amber
+    search_field: country
+    description: "Countries where a study takes place"

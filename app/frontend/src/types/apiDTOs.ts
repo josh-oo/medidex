@@ -141,17 +141,60 @@ export interface StudyDto extends StudyBaseDto {
 }
 
 // A StudyDto plus everything the study details view needs, returned in one call by
-// GET /studies/{study_id}: linked reports and the tag-like aspects (interventions/
-// conditions/outcomes/participants/design). Each nested list is only its first page
-// (the endpoint's `limit` param, default 10) - page further through any one of them
-// via its own /studies/{study_id}/* endpoint and the returned nextCursor.
+// GET /studies/{study_id}: linked reports and the tags of each category of the study
+// schema (interventions, conditions, countries, ...), keyed by category. Each nested
+// list is only its first page (the endpoint's `limit` param, default 10) - page further
+// through any one of them via its own /studies/{study_id}/* endpoint and the returned
+// nextCursor.
 export interface StudyFullDto extends StudyDto {
   reports: Page<ReportPreviewDto>;
-  interventions: Page<TagDto>;
-  conditions: Page<TagDto>;
-  outcomes: Page<TagDto>;
-  participants: Page<TagDto>;
-  design: Page<TagDto>;
+  tags: Record<string, Page<TagDto>>;
+}
+
+// GET /study-schema: what a study consists of and how it is presented (config/study.yaml
+// of the backend). Colors and icons are names; see lib/colors.ts and lib/icons.ts.
+export type StudyColor =
+  | "blue"
+  | "emerald"
+  | "rose"
+  | "amber"
+  | "slate"
+  | "sky"
+  | "violet"
+  | "teal";
+
+// A primitive value of a study; `key` is the name of the field of StudyDto.
+export interface StudyFieldSchemaDto {
+  key: keyof StudyDto & string;
+  label: string;
+  type: "integer" | "duration" | "enum" | "text";
+  icon: string;
+  color: StudyColor;
+  display: "metric" | "text";
+  // The allowed values of an enum field (empty for the other types).
+  values: string[];
+}
+
+// A metadata field of the database record of a study (when it was entered/edited).
+export interface StudyMetaSchemaDto {
+  key: keyof StudyDto & string;
+  label: string;
+  type: "date";
+}
+
+export interface TagCategorySchemaDto {
+  key: string;
+  label: string;
+  icon: string;
+  color: StudyColor;
+  searchField: string;
+  description: string;
+}
+
+export interface StudySchemaDto {
+  fields: StudyFieldSchemaDto[];
+  meta: StudyMetaSchemaDto[];
+  tags: TagCategorySchemaDto[];
 }
 
 // Bare-bones Study identity for ReportCurationDto.assignedStudies - the UI only ever
@@ -233,24 +276,12 @@ export interface TaskDto {
 }
 
 // ---------------------------------------------------------------------------
-// Aspect DTOs (interventions / conditions / outcomes / persons)
+// Aspect DTOs (tags / persons)
 // ---------------------------------------------------------------------------
 
 export interface TagDto {
   id: string;
   keyword: string;
-}
-
-// Raw shape of GET /participants and GET /design - unlike interventions/conditions/
-// outcomes, these two aren't wrapped into TagDto by the backend (see resources.py).
-export interface ParticipantDto {
-  id: number;
-  description: string;
-}
-
-export interface DesignDto {
-  id: number;
-  description?: string | null;
 }
 
 export type GetPersonsResponseDto = Record<string, string[]>;
@@ -279,7 +310,8 @@ export interface ReportAnnotationsDto {
 
 export type ProjectAnnotationsDto = Record<string, ReportAnnotationsDto>;
 
-export type StudyStatus = "Closed" | "Stopped early" | "Open/Ongoing" | "Planned";
+// One of the allowed values of the `status` field of the study schema.
+export type StudyStatus = string;
 
 export type DurationUnit = "hours" | "days" | "weeks" | "months" | "years";
 

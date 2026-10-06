@@ -3,6 +3,7 @@ from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
 from ..utils.dto import Page, Study, StudyCandidate, candidate_studies_to_dto
 from ..utils.pagination import decode_cursor, encode_cursor
+from ..utils.tagconfig import TAG_CATEGORIES
 from .authorization import get_authorized_project_id
 from .authors import AuthorFeatureService
 from .vectorstore import VectorstoreService
@@ -222,21 +223,12 @@ class RelatedTagSearchService:
 
     async def search_related_tags_by_study_ids(self, study_ids: List[int], aspect : TagCategories, vectors : Any):
 
-        related_tags = []
-        if aspect == TagCategories.interventions:
-            related_tags = await self.study_repo.get_study_interventions(study_ids)
-            related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors, TagCategories.interventions)
-        elif aspect == TagCategories.conditions:
-            related_tags = await self.study_repo.get_study_conditions(study_ids)
-            related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors, TagCategories.conditions)
-        elif aspect == TagCategories.outcomes:
-            related_tags = await self.study_repo.get_study_outcomes(study_ids=study_ids)
-            related_ids = {item["ID"] for items in related_tags.values() for item in items}
-            return await self.tag_scoring_service.score_related_tags(related_ids, vectors, TagCategories.outcomes)
-        else:
+        if aspect.value not in TAG_CATEGORIES:
             raise UnsupportedAspectError(f"No related-tag search is defined for aspect '{aspect}'")
+
+        related_tags = await self.study_repo.get_study_tags(aspect.value, study_ids)
+        related_ids = {item.id for items in related_tags.values() for item in items}
+        return await self.tag_scoring_service.score_related_tags(related_ids, vectors, aspect)
 
     async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : str, user_id: Optional[str] = None):
         """`user_id` gates access the same way get_similar_studies_page does (see that
@@ -245,7 +237,7 @@ class RelatedTagSearchService:
         """
         await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
 
-        if aspect not in (TagCategories.interventions, TagCategories.conditions, TagCategories.outcomes):
+        if aspect.value not in TAG_CATEGORIES:
             raise UnsupportedAspectError(f"No related-tag search is defined for aspect '{aspect}'")
 
         similar_studies, _has_more = await self.study_similarity_service.get_similar_studies_by_id(report_id, cutoff, k, 0)

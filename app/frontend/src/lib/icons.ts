@@ -1,0 +1,53 @@
+import {
+  Activity,
+  Baby,
+  Calendar,
+  CircleDashed,
+  Clock,
+  FileText,
+  Flag,
+  Globe,
+  HeartPulse,
+  Hospital,
+  MapPin,
+  Microscope,
+  Pill,
+  Scale,
+  Stethoscope,
+  Syringe,
+  Tag,
+  Target,
+  Timer,
+  User,
+  UserRound,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
+
+// The icons the study schema (config/study.yaml of the backend) can name, by their lucide
+// name in kebab-case. To use another lucide icon in the schema, add it here.
+const ICONS: Record<string, LucideIcon> = {
+  activity: Activity,
+  baby: Baby,
+  calendar: Calendar,
+  clock: Clock,
+  "file-text": FileText,
+  flag: Flag,
+  globe: Globe,
+  "heart-pulse": HeartPulse,
+  hospital: Hospital,
+  "map-pin": MapPin,
+  microscope: Microscope,
+  pill: Pill,
+  scale: Scale,
+  stethoscope: Stethoscope,
+  syringe: Syringe,
+  tag: Tag,
+  target: Target,
+  timer: Timer,
+  user: User,
+  "user-round": UserRound,
+  users: Users,
+};
+
+export const iconByName = (name: string): LucideIcon => ICONS[name] ?? CircleDashed;

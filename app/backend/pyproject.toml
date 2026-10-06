@@ -25,8 +25,12 @@ packages = [
     "src.services",
     "src.utils",
     "src.background",
+    "src.config",
     "fastapi_app",
 ]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.package-data]
+"src.config" = ["*.yaml"]

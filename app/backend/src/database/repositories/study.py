@@ -13,10 +13,11 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Tuple
 
 from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport, StudyReportAdded
-from ..models import StudyIntervention, Intervention, StudyCondition, Condition, StudyOutcome, Outcome, StudyDesign, Design, StudyParticipant, Participant
+from ..tagstorage import TAG_COLUMNS, TAG_TABLES
 
 from ...utils.postprocessing import normalize_author_names
 from ...utils.dto import Tag
+from ...utils.tagconfig import TAG_CATEGORIES
 from ...utils.query_parser import AdvancedSearchField, AndGroup, Comparison, OrGroup, QueryNode
 
 load_dotenv()
@@ -44,12 +45,12 @@ trial_id_mapping = load_trial_id_mapping()
 # validation (src/utils/query_parser.py) before a Comparison ever reaches here, so
 # there's no "unknown field" case left to check or raise for at this layer.
 _ASPECT_FIELDS = {
-    AdvancedSearchField.INTERVENTION: (StudyIntervention.study_id, StudyIntervention.intervention_id, Intervention.id, Intervention.description),
-    AdvancedSearchField.CONDITION: (StudyCondition.study_id, StudyCondition.condition_id, Condition.id, Condition.description),
-    AdvancedSearchField.OUTCOME: (StudyOutcome.study_id, StudyOutcome.outcome_id, Outcome.id, Outcome.description),
-    AdvancedSearchField.PARTICIPANT: (StudyParticipant.study_id, StudyParticipant.participant_id, Participant.id, Participant.description),
-    AdvancedSearchField.DESIGN: (StudyDesign.study_id, StudyDesign.design_id, Design.id, Design.description),
+    AdvancedSearchField(TAG_CATEGORIES[name].search_field): (storage.link_study, storage.link_tag, storage.tag.id, storage.tag.description)
+    for name, storage in TAG_TABLES.items()
 }
+
+# Tags kept in a column of the study itself (e.g. countries) are matched with an ilike on the column.
+_COLUMN_FIELDS = {AdvancedSearchField(TAG_CATEGORIES[name].search_field): storage.column for name, storage in TAG_COLUMNS.items()}
 
 def _aspect_exists(join_study_id, join_fk_col, aspect_pk_col, aspect_desc_col, pattern):
     return (
@@ -86,8 +87,8 @@ def _comparison_to_condition(comparison: Comparison):
     if field == AdvancedSearchField.STATUS:
         return Study.status.ilike(pattern)
 
-    if field == AdvancedSearchField.COUNTRY:
-        return Study.countries.ilike(pattern)
+    if field in _COLUMN_FIELDS:
+        return _COLUMN_FIELDS[field].ilike(pattern)
 
     # Unreachable: AdvancedSearchField is a closed enum and every member is handled
     # above - this only trips if a new enum member is added without a case here.
@@ -148,7 +149,7 @@ class StudyRepository:
         """Free-text search across a study's own name/trial ID plus its linked reports'
         authors/trial ID - both the confirmed Report.trial_registration_id and the
         unconfirmed report_added.trial_registration_id guess (see their comments in
-        models.py) - and interventions. Returns (page, has_more) - one extra id beyond
+        models.py) - and the tags of the categories with free_text_search (config/study.yaml). Returns (page, has_more) - one extra id beyond
         the page is fetched so has_more can be determined without a separate count
         query, same convention as StudySimilaritySearchService.get_similar_studies_by_id.
         """
@@ -158,16 +159,21 @@ class StudyRepository:
             .outerjoin(StudyReport, StudyReport.study_id == Study.id)
             .outerjoin(Report, Report.id == StudyReport.report_id)
             .outerjoin(ReportAdded, ReportAdded.report_id == StudyReport.report_id)
-            .outerjoin(StudyIntervention, StudyIntervention.study_id == Study.id)
-            .outerjoin(Intervention, Intervention.id == StudyIntervention.intervention_id)
-            .where(
-                Study.short_name.ilike(pattern)
-                | Study.trial_registration_id.ilike(pattern)
-                | Report.authors.ilike(pattern)
-                | Report.trial_registration_id.ilike(pattern)
-                | ReportAdded.trial_registration_id.ilike(pattern)
-                | Intervention.description.ilike(pattern)
-            )
+        )
+        matches = [
+            Study.short_name.ilike(pattern),
+            Study.trial_registration_id.ilike(pattern),
+            Report.authors.ilike(pattern),
+            Report.trial_registration_id.ilike(pattern),
+            ReportAdded.trial_registration_id.ilike(pattern),
+        ]
+        for category in TAG_CATEGORIES.where(free_text_search=True):
+            storage = TAG_TABLES[category]
+            id_stmt = id_stmt.outerjoin(storage.link, storage.link_study == Study.id).outerjoin(storage.tag, storage.tag.id == storage.link_tag)
+            matches.append(storage.tag.description.ilike(pattern))
+        id_stmt = (
+            id_stmt
+            .where(or_(*matches))
             .distinct()
             .order_by(Study.short_name, Study.id)
             .offset(offset)
@@ -187,8 +193,8 @@ class StudyRepository:
     async def search_studies_advanced(self, query: QueryNode, limit: int, offset: int) -> Tuple[List[Study], bool]:
         """Boolean AND/OR search across studies by field==value comparisons (see
         src/utils/query_parser.py for the grammar and QueryNode shape). Supported fields:
-        name/shortName, trialId, author, status, country/countries, intervention,
-        condition, outcome, participant, design - each translated into an ilike match,
+        name/shortName, trialId, author, status and the search field of each tag category
+        (config/study.yaml) - each translated into an ilike match,
         an EXISTS against its join table for the many-to-many aspect fields. Same
         two-phase id-then-hydrate paging convention as search_studies() above.
         """
@@ -362,168 +368,45 @@ class StudyRepository:
         items = [Tag(id=str(aspect_id), keyword=description or "") for aspect_id, description in rows[:limit]]
         return items, has_more
 
-    async def get_study_interventions(self, study_ids: List[int]) -> Dict[int, List[Tag]]:
+    async def get_study_tags(self, category: str, study_ids: List[int]) -> Dict[int, List[Tag]]:
+        """The tags of a category (a key of config/study.yaml) of each of the studies."""
         if not study_ids:
             return {}
+        if category in TAG_COLUMNS:
+            storage = TAG_COLUMNS[category]
+            rows = (await self.db.execute(select(Study.id, storage.column).where(Study.id.in_(study_ids)))).all()
+            tags = {study_id: [Tag(id=name, keyword=name) for name in storage.split(value)] for study_id, value in rows}
+            return {study_id: items for study_id, items in tags.items() if items}
+        storage = TAG_TABLES[category]
         stmt = (
             select(
-                StudyIntervention.study_id.label("study_id"),
-                StudyIntervention.intervention_id.label("id"),
-                Intervention.description.label("description"),
+                storage.link_study.label("study_id"),
+                storage.link_tag.label("id"),
+                storage.tag.description.label("description"),
             )
-            .join(Intervention, Intervention.id == StudyIntervention.intervention_id)
-            .where(StudyIntervention.study_id.in_(study_ids))
+            .join(storage.tag, storage.tag.id == storage.link_tag)
+            .where(storage.link_study.in_(study_ids))
         )
 
         return await self._get_study_aspect(stmt)
 
-    async def get_study_interventions_single(self, study_id : int) -> List[Tag]:
-        result = await self.get_study_interventions(study_ids=[study_id])
-        if study_id in result.keys():
-            return result[study_id]
-        return []
+    async def get_study_tags_single(self, category: str, study_id: int) -> List[Tag]:
+        result = await self.get_study_tags(category, study_ids=[study_id])
+        return result.get(study_id, [])
 
-    async def get_study_interventions_single_page(self, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
+    async def get_study_tags_single_page(self, category: str, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
+        if category in TAG_COLUMNS:
+            tags = await self.get_study_tags_single(category, study_id)
+            return tags[offset:offset + limit], len(tags) > offset + limit
+        storage = TAG_TABLES[category]
         stmt = (
             select(
-                StudyIntervention.intervention_id.label("id"),
-                Intervention.description.label("description"),
+                storage.link_tag.label("id"),
+                storage.tag.description.label("description"),
             )
-            .join(Intervention, Intervention.id == StudyIntervention.intervention_id)
-            .where(StudyIntervention.study_id == study_id)
-            .order_by(StudyIntervention.intervention_id)
-        )
-        return await self._get_study_aspect_page(stmt, limit, offset)
-
-    async def get_study_conditions(self, study_ids: List[int]) -> Dict[int, List[Tag]]:
-        if not study_ids:
-            return {}
-        stmt = (
-            select(
-                StudyCondition.study_id.label("study_id"),
-                StudyCondition.condition_id.label("id"),
-                Condition.description.label("description"),
-            )
-            .join(Condition, Condition.id == StudyCondition.condition_id)
-            .where(StudyCondition.study_id.in_(study_ids))
-        )
-
-        return await self._get_study_aspect(stmt)
-
-    async def get_study_conditions_single(self, study_id : int) -> List[Tag]:
-        result = await self.get_study_conditions(study_ids=[study_id])
-        if study_id in result.keys():
-            return result[study_id]
-        return []
-
-    async def get_study_conditions_single_page(self, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
-        stmt = (
-            select(
-                StudyCondition.condition_id.label("id"),
-                Condition.description.label("description"),
-            )
-            .join(Condition, Condition.id == StudyCondition.condition_id)
-            .where(StudyCondition.study_id == study_id)
-            .order_by(StudyCondition.condition_id)
-        )
-        return await self._get_study_aspect_page(stmt, limit, offset)
-
-    async def get_study_outcomes(self, study_ids: List[int]) -> Dict[int, List[Tag]]:
-        if not study_ids:
-            return {}
-        stmt = (
-            select(
-                StudyOutcome.study_id.label("study_id"),
-                StudyOutcome.outcome_id.label("id"),
-                Outcome.description.label("description"),
-            )
-            .join(Outcome, Outcome.id == StudyOutcome.outcome_id)
-            .where(StudyOutcome.study_id.in_(study_ids))
-        )
-
-        return await self._get_study_aspect(stmt)
-
-    async def get_study_outcomes_single(self, study_id : int) -> List[Tag]:
-        result =await self.get_study_outcomes(study_ids=[study_id])
-        if study_id in result.keys():
-            return result[study_id]
-        return []
-
-    async def get_study_outcomes_single_page(self, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
-        stmt = (
-            select(
-                StudyOutcome.outcome_id.label("id"),
-                Outcome.description.label("description"),
-            )
-            .join(Outcome, Outcome.id == StudyOutcome.outcome_id)
-            .where(StudyOutcome.study_id == study_id)
-            .order_by(StudyOutcome.outcome_id)
-        )
-        return await self._get_study_aspect_page(stmt, limit, offset)
-
-    async def get_study_participants(self, study_ids: List[int]) -> Dict[int, List[Tag]]:
-        if not study_ids:
-            return {}
-        stmt = (
-            select(
-                StudyParticipant.study_id.label("study_id"),
-                StudyParticipant.participant_id.label("id"),
-                Participant.description.label("description"),
-                )
-            .join(Participant, Participant.id == StudyParticipant.participant_id)
-            .where(StudyParticipant.study_id.in_(study_ids))
-        )
-
-        return await self._get_study_aspect(stmt)
-
-    async def get_study_participants_single(self, study_id: int) -> List[Tag]:
-        result = await self.get_study_participants(study_ids=[study_id])
-        if study_id in result.keys():
-            return result[study_id]
-        return []
-
-    async def get_study_participants_single_page(self, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
-        stmt = (
-            select(
-                StudyParticipant.participant_id.label("id"),
-                Participant.description.label("description"),
-            )
-            .join(Participant, Participant.id == StudyParticipant.participant_id)
-            .where(StudyParticipant.study_id == study_id)
-            .order_by(StudyParticipant.participant_id)
-        )
-        return await self._get_study_aspect_page(stmt, limit, offset)
-
-    async def get_study_design(self, study_ids: List[int]) -> Dict[int, List[Tag]]:
-        if not study_ids:
-            return {}
-        stmt = (
-            select(
-                StudyDesign.study_id.label("study_id"),
-                StudyDesign.design_id.label("id"),
-                Design.description.label("description"),
-                )
-            .join(Design, Design.id == StudyDesign.design_id)
-            .where(StudyDesign.study_id.in_(study_ids))
-        )
-
-        return await self._get_study_aspect(stmt)
-
-    async def get_study_design_single(self, study_id : int) -> List[Tag]:
-        result = await self.get_study_design(study_ids=[study_id])
-        if study_id in result.keys():
-            return result[study_id]
-        return []
-
-    async def get_study_design_single_page(self, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
-        stmt = (
-            select(
-                StudyDesign.design_id.label("id"),
-                Design.description.label("description"),
-            )
-            .join(Design, Design.id == StudyDesign.design_id)
-            .where(StudyDesign.study_id == study_id)
-            .order_by(StudyDesign.design_id)
+            .join(storage.tag, storage.tag.id == storage.link_tag)
+            .where(storage.link_study == study_id)
+            .order_by(storage.link_tag)
         )
         return await self._get_study_aspect_page(stmt, limit, offset)
 

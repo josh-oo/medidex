@@ -35,7 +35,8 @@ import { getConditions } from "@/lib/api/conditionsApi";
 import { getOutcomes } from "@/lib/api/outcomesApi";
 import { getParticipants } from "@/lib/api/participantsApi";
 import { getDesigns } from "@/lib/api/designApi";
-import { COUNTRY_OPTIONS, STUDY_STATUS_OPTIONS } from "./constants";
+import { COUNTRY_OPTIONS } from "./constants";
+import { useStudyFieldValues } from "@/hooks/use-study-schema";
 
 // Fields the backend's advanced-search grammar accepts (see the backend's
 // src/utils/query_parser.py and StudyRepository.search_studies_advanced) - field names
@@ -326,6 +327,7 @@ function ConditionEditor({
   onRemove,
 }: ConditionEditorProps) {
   const config = FIELD_CONFIG_BY_KEY[node.field];
+  const statusOptions = useStudyFieldValues("status");
 
   return (
     <div className="flex items-start gap-2">
@@ -356,7 +358,7 @@ function ConditionEditor({
               <SelectValue placeholder="Choose status" />
             </SelectTrigger>
             <SelectContent>
-              {STUDY_STATUS_OPTIONS.map((status) => (
+              {statusOptions.map((status) => (
                 <SelectItem key={status} value={status}>
                   {status}
                 </SelectItem>
@@ -529,8 +531,8 @@ export function AdvancedSearchDialog({ onSearch }: AdvancedSearchDialogProps) {
           intervention: dedupeSorted(interventions.map((tag) => tag.keyword)),
           condition: dedupeSorted(conditions.map((tag) => tag.keyword)),
           outcome: dedupeSorted(outcomes.map((tag) => tag.keyword)),
-          participant: dedupeSorted(participants.map((participant) => participant.description)),
-          design: dedupeSorted(designs.map((design) => design.description)),
+          participant: dedupeSorted(participants.map((tag) => tag.keyword)),
+          design: dedupeSorted(designs.map((tag) => tag.keyword)),
           country: COUNTRY_OPTIONS,
         });
       })

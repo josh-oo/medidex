@@ -32,6 +32,7 @@ import {
 import { Check, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { COUNTRY_OPTIONS } from "./constants";
+import { useStudyFieldValues } from "@/hooks/use-study-schema";
 import {
   createComparisonGroup,
   hasValidComparisonGroups,
@@ -114,6 +115,7 @@ export function AddStudyDialog({
   onSaveStudy,
 }: AddStudyDialogProps) {
   const [shortName, setShortName] = useState("");
+  const statusOptions = useStudyFieldValues("status");
   const [statusOfStudy, setStatusOfStudy] = useState("");
   const [durationValue, setDurationValue] = useState("");
   const [durationUnit, setDurationUnit] = useState<StudyDurationUnit | undefined>(
@@ -636,10 +638,11 @@ export function AddStudyDialog({
                   <SelectValue placeholder="Choose status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Closed">Closed</SelectItem>
-                  <SelectItem value="Stopped early">Stopped early</SelectItem>
-                  <SelectItem value="Open/Ongoing">Open/Ongoing</SelectItem>
-                  <SelectItem value="Planned">Planned</SelectItem>
+                  {statusOptions.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {status}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
