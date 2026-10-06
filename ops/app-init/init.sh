@@ -150,7 +150,7 @@ APP_UID="${APP_UID:-999}"
 APP_GID="${APP_GID:-999}"
 
 echo "app-init: preparing data volume at $DATABASE_VOLUME..."
-for dir in logs resources resources/pdfs resources/pdf_metadata resources/fulltexts; do
+for dir in logs resources resources/pdfs resources/pdf_metadata; do
     mkdir -p "$DATABASE_VOLUME/$dir"
 done
 if [ ! -f "$DATABASE_VOLUME/resources/pdfs/00000.pdf" ]; then

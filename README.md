@@ -93,6 +93,30 @@ The original frontend code can be found in the [MaxiMittel/medidex repository](h
 This service manages the incoming requests from the frontend and calls the appropriate
 sub-services in the backend.
 
+## Scopes
+
+Everyone who edits works in a **scope** of their own and does not interact with the others. A scope is the id the
+edit is recorded under (`user_id` of the request):
+
+| Scope | Id | Who |
+|---|---|---|
+| user | the Keycloak user id | a person working in the web UI |
+| MediBot | `bot` | the project automation |
+| MCP client | `<client name> (mcp)` | an MCP client acting for the project's administrator (downstream builds) |
+
+- **Links.** The link of a report to a study is recorded per scope (`study_report_added.created_by`; in the
+  vector store under `temporary.<scope>`), so everyone sees their own links.
+- **Studies.** A study created in a scope (`study_added.created_by`) is only visible to that scope - in search,
+  candidates, details and for linking - until a reviewer confirms a link to it, from then on it is visible to
+  everyone. Studies of the seed data (no `study_added` record) are visible to everyone. Admins (reviewers) see
+  every scope's studies (`RequestContext.is_admin`); an MCP client acting for an admin does not.
+- **Projects.** A scope needs access to the project: it is assigned to it (`project_assignee`, any string is a
+  valid assignee), which is also what shows its progress in the project card. Reviewing the edits of the scopes
+  finishes the project.
+- **Not scoped.** PDFs and their upload are global: a PDF found for a report is the PDF of the report.
+
+Implemented in `StudyRepository._visible()` and `LinkageService` (a study that is not visible cannot be linked).
+
 ## embedding
 This service transforms plain text into vector embeddings. It runs HuggingFace
 [text-embeddings-inference](https://github.com/huggingface/text-embeddings-inference) and

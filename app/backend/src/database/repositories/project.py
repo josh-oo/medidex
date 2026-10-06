@@ -1,7 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import func
+from dataclasses import dataclass
+from sqlalchemy import exists, func
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 from sqlmodel import select, delete, insert
 from collections import defaultdict
 
@@ -12,12 +14,22 @@ from ..models import (
     ReportFlag,
     Project,
     ProjectInnerScore,
+    StudyAdded,
     StudyReport,
     StudyReportAdded,
     ProjectAssignees,
 )
 from .report import ReportRepository
 from typing import Any, Dict, List, Set, Tuple, Optional
+
+
+@dataclass
+class DeletedProject:
+    """What a deleted project had that lives outside the database and has to be removed as well."""
+
+    report_ids: List[int]
+    # Numbers of the PDF files of the reports that have one (report.report_number > 0).
+    pdf_numbers: List[int]
 
 
 class ProjectRepository:
@@ -243,15 +255,54 @@ class ProjectRepository:
         result = await self.db.execute(stmt)
         return {project_id: count for project_id, count in result.all()}
 
-    async def delete_project(self, project_id : str):
+    async def delete_project(self, project_id: str) -> Optional[DeletedProject]:
+        """Delete a project with everything it brought into the database, so that the database is as it was
+        before the project was added: its reports, also those already linked to a study (a cascade of the
+        models and the foreign keys, see Project.reports_added), and the studies created in the application
+        (they have a study_added record) that have no report left afterwards. Studies that existed before
+        stay, minus the links to the deleted reports.
+
+        Only the uploader can delete a project. Returns None, deleting nothing, if there is no such project
+        or it was uploaded by somebody else; otherwise what is left to remove outside the database.
+        """
         if not self.user_id:
             raise ValueError("User ID is required to delete a project")
 
-        stmt = delete(Project).where(Project.id == project_id)
-        stmt = stmt.where(Project.uploaded_by == self.user_id)
+        stmt = (
+            select(Project)
+            .where(Project.id == project_id)
+            .where(Project.uploaded_by == self.user_id)
+            .options(selectinload(Project.reports_added).selectinload(ReportAdded.report))
+        )
+        project = (await self.db.execute(stmt)).scalar_one_or_none()
+        if project is None:
+            return None
 
-        await self.db.execute(stmt)
-        await self.db.commit()
+        reports = [added.report for added in project.reports_added]
+        report_ids = [report.id for report in reports]
+        deleted = DeletedProject(
+            report_ids=report_ids,
+            pdf_numbers=[report.report_number for report in reports if (report.report_number or 0) > 0],
+        )
+        linked_study_ids = list((await self.db.execute(
+            select(StudyReport.study_id).where(StudyReport.report_id.in_(report_ids)).distinct()
+        )).scalars().all()) if report_ids else []
+
+        try:
+            await self.db.delete(project)
+            await self.db.flush()
+            if linked_study_ids:
+                # The one thing a cascade cannot express: a study goes when its last report goes.
+                has_report = exists().where(StudyReport.study_id == Study.id)
+                created_here = exists().where(StudyAdded.study_id == Study.id)
+                await self.db.execute(
+                    delete(Study).where(Study.id.in_(linked_study_ids)).where(created_here).where(~has_report)
+                )
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+        return deleted
 
     async def project_item_to_report_id(self, project_id: str, report_index: int):
         stmt = (

@@ -23,6 +23,7 @@ from src.services.aspects import TagCategories, UnsupportedAspectError
 from src.services.core import ReportNotReadyError
 from src.services.linkage import (
     ReportNotInProjectError,
+    StudyNotFoundError,
     ReportProjectAccessError,
     ReportStudyLinkNotFoundError,
 )
@@ -125,6 +126,8 @@ async def assign_studies(
         await ctx.linkage_service.link_existing_study_to_report(report_id, study_id, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
         raise_for_report_access(exc)
+    except StudyNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     payload = {"user": ctx.user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
