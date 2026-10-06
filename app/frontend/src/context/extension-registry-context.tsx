@@ -70,14 +70,20 @@ export interface ReportStatusSlotProps {
 export type AddStudyTriggerSlotProps = Pick<
   AddStudyDialogProps,
   "currentReportId" | "onSaveStudy"
->
+> & {
+  /** The current report's `extensions` payload (see ReportCardSlotProps). */
+  extensions?: Record<string, unknown>
+}
 
 export interface ReportCardSlotProps {
   reportId: number
+  /** The report's `extensions` payload, for the keys listed in the registry's `reportIncludes`. */
+  extensions?: Record<string, unknown>
 }
 
 export interface ReportAbstractSlotProps {
   reportId: number
+  extensions?: Record<string, unknown>
   title: string | null
   text: string | null
 }
@@ -105,6 +111,11 @@ export interface ExtensionRegistry {
   studyContextMenuItems: ComponentType<StudyContextMenuItemProps>[]
   reportBanners: ComponentType<ReportBannerSlotProps>[]
   reportStatuses: ComponentType<ReportStatusSlotProps>[]
+  /**
+   * Keys of extension data the project report lists should attach to each report
+   * (the backend's `include`); delivered to the report slots as `extensions`.
+   */
+  reportIncludes?: string[]
   /** Rendered at the bottom of every report card in the report list. */
   reportCardExtras: ComponentType<ReportCardSlotProps>[]
   projectUploadOptions: ComponentType<ProjectUploadOptionsSlotProps>[]

@@ -1,10 +1,12 @@
+import { useCallback } from "react";
 import { useParams, Outlet } from "react-router-dom";
+import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { getProjectReports } from "@/lib/api/projectApi";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectResource } from "@/hooks/use-project-resource";
 import { ProjectNotFound } from "@/components/reports/project-not-found";
 import { ReportSplitView } from "@/components/reports/report-split-view";
-import type { ReportFilterDimension } from "@/types/apiDTOs";
+import type { GetProjectReportsParams, ReportFilterDimension } from "@/types/apiDTOs";
 import StudySheet from "./study-sheet";
 
 const reportFilterDimensions: ReportFilterDimension[] = [
@@ -15,8 +17,13 @@ const reportFilterDimensions: ReportFilterDimension[] = [
 
 export default function ReportColumn() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
+  const { reportIncludes } = useExtensionRegistry();
+  const fetchReports = useCallback(
+    (id: string, filters?: GetProjectReportsParams) => getProjectReports(id, { ...filters, include: reportIncludes }),
+    [reportIncludes]
+  );
   const { data: reports, notFound } = useProjectResource(
-    () => getProjectReports(projectId).then((result) => result?.items ?? []),
+    () => fetchReports(projectId).then((result) => result?.items ?? []),
     [],
     [projectId]
   );
@@ -31,7 +38,7 @@ export default function ReportColumn() {
       baseUrl="projects"
       editMode={true}
       filterDimensions={reportFilterDimensions}
-      fetchReports={getProjectReports}
+      fetchReports={fetchReports}
       sheet={<StudySheet />}
     >
       <Outlet />

@@ -1,6 +1,8 @@
+import { useCallback } from "react";
 import { useParams, Outlet } from "react-router-dom";
+import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { AdminGuard } from "@/components/auth/admin-guard";
-import type { ProjectAnnotationsDto, ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
+import type { GetProjectReportsParams, ProjectAnnotationsDto, ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
 import { getAnnotations, getProjectReportsReview } from "@/lib/api/projectApi";
 import { ReviewAnnotationsProvider } from "./components/review-annotations-context";
 import { Spinner } from "@/components/ui/spinner";
@@ -25,10 +27,16 @@ const emptyReviewData: ProjectReviewData = { reports: [], annotations: {} };
 export default function AnnotationsReviewPage() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
   const isAdmin = useAuthStore((s) => s.user?.isAdmin ?? false);
+  const { reportIncludes } = useExtensionRegistry();
+  const fetchReports = useCallback(
+    (id: string, filters?: GetProjectReportsParams) =>
+      getProjectReportsReview(id, { ...filters, include: reportIncludes }),
+    [reportIncludes]
+  );
   const { data, notFound } = useProjectResource<ProjectReviewData>(
     async () => {
       const [reportsPage, annotations] = await Promise.all([
-        getProjectReportsReview(projectId),
+        fetchReports(projectId),
         getAnnotations(projectId),
       ]);
       return { reports: reportsPage?.items ?? [], annotations: annotations ?? {} };
@@ -56,7 +64,7 @@ export default function AnnotationsReviewPage() {
                 baseUrl="review"
                 editMode={false}
                 filterDimensions={reportFilterDimensions}
-                fetchReports={getProjectReportsReview}
+                fetchReports={fetchReports}
                 sheet={<StudySheet />}
               >
                 <Outlet />

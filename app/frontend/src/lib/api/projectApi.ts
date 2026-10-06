@@ -67,6 +67,7 @@ export const getProjectReports = (
       new_study: filters?.newStudy,
       cursor: filters?.cursor,
       limit: filters?.limit,
+      include: filters?.include,
     },
   };
 
@@ -115,6 +116,7 @@ export const getProjectReportsReview = (
       reviewed: filters?.reviewed,
       cursor: filters?.cursor,
       limit: filters?.limit,
+      include: filters?.include,
     },
   };
 

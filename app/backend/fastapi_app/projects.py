@@ -10,6 +10,7 @@ from src.utils.ris_parser import RisParseError
 from src.utils.logger import setup_logging
 
 from .auth import is_verified_api_call, is_admin
+from .enrichment import report_enrichers
 
 from src.context import RequestContext
 from .deps import get_context
@@ -115,6 +116,7 @@ async def remove_user_from_project(
 _search_query = Query(None, description="Filter reports by title, abstract or report id (case-insensitive substring match).")
 _cursor_query = Query(None, description="Opaque cursor from a previous response's nextCursor; omit to fetch the first page.")
 _limit_query = Query(50, ge=1, le=200, description="Maximum number of reports to return in this page.")
+_include_query = Query([], description="Keys of optional extension data to attach to each report's `extensions` (see fastapi_app/enrichment.py); omit for the plain response.")
 
 
 @router.get(
@@ -132,9 +134,10 @@ async def get_project_reports(
     new_study: FilterMode = Query(FilterMode.any, description="Only/exclude reports where a linked study was created after the report itself."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
+    include: List[str] = _include_query,
 ) -> Page[ReportCuration]:
     try:
-        return await ctx.project_service.get_reports_page(
+        page = await ctx.project_service.get_reports_page(
             project_id,
             search=search,
             processed=processed,
@@ -143,6 +146,7 @@ async def get_project_reports(
             cursor=cursor,
             limit=limit,
         )
+        return await report_enrichers.apply(page, include, ctx)
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ProjectAccessDeniedError as exc:
@@ -192,9 +196,10 @@ async def get_project_reports_review(
     reviewed: FilterMode = Query(FilterMode.any, description="Only/exclude reports where an annotator has confirmed their annotation."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
+    include: List[str] = _include_query,
 ) -> Page[ReportCuration]:
     try:
-        return await ctx.project_service.get_review_reports_page(
+        page = await ctx.project_service.get_review_reports_page(
             project_id,
             search=search,
             consensus=consensus,
@@ -202,6 +207,7 @@ async def get_project_reports_review(
             cursor=cursor,
             limit=limit,
         )
+        return await report_enrichers.apply(page, include, ctx)
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

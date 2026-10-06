@@ -62,6 +62,9 @@ export interface ReportCurationDto extends ReportDto {
   // Optional for the same reason flag/assignedStudies are: ReportIntakeDto doesn't carry
   // it either, but still needs to satisfy this shape (see this interface's comment).
   preliminaryTrialId?: string | null;
+  // Optional data a downstream deployable attached on request (see `include` in
+  // GetProjectReportsParams), keyed by extension. Empty unless requested.
+  extensions?: Record<string, unknown>;
 }
 
 // The admin intake list's row shape (Page<ReportIntakeDto>.items below) - a report plus
@@ -111,6 +114,8 @@ export interface GetProjectReportsParams extends ReportFiltersState {
   search?: string;
   cursor?: string;
   limit?: number;
+  // Keys of optional extension data to attach to each report (ReportCurationDto.extensions).
+  include?: string[];
 }
 
 // ---------------------------------------------------------------------------

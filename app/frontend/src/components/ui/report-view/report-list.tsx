@@ -483,7 +483,7 @@ export function ReportList({
                         </p>
                       )}
                       <div className="min-w-0" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                        <ReportCardExtrasSlot reportId={report.reportId} />
+                        <ReportCardExtrasSlot reportId={report.reportId} extensions={report.extensions} />
                       </div>
                       {editMode && (
                         <div onClick={(e) => e.stopPropagation()}>
@@ -495,7 +495,7 @@ export function ReportList({
                     {isExpanded && (
                       <div className="px-4 pb-4 border-t bg-muted/30">
                         <div className="text-xs text-muted-foreground leading-relaxed mt-2 whitespace-pre-wrap">
-                          <ReportAbstractSlot reportId={report.reportId} title={report.title} text={report.abstract} />
+                          <ReportAbstractSlot reportId={report.reportId} extensions={report.extensions} title={report.title} text={report.abstract} />
                         </div>
                       </div>
                     )}
