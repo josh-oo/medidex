@@ -309,11 +309,11 @@ export function CandidateStudyTable({
         </div>
       </div>
 
-      <ReportBannerSlot reportId={reportId} />
-
       {/* Scrollable Content */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4">
-        <div className="pt-3 pb-4 space-y-6">
+        {/* Inside the scroll area, so a banner scrolls away with the list unless it sticks itself */}
+        <ReportBannerSlot reportId={reportId} />
+        <div className="pt-3 pb-24 space-y-6">
 
           {/* Globally searched studies */}
           {searchResults && (
