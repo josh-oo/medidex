@@ -29,6 +29,7 @@ from src.services.linkage import (
 
 from src.utils.dto import StudyPayload, Study, StudyCandidate, TagCandidate, Page, studies_to_dto
 from src.utils.pagination import InvalidCursorError
+from src.utils.tagconfig import TAG_CATEGORIES
 from src.utils.query_parser import QuerySyntaxError, SEARCH_QUERY_DESCRIPTION
 from datetime import datetime
 
@@ -106,7 +107,7 @@ async def referenced_studies_by_report(report_id: int, ctx: RequestContext = Dep
         raise_for_report_access(exc)
 
 @router.get("/reports/{report_id}/similar-studies/tags", dependencies=[Depends(is_verified_api_call)], summary="")
-async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories.interventions, description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(10, description="The number of related studies considered for retrieving relevant tags."), ctx: RequestContext = Depends(get_context)):
+async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories(TAG_CATEGORIES.first), description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(10, description="The number of related studies considered for retrieving relevant tags."), ctx: RequestContext = Depends(get_context)):
     try:
         return await ctx.related_tag_service.search_related_tags_by_report_id(report_id, aspect, k, cutoff, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:

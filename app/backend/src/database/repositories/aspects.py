@@ -2,42 +2,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 import re
 
-from ..models import Intervention, Condition, Outcome, Design, Participant, Study
+from ..models import Study
+from ..tagstorage import TAG_TABLES
 from typing import List, Optional
 
 class AspectRepository:
     def __init__(self, db : AsyncSession):
         self.db = db
 
-    async def get_all_interventions(self, ids: List[int]) -> List[Intervention]:
-        stmt = select(Intervention)
+    async def get_all_tags(self, category: str, ids: List[int]):
+        """All tags of a category (a key of config/study.yaml), or only those with the given ids."""
+        tag = TAG_TABLES[category].tag
+        stmt = select(tag)
         if ids:
-            stmt = stmt.where(Intervention.id.in_(ids))
+            stmt = stmt.where(tag.id.in_(ids))
         return (await self.db.execute(stmt)).scalars().all()
-
-    async def get_all_conditions(self, ids: List[int]) -> List[Condition]:
-        stmt = select(Condition)
-        if ids:
-            stmt = stmt.where(Condition.id.in_(ids))
-        return (await self.db.execute(stmt)).scalars().all()
-
-    async def get_all_outcomes(self, ids: List[int]) -> List[Outcome]:
-        stmt = select(Outcome)
-        if ids:
-            stmt = stmt.where(Outcome.id.in_(ids))
-        return (await self.db.execute(stmt)).scalars().all()
-
-    async def get_all_designs(self, ids: List[int]) -> List[Design]:
-        stmt = select(Design)
-        if ids:
-            stmt = stmt.where(Design.id.in_(ids))
-        return (await self.db.execute(stmt)).all()
-
-    async def get_all_participants(self, ids: List[int]) -> List[Participant]:
-        stmt = select(Participant)
-        if ids:
-            stmt = stmt.where(Participant.id.in_(ids))
-        return (await self.db.execute(stmt)).all()
 
     async def get_all_countries(self, prefix: Optional[str]) -> List[str]:
         # Get all non-null Countries values

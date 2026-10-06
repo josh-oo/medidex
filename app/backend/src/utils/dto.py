@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from .studyconfig import STUDY_CONFIG
 from typing import Any, Dict, Mapping, Optional, List, TypeVar, Generic
 from datetime import datetime
 from enum import Enum
@@ -124,9 +125,8 @@ class Tag(BaseModel):
 class TagCandidate(Tag):
     relevance: float
 
-class StudyPayload(BaseModel):
-    """The fields needed to create a study - everything else (studyId, timestamps) is
-    server-generated, so this also doubles as the PUT /studies request body."""
+class StudyFields(BaseModel):
+    """The primitive fields of a study."""
     shortName: str
     status: str
     countries: List[str]
@@ -135,24 +135,64 @@ class StudyPayload(BaseModel):
     comparison: Optional[str]
     trialId: Optional[str] = None
 
-class Study(StudyPayload):
+class StudyPayload(StudyFields):
+    """The fields needed to create a study - everything else (studyId, timestamps) is
+    server-generated, so this also doubles as the PUT /studies request body. The values of
+    enum fields (config/study.yaml) must be allowed ones; only checked here, not for the
+    studies already in the database."""
+
+    @model_validator(mode="after")
+    def _check_enums(self) -> "StudyPayload":
+        for key, values in STUDY_CONFIG.enums.items():
+            if getattr(self, key) not in values:
+                raise ValueError(f"{key} must be one of: {', '.join(values)}")
+        return self
+
+class Study(StudyFields):
     studyId: int
     createdAt: Optional[str]
     updatedAt: Optional[str]
 
 class StudyFull(Study):
     """A Study plus everything the study details view fetches per-study: its linked
-    reports and the tag-like aspects (interventions/conditions/outcomes/participants/
-    design) attached to it. Returned by GET /studies/{study_id}. Each nested list is
-    only its first page (see that endpoint's `limit` param, default 10) - page further
-    through any one of them with the matching /studies/{study_id}/* endpoint and its
-    nextCursor, same as fastapi_app/resources.py's standalone aspect endpoints."""
+    reports and its tags per category of config/study.yaml (interventions, conditions,
+    countries, ...). Returned by GET /studies/{study_id}. Each nested list is only its
+    first page (see that endpoint's `limit` param, default 10) - page further through any
+    one of them with the matching /studies/{study_id}/* endpoint and its nextCursor, same
+    as fastapi_app/resources.py's standalone aspect endpoints."""
     reports: Page[ReportPreview] = Field(default_factory=lambda: Page[ReportPreview](items=[]))
-    interventions: Page[Tag] = Field(default_factory=lambda: Page[Tag](items=[]))
-    conditions: Page[Tag] = Field(default_factory=lambda: Page[Tag](items=[]))
-    outcomes: Page[Tag] = Field(default_factory=lambda: Page[Tag](items=[]))
-    participants: Page[Tag] = Field(default_factory=lambda: Page[Tag](items=[]))
-    design: Page[Tag] = Field(default_factory=lambda: Page[Tag](items=[]))
+    tags: Dict[str, Page[Tag]] = Field(default_factory=dict)
+
+class StudyFieldSchema(BaseModel):
+    """A primitive value of a study (see `fields` in config/study.yaml)."""
+    key: str
+    label: str
+    type: str
+    icon: str
+    color: str
+    display: str
+    values: List[str] = []
+
+class StudyMetaSchema(BaseModel):
+    """A metadata field of the database record of a study (see `meta` in config/study.yaml)."""
+    key: str
+    label: str
+    type: str
+
+class TagCategorySchema(BaseModel):
+    """A tag category (see `categories` in config/study.yaml)."""
+    key: str
+    label: str
+    icon: str
+    color: str
+    searchField: str
+    description: str
+
+class StudySchema(BaseModel):
+    """What a study consists of and how it is presented. Returned by GET /study-schema."""
+    fields: List[StudyFieldSchema]
+    meta: List[StudyMetaSchema]
+    tags: List[TagCategorySchema]
 
 class StudyCandidate(Study):
     """A study suggested as a possible match for a report by the similarity search

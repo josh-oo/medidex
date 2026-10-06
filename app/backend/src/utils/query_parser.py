@@ -23,22 +23,25 @@ from pyparsing import (
     opAssoc,
 )
 
+from .tagconfig import TAG_CATEGORIES
+
 
 class QuerySyntaxError(ValueError):
     pass
 
 
-class AdvancedSearchField(str, Enum):
-    NAME = "name"
-    TRIAL_ID = "trialId"
-    AUTHOR = "author"
-    STATUS = "status"
-    COUNTRY = "country"
-    INTERVENTION = "intervention"
-    CONDITION = "condition"
-    OUTCOME = "outcome"
-    PARTICIPANT = "participant"
-    DESIGN = "design"
+# The study fields of the search: fixed ones, and one per tag category of config/study.yaml.
+AdvancedSearchField = Enum(
+    "AdvancedSearchField",
+    {
+        "NAME": "name",
+        "TRIAL_ID": "trialId",
+        "AUTHOR": "author",
+        "STATUS": "status",
+        **{TAG_CATEGORIES[name].search_field.upper(): TAG_CATEGORIES[name].search_field for name in TAG_CATEGORIES},
+    },
+    type=str,
+)
 
 
 # Common alternate spellings (plurals, the REST DTO's camelCase, snake_case) that both
@@ -51,12 +54,8 @@ _FIELD_ALIASES = {
     "trialregistrationid": AdvancedSearchField.TRIAL_ID,
     "trial_registration_id": AdvancedSearchField.TRIAL_ID,
     "authors": AdvancedSearchField.AUTHOR,
-    "countries": AdvancedSearchField.COUNTRY,
-    "interventions": AdvancedSearchField.INTERVENTION,
-    "conditions": AdvancedSearchField.CONDITION,
-    "outcomes": AdvancedSearchField.OUTCOME,
-    "participants": AdvancedSearchField.PARTICIPANT,
-    "designs": AdvancedSearchField.DESIGN,
+    **{name: AdvancedSearchField(TAG_CATEGORIES[name].search_field) for name in TAG_CATEGORIES},
+    **{f"{TAG_CATEGORIES[name].search_field}s": AdvancedSearchField(TAG_CATEGORIES[name].search_field) for name in TAG_CATEGORIES},
 }
 
 
@@ -176,14 +175,19 @@ _COMPARISON_HINT = re.compile(
 )
 
 SEARCH_QUERY_DESCRIPTION = (
-    "Search text, matched against study name, trial ID, author and intervention. "
+    "Search text, matched against study name, trial ID, author and "
+    + ", ".join(TAG_CATEGORIES[name].search_field for name in TAG_CATEGORIES.where(free_text_search=True))
+    + ". "
     "If it is a boolean expression of field==value (or field=value) comparisons combined "
     "with AND/OR (AND binds tighter than OR) and optional parentheses, or a JSON filter "
     "object, it is treated as an advanced field search instead, e.g. "
     "'intervention==Drug A AND condition==Sick OR condition==Healthy'. Quote a value "
     "(\"...\" or '...') to include literal AND/OR/)/whitespace. Valid fields: "
-    "name/shortName, trialId, author, status, country, intervention, condition, outcome, "
-    "participant, design (plurals accepted too, e.g. conditions)."
+    "name/shortName, trialId, author, status, "
+    + ", ".join(TAG_CATEGORIES[name].search_field for name in TAG_CATEGORIES)
+    + " (plurals accepted too, e.g. "
+    + TAG_CATEGORIES.first
+    + ")."
 )
 
 

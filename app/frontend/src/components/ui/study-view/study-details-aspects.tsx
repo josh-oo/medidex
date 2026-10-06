@@ -2,16 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Activity,
-  Stethoscope,
-  Target,
-  Syringe,
-  Info,
-  UserRound,
-  Users,
-  CircleDashed,
-} from "lucide-react";
+import { Info, CircleDashed } from "lucide-react";
 import {
   Accordion,
   AccordionContent,
@@ -20,9 +11,12 @@ import {
 } from "@/components/ui/accordion";
 import {
   StudyDto,
+  TagCategorySchemaDto,
   TagDto,
 } from "@/types/apiDTOs";
 import { getPersonsForStudy } from "@/lib/api/studiesApi";
+import { colorClasses, type ColorClasses } from "@/lib/colors";
+import { iconByName } from "@/lib/icons";
 
 // A paginated aspect list's current state, as owned and fetched by the parent
 // (StudyDetails, via GET /studies/{study_id} and this category's own
@@ -37,79 +31,23 @@ interface StudyAspectsProps {
   study: StudyDto;
   loading: boolean;
   error: string | null;
-  interventions: AspectPageState;
-  conditions: AspectPageState;
-  outcomes: AspectPageState;
-  participants: AspectPageState;
-  design: AspectPageState;
-  onLoadMoreInterventions: () => void;
-  onLoadMoreConditions: () => void;
-  onLoadMoreOutcomes: () => void;
-  onLoadMoreParticipants: () => void;
-  onLoadMoreDesign: () => void;
+  // The tag categories of the study schema, in the order they are shown.
+  categories: TagCategorySchemaDto[];
+  // The tags of the study per category.
+  tags: Record<string, AspectPageState>;
+  onLoadMore: (category: string) => void;
 }
 
-const categoryConfig = {
-  interventions: {
-    icon: Syringe,
-    label: "Interventions",
-    accentClass: "text-emerald-600 dark:text-emerald-400",
-    bgClass: "bg-emerald-50 dark:bg-emerald-950/30",
-    borderClass: "border-l-emerald-500",
-  },
-  conditions: {
-    icon: Stethoscope,
-    label: "Conditions",
-    accentClass: "text-blue-600 dark:text-blue-400",
-    bgClass: "bg-blue-50 dark:bg-blue-950/30",
-    borderClass: "border-l-blue-500",
-  },
-  outcomes: {
-    icon: Target,
-    label: "Outcomes",
-    accentClass: "text-rose-600 dark:text-rose-400",
-    bgClass: "bg-rose-50 dark:bg-rose-950/30",
-    borderClass: "border-l-rose-500",
-  },
-  participants: {
-    icon: Users,
-    label: "Participants",
-    accentClass: "text-sky-600 dark:text-sky-400",
-    bgClass: "bg-sky-50 dark:bg-sky-950/30",
-    borderClass: "border-l-sky-500",
-  },
-  design: {
-    icon: Activity,
-    label: "Study Design",
-    accentClass: "text-amber-600 dark:text-amber-400",
-    bgClass: "bg-amber-50 dark:bg-amber-950/30",
-    borderClass: "border-l-amber-500",
-  },
-  persons: {
-    icon: UserRound,
-    label: "Persons",
-    accentClass: "text-violet-600 dark:text-violet-400",
-    bgClass: "bg-violet-50 dark:bg-violet-950/30",
-    borderClass: "border-l-violet-500",
-  },
-};
-
-type PagedCategory = Exclude<keyof typeof categoryConfig, "persons">;
+// How the persons (the authors of the study), which are no tag category, are drawn.
+const PERSONS_COLORS: ColorClasses = colorClasses("violet");
 
 export function StudyAspects({
   study,
   loading,
   error,
-  interventions,
-  conditions,
-  outcomes,
-  participants,
-  design,
-  onLoadMoreInterventions,
-  onLoadMoreConditions,
-  onLoadMoreOutcomes,
-  onLoadMoreParticipants,
-  onLoadMoreDesign,
+  categories,
+  tags,
+  onLoadMore,
 }: StudyAspectsProps) {
   const [persons, setPersons] = useState<string[]>([]);
   const [personsLoading, setPersonsLoading] = useState(true);
@@ -167,11 +105,11 @@ export function StudyAspects({
             <div className="p-1.5 rounded-md bg-muted">
               <Info className="h-4 w-4" />
             </div>
-            Study Details
+            Tags
           </h3>
         </div>
         <div className="space-y-4">
-          {Object.keys(categoryConfig).map((category) => (
+          {[...categories.map((category) => category.key), "persons"].map((category) => (
             <div key={category} className="space-y-2 px-1">
               <div className="flex items-center gap-3">
                 <Skeleton className="h-6 w-6" />
@@ -193,21 +131,15 @@ export function StudyAspects({
     );
   }
 
-  const renderTagItems = (
-    items: TagDto[],
-    category: PagedCategory,
-    emptyMessage: string,
-    nextCursor: string | null,
-    loadingMore: boolean,
-    onLoadMore: () => void
-  ) => {
-    const config = categoryConfig[category];
+  const renderTagItems = (category: TagCategorySchemaDto) => {
+    const { items, nextCursor, loadingMore } = tags[category.key];
+    const colors = colorClasses(category.color);
 
     if (!items.length) {
       return (
         <div className="flex items-center gap-3 py-6 px-4 text-muted-foreground">
           <CircleDashed className="h-4 w-4 opacity-50" />
-          <p className="text-sm">{emptyMessage}</p>
+          <p className="text-sm">No {category.label.toLowerCase()} available</p>
         </div>
       );
     }
@@ -217,7 +149,7 @@ export function StudyAspects({
         {items.map((item) => (
           <div
             key={item.id}
-            className={`p-3.5 rounded-md border-l-2 ${config.borderClass} ${config.bgClass} transition-colors`}
+            className={`p-3.5 rounded-md border-l-2 ${colors.border} ${colors.bg} transition-colors`}
           >
             <p className="text-foreground text-sm leading-relaxed">
               {item.keyword}
@@ -229,7 +161,7 @@ export function StudyAspects({
             <Button
               variant="outline"
               size="sm"
-              onClick={onLoadMore}
+              onClick={() => onLoadMore(category.key)}
               disabled={loadingMore}
             >
               {loadingMore ? "Loading..." : "Load more"}
@@ -241,8 +173,6 @@ export function StudyAspects({
   };
 
   const renderPersonItems = (items: string[], emptyMessage: string) => {
-    const config = categoryConfig.persons;
-
     if (!items.length) {
       return (
         <div className="flex items-center gap-3 py-6 px-4 text-muted-foreground">
@@ -257,7 +187,7 @@ export function StudyAspects({
         {items.map((item, index) => (
           <div
             key={index}
-            className={`p-3.5 rounded-md border-l-2 ${config.borderClass} ${config.bgClass} transition-colors`}
+            className={`p-3.5 rounded-md border-l-2 ${PERSONS_COLORS.border} ${PERSONS_COLORS.bg} transition-colors`}
           >
             <p className="text-foreground text-sm leading-relaxed">{item}</p>
           </div>
@@ -268,25 +198,28 @@ export function StudyAspects({
 
   const renderAccordionItem = (
     value: string,
-    category: keyof typeof categoryConfig,
+    label: string,
+    icon: string,
+    color: string,
     count: number,
     children: ReactNode,
     hasMore = false
   ) => {
-    const config = categoryConfig[category];
-    const Icon = config.icon;
+    const colors = colorClasses(color);
+    const Icon = iconByName(icon);
 
     return (
       <AccordionItem
+        key={value}
         value={value}
         className="border-b border-border/50 last:border-b-0"
       >
         <AccordionTrigger className="py-4 hover:no-underline hover:bg-muted/30 px-1 rounded-md transition-colors">
           <div className="flex items-center gap-3">
-            <div className={`p-1.5 rounded-md ${config.bgClass}`}>
-              <Icon className={`h-4 w-4 ${config.accentClass}`} />
+            <div className={`p-1.5 rounded-md ${colors.bg}`}>
+              <Icon className={`h-4 w-4 ${colors.accent}`} />
             </div>
-            <span className="text-sm font-medium">{config.label}</span>
+            <span className="text-sm font-medium">{label}</span>
             <Badge
               variant="secondary"
               className="ml-1 h-5 px-1.5 text-xs font-normal"
@@ -307,7 +240,7 @@ export function StudyAspects({
           <div className="p-1.5 rounded-md bg-muted">
             <Info className="h-4 w-4" />
           </div>
-          Study Details
+          Tags
         </h3>
       </div>
       <div>
@@ -316,85 +249,28 @@ export function StudyAspects({
             {combinedError}
           </div>
         )}
-        <Accordion type="multiple" className="w-full">
-          {renderAccordionItem(
-            "interventions",
-            "interventions",
-            interventions.items.length,
-            renderTagItems(
-              interventions.items,
-              "interventions",
-              "No interventions available",
-              interventions.nextCursor,
-              interventions.loadingMore,
-              onLoadMoreInterventions
-            ),
-            interventions.nextCursor !== null
-          )}
-
-          {renderAccordionItem(
-            "conditions",
-            "conditions",
-            conditions.items.length,
-            renderTagItems(
-              conditions.items,
-              "conditions",
-              "No conditions available",
-              conditions.nextCursor,
-              conditions.loadingMore,
-              onLoadMoreConditions
-            ),
-            conditions.nextCursor !== null
-          )}
-
-          {renderAccordionItem(
-            "outcomes",
-            "outcomes",
-            outcomes.items.length,
-            renderTagItems(
-              outcomes.items,
-              "outcomes",
-              "No outcomes available",
-              outcomes.nextCursor,
-              outcomes.loadingMore,
-              onLoadMoreOutcomes
-            ),
-            outcomes.nextCursor !== null
-          )}
-
-          {renderAccordionItem(
-            "participants",
-            "participants",
-            participants.items.length,
-            renderTagItems(
-              participants.items,
-              "participants",
-              "No participant description available",
-              participants.nextCursor,
-              participants.loadingMore,
-              onLoadMoreParticipants
-            ),
-            participants.nextCursor !== null
-          )}
-
-          {renderAccordionItem(
-            "design",
-            "design",
-            design.items.length,
-            renderTagItems(
-              design.items,
-              "design",
-              "No design information available",
-              design.nextCursor,
-              design.loadingMore,
-              onLoadMoreDesign
-            ),
-            design.nextCursor !== null
+        <Accordion
+          type="multiple"
+          defaultValue={[...categories.map((category) => category.key), "persons"]}
+          className="w-full"
+        >
+          {categories.map((category) =>
+            renderAccordionItem(
+              category.key,
+              category.label,
+              category.icon,
+              category.color,
+              tags[category.key].items.length,
+              renderTagItems(category),
+              tags[category.key].nextCursor !== null
+            )
           )}
 
           {renderAccordionItem(
             "persons",
-            "persons",
+            "Persons",
+            "user-round",
+            "violet",
             persons.length,
             renderPersonItems(persons, "No persons information available")
           )}

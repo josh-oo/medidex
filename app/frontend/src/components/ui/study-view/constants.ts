@@ -1,11 +1,3 @@
-// Same fixed status set offered in AddStudyDialog's "Status of study" select.
-export const STUDY_STATUS_OPTIONS = [
-  "Closed",
-  "Stopped early",
-  "Open/Ongoing",
-  "Planned",
-];
-
 // Centralized list of country options for study creation.
 export const COUNTRY_OPTIONS = [
   "{MC}",

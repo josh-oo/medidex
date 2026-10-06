@@ -15,14 +15,16 @@ from typing import List, Optional, Dict, Any
 from .auth import is_verified_api_call, is_admin
 
 from src.database.models import Report as DbReport, Study as DbStudy
-from src.database.models import Participant as DbParticipant, Design as DbDesign
 
 from src.database.repositories.study import DuplicateShortNameError
 from src.utils.query_parser import QuerySyntaxError, SEARCH_QUERY_DESCRIPTION
 from src.context import RequestContext
 from .deps import get_context
 
-from src.utils.dto import Study, StudyFull, StudyPayload, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
+from src.utils.dto import Study, StudyFull, StudySchema, StudyFieldSchema, StudyMetaSchema, TagCategorySchema, StudyPayload, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
+from src.database.tagstorage import TAG_TABLES
+from src.utils.studyconfig import STUDY_CONFIG
+from src.utils.tagconfig import TAG_CATEGORIES
 from src.utils.pagination import encode_cursor, decode_cursor, InvalidCursorError
 
 logger = logging.getLogger(__name__)
@@ -132,69 +134,24 @@ async def _decode_cursor_or_400(cursor: Optional[str]) -> int:
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-@router.get("/studies/{study_id}/interventions", summary="Get interventions for a specific study (e.g. 'Placebo', 'Group Therapy', ...), paginated.")
-async def get_study_interventions_single(
-    study_id: int = study_id_path,
-    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=100, description="Maximum number of results to return per page."),
-    cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
-    ctx: RequestContext = Depends(get_context),
-) -> Page[Tag]:
-    offset = await _decode_cursor_or_400(cursor)
-    result, has_more = await ctx.study_repo.get_study_interventions_single_page(study_id, limit=limit, offset=offset)
-    next_cursor = encode_cursor(offset + limit) if has_more else None
-    return Page[Tag](items=result, nextCursor=next_cursor)
-
-@router.get("/studies/{study_id}/conditions", summary="Get the health conditions of participants in a specific study (e.g., 'COVID-19', 'Diabetes', ...), paginated.")
-async def get_study_conditions_single(
-    study_id: int = study_id_path,
-    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=100, description="Maximum number of results to return per page."),
-    cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
-    ctx: RequestContext = Depends(get_context),
-) -> Page[Tag]:
-    offset = await _decode_cursor_or_400(cursor)
-    result, has_more = await ctx.study_repo.get_study_conditions_single_page(study_id, limit=limit, offset=offset)
-    next_cursor = encode_cursor(offset + limit) if has_more else None
-    return Page[Tag](items=result, nextCursor=next_cursor)
-
-@router.get("/studies/{study_id}/outcomes", summary="Get outcomes for a specific study (e.g. 'Mortality', 'Hospitalization', ...), paginated.")
-async def get_study_outcomes_single(
-    study_id: int = study_id_path,
-    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=100, description="Maximum number of results to return per page."),
-    cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
-    ctx: RequestContext = Depends(get_context),
-) -> Page[Tag]:
-    offset = await _decode_cursor_or_400(cursor)
-    result, has_more = await ctx.study_repo.get_study_outcomes_single_page(study_id, limit=limit, offset=offset)
-    next_cursor = encode_cursor(offset + limit) if has_more else None
-    return Page[Tag](items=result, nextCursor=next_cursor)
-
-@router.get("/studies/{study_id}/participants", summary="Get participant description for a specific study (e.g. Male, Female, Adult, Child, ...), paginated.")
-async def get_study_participants_single(
-    study_id: int = study_id_path,
-    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=100, description="Maximum number of results to return per page."),
-    cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
-    ctx: RequestContext = Depends(get_context),
-) -> Page[Tag]:
-    offset = await _decode_cursor_or_400(cursor)
-    result, has_more = await ctx.study_repo.get_study_participants_single_page(study_id, limit=limit, offset=offset)
-    next_cursor = encode_cursor(offset + limit) if has_more else None
-    return Page[Tag](items=result, nextCursor=next_cursor)
-
-@router.get("/studies/{study_id}/design", summary="Get the study design of the corresponding study ('Randomized Controlled Trial', 'Controlled Clinical Trial'), paginated.")
-async def get_study_design_single(
-    study_id: int = study_id_path,
-    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=100, description="Maximum number of results to return per page."),
-    cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
-    ctx: RequestContext = Depends(get_context),
-) -> Page[Tag]:
-    offset = await _decode_cursor_or_400(cursor)
-    result, has_more = await ctx.study_repo.get_study_design_single_page(study_id, limit=limit, offset=offset)
-    next_cursor = encode_cursor(offset + limit) if has_more else None
-    return Page[Tag](items=result, nextCursor=next_cursor)
-
 @router.get("/studies/{study_id}/persons", summary="Get all persons (usually only authors) associated with a specific study")
 async def get_study_persons_single(study_id : int = study_id_path, cutoff: str = cutoff_query, normalize_names : bool = Query(False), ctx: RequestContext = Depends(get_context)) -> List[str]:
     return await ctx.study_repo.get_study_persons_single(study_id=study_id, cutoff=cutoff, normalize_names=normalize_names)
+
+_unknown = [key for key in (*STUDY_CONFIG.fields, *STUDY_CONFIG.meta) if key not in Study.model_fields]
+if _unknown:
+    raise RuntimeError(f"config/study.yaml names fields that a study does not have: {_unknown}")
+
+@router.get("/study-schema", summary="What a study consists of and how it is presented: its primitive fields, its tag categories (with icons and colors) and its database metadata, as configured in config/study.yaml.")
+async def get_study_schema() -> StudySchema:
+    return StudySchema(
+        fields=[StudyFieldSchema(key=key, **field.model_dump()) for key, field in STUDY_CONFIG.fields.items()],
+        meta=[StudyMetaSchema(key=key, **meta.model_dump()) for key, meta in STUDY_CONFIG.meta.items()],
+        tags=[
+            TagCategorySchema(key=name, label=config.label, icon=config.icon, color=config.color, searchField=config.search_field, description=config.description)
+            for name, config in TAG_CATEGORIES.categories.items()
+        ],
+    )
 
 @router.get("/studies/{study_id}", summary="Get full study details for a specific study, including its linked reports and aspects (each as a first page, paginated).")
 async def get_study_by_id(
@@ -205,22 +162,20 @@ async def get_study_by_id(
     await post_report_event(-1, Event(event_type=f"study::{study.id}::visted", timestamp=datetime.now(timezone.utc).isoformat()), ctx)
 
     reports, reports_more = await ctx.study_repo.get_study_reports_by_study_id_page(study.id, limit=limit, offset=0)
-    interventions, interventions_more = await ctx.study_repo.get_study_interventions_single_page(study.id, limit=limit, offset=0)
-    conditions, conditions_more = await ctx.study_repo.get_study_conditions_single_page(study.id, limit=limit, offset=0)
-    outcomes, outcomes_more = await ctx.study_repo.get_study_outcomes_single_page(study.id, limit=limit, offset=0)
-    participants, participants_more = await ctx.study_repo.get_study_participants_single_page(study.id, limit=limit, offset=0)
-    design, design_more = await ctx.study_repo.get_study_design_single_page(study.id, limit=limit, offset=0)
+    tag_pages = {
+        category: await ctx.study_repo.get_study_tags_single_page(category, study.id, limit=limit, offset=0)
+        for category in TAG_CATEGORIES
+    }
 
     next_cursor = encode_cursor(limit)
     study_dto = studies_to_dto([study])[0]
     return StudyFull(
         **study_dto.model_dump(),
         reports=Page[ReportPreview](items=reports_to_base_dto(reports), nextCursor=next_cursor if reports_more else None),
-        interventions=Page[Tag](items=interventions, nextCursor=next_cursor if interventions_more else None),
-        conditions=Page[Tag](items=conditions, nextCursor=next_cursor if conditions_more else None),
-        outcomes=Page[Tag](items=outcomes, nextCursor=next_cursor if outcomes_more else None),
-        participants=Page[Tag](items=participants, nextCursor=next_cursor if participants_more else None),
-        design=Page[Tag](items=design, nextCursor=next_cursor if design_more else None),
+        tags={
+            category: Page[Tag](items=items, nextCursor=next_cursor if has_more else None)
+            for category, (items, has_more) in tag_pages.items()
+        },
     )
 
 
@@ -388,48 +343,33 @@ async def post_report_event(report_id : int, event: Event, ctx: RequestContext =
 Aspect Endpoints
 """
 
-@router.get("/participants/by_studies", summary="Get participant attributes grouped by studies.", include_in_schema=False)
-async def get_study_participants(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[Tag]]:
-    return await ctx.study_repo.get_study_participants(study_ids)
+def _register_tag_routes(category: str) -> None:
+    """The endpoints of one tag category of config/study.yaml: all its tags and the tags of one study."""
+    config = TAG_CATEGORIES[category]
 
-@router.get("/participants", summary="Get all participant attributes or filter them by id.", include_in_schema=False)
-async def get_all_participants(ids: List[int] = Query(None,description="If you are only interested in specific participant attributes. Leave this blank for retrieving all participant attributes."), ctx: RequestContext = Depends(get_context)) -> List[DbParticipant]:
-    return await ctx.aspect_repo.get_all_participants(ids)
+    async def get_study_tags_single(
+        study_id: int = study_id_path,
+        limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=100, description="Maximum number of results to return per page."),
+        cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
+        ctx: RequestContext = Depends(get_context),
+    ) -> Page[Tag]:
+        offset = await _decode_cursor_or_400(cursor)
+        result, has_more = await ctx.study_repo.get_study_tags_single_page(category, study_id, limit=limit, offset=offset)
+        next_cursor = encode_cursor(offset + limit) if has_more else None
+        return Page[Tag](items=result, nextCursor=next_cursor)
 
-@router.get("/design/by_studies", summary="Get study designs grouped by studies.", include_in_schema=False)
-async def get_study_design(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[Tag]]:
-    return await ctx.study_repo.get_study_design(study_ids)
+    async def get_all_tags(ids: List[int] = Query(None, description=f"If you are only interested in specific {category}. Leave this blank for retrieving all {category}."), ctx: RequestContext = Depends(get_context)) -> List[Tag]:
+        return tags_to_dto(await ctx.aspect_repo.get_all_tags(category, ids))
 
-@router.get("/design", summary="Get all study design items or filter them by id.", include_in_schema=False)
-async def get_all_design(ids: List[int] = Query(None,description="If you are only interested in specific design items. Leave this blank for retrieving all design items."), ctx: RequestContext = Depends(get_context)) -> List[DbDesign]:
-    return await ctx.aspect_repo.get_all_designs(ids)
+    router.add_api_route(f"/studies/{{study_id}}/{category}", get_study_tags_single, methods=["GET"], name=f"get_study_{category}_single",
+                         summary=f"Get the {config.description[0].lower()}{config.description[1:]}, paginated.")
+    if category not in TAG_TABLES:
+        return  # tags kept in a column of the study (countries): listed by their own endpoint
+    router.add_api_route(f"/{category}", get_all_tags, methods=["GET"], name=f"get_all_{category}", response_model_exclude_none=True,
+                         summary=f"Get all {category} or filter them by id.", description=config.description)
 
-@router.get("/interventions/by_studies", summary="Get interventions grouped by studies.")
-async def get_study_interventions(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[Tag]]:
-    return await ctx.study_repo.get_study_interventions(study_ids)
-
-@router.get("/interventions", summary="Get all intervention items or filter them by id.", response_model_exclude_none=True)
-async def get_all_interventions(ids: List[int] = Query(None,description="If you are only interested in specific interventions. Leave this blank for retrieving all interventions."), ctx: RequestContext = Depends(get_context)) -> List[Tag]:
-    result = await ctx.aspect_repo.get_all_interventions(ids)
-    return tags_to_dto(result)
-
-@router.get("/conditions/by_studies", summary="Get conditions grouped by studies.")
-async def get_study_conditions(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[Tag]]:
-    return await ctx.study_repo.get_study_conditions(study_ids)
-
-@router.get("/conditions", summary="Get all condition items or filter them by id.", description="Conditions might be for example 'Diabetes', 'Schizophrenia', ... ", response_model_exclude_none=True)
-async def get_all_conditions(ids: List[int] = Query(None, description="If you are only interested in specific conditions. Leave this blank for retrieving all conditions."), ctx: RequestContext = Depends(get_context)) -> List[Tag]:
-    result = await ctx.aspect_repo.get_all_conditions(ids)
-    return tags_to_dto(result)
-
-@router.get("/outcomes/by_studies", summary="Get outcomes grouped by studies.")
-async def get_study_outcomes(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[Tag]]:
-    return await ctx.study_repo.get_study_outcomes(study_ids)
-
-@router.get("/outcomes", summary="Get all study outcome items or filter them by id.", description="Outcomes might be for example 'Mortality', 'Quality of Life', etc. These items are linked to studies.", response_model_exclude_none=True)
-async def get_all_outcomes(ids: List[int] = Query(None,description="If you are only interested in specific outcomes. Leave this blank for retrieving all outcomes."), ctx: RequestContext = Depends(get_context)) -> List[Tag]:
-    result = await ctx.aspect_repo.get_all_outcomes(ids)
-    return tags_to_dto(result)
+for _category in TAG_CATEGORIES:
+    _register_tag_routes(_category)
 
 @router.get("/countries", summary="Get all study countries or filter them by prefix.")
 async def get_all_countries(prefix: Optional[str] = Query(None, description="Filter countries by prefix (case-insensitive)."), ctx: RequestContext = Depends(get_context)) -> List[str]:
