@@ -1,34 +1,54 @@
 # What a study consists of, and how it is presented. This is the single source of truth for the
-# study details view (served as GET /study-schema), the tag endpoints, the tag and study search.
+# study details view (served as GET /study-schema), the study DTOs, the tag endpoints, the tag and study search.
 #
-# A study has three kinds of data:
+# A study has four kinds of data:
 #   fields      Primitive values of the study itself (numbers, durations, a status, free text).
 #   categories  Lists of tags (interventions, conditions, countries, ...).
+#   views       Presentations that put parts of the above together, e.g. a comparison of interventions.
 #   meta        Metadata of the database record (when it was entered and edited).
 #
 # Colors are names the frontend draws: blue, emerald, rose, amber, slate, sky, violet, teal.
 # Icons are names of lucide icons (https://lucide.dev/icons), in kebab-case, that the frontend
 # knows (src/lib/icons.ts); an unknown name is drawn as a generic tag icon.
 
-# Primitive values. The key is the name of the field of the study (see the Study DTO).
+# Primitive values. The key is the name of the field in the study DTO.
 #   label    Name shown to the user.
 #   type     integer | duration | enum | text
+#   column   The attribute of the study in the database (src/database/models.py).
+#   required The value must be given when a study is created (an enum field always is).
 #   values   The allowed values of an `enum` field (required for those, and only for those). Creating a
 #            study with another value is rejected.
-#   display  metric (a tile at the top of the details) | text (a paragraph below the tiles)
+#   display  metric (a tile at the top of the details) | text (a paragraph below the tiles) | none (not shown)
 fields:
+  shortName:
+    label: Name
+    type: text
+    icon: tag
+    color: slate
+    display: none
+    column: short_name
+    required: true
+  trialId:
+    label: Trial ID
+    type: text
+    icon: tag
+    color: slate
+    display: none
+    column: trial_registration_id
   numberParticipants:
     label: Participants
     type: integer
     icon: users
     color: blue
     display: metric
+    column: number_participants
   duration:
     label: Duration
     type: duration
     icon: clock
     color: emerald
     display: metric
+    column: duration
   status:
     label: Status
     type: enum
@@ -36,12 +56,43 @@ fields:
     icon: flag
     color: amber
     display: metric
+    column: status
+
+# Views. A view shows parts of a study together as groups: each part is the tags of a category or the value
+# of a field (a derived view), and a stored view keeps its groups in a column of the study as JSON, each
+# part as the ids of its tags (see src/utils/views.py). The key is the name of the view in the study DTO
+# (the JSON of a stored view) and in the study details (`views`).
+#   label      Name shown to the user.
+#   column     Stored view: the attribute of the study that holds the groups. Omit it for a derived view,
+#              whose single group is built from the tags and fields of the study.
+#   parts      The parts of a group in reading order, by name, with their `label`. Each has a `category` (the tags of this
+#              category), or - derived views only - a `field`. A stored view's part can also keep the values of
+#              `fields` next to its tags (e.g. `fields: [duration]` for "5 days Drug A vs 10 days Drug A").
+#   separator  Between the parts of a group when it is shown as a line ("Drug A vs Placebo").
+#   symmetric  The order of the parts does not matter (A vs B is B vs A); used to compare groups.
+#   card       Also shown as a line on the study cards.
+#   display    text: a block in the study details, below the tiles.
+#
+# Example of a derived view, to show the number of participants with their tags:
+#   population:
+#     label: Population
+#     icon: users
+#     color: sky
+#     parts:
+#       numberParticipants: { field: numberParticipants }
+#       participants: { category: participants }
+views:
   comparison:
     label: Comparison
-    type: text
     icon: scale
     color: violet
-    display: text
+    column: comparison
+    separator: " vs "
+    symmetric: true
+    card: true
+    parts:
+      intervention: { label: Interventions, category: interventions }
+      control: { label: Control interventions, category: interventions }
 
 # Database metadata. The key is the name of the field of the study.
 meta:
@@ -65,6 +116,8 @@ meta:
 #   search_field      Singular name of the field in the advanced study search (e.g. `intervention==Placebo`).
 #   description       What the tags are, with examples. Used in the API documentation.
 #   free_text_search  The plain-text study search also matches the tags of this category (default false).
+#   inline            The tags are kept in the column of the study with this name, separated by `//`, instead of
+#                     a table of their own (default false).
 categories:
   interventions:
     label: Interventions
@@ -102,4 +155,5 @@ categories:
     icon: map-pin
     color: amber
     search_field: country
+    inline: true
     description: "Countries where a study takes place"

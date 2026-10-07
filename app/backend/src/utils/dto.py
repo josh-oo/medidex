@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, model_validator
-from .studyconfig import STUDY_CONFIG
+from pydantic import BaseModel, Field, create_model, model_validator
+from .studyconfig import INLINE_SEPARATOR, STUDY_CONFIG
 from typing import Any, Dict, Mapping, Optional, List, TypeVar, Generic
 from datetime import datetime
 from enum import Enum
@@ -122,18 +122,47 @@ class Tag(BaseModel):
     id: str
     keyword: str
 
+class ViewPart(BaseModel):
+    """One part of a group of a view: its tags (or the tag-like value of a field) and the values of the fields
+    that belong to it."""
+    tags: List[Tag] = Field(default_factory=list)
+    values: Dict[str, str] = Field(default_factory=dict)
+
+class StudyView(BaseModel):
+    """A view of a study (`views` of config/study.yaml): its groups, each naming its parts. `text` is the plain
+    text an older study holds instead of a structure (then there are no groups)."""
+    groups: List[Dict[str, ViewPart]] = Field(default_factory=list)
+    text: Optional[str] = None
+
 class TagCandidate(Tag):
     relevance: float
 
-class StudyFields(BaseModel):
-    """The primitive fields of a study."""
-    shortName: str
-    status: str
-    countries: List[str]
-    numberParticipants: Optional[str]
-    duration: Optional[str]
-    comparison: Optional[str]
-    trialId: Optional[str] = None
+def _study_fields_model():
+    """The fields of a study, made from config/study.yaml: its `fields`, the tag categories kept in a column of
+    the study (as lists of names, e.g. countries), and the stored views (as their JSON, see utils/views.py)."""
+    attributes: Dict[str, Any] = {}
+    for key, field in STUDY_CONFIG.fields.items():
+        if field.required or field.type == "enum":
+            attributes[key] = (str, Field(description=field.label))
+        else:
+            attributes[key] = (Optional[str], Field(default=None, description=field.label))
+    for key in STUDY_CONFIG.inline_categories:
+        attributes[key] = (List[str], Field(default_factory=list, description=STUDY_CONFIG.categories[key].description))
+    for key, view in STUDY_CONFIG.stored_views.items():
+        attributes[key] = (Optional[str], Field(default=None, description=f"{view.label}, as JSON groups of tags (utils/views.py)"))
+    return create_model("StudyFields", __doc__="The fields of a study, as configured in config/study.yaml.", **attributes)
+
+StudyFields = _study_fields_model()
+
+def study_values(study) -> Dict[str, Any]:
+    """The fields of a study of the database (see StudyFields), read as config/study.yaml says."""
+    values: Dict[str, Any] = {key: getattr(study, field.column) for key, field in STUDY_CONFIG.fields.items()}
+    for key in STUDY_CONFIG.inline_categories:
+        column = getattr(study, key)
+        values[key] = [part.strip() for part in column.split(INLINE_SEPARATOR) if part.strip()] if column else []
+    for key, view in STUDY_CONFIG.stored_views.items():
+        values[key] = getattr(study, view.column)
+    return values
 
 class StudyPayload(StudyFields):
     """The fields needed to create a study - everything else (studyId, timestamps) is
@@ -162,6 +191,27 @@ class StudyFull(Study):
     as fastapi_app/resources.py's standalone aspect endpoints."""
     reports: Page[ReportPreview] = Field(default_factory=lambda: Page[ReportPreview](items=[]))
     tags: Dict[str, Page[Tag]] = Field(default_factory=dict)
+    # The views of config/study.yaml, by name, with their tags named.
+    views: Dict[str, StudyView] = Field(default_factory=dict)
+
+class StudyViewPartSchema(BaseModel):
+    key: str
+    label: Optional[str] = None
+    category: Optional[str] = None
+    field: Optional[str] = None
+    fields: List[str] = []
+
+class StudyViewSchema(BaseModel):
+    """A view of a study (see `views` in config/study.yaml)."""
+    key: str
+    label: str
+    icon: str
+    color: str
+    display: str
+    card: bool
+    separator: str
+    stored: bool
+    parts: List[StudyViewPartSchema]
 
 class StudyFieldSchema(BaseModel):
     """A primitive value of a study (see `fields` in config/study.yaml)."""
@@ -193,6 +243,7 @@ class StudySchema(BaseModel):
     fields: List[StudyFieldSchema]
     meta: List[StudyMetaSchema]
     tags: List[TagCategorySchema]
+    views: List[StudyViewSchema] = []
 
 class StudyCandidate(Study):
     """A study suggested as a possible match for a report by the similarity search
@@ -280,22 +331,10 @@ def reports_to_base_dto(reports) -> List[ReportPreview]:
     return [ReportPreview(reportId=report.id, title=report.title) for report in reports]
 
 def studies_to_dto(studies):
-    result = []
-    for study in studies:
-        output_study = Study(
-            studyId=study.id,
-            shortName=study.short_name,
-            numberParticipants=study.number_participants,
-            duration=study.duration,
-            comparison=study.comparison,
-            countries=study.countries.split("//") if study.countries else [],
-            createdAt=study.date_entered,
-            updatedAt=study.date_edited,
-            status=study.status,
-            trialId=study.trial_registration_id,
-        )
-        result.append(output_study)
-    return result
+    return [
+        Study(studyId=study.id, createdAt=study.date_entered, updatedAt=study.date_edited, **study_values(study))
+        for study in studies
+    ]
 
 def studies_to_preview_dto(studies) -> List[StudyPreview]:
     return [
@@ -304,19 +343,9 @@ def studies_to_preview_dto(studies) -> List[StudyPreview]:
     ]
 
 def candidate_studies_to_dto(studies) -> List[StudyCandidate]:
-    results = []
-    for study in studies:
-        results.append(StudyCandidate(
-            studyId=study.id,
-            shortName=study.short_name,
-            numberParticipants=study.number_participants,
-            duration=study.duration,
-            comparison=study.comparison,
-            countries=study.countries.split("//") if study.countries else [],
-            createdAt=study.date_entered,
-            updatedAt=study.date_edited,
-            status=study.status,
-            trialId=study.trial_registration_id,
-            relevance=study.relevance,
-        ))
-    return results
+    return [
+        StudyCandidate(
+            studyId=study.id, createdAt=study.date_entered, updatedAt=study.date_edited, relevance=study.relevance, **study_values(study)
+        )
+        for study in studies
+    ]

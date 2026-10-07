@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { StudyCardViews } from "@/components/ui/study-view/study-views";
 import {
   Tooltip,
   TooltipContent,
@@ -8,7 +9,6 @@ import {
 import {
   Users,
   Calendar,
-  CheckCircle2,
   Plus,
   Link,
 } from "lucide-react";
@@ -184,26 +184,8 @@ export function StudyCard({
             </span>
           </div>
 
-          {/* Comparison */}
-          {study.comparison && (
-            <div className="flex items-center gap-1.5 text-muted-foreground flex-1 min-w-0 basis-0 max-w-full overflow-hidden">
-              <div className="p-0.5 rounded bg-violet-50 dark:bg-violet-950/30 shrink-0">
-                <CheckCircle2 className="h-3 w-3 text-violet-600 dark:text-violet-400" />
-              </div>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="truncate block w-full max-w-full">
-                      {study.comparison}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-xs">
-                    <p>{study.comparison}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          )}
+          {/* The views of the study that are shown on its card (e.g. the comparison) */}
+          <StudyCardViews studyId={study.studyId} />
         </div>
       </div>
     </div>

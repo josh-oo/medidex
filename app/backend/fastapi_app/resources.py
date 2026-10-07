@@ -21,7 +21,7 @@ from src.utils.query_parser import QuerySyntaxError, SEARCH_QUERY_DESCRIPTION
 from src.context import RequestContext
 from .deps import get_context
 
-from src.utils.dto import Study, StudyFull, StudySchema, StudyFieldSchema, StudyMetaSchema, TagCategorySchema, StudyPayload, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
+from src.utils.dto import Study, StudyFull, StudySchema, StudyFieldSchema, StudyMetaSchema, StudyView, StudyViewPartSchema, StudyViewSchema, TagCategorySchema, StudyPayload, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
 from src.database.tagstorage import TAG_TABLES
 from src.utils.studyconfig import STUDY_CONFIG
 from src.utils.tagconfig import TAG_CATEGORIES
@@ -89,6 +89,13 @@ async def search_studies(
 ) -> Page[Study]:
     return await _search_studies_or_400(ctx, q, limit, cursor)
 
+@router.get("/studies/views", summary="The views of config/study.yaml (e.g. the comparison) of the specified studies, with their tags named.")
+async def get_study_views(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, Dict[str, StudyView]]:
+    if not study_ids:
+        return {}
+    studies = await ctx.study_repo.get_studies(study_ids)
+    return await ctx.study_repo.get_views(studies)
+
 @router.get("/studies/reports", include_in_schema=False)
 async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[DbReport]]:
     return await ctx.study_repo.get_study_reports_by_study_ids(study_ids, cutoff)
@@ -147,6 +154,15 @@ async def get_study_schema() -> StudySchema:
     return StudySchema(
         fields=[StudyFieldSchema(key=key, **field.model_dump()) for key, field in STUDY_CONFIG.fields.items()],
         meta=[StudyMetaSchema(key=key, **meta.model_dump()) for key, meta in STUDY_CONFIG.meta.items()],
+        views=[
+            StudyViewSchema(
+                key=key,
+                stored=view.column is not None,
+                **view.model_dump(exclude={"column", "symmetric", "parts"}),
+                parts=[StudyViewPartSchema(key=part_key, **part.model_dump()) for part_key, part in view.parts.items()],
+            )
+            for key, view in STUDY_CONFIG.views.items()
+        ],
         tags=[
             TagCategorySchema(key=name, label=config.label, icon=config.icon, color=config.color, searchField=config.search_field, description=config.description)
             for name, config in TAG_CATEGORIES.categories.items()
@@ -169,8 +185,10 @@ async def get_study_by_id(
 
     next_cursor = encode_cursor(limit)
     study_dto = studies_to_dto([study])[0]
+    views = (await ctx.study_repo.get_views([study]))[study.id]
     return StudyFull(
         **study_dto.model_dump(),
+        views=views,
         reports=Page[ReportPreview](items=reports_to_base_dto(reports), nextCursor=next_cursor if reports_more else None),
         tags={
             category: Page[Tag](items=items, nextCursor=next_cursor if has_more else None)

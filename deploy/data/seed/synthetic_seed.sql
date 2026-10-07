@@ -341,7 +341,104 @@ INSERT INTO "intervention" ("id", "description") VALUES
 (3000109, 'structured low-saturated-fat dietary counseling'),
 (3000110, 'bempedoic acid 180 mg once daily'),
 (3000111, 'icosapent ethyl 2 g twice daily'),
-(3000112, 'fenofibrate 145 mg once daily') ON CONFLICT DO NOTHING;
+(3000112, 'fenofibrate 145 mg once daily'),
+(3000113, 'usual care'),
+(3000114, 'saline rinse'),
+(3000115, 'standard cardiac rehabilitation alone'),
+(3000116, 'standard care control'),
+(3000117, 'patient-controlled analgesia with higher opioid dosing'),
+(3000118, 'placebo'),
+(3000119, 'placebo (normal saline)'),
+(3000120, 'conventional glucose monitoring only (fingerstick and laboratory methods)'),
+(3000121, 'aspirin (antiplatelet therapy)'),
+(3000122, 'standard of care'),
+(3000123, 'standard care with provider support only'),
+(3000124, 'standard care without device'),
+(3000125, 'active control condition'),
+(3000126, 'standard postpartum care'),
+(3000127, 'standard inpatient rehabilitation practice'),
+(3000128, 'enhanced usual care'),
+(3000129, 'transversus abdominis plane regional anesthesia block'),
+(3000130, 'standard postoperative nursing care'),
+(3000131, 'apremilast (phosphodiesterase-4 inhibitor) oral daily treatment'),
+(3000132, 'standard care'),
+(3000133, 'latanoprost ophthalmic solution'),
+(3000134, 'standard rate control approach'),
+(3000135, 'conventional rehabilitation alone'),
+(3000136, 'cognitive processing therapy versus dialectical behavior therapy'),
+(3000137, 'standard prenatal care without exercise intervention'),
+(3000138, 'standard school-based health promotion'),
+(3000139, 'continued therapy with established biologic agent'),
+(3000140, 'standard ambulatory nursing care'),
+(3000141, 'standard perioperative care'),
+(3000142, 'standard hospital care'),
+(3000143, 'calcium hydroxide intracanal medication'),
+(3000144, 'standard care with baseline education only'),
+(3000145, 'vehicle control'),
+(3000146, 'baseline glucose patterns in crossover design'),
+(3000147, 'usual practice without structured intervention'),
+(3000148, 'standard referral-based care pathway'),
+(3000149, 'app-only self-guided use'),
+(3000150, 'qualitative pilot evaluation (non-randomized)'),
+(3000151, 'conventional nutritional care'),
+(3000152, 'conventional meal timing pattern'),
+(3000153, 'routine oncology care without exercise'),
+(3000154, 'standard care without palliative training'),
+(3000155, 'angled inserts without arch support'),
+(3000156, 'placebo control'),
+(3000157, 'annual uniform screening'),
+(3000158, 'supportive counseling therapy'),
+(3000159, 'in-person clinic-based hypertension management'),
+(3000160, 'standard smoking cessation counseling alone'),
+(3000161, 'expectant management until term'),
+(3000162, 'control or turmeric alone at varying doses'),
+(3000163, 'routine usual care'),
+(3000164, 'standard outpatient pulmonary care'),
+(3000165, 'baseline or comparison schools without intervention'),
+(3000166, 'standard cardiac rehabilitation without additional behaviour change coaching'),
+(3000167, 'empirical piperacillin/tazobactam antibiotic therapy'),
+(3000168, 'augmented reality alone and conventional physical therapy'),
+(3000169, 'ultrasound-assisted delivery of ethosome gold nanoparticles and thermal laser'),
+(3000170, 'periapical radiography for working length determination'),
+(3000171, 'psychoeducation control via digital format'),
+(3000172, 'standard 6-month rivaroxaban regimen'),
+(3000173, 'standard care without intervention'),
+(3000174, 'angiography-based standard care'),
+(3000175, 'conventional routine clinical care'),
+(3000176, 'referral to offsite hepatology services'),
+(3000177, 'enhanced recovery after surgery protocol alone'),
+(3000178, 'standard community care'),
+(3000179, 'usual care without digital intervention'),
+(3000180, 'walking without stimulation'),
+(3000181, 'sham stimulation'),
+(3000182, 'autologous fecal microbiota transplantation'),
+(3000183, 'patent blue V dye tracing'),
+(3000184, 'standard malaria prevention methods'),
+(3000185, 'dupilumab 300 mg every 2 weeks'),
+(3000186, 'standard medical management alone'),
+(3000187, 'prescription retinoid-peroxide combination (adapalene 0.1%/benzoyl peroxide 2.5%)'),
+(3000188, 'standard school health curriculum'),
+(3000189, 'standard symptom-based diagnostic approach'),
+(3000190, 'low-level fixed load inspiratory muscle training'),
+(3000191, 'rolled gauze bandage'),
+(3000192, 'unimodal EEG classifier with functional electrical stimulation'),
+(3000193, 'scaling and root planing alone'),
+(3000194, 'expectant management with standard care timing'),
+(3000195, 'standard prenatal and postnatal care without specialized support'),
+(3000196, 'no screening'),
+(3000197, 'calcipotriene and betamethasone fixed-dose ointment formulation'),
+(3000198, 'routine treatment alone'),
+(3000199, 'conventional sterile gauze dressing'),
+(3000200, 'placebo combined with identical aerobic exercise training'),
+(3000201, 'minimal digital control'),
+(3000202, 'intranasal saline placebo'),
+(3000203, 'computerized cognitive remediation therapy alone'),
+(3000204, 'attention control comparison'),
+(3000205, 'standard care (stepped wedge design)'),
+(3000206, 'maintenance of usual lifestyle and activity patterns'),
+(3000207, 'no intervention (standard care only)'),
+(3000208, 'standard TB treatment protocols'),
+(3000209, 'ziltravir') ON CONFLICT DO NOTHING;
 
 INSERT INTO "condition" ("id", "description") VALUES
 
@@ -902,207 +999,207 @@ INSERT INTO "participant" ("id", "description") VALUES
 INSERT INTO "study" ("id", "short_name", "status", "trialist_contact_details", "date_entered", "date_edited", "number_participants", "countries", "duration", "comparison", "trial_registration_id") VALUES
 
 -- Study S001 (CRGStudyID 1000001) — source PMID 42669049 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000001, 'SYNTH-SCREEN-DETECTE-001', 'Closed', 'Zofia Wachira (Study Coordinator), wachira.trial@example.org', '2025-02-17 00:00:00', '2026-07-27 00:00:00', 50549, 'Norway', '1 week', 'usual care', 'SYNTH-ISRCTN-0000001'),
+(1000001, 'SYNTH-SCREEN-DETECTE-001', 'Closed', 'Zofia Wachira (Study Coordinator), wachira.trial@example.org', '2025-02-17 00:00:00', '2026-07-27 00:00:00', 50549, 'Norway', '1 week', '[{"intervention":[3000001],"control":[3000113]}]', 'SYNTH-ISRCTN-0000001'),
 -- Study S002 (CRGStudyID 1000002) — source PMID 35010502 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000002, 'SYNTH-DENTAL-CARIES--002', 'Stopped early', 'Franz Fernandes (Study Coordinator), fernandes.trial@example.org', '2025-10-18 00:00:00', '2026-02-02 00:00:00', 60, 'Italy', '1 week', 'saline rinse', 'SYNTH-NCT0000002'),
+(1000002, 'SYNTH-DENTAL-CARIES--002', 'Stopped early', 'Franz Fernandes (Study Coordinator), fernandes.trial@example.org', '2025-10-18 00:00:00', '2026-02-02 00:00:00', 60, 'Italy', '1 week', '[{"intervention":[3000002],"control":[3000114]}]', 'SYNTH-NCT0000002'),
 -- Study S003 (CRGStudyID 1000003) — source PMID 41875187 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000003, 'SYNTH-CORONARY-HEART-003', 'Closed', 'Jamal Ivanova (Study Coordinator), ivanova.trial@example.org', '2025-08-09 00:00:00', '2026-02-19 00:00:00', 96, 'United States//Belgium', '26 weeks', 'standard cardiac rehabilitation alone', 'SYNTH-NCT0000003'),
+(1000003, 'SYNTH-CORONARY-HEART-003', 'Closed', 'Jamal Ivanova (Study Coordinator), ivanova.trial@example.org', '2025-08-09 00:00:00', '2026-02-19 00:00:00', 96, 'United States//Belgium', '26 weeks', '[{"intervention":[3000003],"control":[3000115]}]', 'SYNTH-NCT0000003'),
 -- Study S004 (CRGStudyID 1000004) — source PMID 42442808 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000004, 'SYNTH-CHILDHOOD-OBES-004', 'Closed', 'Isabela Dahl (Study Coordinator), dahl.trial@example.org', '2025-09-13 00:00:00', '2026-08-17 00:00:00', 980, 'China', '52 weeks', 'standard care control', 'SYNTH-ISRCTN-0000004'),
+(1000004, 'SYNTH-CHILDHOOD-OBES-004', 'Closed', 'Isabela Dahl (Study Coordinator), dahl.trial@example.org', '2025-09-13 00:00:00', '2026-08-17 00:00:00', 980, 'China', '52 weeks', '[{"intervention":[3000004],"control":[3000116]}]', 'SYNTH-ISRCTN-0000004'),
 -- Study S005 (CRGStudyID 1000005) — source PMID 42148362 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000005, 'SYNTH-EARLY-POSTOPER-005', 'Closed', 'Yuki Zeleny (Study Coordinator), zeleny.trial@example.org', '2025-08-09 00:00:00', '2026-01-07 00:00:00', 84, 'France', '1 week', 'patient-controlled analgesia with higher opioid dosing', 'SYNTH-NCT0000005'),
+(1000005, 'SYNTH-EARLY-POSTOPER-005', 'Closed', 'Yuki Zeleny (Study Coordinator), zeleny.trial@example.org', '2025-08-09 00:00:00', '2026-01-07 00:00:00', 84, 'France', '1 week', '[{"intervention":[3000005],"control":[3000117]}]', 'SYNTH-NCT0000005'),
 -- Study S006 (CRGStudyID 1000006) — source PMID 40924491 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000006, 'SYNTH-ACUTE-KIDNEY-I-006', 'Closed', 'Aisling Kallio (Study Coordinator), kallio.trial@example.org', '2025-05-06 00:00:00', '2026-02-06 00:00:00', 150, 'Sweden//Japan', '1 week', 'placebo', 'SYNTH-ISRCTN-0000006'),
+(1000006, 'SYNTH-ACUTE-KIDNEY-I-006', 'Closed', 'Aisling Kallio (Study Coordinator), kallio.trial@example.org', '2025-05-06 00:00:00', '2026-02-06 00:00:00', 150, 'Sweden//Japan', '1 week', '[{"intervention":[3000006],"control":[3000118]}]', 'SYNTH-ISRCTN-0000006'),
 -- Study S007 (CRGStudyID 1000007) — source PMID 42035777 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000007, 'SYNTH-MALARIA-PREVEN-007', 'Closed', 'Umberto Ricci (Study Coordinator), ricci.trial@example.org', '2025-12-05 00:00:00', '2026-02-24 00:00:00', 324, 'Kenya', '52 weeks', 'placebo (normal saline)', 'SYNTH-NCT0000007'),
+(1000007, 'SYNTH-MALARIA-PREVEN-007', 'Closed', 'Umberto Ricci (Study Coordinator), ricci.trial@example.org', '2025-12-05 00:00:00', '2026-02-24 00:00:00', 324, 'Kenya', '52 weeks', '[{"intervention":[3000007],"control":[3000119]}]', 'SYNTH-NCT0000007'),
 -- Study S008 (CRGStudyID 1000008) — source PMID 42622665 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000008, 'SYNTH-HYPERGLYCAEMIA-008', 'Closed', 'Dovile Okoye (Study Coordinator), okoye.trial@example.org', '2025-07-04 00:00:00', '2026-04-11 00:00:00', 60, 'Brazil', '52 weeks', 'conventional glucose monitoring only (fingerstick and laboratory methods)', 'SYNTH-NCT0000008'),
+(1000008, 'SYNTH-HYPERGLYCAEMIA-008', 'Closed', 'Dovile Okoye (Study Coordinator), okoye.trial@example.org', '2025-07-04 00:00:00', '2026-04-11 00:00:00', 60, 'Brazil', '52 weeks', '[{"intervention":[3000008],"control":[3000120]}]', 'SYNTH-NCT0000008'),
 -- Study S009 (CRGStudyID 1000009) — source PMID 41214256 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000009, 'SYNTH-HIV-PREVENTION-009', 'Closed', 'Ulla Jansen (Study Coordinator), jansen.trial@example.org', '2025-04-25 00:00:00', '2026-06-01 00:00:00', 210, 'Uganda', '78 weeks', 'standard care control', 'SYNTH-NCT0000009'),
+(1000009, 'SYNTH-HIV-PREVENTION-009', 'Closed', 'Ulla Jansen (Study Coordinator), jansen.trial@example.org', '2025-04-25 00:00:00', '2026-06-01 00:00:00', 210, 'Uganda', '78 weeks', '[{"intervention":[3000009],"control":[3000116]}]', 'SYNTH-NCT0000009'),
 -- Study S010 (CRGStudyID 1000010) — source PMID 42008258 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000010, 'SYNTH-SECONDARY-PREV-010', 'Open/Ongoing', 'Elif Kowalski (Study Coordinator), kowalski.trial@example.org', '2025-09-18 00:00:00', '2026-06-07 00:00:00', 945, 'North America', '83 weeks', 'aspirin (antiplatelet therapy)', 'SYNTH-ISRCTN-0000010'),
+(1000010, 'SYNTH-SECONDARY-PREV-010', 'Open/Ongoing', 'Elif Kowalski (Study Coordinator), kowalski.trial@example.org', '2025-09-18 00:00:00', '2026-06-07 00:00:00', 945, 'North America', '83 weeks', '[{"intervention":[3000010],"control":[3000121]}]', 'SYNTH-ISRCTN-0000010'),
 -- Study S011 (CRGStudyID 1000011) — source PMID 42270675 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000011, 'SYNTH-RIFAMPICIN-RES-011', 'Closed', 'Aisling Kowalski (Study Coordinator), kowalski.trial@example.org', '2025-04-21 00:00:00', '2026-06-15 00:00:00', 412, 'Belarus, South Africa//Sweden', '52 weeks', 'standard of care', 'SYNTH-NCT0000011'),
+(1000011, 'SYNTH-RIFAMPICIN-RES-011', 'Closed', 'Aisling Kowalski (Study Coordinator), kowalski.trial@example.org', '2025-04-21 00:00:00', '2026-06-15 00:00:00', 412, 'Belarus, South Africa//Sweden', '52 weeks', '[{"intervention":[3000011],"control":[3000122]}]', 'SYNTH-NCT0000011'),
 -- Study S012 (CRGStudyID 1000012) — source PMID 41086425 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000012, 'SYNTH-GENERALIZED-AN-012', 'Closed', 'Camille Girard (Study Coordinator), girard.trial@example.org', '2025-02-16 00:00:00', '2026-04-02 00:00:00', 96, 'Switzerland', '15 weeks', 'standard care with provider support only', 'SYNTH-NCT0000012'),
+(1000012, 'SYNTH-GENERALIZED-AN-012', 'Closed', 'Camille Girard (Study Coordinator), girard.trial@example.org', '2025-02-16 00:00:00', '2026-04-02 00:00:00', 96, 'Switzerland', '15 weeks', '[{"intervention":[3000012],"control":[3000123]}]', 'SYNTH-NCT0000012'),
 -- Study S013 (CRGStudyID 1000013) — source PMID 27842564 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000013, 'SYNTH-HEEL-PRESSURE--013', 'Closed', 'Mateus Bergstrom (Study Coordinator), bergstrom.trial@example.org', '2025-10-26 00:00:00', '2026-01-04 00:00:00', 183, 'Sweden', '8 weeks', 'standard care without device', 'SYNTH-ISRCTN-0000013'),
+(1000013, 'SYNTH-HEEL-PRESSURE--013', 'Closed', 'Mateus Bergstrom (Study Coordinator), bergstrom.trial@example.org', '2025-10-26 00:00:00', '2026-01-04 00:00:00', 183, 'Sweden', '8 weeks', '[{"intervention":[3000013],"control":[3000124]}]', 'SYNTH-ISRCTN-0000013'),
 -- Study S014 (CRGStudyID 1000014) — source PMID 42171809 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000014, 'SYNTH-POSTPARTUM-DEP-014', 'Closed', 'Xavier Toivonen (Study Coordinator), toivonen.trial@example.org', '2025-09-12 00:00:00', '2026-08-17 00:00:00', 264, 'South Korea', '26 weeks', 'active control condition', 'SYNTH-ISRCTN-0000014'),
+(1000014, 'SYNTH-POSTPARTUM-DEP-014', 'Closed', 'Xavier Toivonen (Study Coordinator), toivonen.trial@example.org', '2025-09-12 00:00:00', '2026-08-17 00:00:00', 264, 'South Korea', '26 weeks', '[{"intervention":[3000014],"control":[3000125]}]', 'SYNTH-ISRCTN-0000014'),
 -- Study S015 (CRGStudyID 1000015) — source PMID 28549455 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000015, 'SYNTH-PREVENTION-OF--015', 'Closed', 'Bo Brennan (Study Coordinator), brennan.trial@example.org', '2025-09-07 00:00:00', '2026-08-19 00:00:00', 210, 'Denmark', '104 weeks', 'standard postpartum care', 'SYNTH-NCT0000015'),
+(1000015, 'SYNTH-PREVENTION-OF--015', 'Closed', 'Bo Brennan (Study Coordinator), brennan.trial@example.org', '2025-09-07 00:00:00', '2026-08-19 00:00:00', 210, 'Denmark', '104 weeks', '[{"intervention":[3000015],"control":[3000126]}]', 'SYNTH-NCT0000015'),
 -- Study S016 (CRGStudyID 1000016) — source PMID 40720450 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000016, 'SYNTH-STROKE-REQUIRI-016', 'Closed', 'Bruno Yamada (Study Coordinator), yamada.trial@example.org', '2025-02-01 00:00:00', '2026-02-16 00:00:00', 166, 'Canada', '8 weeks', 'standard inpatient rehabilitation practice', 'SYNTH-ISRCTN-0000016'),
+(1000016, 'SYNTH-STROKE-REQUIRI-016', 'Closed', 'Bruno Yamada (Study Coordinator), yamada.trial@example.org', '2025-02-01 00:00:00', '2026-02-16 00:00:00', 166, 'Canada', '8 weeks', '[{"intervention":[3000016],"control":[3000127]}]', 'SYNTH-ISRCTN-0000016'),
 -- Study S017 (CRGStudyID 1000017) — source PMID 42480006 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000017, 'SYNTH-POST-TRAUMATIC-017', 'Stopped early', 'Viktor Johansen (Study Coordinator), johansen.trial@example.org', '2025-05-11 00:00:00', '2026-07-02 00:00:00', 319, 'Germany, United Kingdom', '52 weeks', 'enhanced usual care', 'SYNTH-ISRCTN-0000017'),
+(1000017, 'SYNTH-POST-TRAUMATIC-017', 'Stopped early', 'Viktor Johansen (Study Coordinator), johansen.trial@example.org', '2025-05-11 00:00:00', '2026-07-02 00:00:00', 319, 'Germany, United Kingdom', '52 weeks', '[{"intervention":[3000017],"control":[3000128]}]', 'SYNTH-ISRCTN-0000017'),
 -- Study S018 (CRGStudyID 1000018) — source PMID 41816738 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000018, 'SYNTH-POSTOPERATIVE--018', 'Stopped early', 'Bruno Gomulka (Study Coordinator), gomulka.trial@example.org', '2025-01-05 00:00:00', '2026-01-10 00:00:00', 60, 'Brazil//Uganda', '6 weeks', 'transversus abdominis plane regional anesthesia block', 'SYNTH-ISRCTN-0000018'),
+(1000018, 'SYNTH-POSTOPERATIVE--018', 'Stopped early', 'Bruno Gomulka (Study Coordinator), gomulka.trial@example.org', '2025-01-05 00:00:00', '2026-01-10 00:00:00', 60, 'Brazil//Uganda', '6 weeks', '[{"intervention":[3000018],"control":[3000129]}]', 'SYNTH-ISRCTN-0000018'),
 -- Study S019 (CRGStudyID 1000019) — source PMID 40281425 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000019, 'SYNTH-RECOVERY-FROM--019', 'Closed', 'Wanjiru Lindqvist (Study Coordinator), lindqvist.trial@example.org', '2025-01-05 00:00:00', '2026-07-03 00:00:00', 90, 'Sweden//United States', '52 weeks', 'standard postoperative nursing care', 'SYNTH-NCT0000019'),
+(1000019, 'SYNTH-RECOVERY-FROM--019', 'Closed', 'Wanjiru Lindqvist (Study Coordinator), lindqvist.trial@example.org', '2025-01-05 00:00:00', '2026-07-03 00:00:00', 90, 'Sweden//United States', '52 weeks', '[{"intervention":[3000019],"control":[3000130]}]', 'SYNTH-NCT0000019'),
 -- Study S020 (CRGStudyID 1000020) — source PMID 37488811 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000020, 'SYNTH-MODERATE-CHRON-020', 'Closed', 'Camille Novak (Study Coordinator), novak.trial@example.org', '2025-10-22 00:00:00', '2026-01-02 00:00:00', 352, 'China//Uganda', '52 weeks', 'apremilast (phosphodiesterase-4 inhibitor) oral daily treatment', 'SYNTH-NCT0000020'),
+(1000020, 'SYNTH-MODERATE-CHRON-020', 'Closed', 'Camille Novak (Study Coordinator), novak.trial@example.org', '2025-10-22 00:00:00', '2026-01-02 00:00:00', 352, 'China//Uganda', '52 weeks', '[{"intervention":[3000020],"control":[3000131]}]', 'SYNTH-NCT0000020'),
 -- Study S021 (CRGStudyID 1000021) — source PMID 36328094 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000021, 'SYNTH-FAMILY-PLANNIN-021', 'Open/Ongoing', 'Lukas Moreau (Study Coordinator), moreau.trial@example.org', '2025-11-10 00:00:00', '2026-02-02 00:00:00', 1201, 'India', '39 weeks', 'standard care', 'SYNTH-NCT0000021'),
+(1000021, 'SYNTH-FAMILY-PLANNIN-021', 'Open/Ongoing', 'Lukas Moreau (Study Coordinator), moreau.trial@example.org', '2025-11-10 00:00:00', '2026-02-02 00:00:00', 1201, 'India', '39 weeks', '[{"intervention":[3000021],"control":[3000132]}]', 'SYNTH-NCT0000021'),
 -- Study S022 (CRGStudyID 1000022) — source PMID 40493333 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000022, 'SYNTH-PRIMARY-OPEN-A-022', 'Stopped early', 'Mateus Brennan (Study Coordinator), brennan.trial@example.org', '2025-12-01 00:00:00', '2026-04-10 00:00:00', 33, 'Ireland', '13 weeks', 'latanoprost ophthalmic solution', 'SYNTH-ISRCTN-0000022'),
+(1000022, 'SYNTH-PRIMARY-OPEN-A-022', 'Stopped early', 'Mateus Brennan (Study Coordinator), brennan.trial@example.org', '2025-12-01 00:00:00', '2026-04-10 00:00:00', 33, 'Ireland', '13 weeks', '[{"intervention":[3000022],"control":[3000133]}]', 'SYNTH-ISRCTN-0000022'),
 -- Study S023 (CRGStudyID 1000023) — source PMID 41761704 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000023, 'SYNTH-ATRIAL-FIBRILL-023', 'Open/Ongoing', 'Viktor Wachira (Study Coordinator), wachira.trial@example.org', '2025-11-10 00:00:00', '2026-01-23 00:00:00', 40, 'Sweden', '1 week', 'standard rate control approach', 'SYNTH-ISRCTN-0000023'),
+(1000023, 'SYNTH-ATRIAL-FIBRILL-023', 'Open/Ongoing', 'Viktor Wachira (Study Coordinator), wachira.trial@example.org', '2025-11-10 00:00:00', '2026-01-23 00:00:00', 40, 'Sweden', '1 week', '[{"intervention":[3000023],"control":[3000134]}]', 'SYNTH-ISRCTN-0000023'),
 -- Study S024 (CRGStudyID 1000024) — source PMID 42048524 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000024, 'SYNTH-PARKINSON-DISE-024', 'Open/Ongoing', 'Amara Petrov (Study Coordinator), petrov.trial@example.org', '2025-07-23 00:00:00', '2026-05-11 00:00:00', 56, 'China', '4 weeks', 'conventional rehabilitation alone', 'SYNTH-NCT0000024'),
+(1000024, 'SYNTH-PARKINSON-DISE-024', 'Open/Ongoing', 'Amara Petrov (Study Coordinator), petrov.trial@example.org', '2025-07-23 00:00:00', '2026-05-11 00:00:00', 56, 'China', '4 weeks', '[{"intervention":[3000024],"control":[3000135]}]', 'SYNTH-NCT0000024'),
 -- Study S025 (CRGStudyID 1000025) — source PMID 42296016 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000025, 'SYNTH-POST-TRAUMATIC-025', 'Open/Ongoing', 'Giulia Csik (Study Coordinator), csik.trial@example.org', '2025-05-18 00:00:00', '2026-03-16 00:00:00', 178, 'India', '65 weeks', 'cognitive processing therapy versus dialectical behavior therapy', 'SYNTH-ISRCTN-0000025'),
+(1000025, 'SYNTH-POST-TRAUMATIC-025', 'Open/Ongoing', 'Giulia Csik (Study Coordinator), csik.trial@example.org', '2025-05-18 00:00:00', '2026-03-16 00:00:00', 178, 'India', '65 weeks', '[{"intervention":[3000025],"control":[3000136]}]', 'SYNTH-ISRCTN-0000025'),
 -- Study S026 (CRGStudyID 1000026) — source PMID 40976261 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000026, 'SYNTH-PREVENTION-OF--026', 'Closed', 'Umberto Esposito (Study Coordinator), esposito.trial@example.org', '2025-06-12 00:00:00', '2026-01-03 00:00:00', 398, 'Italy//Denmark', '13 weeks', 'standard prenatal care without exercise intervention', 'SYNTH-ISRCTN-0000026'),
+(1000026, 'SYNTH-PREVENTION-OF--026', 'Closed', 'Umberto Esposito (Study Coordinator), esposito.trial@example.org', '2025-06-12 00:00:00', '2026-01-03 00:00:00', 398, 'Italy//Denmark', '13 weeks', '[{"intervention":[3000026],"control":[3000137]}]', 'SYNTH-ISRCTN-0000026'),
 -- Study S027 (CRGStudyID 1000027) — source PMID 41455974 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000027, 'SYNTH-CHILDHOOD-OVER-027', 'Stopped early', 'Tariq Quraishi (Study Coordinator), quraishi.trial@example.org', '2025-07-11 00:00:00', '2026-02-14 00:00:00', 235, 'Sweden//China', '26 weeks', 'standard school-based health promotion', 'SYNTH-NCT0000027'),
+(1000027, 'SYNTH-CHILDHOOD-OVER-027', 'Stopped early', 'Tariq Quraishi (Study Coordinator), quraishi.trial@example.org', '2025-07-11 00:00:00', '2026-02-14 00:00:00', 235, 'Sweden//China', '26 weeks', '[{"intervention":[3000027],"control":[3000138]}]', 'SYNTH-NCT0000027'),
 -- Study S028 (CRGStudyID 1000028) — source PMID 34643650 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000028, 'SYNTH-MODERATE-TO-SE-028', 'Closed', 'Hana Moreau (Study Coordinator), moreau.trial@example.org', '2025-03-13 00:00:00', '2026-08-02 00:00:00', 91, 'United States and Canada', '88 weeks', 'continued therapy with established biologic agent', 'SYNTH-ISRCTN-0000028'),
+(1000028, 'SYNTH-MODERATE-TO-SE-028', 'Closed', 'Hana Moreau (Study Coordinator), moreau.trial@example.org', '2025-03-13 00:00:00', '2026-08-02 00:00:00', 91, 'United States and Canada', '88 weeks', '[{"intervention":[3000028],"control":[3000139]}]', 'SYNTH-ISRCTN-0000028'),
 -- Study S029 (CRGStudyID 1000029) — source PMID 39994078 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000029, 'SYNTH-CHRONIC-PAIN-I-029', 'Closed', 'Isabela Yilmaz (Study Coordinator), yilmaz.trial@example.org', '2025-03-06 00:00:00', '2026-07-13 00:00:00', 190, 'Germany', '8 weeks', 'standard ambulatory nursing care', 'SYNTH-NCT0000029'),
+(1000029, 'SYNTH-CHRONIC-PAIN-I-029', 'Closed', 'Isabela Yilmaz (Study Coordinator), yilmaz.trial@example.org', '2025-03-06 00:00:00', '2026-07-13 00:00:00', 190, 'Germany', '8 weeks', '[{"intervention":[3000029],"control":[3000140]}]', 'SYNTH-NCT0000029'),
 -- Study S030 (CRGStudyID 1000030) — source PMID 34910080 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000030, 'SYNTH-POSTOPERATIVE--030', 'Closed', 'Gemma Quraishi (Study Coordinator), quraishi.trial@example.org', '2025-04-27 00:00:00', '2026-03-28 00:00:00', 1470, 'Germany', '16 weeks', 'standard perioperative care', 'SYNTH-ISRCTN-0000030'),
+(1000030, 'SYNTH-POSTOPERATIVE--030', 'Closed', 'Gemma Quraishi (Study Coordinator), quraishi.trial@example.org', '2025-04-27 00:00:00', '2026-03-28 00:00:00', 1470, 'Germany', '16 weeks', '[{"intervention":[3000030],"control":[3000141]}]', 'SYNTH-ISRCTN-0000030'),
 -- Study S031 (CRGStudyID 1000031) — source PMID 41795734 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000031, 'SYNTH-REDUCED-MOBILI-031', 'Closed', 'Kavya Petrov (Study Coordinator), petrov.trial@example.org', '2025-04-27 00:00:00', '2026-07-04 00:00:00', 589, 'Germany', '26 weeks', 'standard hospital care', 'SYNTH-NCT0000031'),
+(1000031, 'SYNTH-REDUCED-MOBILI-031', 'Closed', 'Kavya Petrov (Study Coordinator), petrov.trial@example.org', '2025-04-27 00:00:00', '2026-07-04 00:00:00', 589, 'Germany', '26 weeks', '[{"intervention":[3000031],"control":[3000142]}]', 'SYNTH-NCT0000031'),
 -- Study S032 (CRGStudyID 1000032) — source PMID 42750035 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000032, 'SYNTH-SYMPTOMATIC-AP-032', 'Closed', 'Umberto Castellano (Study Coordinator), castellano.trial@example.org', '2025-11-26 00:00:00', '2026-02-19 00:00:00', 30, 'United States', '1 week', 'calcium hydroxide intracanal medication', 'SYNTH-ISRCTN-0000032'),
+(1000032, 'SYNTH-SYMPTOMATIC-AP-032', 'Closed', 'Umberto Castellano (Study Coordinator), castellano.trial@example.org', '2025-11-26 00:00:00', '2026-02-19 00:00:00', 30, 'United States', '1 week', '[{"intervention":[3000032],"control":[3000143]}]', 'SYNTH-ISRCTN-0000032'),
 -- Study S033 (CRGStudyID 1000033) — source PMID 42652271 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000033, 'SYNTH-METABOLIC-SYND-033', 'Closed', 'Ulla Nakamura (Study Coordinator), nakamura.trial@example.org', '2025-06-20 00:00:00', '2026-02-02 00:00:00', 80, 'Chile', '18 weeks', 'usual care', 'SYNTH-NCT0000033'),
+(1000033, 'SYNTH-METABOLIC-SYND-033', 'Closed', 'Ulla Nakamura (Study Coordinator), nakamura.trial@example.org', '2025-06-20 00:00:00', '2026-02-02 00:00:00', 80, 'Chile', '18 weeks', '[{"intervention":[3000033],"control":[3000113]}]', 'SYNTH-NCT0000033'),
 -- Study S034 (CRGStudyID 1000034) — source PMID 42228308 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000034, 'SYNTH-INFLAMMATORY-B-034', 'Open/Ongoing', 'Rasmus Underwood (Study Coordinator), underwood.trial@example.org', '2025-10-19 00:00:00', '2026-03-10 00:00:00', 98, 'Spain', '52 weeks', 'standard care with baseline education only', 'SYNTH-NCT0000034'),
+(1000034, 'SYNTH-INFLAMMATORY-B-034', 'Open/Ongoing', 'Rasmus Underwood (Study Coordinator), underwood.trial@example.org', '2025-10-19 00:00:00', '2026-03-10 00:00:00', 98, 'Spain', '52 weeks', '[{"intervention":[3000034],"control":[3000144]}]', 'SYNTH-NCT0000034'),
 -- Study S035 (CRGStudyID 1000035) — source PMID 42115134 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000035, 'SYNTH-MILD-TO-MODERA-035', 'Open/Ongoing', 'Esteban Ostrowski (Study Coordinator), ostrowski.trial@example.org', '2025-02-18 00:00:00', '2026-03-02 00:00:00', 53, 'United Kingdom', '2 weeks', 'vehicle control', 'SYNTH-ISRCTN-0000035'),
+(1000035, 'SYNTH-MILD-TO-MODERA-035', 'Open/Ongoing', 'Esteban Ostrowski (Study Coordinator), ostrowski.trial@example.org', '2025-02-18 00:00:00', '2026-03-02 00:00:00', 53, 'United Kingdom', '2 weeks', '[{"intervention":[3000035],"control":[3000145]}]', 'SYNTH-ISRCTN-0000035'),
 -- Study S036 (CRGStudyID 1000036) — source PMID 42474505 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000036, 'SYNTH-TYPE-2-DIABETE-036', 'Closed', 'Dovile Yilmaz (Study Coordinator), yilmaz.trial@example.org', '2025-04-12 00:00:00', '2026-08-24 00:00:00', 24, 'Netherlands//Uganda', '1 week', 'baseline glucose patterns in crossover design', 'SYNTH-NCT0000036'),
+(1000036, 'SYNTH-TYPE-2-DIABETE-036', 'Closed', 'Dovile Yilmaz (Study Coordinator), yilmaz.trial@example.org', '2025-04-12 00:00:00', '2026-08-24 00:00:00', 24, 'Netherlands//Uganda', '1 week', '[{"intervention":[3000036],"control":[3000146]}]', 'SYNTH-NCT0000036'),
 -- Study S037 (CRGStudyID 1000037) — source PMID 39380053 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000037, 'SYNTH-SUBOPTIMAL-AND-037', 'Closed', 'Chidi Eriksson (Study Coordinator), eriksson.trial@example.org', '2025-09-27 00:00:00', '2026-05-20 00:00:00', 392, 'Denmark//Sweden', '78 weeks', 'usual practice without structured intervention', 'SYNTH-NCT0000037'),
+(1000037, 'SYNTH-SUBOPTIMAL-AND-037', 'Closed', 'Chidi Eriksson (Study Coordinator), eriksson.trial@example.org', '2025-09-27 00:00:00', '2026-05-20 00:00:00', 392, 'Denmark//Sweden', '78 weeks', '[{"intervention":[3000037],"control":[3000147]}]', 'SYNTH-NCT0000037'),
 -- Study S038 (CRGStudyID 1000038) — source PMID 39208211 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000038, 'SYNTH-HEPATITIS-C-IN-038', 'Closed', 'Rasmus Santos (Study Coordinator), santos.trial@example.org', '2025-10-26 00:00:00', '2026-08-19 00:00:00', 165, 'Canada', '52 weeks', 'standard referral-based care pathway', 'SYNTH-ISRCTN-0000038'),
+(1000038, 'SYNTH-HEPATITIS-C-IN-038', 'Closed', 'Rasmus Santos (Study Coordinator), santos.trial@example.org', '2025-10-26 00:00:00', '2026-08-19 00:00:00', 165, 'Canada', '52 weeks', '[{"intervention":[3000038],"control":[3000148]}]', 'SYNTH-ISRCTN-0000038'),
 -- Study S039 (CRGStudyID 1000039) — source PMID 42271518 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000039, 'SYNTH-TOBACCO-SMOKIN-039', 'Stopped early', 'Dovile Dahl (Study Coordinator), dahl.trial@example.org', '2025-05-16 00:00:00', '2026-04-20 00:00:00', 420, 'Spain//Kenya', '52 weeks', 'app-only self-guided use', 'SYNTH-NCT0000039'),
+(1000039, 'SYNTH-TOBACCO-SMOKIN-039', 'Stopped early', 'Dovile Dahl (Study Coordinator), dahl.trial@example.org', '2025-05-16 00:00:00', '2026-04-20 00:00:00', 420, 'Spain//Kenya', '52 weeks', '[{"intervention":[3000039],"control":[3000149]}]', 'SYNTH-NCT0000039'),
 -- Study S040 (CRGStudyID 1000040) — source PMID 42661205 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000040, 'SYNTH-PROSTATE-CANCE-040', 'Closed', 'Kavya Bergstrom (Study Coordinator), bergstrom.trial@example.org', '2025-05-05 00:00:00', '2026-01-17 00:00:00', 8, 'United States', '8 weeks', 'qualitative pilot evaluation (non-randomized)', 'SYNTH-ISRCTN-0000040'),
+(1000040, 'SYNTH-PROSTATE-CANCE-040', 'Closed', 'Kavya Bergstrom (Study Coordinator), bergstrom.trial@example.org', '2025-05-05 00:00:00', '2026-01-17 00:00:00', 8, 'United States', '8 weeks', '[{"intervention":[3000040],"control":[3000150]}]', 'SYNTH-ISRCTN-0000040'),
 -- Study S041 (CRGStudyID 1000041) — source PMID 40324272 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000041, 'SYNTH-CRITICAL-ILLNE-041', 'Closed', 'Amara Quraishi (Study Coordinator), quraishi.trial@example.org', '2025-04-26 00:00:00', '2026-02-01 00:00:00', 100, 'Kenya', '1 week', 'conventional nutritional care', 'SYNTH-ISRCTN-0000041'),
+(1000041, 'SYNTH-CRITICAL-ILLNE-041', 'Closed', 'Amara Quraishi (Study Coordinator), quraishi.trial@example.org', '2025-04-26 00:00:00', '2026-02-01 00:00:00', 100, 'Kenya', '1 week', '[{"intervention":[3000041],"control":[3000151]}]', 'SYNTH-ISRCTN-0000041'),
 -- Study S042 (CRGStudyID 1000042) — source PMID 42508996 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000042, 'SYNTH-OBESITY-WITH-P-042', 'Open/Ongoing', 'Viktor Eriksson (Study Coordinator), eriksson.trial@example.org', '2025-05-07 00:00:00', '2026-05-05 00:00:00', 39, 'France', '12 weeks', 'conventional meal timing pattern', 'SYNTH-NCT0000042'),
+(1000042, 'SYNTH-OBESITY-WITH-P-042', 'Open/Ongoing', 'Viktor Eriksson (Study Coordinator), eriksson.trial@example.org', '2025-05-07 00:00:00', '2026-05-05 00:00:00', 39, 'France', '12 weeks', '[{"intervention":[3000042],"control":[3000152]}]', 'SYNTH-NCT0000042'),
 -- Study S043 (CRGStudyID 1000043) — source PMID 38102816 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000043, 'SYNTH-ADVANCED-LUNG--043', 'Closed', 'Sami Yamada (Study Coordinator), yamada.trial@example.org', '2025-03-24 00:00:00', '2026-02-15 00:00:00', 80, 'China', '52 weeks', 'routine oncology care without exercise', 'SYNTH-NCT0000043'),
+(1000043, 'SYNTH-ADVANCED-LUNG--043', 'Closed', 'Sami Yamada (Study Coordinator), yamada.trial@example.org', '2025-03-24 00:00:00', '2026-02-15 00:00:00', 80, 'China', '52 weeks', '[{"intervention":[3000043],"control":[3000153]}]', 'SYNTH-NCT0000043'),
 -- Study S044 (CRGStudyID 1000044) — source PMID 42436458 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000044, 'SYNTH-END-OF-LIFE-CA-044', 'Closed', 'Oleksandr Castellano (Study Coordinator), castellano.trial@example.org', '2025-04-03 00:00:00', '2026-07-22 00:00:00', 119, 'Germany', '13 weeks', 'standard care without palliative training', 'SYNTH-NCT0000044'),
+(1000044, 'SYNTH-END-OF-LIFE-CA-044', 'Closed', 'Oleksandr Castellano (Study Coordinator), castellano.trial@example.org', '2025-04-03 00:00:00', '2026-07-22 00:00:00', 119, 'Germany', '13 weeks', '[{"intervention":[3000044],"control":[3000154]}]', 'SYNTH-NCT0000044'),
 -- Study S045 (CRGStudyID 1000045) — source PMID 42444044 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000045, 'SYNTH-KNEE-OSTEOARTH-045', 'Closed', 'Mateus Castellano (Study Coordinator), castellano.trial@example.org', '2025-03-03 00:00:00', '2026-05-18 00:00:00', 30, 'Switzerland', '12 weeks', 'angled inserts without arch support', 'SYNTH-ISRCTN-0000045'),
+(1000045, 'SYNTH-KNEE-OSTEOARTH-045', 'Closed', 'Mateus Castellano (Study Coordinator), castellano.trial@example.org', '2025-03-03 00:00:00', '2026-05-18 00:00:00', 30, 'Switzerland', '12 weeks', '[{"intervention":[3000045],"control":[3000155]}]', 'SYNTH-ISRCTN-0000045'),
 -- Study S046 (CRGStudyID 1000046) — source PMID 42210033 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000046, 'SYNTH-HYPERTENSION-W-046', 'Closed', 'Rasmus Brennan (Study Coordinator), brennan.trial@example.org', '2025-08-04 00:00:00', '2026-08-28 00:00:00', 150, 'United Kingdom', '26 weeks', 'placebo control', 'SYNTH-NCT0000046'),
+(1000046, 'SYNTH-HYPERTENSION-W-046', 'Closed', 'Rasmus Brennan (Study Coordinator), brennan.trial@example.org', '2025-08-04 00:00:00', '2026-08-28 00:00:00', 150, 'United Kingdom', '26 weeks', '[{"intervention":[3000046],"control":[3000156]}]', 'SYNTH-NCT0000046'),
 -- Study S047 (CRGStudyID 1000047) — source PMID 33146763 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000047, 'SYNTH-DIABETES-MELLI-047', 'Closed', 'Franz Mensah (Study Coordinator), mensah.trial@example.org', '2025-07-08 00:00:00', '2026-07-18 00:00:00', 4534, 'United Kingdom', '104 weeks', 'annual uniform screening', 'SYNTH-ISRCTN-0000047'),
+(1000047, 'SYNTH-DIABETES-MELLI-047', 'Closed', 'Franz Mensah (Study Coordinator), mensah.trial@example.org', '2025-07-08 00:00:00', '2026-07-18 00:00:00', 4534, 'United Kingdom', '104 weeks', '[{"intervention":[3000047],"control":[3000157]}]', 'SYNTH-ISRCTN-0000047'),
 -- Study S048 (CRGStudyID 1000048) — source PMID 41947092 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000048, 'SYNTH-GENERALIZED-AN-048', 'Open/Ongoing', 'Jamal Haddad (Study Coordinator), haddad.trial@example.org', '2025-12-11 00:00:00', '2026-08-04 00:00:00', 82, 'Sweden', '14 weeks', 'supportive counseling therapy', 'SYNTH-ISRCTN-0000048'),
+(1000048, 'SYNTH-GENERALIZED-AN-048', 'Open/Ongoing', 'Jamal Haddad (Study Coordinator), haddad.trial@example.org', '2025-12-11 00:00:00', '2026-08-04 00:00:00', 82, 'Sweden', '14 weeks', '[{"intervention":[3000048],"control":[3000158]}]', 'SYNTH-ISRCTN-0000048'),
 -- Study S049 (CRGStudyID 1000049) — source PMID 42520052 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000049, 'SYNTH-MODERATE-TO-SE-049', 'Closed', 'Zofia Fernandes (Study Coordinator), fernandes.trial@example.org', '2025-08-25 00:00:00', '2026-02-22 00:00:00', 55, 'Kenya and Uganda', '26 weeks', 'in-person clinic-based hypertension management', 'SYNTH-NCT0000049'),
+(1000049, 'SYNTH-MODERATE-TO-SE-049', 'Closed', 'Zofia Fernandes (Study Coordinator), fernandes.trial@example.org', '2025-08-25 00:00:00', '2026-02-22 00:00:00', 55, 'Kenya and Uganda', '26 weeks', '[{"intervention":[3000049],"control":[3000159]}]', 'SYNTH-NCT0000049'),
 -- Study S050 (CRGStudyID 1000050) — source PMID 41641973 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000050, 'SYNTH-TOBACCO-SMOKIN-050', 'Closed', 'Valentina Johansen (Study Coordinator), johansen.trial@example.org', '2025-03-02 00:00:00', '2026-07-12 00:00:00', 831, 'Switzerland//Denmark', '26 weeks', 'standard smoking cessation counseling alone', 'SYNTH-ISRCTN-0000050'),
+(1000050, 'SYNTH-TOBACCO-SMOKIN-050', 'Closed', 'Valentina Johansen (Study Coordinator), johansen.trial@example.org', '2025-03-02 00:00:00', '2026-07-12 00:00:00', 831, 'Switzerland//Denmark', '26 weeks', '[{"intervention":[3000050],"control":[3000160]}]', 'SYNTH-ISRCTN-0000050'),
 -- Study S051 (CRGStudyID 1000051) — source PMID 40556042 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000051, 'SYNTH-CHRONIC-OR-GES-051', 'Closed', 'Gemma Dubois (Study Coordinator), dubois.trial@example.org', '2025-11-12 00:00:00', '2026-06-22 00:00:00', 357, 'United Kingdom//Ireland', '24 weeks', 'expectant management until term', 'SYNTH-ISRCTN-0000051'),
+(1000051, 'SYNTH-CHRONIC-OR-GES-051', 'Closed', 'Gemma Dubois (Study Coordinator), dubois.trial@example.org', '2025-11-12 00:00:00', '2026-06-22 00:00:00', 357, 'United Kingdom//Ireland', '24 weeks', '[{"intervention":[3000051],"control":[3000161]}]', 'SYNTH-ISRCTN-0000051'),
 -- Study S052 (CRGStudyID 1000052) — source PMID 41599836 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000052, 'SYNTH-CHRONIC-PAIN-I-052', 'Closed', 'Amara Fernandes (Study Coordinator), fernandes.trial@example.org', '2025-02-05 00:00:00', '2026-01-25 00:00:00', 30, 'United States//Sweden', '3 weeks', 'control or turmeric alone at varying doses', 'SYNTH-ISRCTN-0000052'),
+(1000052, 'SYNTH-CHRONIC-PAIN-I-052', 'Closed', 'Amara Fernandes (Study Coordinator), fernandes.trial@example.org', '2025-02-05 00:00:00', '2026-01-25 00:00:00', 30, 'United States//Sweden', '3 weeks', '[{"intervention":[3000052],"control":[3000162]}]', 'SYNTH-ISRCTN-0000052'),
 -- Study S053 (CRGStudyID 1000053) — source PMID 42567638 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000053, 'SYNTH-ATRIAL-FIBRILL-053', 'Closed', 'Felix Dahl (Study Coordinator), dahl.trial@example.org', '2025-05-27 00:00:00', '2026-05-06 00:00:00', 480, 'Australia', '13 weeks', 'routine usual care', 'SYNTH-ISRCTN-0000053'),
+(1000053, 'SYNTH-ATRIAL-FIBRILL-053', 'Closed', 'Felix Dahl (Study Coordinator), dahl.trial@example.org', '2025-05-27 00:00:00', '2026-05-06 00:00:00', 480, 'Australia', '13 weeks', '[{"intervention":[3000053],"control":[3000163]}]', 'SYNTH-ISRCTN-0000053'),
 -- Study S054 (CRGStudyID 1000054) — source PMID 41313804 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000054, 'SYNTH-CHRONIC-RESPIR-054', 'Closed', 'Paloma Valdes (Study Coordinator), valdes.trial@example.org', '2025-07-02 00:00:00', '2026-03-21 00:00:00', 90, 'Ireland', '12 weeks', 'standard outpatient pulmonary care', 'SYNTH-NCT0000054'),
+(1000054, 'SYNTH-CHRONIC-RESPIR-054', 'Closed', 'Paloma Valdes (Study Coordinator), valdes.trial@example.org', '2025-07-02 00:00:00', '2026-03-21 00:00:00', 90, 'Ireland', '12 weeks', '[{"intervention":[3000054],"control":[3000164]}]', 'SYNTH-NCT0000054'),
 -- Study S055 (CRGStudyID 1000055) — source PMID 25108611 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000055, 'SYNTH-CHILDHOOD-OVER-055', 'Closed', 'Priya Lindqvist (Study Coordinator), lindqvist.trial@example.org', '2025-01-22 00:00:00', '2026-06-09 00:00:00', 141, 'Mexico', '52 weeks', 'baseline or comparison schools without intervention', 'SYNTH-NCT0000055'),
+(1000055, 'SYNTH-CHILDHOOD-OVER-055', 'Closed', 'Priya Lindqvist (Study Coordinator), lindqvist.trial@example.org', '2025-01-22 00:00:00', '2026-06-09 00:00:00', 141, 'Mexico', '52 weeks', '[{"intervention":[3000055],"control":[3000165]}]', 'SYNTH-NCT0000055'),
 -- Study S056 (CRGStudyID 1000056) — source PMID 42302056 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000056, 'SYNTH-CORONARY-HEART-056', 'Closed', 'Wanjiru Yamada (Study Coordinator), yamada.trial@example.org', '2025-11-02 00:00:00', '2026-05-27 00:00:00', 300, 'Australia', '26 weeks', 'standard cardiac rehabilitation without additional behaviour change coaching', 'SYNTH-NCT0000056'),
+(1000056, 'SYNTH-CORONARY-HEART-056', 'Closed', 'Wanjiru Yamada (Study Coordinator), yamada.trial@example.org', '2025-11-02 00:00:00', '2026-05-27 00:00:00', 300, 'Australia', '26 weeks', '[{"intervention":[3000056],"control":[3000166]}]', 'SYNTH-NCT0000056'),
 -- Study S057 (CRGStudyID 1000057) — source PMID 42674465 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000057, 'SYNTH-SEPSIS-IN-CRIT-057', 'Open/Ongoing', 'Ivo Ostrowski (Study Coordinator), ostrowski.trial@example.org', '2025-10-05 00:00:00', '2026-06-08 00:00:00', 200, 'Denmark', '24 weeks', 'empirical piperacillin/tazobactam antibiotic therapy', 'SYNTH-NCT0000057'),
+(1000057, 'SYNTH-SEPSIS-IN-CRIT-057', 'Open/Ongoing', 'Ivo Ostrowski (Study Coordinator), ostrowski.trial@example.org', '2025-10-05 00:00:00', '2026-06-08 00:00:00', 200, 'Denmark', '24 weeks', '[{"intervention":[3000057],"control":[3000167]}]', 'SYNTH-NCT0000057'),
 -- Study S058 (CRGStudyID 1000058) — source PMID 41444616 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000058, 'SYNTH-STROKE-WITH-MO-058', 'Open/Ongoing', 'Bruno Ostrowski (Study Coordinator), ostrowski.trial@example.org', '2025-10-14 00:00:00', '2026-07-15 00:00:00', 44, 'China', '6 weeks', 'augmented reality alone and conventional physical therapy', 'SYNTH-ISRCTN-0000058'),
+(1000058, 'SYNTH-STROKE-WITH-MO-058', 'Open/Ongoing', 'Bruno Ostrowski (Study Coordinator), ostrowski.trial@example.org', '2025-10-14 00:00:00', '2026-07-15 00:00:00', 44, 'China', '6 weeks', '[{"intervention":[3000058],"control":[3000168]}]', 'SYNTH-ISRCTN-0000058'),
 -- Study S059 (CRGStudyID 1000059) — source PMID 40654089 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000059, 'SYNTH-MODERATE-TO-SE-059', 'Open/Ongoing', 'Mireille Castellano (Study Coordinator), castellano.trial@example.org', '2025-09-11 00:00:00', '2026-03-12 00:00:00', 24, 'New Zealand//Switzerland', '52 weeks', 'ultrasound-assisted delivery of ethosome gold nanoparticles and thermal laser', 'SYNTH-ISRCTN-0000059'),
+(1000059, 'SYNTH-MODERATE-TO-SE-059', 'Open/Ongoing', 'Mireille Castellano (Study Coordinator), castellano.trial@example.org', '2025-09-11 00:00:00', '2026-03-12 00:00:00', 24, 'New Zealand//Switzerland', '52 weeks', '[{"intervention":[3000059],"control":[3000169]}]', 'SYNTH-ISRCTN-0000059'),
 -- Study S060 (CRGStudyID 1000060) — source PMID 42698074 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000060, 'SYNTH-ASYMPTOMATIC-I-060', 'Closed', 'Tariq Petrov (Study Coordinator), petrov.trial@example.org', '2025-07-11 00:00:00', '2026-06-10 00:00:00', 125, 'France', '1 week', 'periapical radiography for working length determination', 'SYNTH-ISRCTN-0000060'),
+(1000060, 'SYNTH-ASYMPTOMATIC-I-060', 'Closed', 'Tariq Petrov (Study Coordinator), petrov.trial@example.org', '2025-07-11 00:00:00', '2026-06-10 00:00:00', 125, 'France', '1 week', '[{"intervention":[3000060],"control":[3000170]}]', 'SYNTH-ISRCTN-0000060'),
 -- Study S061 (CRGStudyID 1000061) — source PMID 42599708 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000061, 'SYNTH-CHILDHOOD-ANXI-061', 'Closed', 'Sami Haddad (Study Coordinator), haddad.trial@example.org', '2025-10-03 00:00:00', '2026-01-19 00:00:00', 465, 'Finland', '104 weeks', 'psychoeducation control via digital format', 'SYNTH-ISRCTN-0000061'),
+(1000061, 'SYNTH-CHILDHOOD-ANXI-061', 'Closed', 'Sami Haddad (Study Coordinator), haddad.trial@example.org', '2025-10-03 00:00:00', '2026-01-19 00:00:00', 465, 'Finland', '104 weeks', '[{"intervention":[3000061],"control":[3000171]}]', 'SYNTH-ISRCTN-0000061'),
 -- Study S062 (CRGStudyID 1000062) — source PMID 41757461 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000062, 'SYNTH-CANCER-ASSOCIA-062', 'Closed', 'Zofia Ivanova (Study Coordinator), ivanova.trial@example.org', '2025-08-21 00:00:00', '2026-07-11 00:00:00', 178, 'Netherlands', '8 weeks', 'standard 6-month rivaroxaban regimen', 'SYNTH-NCT0000062'),
+(1000062, 'SYNTH-CANCER-ASSOCIA-062', 'Closed', 'Zofia Ivanova (Study Coordinator), ivanova.trial@example.org', '2025-08-21 00:00:00', '2026-07-11 00:00:00', 178, 'Netherlands', '8 weeks', '[{"intervention":[3000062],"control":[3000172]}]', 'SYNTH-NCT0000062'),
 -- Study S063 (CRGStudyID 1000063) — source PMID 32122322 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000063, 'SYNTH-TYPE-2-DIABETE-063', 'Open/Ongoing', 'Chidi Johansen (Study Coordinator), johansen.trial@example.org', '2025-07-01 00:00:00', '2026-07-25 00:00:00', 101, 'Japan//India', '4 weeks', 'standard care without intervention', 'SYNTH-NCT0000063'),
+(1000063, 'SYNTH-TYPE-2-DIABETE-063', 'Open/Ongoing', 'Chidi Johansen (Study Coordinator), johansen.trial@example.org', '2025-07-01 00:00:00', '2026-07-25 00:00:00', 101, 'Japan//India', '4 weeks', '[{"intervention":[3000063],"control":[3000173]}]', 'SYNTH-NCT0000063'),
 -- Study S064 (CRGStudyID 1000064) — source PMID 42241125 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000064, 'SYNTH-ANGINA-WITH-NO-064', 'Stopped early', 'Chiara Novak (Study Coordinator), novak.trial@example.org', '2025-11-11 00:00:00', '2026-02-09 00:00:00', 250, 'Australia', '52 weeks', 'angiography-based standard care', 'SYNTH-ISRCTN-0000064'),
+(1000064, 'SYNTH-ANGINA-WITH-NO-064', 'Stopped early', 'Chiara Novak (Study Coordinator), novak.trial@example.org', '2025-11-11 00:00:00', '2026-02-09 00:00:00', 250, 'Australia', '52 weeks', '[{"intervention":[3000064],"control":[3000174]}]', 'SYNTH-ISRCTN-0000064'),
 -- Study S065 (CRGStudyID 1000065) — source PMID 40762233 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000065, 'SYNTH-ATOPIC-DERMATI-065', 'Closed', 'Tariq Santos (Study Coordinator), santos.trial@example.org', '2025-02-23 00:00:00', '2026-04-05 00:00:00', 98, 'China//Brazil', '12 weeks', 'conventional routine clinical care', 'SYNTH-ISRCTN-0000065'),
+(1000065, 'SYNTH-ATOPIC-DERMATI-065', 'Closed', 'Tariq Santos (Study Coordinator), santos.trial@example.org', '2025-02-23 00:00:00', '2026-04-05 00:00:00', 98, 'China//Brazil', '12 weeks', '[{"intervention":[3000065],"control":[3000175]}]', 'SYNTH-ISRCTN-0000065'),
 -- Study S066 (CRGStudyID 1000066) — source PMID 41094463 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000066, 'SYNTH-HEPATITIS-C-VI-066', 'Closed', 'Hana Mensah (Study Coordinator), mensah.trial@example.org', '2025-06-11 00:00:00', '2026-01-14 00:00:00', 282, 'United States', '26 weeks', 'referral to offsite hepatology services', 'SYNTH-ISRCTN-0000066'),
+(1000066, 'SYNTH-HEPATITIS-C-VI-066', 'Closed', 'Hana Mensah (Study Coordinator), mensah.trial@example.org', '2025-06-11 00:00:00', '2026-01-14 00:00:00', 282, 'United States', '26 weeks', '[{"intervention":[3000066],"control":[3000176]}]', 'SYNTH-ISRCTN-0000066'),
 -- Study S067 (CRGStudyID 1000067) — source PMID 42470487 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000067, 'SYNTH-POSTOPERATIVE--067', 'Closed', 'Sofia Johansen (Study Coordinator), johansen.trial@example.org', '2025-12-24 00:00:00', '2026-07-17 00:00:00', 160, 'Thailand', '26 weeks', 'enhanced recovery after surgery protocol alone', 'SYNTH-NCT0000067'),
+(1000067, 'SYNTH-POSTOPERATIVE--067', 'Closed', 'Sofia Johansen (Study Coordinator), johansen.trial@example.org', '2025-12-24 00:00:00', '2026-07-17 00:00:00', 160, 'Thailand', '26 weeks', '[{"intervention":[3000067],"control":[3000177]}]', 'SYNTH-NCT0000067'),
 -- Study S068 (CRGStudyID 1000068) — source PMID 41996694 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000068, 'SYNTH-HIV-PREVENTION-068', 'Stopped early', 'Jonas Ueda (Study Coordinator), ueda.trial@example.org', '2025-06-18 00:00:00', '2026-04-16 00:00:00', 250, 'Uganda//China', '52 weeks', 'standard community care', 'SYNTH-ISRCTN-0000068'),
+(1000068, 'SYNTH-HIV-PREVENTION-068', 'Stopped early', 'Jonas Ueda (Study Coordinator), ueda.trial@example.org', '2025-06-18 00:00:00', '2026-04-16 00:00:00', 250, 'Uganda//China', '52 weeks', '[{"intervention":[3000068],"control":[3000178]}]', 'SYNTH-ISRCTN-0000068'),
 -- Study S069 (CRGStudyID 1000069) — source PMID 42386349 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000069, 'SYNTH-INFLAMMATORY-B-069', 'Closed', 'Jonas Dubois (Study Coordinator), dubois.trial@example.org', '2025-01-24 00:00:00', '2026-08-26 00:00:00', 780, 'United Kingdom//Italy', '52 weeks', 'usual care without digital intervention', 'SYNTH-ISRCTN-0000069'),
+(1000069, 'SYNTH-INFLAMMATORY-B-069', 'Closed', 'Jonas Dubois (Study Coordinator), dubois.trial@example.org', '2025-01-24 00:00:00', '2026-08-26 00:00:00', 780, 'United Kingdom//Italy', '52 weeks', '[{"intervention":[3000069],"control":[3000179]}]', 'SYNTH-ISRCTN-0000069'),
 -- Study S070 (CRGStudyID 1000070) — source PMID 41195808 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000070, 'SYNTH-PARKINSON-DISE-070', 'Stopped early', 'Lukas Farrell (Study Coordinator), farrell.trial@example.org', '2025-01-25 00:00:00', '2026-02-09 00:00:00', 14, 'Australia', '16 weeks', 'walking without stimulation', 'SYNTH-ISRCTN-0000070'),
+(1000070, 'SYNTH-PARKINSON-DISE-070', 'Stopped early', 'Lukas Farrell (Study Coordinator), farrell.trial@example.org', '2025-01-25 00:00:00', '2026-02-09 00:00:00', 14, 'Australia', '16 weeks', '[{"intervention":[3000070],"control":[3000180]}]', 'SYNTH-ISRCTN-0000070'),
 -- Study S071 (CRGStudyID 1000071) — source PMID 42091052 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000071, 'SYNTH-ALCOHOL-USE-DI-071', 'Closed', 'Mireille Brennan (Study Coordinator), brennan.trial@example.org', '2025-05-07 00:00:00', '2026-03-28 00:00:00', 337, 'France and Monaco//South Korea', '24 weeks', 'sham stimulation', 'SYNTH-ISRCTN-0000071'),
+(1000071, 'SYNTH-ALCOHOL-USE-DI-071', 'Closed', 'Mireille Brennan (Study Coordinator), brennan.trial@example.org', '2025-05-07 00:00:00', '2026-03-28 00:00:00', 337, 'France and Monaco//South Korea', '24 weeks', '[{"intervention":[3000071],"control":[3000181]}]', 'SYNTH-ISRCTN-0000071'),
 -- Study S072 (CRGStudyID 1000072) — source PMID 41785480 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000072, 'SYNTH-BIPOLAR-DISORD-072', 'Closed', 'Chidi Moreau (Study Coordinator), moreau.trial@example.org', '2025-08-11 00:00:00', '2026-04-26 00:00:00', 35, 'China', '24 weeks', 'autologous fecal microbiota transplantation', 'SYNTH-NCT0000072'),
+(1000072, 'SYNTH-BIPOLAR-DISORD-072', 'Closed', 'Chidi Moreau (Study Coordinator), moreau.trial@example.org', '2025-08-11 00:00:00', '2026-04-26 00:00:00', 35, 'China', '24 weeks', '[{"intervention":[3000072],"control":[3000182]}]', 'SYNTH-NCT0000072'),
 -- Study S073 (CRGStudyID 1000073) — source PMID 42684555 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000073, 'SYNTH-EARLY-STAGE-BR-073', 'Closed', 'Paloma Zimmermann (Study Coordinator), zimmermann.trial@example.org', '2025-07-19 00:00:00', '2026-06-22 00:00:00', 40, 'Ireland', '12 weeks', 'patent blue V dye tracing', 'SYNTH-NCT0000073'),
+(1000073, 'SYNTH-EARLY-STAGE-BR-073', 'Closed', 'Paloma Zimmermann (Study Coordinator), zimmermann.trial@example.org', '2025-07-19 00:00:00', '2026-06-22 00:00:00', 40, 'Ireland', '12 weeks', '[{"intervention":[3000073],"control":[3000183]}]', 'SYNTH-NCT0000073'),
 -- Study S074 (CRGStudyID 1000074) — source PMID 40615870 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000074, 'SYNTH-MALARIA-IN-CHI-074', 'Closed', 'Elena Nakamura (Study Coordinator), nakamura.trial@example.org', '2025-06-17 00:00:00', '2026-01-07 00:00:00', 293, 'Kenya', '26 weeks', 'standard malaria prevention methods', 'SYNTH-ISRCTN-0000074'),
+(1000074, 'SYNTH-MALARIA-IN-CHI-074', 'Closed', 'Elena Nakamura (Study Coordinator), nakamura.trial@example.org', '2025-06-17 00:00:00', '2026-01-07 00:00:00', 293, 'Kenya', '26 weeks', '[{"intervention":[3000074],"control":[3000184]}]', 'SYNTH-ISRCTN-0000074'),
 -- Study S075 (CRGStudyID 1000075) — source PMID 42084697 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000075, 'SYNTH-MODERATE-TO-SE-075', 'Open/Ongoing', 'Esteban Esposito (Study Coordinator), esposito.trial@example.org', '2025-02-27 00:00:00', '2026-08-21 00:00:00', 1196, 'Uganda', '16 weeks', 'dupilumab 300 mg every 2 weeks', 'SYNTH-NCT0000075'),
+(1000075, 'SYNTH-MODERATE-TO-SE-075', 'Open/Ongoing', 'Esteban Esposito (Study Coordinator), esposito.trial@example.org', '2025-02-27 00:00:00', '2026-08-21 00:00:00', 1196, 'Uganda', '16 weeks', '[{"intervention":[3000075],"control":[3000185]}]', 'SYNTH-NCT0000075'),
 -- Study S076 (CRGStudyID 1000076) — source PMID 42462212 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000076, 'SYNTH-CHRONIC-KIDNEY-076', 'Closed', 'Xavier Girard (Study Coordinator), girard.trial@example.org', '2025-02-04 00:00:00', '2026-08-05 00:00:00', 16, 'Switzerland', '9 weeks', 'standard medical management alone', 'SYNTH-ISRCTN-0000076'),
+(1000076, 'SYNTH-CHRONIC-KIDNEY-076', 'Closed', 'Xavier Girard (Study Coordinator), girard.trial@example.org', '2025-02-04 00:00:00', '2026-08-05 00:00:00', 16, 'Switzerland', '9 weeks', '[{"intervention":[3000076],"control":[3000186]}]', 'SYNTH-ISRCTN-0000076'),
 -- Study S077 (CRGStudyID 1000077) — source PMID 39301780 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000077, 'SYNTH-MILD-TO-MODERA-077', 'Closed', 'Quentin Castellano (Study Coordinator), castellano.trial@example.org', '2025-02-24 00:00:00', '2026-01-20 00:00:00', 54, 'India', '12 weeks', 'prescription retinoid-peroxide combination (adapalene 0.1%/benzoyl peroxide 2.5%)', 'SYNTH-ISRCTN-0000077'),
+(1000077, 'SYNTH-MILD-TO-MODERA-077', 'Closed', 'Quentin Castellano (Study Coordinator), castellano.trial@example.org', '2025-02-24 00:00:00', '2026-01-20 00:00:00', 54, 'India', '12 weeks', '[{"intervention":[3000077],"control":[3000187]}]', 'SYNTH-ISRCTN-0000077'),
 -- Study S078 (CRGStudyID 1000078) — source PMID 40283739 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000078, 'SYNTH-EARLY-CHILDHOO-078', 'Stopped early', 'Felix Nakamura (Study Coordinator), nakamura.trial@example.org', '2025-08-19 00:00:00', '2026-06-02 00:00:00', 1084, 'United States//Canada', '8 weeks', 'standard school health curriculum', 'SYNTH-ISRCTN-0000078'),
+(1000078, 'SYNTH-EARLY-CHILDHOO-078', 'Stopped early', 'Felix Nakamura (Study Coordinator), nakamura.trial@example.org', '2025-08-19 00:00:00', '2026-06-02 00:00:00', 1084, 'United States//Canada', '8 weeks', '[{"intervention":[3000078],"control":[3000188]}]', 'SYNTH-ISRCTN-0000078'),
 -- Study S079 (CRGStudyID 1000079) — source PMID 42105779 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000079, 'SYNTH-TUBERCULOSIS-I-079', 'Open/Ongoing', 'Quentin Farrell (Study Coordinator), farrell.trial@example.org', '2025-11-12 00:00:00', '2026-04-07 00:00:00', 1172, 'Tanzania and Mozambique', '8 weeks', 'standard symptom-based diagnostic approach', 'SYNTH-NCT0000079'),
+(1000079, 'SYNTH-TUBERCULOSIS-I-079', 'Open/Ongoing', 'Quentin Farrell (Study Coordinator), farrell.trial@example.org', '2025-11-12 00:00:00', '2026-04-07 00:00:00', 1172, 'Tanzania and Mozambique', '8 weeks', '[{"intervention":[3000079],"control":[3000189]}]', 'SYNTH-NCT0000079'),
 -- Study S080 (CRGStudyID 1000080) — source PMID 42649477 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000080, 'SYNTH-CHRONIC-KIDNEY-080', 'Closed', 'Lena Brennan (Study Coordinator), brennan.trial@example.org', '2025-07-28 00:00:00', '2026-02-13 00:00:00', 30, 'Netherlands', '8 weeks', 'low-level fixed load inspiratory muscle training', 'SYNTH-NCT0000080'),
+(1000080, 'SYNTH-CHRONIC-KIDNEY-080', 'Closed', 'Lena Brennan (Study Coordinator), brennan.trial@example.org', '2025-07-28 00:00:00', '2026-02-13 00:00:00', 30, 'Netherlands', '8 weeks', '[{"intervention":[3000080],"control":[3000190]}]', 'SYNTH-NCT0000080'),
 -- Study S081 (CRGStudyID 1000081) — source PMID 40240308 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000081, 'SYNTH-PRESSURE-INJUR-081', 'Closed', 'Esteban Ivanova (Study Coordinator), ivanova.trial@example.org', '2025-11-27 00:00:00', '2026-07-11 00:00:00', 60, 'India', '8 weeks', 'rolled gauze bandage', 'SYNTH-NCT0000081'),
+(1000081, 'SYNTH-PRESSURE-INJUR-081', 'Closed', 'Esteban Ivanova (Study Coordinator), ivanova.trial@example.org', '2025-11-27 00:00:00', '2026-07-11 00:00:00', 60, 'India', '8 weeks', '[{"intervention":[3000081],"control":[3000191]}]', 'SYNTH-NCT0000081'),
 -- Study S082 (CRGStudyID 1000082) — source PMID 42740237 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000082, 'SYNTH-MOTOR-REHABILI-082', 'Stopped early', 'Ivo Papadopoulos (Study Coordinator), papadopoulos.trial@example.org', '2025-04-16 00:00:00', '2026-04-25 00:00:00', 16, 'Belgium//Italy', '1 week', 'unimodal EEG classifier with functional electrical stimulation', 'SYNTH-NCT0000082'),
+(1000082, 'SYNTH-MOTOR-REHABILI-082', 'Stopped early', 'Ivo Papadopoulos (Study Coordinator), papadopoulos.trial@example.org', '2025-04-16 00:00:00', '2026-04-25 00:00:00', 16, 'Belgium//Italy', '1 week', '[{"intervention":[3000082],"control":[3000192]}]', 'SYNTH-NCT0000082'),
 -- Study S083 (CRGStudyID 1000083) — source PMID 26496285 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000083, 'SYNTH-PERIODONTAL-DI-083', 'Open/Ongoing', 'Wanjiru Rousseau (Study Coordinator), rousseau.trial@example.org', '2025-01-17 00:00:00', '2026-08-14 00:00:00', 40, 'India', '22 weeks', 'scaling and root planing alone', 'SYNTH-ISRCTN-0000083'),
+(1000083, 'SYNTH-PERIODONTAL-DI-083', 'Open/Ongoing', 'Wanjiru Rousseau (Study Coordinator), rousseau.trial@example.org', '2025-01-17 00:00:00', '2026-08-14 00:00:00', 40, 'India', '22 weeks', '[{"intervention":[3000083],"control":[3000193]}]', 'SYNTH-ISRCTN-0000083'),
 -- Study S084 (CRGStudyID 1000084) — source PMID 39591427 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000084, 'SYNTH-CHRONIC-HYPERT-084', 'Open/Ongoing', 'Noor Schmidt (Study Coordinator), schmidt.trial@example.org', '2025-03-26 00:00:00', '2026-07-25 00:00:00', 403, 'United Kingdom', '6 weeks', 'expectant management with standard care timing', 'SYNTH-ISRCTN-0000084'),
+(1000084, 'SYNTH-CHRONIC-HYPERT-084', 'Open/Ongoing', 'Noor Schmidt (Study Coordinator), schmidt.trial@example.org', '2025-03-26 00:00:00', '2026-07-25 00:00:00', 403, 'United Kingdom', '6 weeks', '[{"intervention":[3000084],"control":[3000194]}]', 'SYNTH-ISRCTN-0000084'),
 -- Study S085 (CRGStudyID 1000085) — source PMID 24428951 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000085, 'SYNTH-LOW-BREASTFEED-085', 'Stopped early', 'Jonas Schmidt (Study Coordinator), schmidt.trial@example.org', '2025-05-21 00:00:00', '2026-08-05 00:00:00', 443, 'Lebanon', '260 weeks', 'standard prenatal and postnatal care without specialized support', 'SYNTH-ISRCTN-0000085'),
+(1000085, 'SYNTH-LOW-BREASTFEED-085', 'Stopped early', 'Jonas Schmidt (Study Coordinator), schmidt.trial@example.org', '2025-05-21 00:00:00', '2026-08-05 00:00:00', 443, 'Lebanon', '260 weeks', '[{"intervention":[3000085],"control":[3000195]}]', 'SYNTH-ISRCTN-0000085'),
 -- Study S086 (CRGStudyID 1000086) — source PMID 42015666 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000086, 'SYNTH-PROSTATE-CANCE-086', 'Open/Ongoing', 'Valentina Jansen (Study Coordinator), jansen.trial@example.org', '2025-05-22 00:00:00', '2026-03-02 00:00:00', 189386, 'England', '780 weeks', 'no screening', 'SYNTH-ISRCTN-0000086'),
+(1000086, 'SYNTH-PROSTATE-CANCE-086', 'Open/Ongoing', 'Valentina Jansen (Study Coordinator), jansen.trial@example.org', '2025-05-22 00:00:00', '2026-03-02 00:00:00', 189386, 'England', '780 weeks', '[{"intervention":[3000086],"control":[3000196]}]', 'SYNTH-ISRCTN-0000086'),
 -- Study S087 (CRGStudyID 1000087) — source PMID 26444907 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000087, 'SYNTH-MODERATE-PLAQU-087', 'Closed', 'Yusuf Ueda (Study Coordinator), ueda.trial@example.org', '2025-12-04 00:00:00', '2026-08-24 00:00:00', 376, 'Germany', '4 weeks', 'calcipotriene and betamethasone fixed-dose ointment formulation', 'SYNTH-ISRCTN-0000087'),
+(1000087, 'SYNTH-MODERATE-PLAQU-087', 'Closed', 'Yusuf Ueda (Study Coordinator), ueda.trial@example.org', '2025-12-04 00:00:00', '2026-08-24 00:00:00', 376, 'Germany', '4 weeks', '[{"intervention":[3000087],"control":[3000197]}]', 'SYNTH-ISRCTN-0000087'),
 -- Study S088 (CRGStudyID 1000088) — source PMID 42189251 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000088, 'SYNTH-FIBROMYALGIA-S-088', 'Open/Ongoing', 'Chiara Ueda (Study Coordinator), ueda.trial@example.org', '2025-03-17 00:00:00', '2026-04-05 00:00:00', 70, 'Italy', '10 weeks', 'routine treatment alone', 'SYNTH-NCT0000088'),
+(1000088, 'SYNTH-FIBROMYALGIA-S-088', 'Open/Ongoing', 'Chiara Ueda (Study Coordinator), ueda.trial@example.org', '2025-03-17 00:00:00', '2026-04-05 00:00:00', 70, 'Italy', '10 weeks', '[{"intervention":[3000088],"control":[3000198]}]', 'SYNTH-NCT0000088'),
 -- Study S089 (CRGStudyID 1000089) — source PMID 40605477 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000089, 'SYNTH-SURGICAL-SITE--089', 'Open/Ongoing', 'Wojciech Ionescu (Study Coordinator), ionescu.trial@example.org', '2025-04-12 00:00:00', '2026-01-07 00:00:00', 90, 'India//South Korea', '4 weeks', 'conventional sterile gauze dressing', 'SYNTH-NCT0000089'),
+(1000089, 'SYNTH-SURGICAL-SITE--089', 'Open/Ongoing', 'Wojciech Ionescu (Study Coordinator), ionescu.trial@example.org', '2025-04-12 00:00:00', '2026-01-07 00:00:00', 90, 'India//South Korea', '4 weeks', '[{"intervention":[3000089],"control":[3000199]}]', 'SYNTH-NCT0000089'),
 -- Study S090 (CRGStudyID 1000090) — source PMID 42509765 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000090, 'SYNTH-METABOLIC-SYND-090', 'Closed', 'Valentina Ivanova (Study Coordinator), ivanova.trial@example.org', '2025-07-07 00:00:00', '2026-04-07 00:00:00', 24, 'Italy//Spain', '5 weeks', 'placebo combined with identical aerobic exercise training', 'SYNTH-ISRCTN-0000090'),
+(1000090, 'SYNTH-METABOLIC-SYND-090', 'Closed', 'Valentina Ivanova (Study Coordinator), ivanova.trial@example.org', '2025-07-07 00:00:00', '2026-04-07 00:00:00', 24, 'Italy//Spain', '5 weeks', '[{"intervention":[3000090],"control":[3000200]}]', 'SYNTH-ISRCTN-0000090'),
 -- Study S091 (CRGStudyID 1000091) — source PMID 41545590 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000091, 'SYNTH-DYSLIPIDEMIA-A-091', 'Open/Ongoing', 'Chidi Moreau (Study Coordinator), moreau.trial@example.org', '2025-02-25 00:00:00', '2026-08-26 00:00:00', 75, 'Belgium', '2 weeks', 'placebo', 'SYNTH-ISRCTN-0000091'),
+(1000091, 'SYNTH-DYSLIPIDEMIA-A-091', 'Open/Ongoing', 'Chidi Moreau (Study Coordinator), moreau.trial@example.org', '2025-02-25 00:00:00', '2026-08-26 00:00:00', 75, 'Belgium', '2 weeks', '[{"intervention":[3000091,3000102,3000103,3000104,3000105,3000106,3000107,3000108,3000109,3000110,3000111,3000112],"control":[3000118]}]', 'SYNTH-ISRCTN-0000091'),
 -- Study S092 (CRGStudyID 1000092) — source PMID 42476106 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000092, 'SYNTH-CHRONIC-KIDNEY-092', 'Closed', 'Chidi Wachira (Study Coordinator), wachira.trial@example.org', '2025-11-01 00:00:00', '2026-02-26 00:00:00', 99, 'United States', '52 weeks', 'minimal digital control', 'SYNTH-ISRCTN-0000092'),
+(1000092, 'SYNTH-CHRONIC-KIDNEY-092', 'Closed', 'Chidi Wachira (Study Coordinator), wachira.trial@example.org', '2025-11-01 00:00:00', '2026-02-26 00:00:00', 99, 'United States', '52 weeks', '[{"intervention":[3000092],"control":[3000201]}]', 'SYNTH-ISRCTN-0000092'),
 -- Study S093 (CRGStudyID 1000093) — source PMID 42630921 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000093, 'SYNTH-POSTOPERATIVE--093', 'Closed', 'Oleksandr Jansen (Study Coordinator), jansen.trial@example.org', '2025-10-07 00:00:00', '2026-08-03 00:00:00', 232, 'China', '1 week', 'intranasal saline placebo', 'SYNTH-ISRCTN-0000093'),
+(1000093, 'SYNTH-POSTOPERATIVE--093', 'Closed', 'Oleksandr Jansen (Study Coordinator), jansen.trial@example.org', '2025-10-07 00:00:00', '2026-08-03 00:00:00', 232, 'China', '1 week', '[{"intervention":[3000093],"control":[3000202]}]', 'SYNTH-ISRCTN-0000093'),
 -- Study S094 (CRGStudyID 1000094) — source PMID 42324517 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000094, 'SYNTH-SCHIZOPHRENIA-094', 'Closed', 'Sofia Adeyemi (Study Coordinator), adeyemi.trial@example.org', '2025-10-20 00:00:00', '2026-03-06 00:00:00', 120, 'Germany//Kenya', '8 weeks', 'computerized cognitive remediation therapy alone', 'SYNTH-ISRCTN-0000094'),
+(1000094, 'SYNTH-SCHIZOPHRENIA-094', 'Closed', 'Sofia Adeyemi (Study Coordinator), adeyemi.trial@example.org', '2025-10-20 00:00:00', '2026-03-06 00:00:00', 120, 'Germany//Kenya', '8 weeks', '[{"intervention":[3000094],"control":[3000203]}]', 'SYNTH-ISRCTN-0000094'),
 -- Study S095 (CRGStudyID 1000095) — source PMID 41146257 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000095, 'SYNTH-DEMENTIA-RELAT-095', 'Closed', 'Umberto Girard (Study Coordinator), girard.trial@example.org', '2025-03-07 00:00:00', '2026-04-07 00:00:00', 240, 'New Zealand', '52 weeks', 'attention control comparison', 'SYNTH-ISRCTN-0000095'),
+(1000095, 'SYNTH-DEMENTIA-RELAT-095', 'Closed', 'Umberto Girard (Study Coordinator), girard.trial@example.org', '2025-03-07 00:00:00', '2026-04-07 00:00:00', 240, 'New Zealand', '52 weeks', '[{"intervention":[3000095],"control":[3000204]}]', 'SYNTH-ISRCTN-0000095'),
 -- Study S096 (CRGStudyID 1000096) — source PMID 42332712 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000096, 'SYNTH-ADVANCED-CANCE-096', 'Closed', 'Aisling Kallio (Study Coordinator), kallio.trial@example.org', '2025-01-27 00:00:00', '2026-07-20 00:00:00', 66, 'Germany, Hungary, Netherlands, Poland, Portugal, Romania, United Kingdom', '78 weeks', 'standard care (stepped wedge design)', 'SYNTH-ISRCTN-0000096'),
+(1000096, 'SYNTH-ADVANCED-CANCE-096', 'Closed', 'Aisling Kallio (Study Coordinator), kallio.trial@example.org', '2025-01-27 00:00:00', '2026-07-20 00:00:00', 66, 'Germany, Hungary, Netherlands, Poland, Portugal, Romania, United Kingdom', '78 weeks', '[{"intervention":[3000096],"control":[3000205]}]', 'SYNTH-ISRCTN-0000096'),
 -- Study S097 (CRGStudyID 1000097) — source PMID 42533223 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000097, 'SYNTH-ACUTE-SCHIZOPH-097', 'Open/Ongoing', 'Tessa Rousseau (Study Coordinator), rousseau.trial@example.org', '2025-08-12 00:00:00', '2026-08-24 00:00:00', 189, 'multinational (11 centers across 3 countries)', '4 weeks', 'placebo', 'SYNTH-ISRCTN-0000097'),
+(1000097, 'SYNTH-ACUTE-SCHIZOPH-097', 'Open/Ongoing', 'Tessa Rousseau (Study Coordinator), rousseau.trial@example.org', '2025-08-12 00:00:00', '2026-08-24 00:00:00', 189, 'multinational (11 centers across 3 countries)', '4 weeks', '[{"intervention":[3000097],"control":[3000118]}]', 'SYNTH-ISRCTN-0000097'),
 -- Study S098 (CRGStudyID 1000098) — source PMID 42401082 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000098, 'SYNTH-METABOLIC-SYND-098', 'Open/Ongoing', 'Chiara Johansen (Study Coordinator), johansen.trial@example.org', '2025-10-13 00:00:00', '2026-06-06 00:00:00', 60, 'Spain//United States', '10 weeks', 'maintenance of usual lifestyle and activity patterns', 'SYNTH-NCT0000098'),
+(1000098, 'SYNTH-METABOLIC-SYND-098', 'Open/Ongoing', 'Chiara Johansen (Study Coordinator), johansen.trial@example.org', '2025-10-13 00:00:00', '2026-06-06 00:00:00', 60, 'Spain//United States', '10 weeks', '[{"intervention":[3000098],"control":[3000206]}]', 'SYNTH-NCT0000098'),
 -- Study S099 (CRGStudyID 1000099) — source PMID 41928589 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000099, 'SYNTH-PSYCHOLOGICAL--099', 'Closed', 'Oleksandr Yamada (Study Coordinator), yamada.trial@example.org', '2025-10-28 00:00:00', '2026-01-03 00:00:00', 84, 'Denmark', '4 weeks', 'no intervention (standard care only)', 'SYNTH-ISRCTN-0000099'),
+(1000099, 'SYNTH-PSYCHOLOGICAL--099', 'Closed', 'Oleksandr Yamada (Study Coordinator), yamada.trial@example.org', '2025-10-28 00:00:00', '2026-01-03 00:00:00', 84, 'Denmark', '4 weeks', '[{"intervention":[3000099],"control":[3000207]}]', 'SYNTH-ISRCTN-0000099'),
 -- Study S100 (CRGStudyID 1000100) — source PMID 40897502 (open-access RCT abstract used only as inspiration; not stored in any column below)
-(1000100, 'SYNTH-TUBERCULOSIS-R-100', 'Closed', 'Tariq Kowalski (Study Coordinator), kowalski.trial@example.org', '2025-08-27 00:00:00', '2026-03-16 00:00:00', 38, 'Argentina', '26 weeks', 'standard TB treatment protocols', 'SYNTH-NCT0000100'),
+(1000100, 'SYNTH-TUBERCULOSIS-R-100', 'Closed', 'Tariq Kowalski (Study Coordinator), kowalski.trial@example.org', '2025-08-27 00:00:00', '2026-03-16 00:00:00', 38, 'Argentina', '26 weeks', '[{"intervention":[3000100],"control":[3000208]}]', 'SYNTH-NCT0000100'),
 -- synthetic
-(1000101, 'ZILTRAVIR-COVID19-01', 'Closed', 'Smith J (Principal Investigator), smith.j@example.org', '2026-09-22 00:00:00', '2026-09-22 00:00:00', 1042, 'Multinational', '5 days', 'ziltravir vs. placebo', 'NCT12345678');
+(1000101, 'ZILTRAVIR-COVID19-01', 'Closed', 'Smith J (Principal Investigator), smith.j@example.org', '2026-09-22 00:00:00', '2026-09-22 00:00:00', 1042, 'Multinational', '5 days', '[{"intervention":[3000101],"control":[3000209,3000118]}]', 'NCT12345678');
 
 INSERT INTO "study_condition" ("study_id", "condition_id") VALUES
 
@@ -1334,7 +1431,109 @@ INSERT INTO "study_intervention" ("study_id", "intervention_id") VALUES
 (1000091, 3000109),
 (1000091, 3000110),
 (1000091, 3000111),
-(1000091, 3000112) ON CONFLICT DO NOTHING;
+(1000091, 3000112),
+(1000001, 3000113),
+(1000002, 3000114),
+(1000003, 3000115),
+(1000004, 3000116),
+(1000005, 3000117),
+(1000006, 3000118),
+(1000007, 3000119),
+(1000008, 3000120),
+(1000009, 3000116),
+(1000010, 3000121),
+(1000011, 3000122),
+(1000012, 3000123),
+(1000013, 3000124),
+(1000014, 3000125),
+(1000015, 3000126),
+(1000016, 3000127),
+(1000017, 3000128),
+(1000018, 3000129),
+(1000019, 3000130),
+(1000020, 3000131),
+(1000021, 3000132),
+(1000022, 3000133),
+(1000023, 3000134),
+(1000024, 3000135),
+(1000025, 3000136),
+(1000026, 3000137),
+(1000027, 3000138),
+(1000028, 3000139),
+(1000029, 3000140),
+(1000030, 3000141),
+(1000031, 3000142),
+(1000032, 3000143),
+(1000033, 3000113),
+(1000034, 3000144),
+(1000035, 3000145),
+(1000036, 3000146),
+(1000037, 3000147),
+(1000038, 3000148),
+(1000039, 3000149),
+(1000040, 3000150),
+(1000041, 3000151),
+(1000042, 3000152),
+(1000043, 3000153),
+(1000044, 3000154),
+(1000045, 3000155),
+(1000046, 3000156),
+(1000047, 3000157),
+(1000048, 3000158),
+(1000049, 3000159),
+(1000050, 3000160),
+(1000051, 3000161),
+(1000052, 3000162),
+(1000053, 3000163),
+(1000054, 3000164),
+(1000055, 3000165),
+(1000056, 3000166),
+(1000057, 3000167),
+(1000058, 3000168),
+(1000059, 3000169),
+(1000060, 3000170),
+(1000061, 3000171),
+(1000062, 3000172),
+(1000063, 3000173),
+(1000064, 3000174),
+(1000065, 3000175),
+(1000066, 3000176),
+(1000067, 3000177),
+(1000068, 3000178),
+(1000069, 3000179),
+(1000070, 3000180),
+(1000071, 3000181),
+(1000072, 3000182),
+(1000073, 3000183),
+(1000074, 3000184),
+(1000075, 3000185),
+(1000076, 3000186),
+(1000077, 3000187),
+(1000078, 3000188),
+(1000079, 3000189),
+(1000080, 3000190),
+(1000081, 3000191),
+(1000082, 3000192),
+(1000083, 3000193),
+(1000084, 3000194),
+(1000085, 3000195),
+(1000086, 3000196),
+(1000087, 3000197),
+(1000088, 3000198),
+(1000089, 3000199),
+(1000090, 3000200),
+(1000091, 3000118),
+(1000092, 3000201),
+(1000093, 3000202),
+(1000094, 3000203),
+(1000095, 3000204),
+(1000096, 3000205),
+(1000097, 3000118),
+(1000098, 3000206),
+(1000099, 3000207),
+(1000100, 3000208),
+(1000101, 3000209),
+(1000101, 3000118) ON CONFLICT DO NOTHING;
 
 INSERT INTO "study_outcome" ("study_id", "outcome_id") VALUES
 

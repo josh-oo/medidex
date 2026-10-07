@@ -1,6 +1,6 @@
 import apiClient from "./apiClient";
 import { unwrap, logAndRethrow } from "./requests";
-import { StudyDto, StudyFullDto, StudySchemaDto, ReportPreviewDto, TagDto, Page, GetStudySearchParams } from "../../types/apiDTOs";
+import { StudyDto, StudyFullDto, StudySchemaDto, StudyViewDto, ReportPreviewDto, TagDto, Page, GetStudySearchParams } from "../../types/apiDTOs";
 import { AxiosRequestConfig } from "axios";
 
 // Full study details in one call - linked reports plus the tags of each category of the
@@ -84,6 +84,13 @@ export const getStudySchema = (config?: AxiosRequestConfig): Promise<StudySchema
   apiClient.get<StudySchemaDto>("/study-schema", config)
     .then(unwrap)
     .catch(logAndRethrow("Error fetching the study schema:"));
+
+// The views (see the study schema) of studies, by study, each with its tags named.
+export const getStudyViews = (studyIds: number[]): Promise<Record<number, Record<string, StudyViewDto>>> =>
+  apiClient
+    .get<Record<number, Record<string, StudyViewDto>>>(`/studies/views?${studyIds.map((id) => `study_ids=${id}`).join("&")}`)
+    .then(unwrap)
+    .catch(logAndRethrow("Error fetching the views of studies:"));
 
 export const getPersonsForStudy = (
   studyId: number,

@@ -12,7 +12,8 @@ does not generate any data.
 - Linked conditions, interventions, outcomes, designs, and participant groups.
 
 During loading, the seed normalizes the corpus for RCT-focused workflows: study
-comparisons use concise, varied `Control: ... vs Intervention: ...` labels, the
+comparisons are structured (`[{"intervention": [ids], "control": [ids]}]`, the `comparison` view of `config/study.yaml`, see `app/backend/src/utils/views.py`): both sides
+are interventions of the study (the control of each study is an intervention of its own), the
 linked study and report designs are normalized to parallel-group randomized
 controlled trials, and every report abstract identifies the underlying randomized
 trial, comparator, and linked intervention. Secondary analyses, protocols, and

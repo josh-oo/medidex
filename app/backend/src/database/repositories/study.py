@@ -10,13 +10,15 @@ from sqlmodel import select, func, text
 from dotenv import load_dotenv
 
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Tuple
+from typing import Any, List, Mapping, Optional, Dict, Tuple
 
 from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport, StudyReportAdded
 from ..tagstorage import TAG_COLUMNS, TAG_TABLES
+from .views import StudyViews
 
 from ...utils.postprocessing import normalize_author_names
-from ...utils.dto import Tag
+from ...utils.dto import StudyView, Tag, study_values
+from ...utils.studyconfig import INLINE_SEPARATOR, STUDY_CONFIG
 from ...utils.tagconfig import TAG_CATEGORIES
 from ...utils.query_parser import AdvancedSearchField, AndGroup, Comparison, OrGroup, QueryNode
 
@@ -106,6 +108,7 @@ class StudyRepository:
         self.db = db
         self.user_id = str(user_id)
         self.see_all = see_all
+        self.views = StudyViews(self)
 
     def _visible(self):
         """The studies this scope may see (see README, "Scopes"): those of the seed data (no study_added
@@ -130,21 +133,20 @@ class StudyRepository:
     async def rollback(self):
         await self.db.rollback()
 
-    async def add_study(self, short_name : str, study_status: str, countries : List[str], duration : str, number_of_participants : int, comparison : str) -> Study:
+    async def add_study(self, values: Mapping[str, Any]) -> Study:
+        """Adds a study from its fields (see StudyFields in utils/dto.py): the primitive fields, the tags kept in a
+        column (e.g. countries) and the stored views, whose tags are resolved and become tags of the study."""
         #TODO add more sophisticated checks
 
         try:
-            new_study = Study(
-                short_name=short_name,
-                status=study_status,
-                countries="//".join(countries),
-                duration=duration,
-                number_participants=str(number_of_participants),
-                comparison=comparison
-            )
+            columns: Dict[str, Any] = {field.column: values.get(key) for key, field in STUDY_CONFIG.fields.items()}
+            for key in STUDY_CONFIG.inline_categories:
+                columns[key] = INLINE_SEPARATOR.join(values.get(key) or [])
+            new_study = Study(**columns)
 
             self.db.add(new_study)
             await self.db.flush()
+            await self.views.store(new_study, values)
 
             study_added_entry = StudyAdded(
                 study_id=new_study.id,
@@ -162,6 +164,10 @@ class StudyRepository:
             if getattr(diag, "constraint_name", None) == "uq_study_short_name":
                 raise DuplicateShortNameError("short_name already exists")
             raise
+
+    async def get_views(self, studies: List[Study]) -> Dict[int, Dict[str, StudyView]]:
+        """The views of config/study.yaml of the studies, by study, with their tags named."""
+        return await self.views.get(studies)
 
     async def search_studies(self, query: str, limit: int, offset: int) -> Tuple[List[Study], bool]:
         """Free-text search across a study's own name/trial ID plus its linked reports'

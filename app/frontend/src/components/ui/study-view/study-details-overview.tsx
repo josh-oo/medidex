@@ -1,6 +1,7 @@
 import { FileText } from "lucide-react";
 import { colorClasses } from "@/lib/colors";
 import { iconByName } from "@/lib/icons";
+import { StudyViewsBlock } from "@/components/ui/study-view/study-views";
 import type { StudyDto, StudyFieldSchemaDto } from "@/types/apiDTOs";
 
 interface StudyOverviewProps {
@@ -68,6 +69,8 @@ export function StudyOverview({ study, fields }: StudyOverviewProps) {
             </div>
           );
         })}
+
+        <StudyViewsBlock studyId={study.studyId} />
       </div>
     </div>
   );

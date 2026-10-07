@@ -149,6 +149,8 @@ export interface StudyDto extends StudyBaseDto {
 export interface StudyFullDto extends StudyDto {
   reports: Page<ReportPreviewDto>;
   tags: Record<string, Page<TagDto>>;
+  // The views of the study schema, by name.
+  views: Record<string, StudyViewDto>;
 }
 
 // GET /study-schema: what a study consists of and how it is presented (config/study.yaml
@@ -170,7 +172,7 @@ export interface StudyFieldSchemaDto {
   type: "integer" | "duration" | "enum" | "text";
   icon: string;
   color: StudyColor;
-  display: "metric" | "text";
+  display: "metric" | "text" | "none";
   // The allowed values of an enum field (empty for the other types).
   values: string[];
 }
@@ -191,10 +193,48 @@ export interface TagCategorySchemaDto {
   description: string;
 }
 
+// A part of a group of a view: the tags of a category, or (derived views) the value of a field.
+export interface StudyViewPartSchemaDto {
+  key: string;
+  label: string | null;
+  category: string | null;
+  field: string | null;
+  // Fields whose values are kept with the tags of this part (e.g. the duration of each side).
+  fields: string[];
+}
+
+// A view of a study (`views` of config/study.yaml): parts of the study shown together as groups, e.g. a
+// comparison of interventions ("Drug A vs Placebo"). A stored view keeps its groups in the study.
+export interface StudyViewSchemaDto {
+  key: string;
+  label: string;
+  icon: string;
+  color: StudyColor;
+  display: "text";
+  // Also a line on the study cards.
+  card: boolean;
+  // Between the parts of a group shown as a line.
+  separator: string;
+  stored: boolean;
+  parts: StudyViewPartSchemaDto[];
+}
+
 export interface StudySchemaDto {
   fields: StudyFieldSchemaDto[];
   meta: StudyMetaSchemaDto[];
   tags: TagCategorySchemaDto[];
+  views: StudyViewSchemaDto[];
+}
+
+export interface ViewPartDto {
+  tags: TagDto[];
+  values: Record<string, string>;
+}
+
+// A view of one study with its tags named. An older study holds a plain text instead of groups.
+export interface StudyViewDto {
+  groups: Record<string, ViewPartDto>[];
+  text: string | null;
 }
 
 // Bare-bones Study identity for ReportCurationDto.assignedStudies - the UI only ever

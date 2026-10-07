@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { StudyCardViews } from "@/components/ui/study-view/study-views";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Empty,
@@ -31,7 +32,7 @@ import {
 } from "../components/review-annotations-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import type { StudyDto } from "@/types/apiDTOs";
-import { Calendar, Scale, CircleCheckBig, CircleAlert, TriangleAlert, Users, Info, AlertTriangle } from "lucide-react";
+import { Calendar, CircleCheckBig, CircleAlert, TriangleAlert, Users, Info, AlertTriangle } from "lucide-react";
 import { listUsers } from "@/lib/api/adminApi";
 import { getStudyById } from "@/lib/api/studiesApi";
 import {
@@ -599,23 +600,7 @@ export default function ReviewDetailsPage() {
                               </span>
                             </div>
 
-                            {item.study.comparison && (
-                              <div className="flex items-center gap-1.5 text-muted-foreground flex-1 min-w-0 basis-0 max-w-full overflow-hidden">
-                                <div className="p-0.5 rounded">
-                                  <Scale className="h-3 w-3" />
-                                </div>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <span className="truncate block w-full max-w-full">
-                                      {item.study.comparison}
-                                    </span>
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-xs">
-                                    <p>{item.study.comparison}</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </div>
-                            )}
+                            <StudyCardViews studyId={item.study.studyId} />
                           </div>
 
                           <div className="border-t border-border/60 pt-2">

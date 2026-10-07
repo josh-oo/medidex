@@ -7,6 +7,7 @@ from .models import (
     Condition, Design, Intervention, Outcome, Participant, Study,
     StudyCondition, StudyDesign, StudyIntervention, StudyOutcome, StudyParticipant,
 )
+from ..utils.studyconfig import INLINE_SEPARATOR
 from ..utils.tagconfig import TAG_CATEGORIES
 
 
@@ -25,7 +26,7 @@ class StudyColumn:
     """Tags kept in a column of the study itself, separated by `//`."""
 
     column: Any
-    separator: str = "//"
+    separator: str = INLINE_SEPARATOR
 
     def split(self, value: str | None) -> List[str]:
         return [part.strip() for part in (value or "").split(self.separator) if part.strip()]
@@ -46,3 +47,7 @@ TAG_COLUMNS: Dict[str, StudyColumn] = {name: storage for name, storage in TAG_ST
 _missing = [name for name in TAG_CATEGORIES if name not in TAG_STORAGE]
 if _missing:
     raise RuntimeError(f"config/study.yaml defines categories without storage in tagstorage.py: {_missing}")
+
+_inconsistent = [name for name, storage in TAG_STORAGE.items() if TAG_CATEGORIES[name].inline != isinstance(storage, StudyColumn)]
+if _inconsistent:
+    raise RuntimeError(f"config/study.yaml `inline` disagrees with the storage in tagstorage.py for: {_inconsistent}")
