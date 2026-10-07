@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { StudyCardViews } from "@/components/ui/study-view/study-views";
+import { StudyCardGraph } from "@/components/ui/study-view/study-graph";
 import {
   Tooltip,
   TooltipContent,
@@ -184,8 +184,8 @@ export function StudyCard({
             </span>
           </div>
 
-          {/* The views of the study that are shown on its card (e.g. the comparison) */}
-          <StudyCardViews studyId={study.studyId} />
+          {/* The relations of the study that are shown on its card (e.g. the comparison of its arms) */}
+          <StudyCardGraph studyId={study.studyId} />
         </div>
       </div>
     </div>

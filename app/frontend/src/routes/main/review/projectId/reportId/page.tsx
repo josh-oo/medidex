@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { StudyCardViews } from "@/components/ui/study-view/study-views";
+import { StudyCardGraph } from "@/components/ui/study-view/study-graph";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Empty,
@@ -600,7 +600,7 @@ export default function ReviewDetailsPage() {
                               </span>
                             </div>
 
-                            <StudyCardViews studyId={item.study.studyId} />
+                            <StudyCardGraph studyId={item.study.studyId} />
                           </div>
 
                           <div className="border-t border-border/60 pt-2">

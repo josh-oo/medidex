@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field, create_model, model_validator
-from .studyconfig import INLINE_SEPARATOR, STUDY_CONFIG
+from .derive import DerivedFields
+from .graph import GraphFormatError, StoredGraph
+from .studyconfig import GRAPH_FIELD, INLINE_SEPARATOR, STUDY_CONFIG
 from typing import Any, Dict, Mapping, Optional, List, TypeVar, Generic
 from datetime import datetime
 from enum import Enum
@@ -122,16 +124,25 @@ class Tag(BaseModel):
     id: str
     keyword: str
 
-class ViewPart(BaseModel):
-    """One part of a group of a view: its tags (or the tag-like value of a field) and the values of the fields
-    that belong to it."""
-    tags: List[Tag] = Field(default_factory=list)
-    values: Dict[str, str] = Field(default_factory=dict)
+class StudyGraphNode(BaseModel):
+    """A node of the graph of a study: an entity of a kind of config/study.yaml. A node that is a value holds it: the name
+    of the tag (with its id) or the text."""
+    id: str
+    kind: str
+    value: Optional[str] = None
+    tagId: Optional[str] = None
 
-class StudyView(BaseModel):
-    """A view of a study (`views` of config/study.yaml): its groups, each naming its parts. `text` is the plain
-    text an older study holds instead of a structure (then there are no groups)."""
-    groups: List[Dict[str, ViewPart]] = Field(default_factory=list)
+class StudyGraphEdge(BaseModel):
+    """A relation between two nodes of a study's graph, by their ids (`study` is the study itself)."""
+    relation: str
+    source: str
+    target: str
+
+class StudyGraph(BaseModel):
+    """The graph of a study (`graph` of config/study.yaml), the tags named. `text` is the plain text an older study holds
+    instead of a structure (then there are no nodes)."""
+    nodes: List[StudyGraphNode] = Field(default_factory=list)
+    edges: List[StudyGraphEdge] = Field(default_factory=list)
     text: Optional[str] = None
 
 class TagCandidate(Tag):
@@ -139,7 +150,7 @@ class TagCandidate(Tag):
 
 def _study_fields_model():
     """The fields of a study, made from config/study.yaml: its `fields`, the tag categories kept in a column of
-    the study (as lists of names, e.g. countries), and the stored views (as their JSON, see utils/views.py)."""
+    the study (as lists of names, e.g. countries). The graph of a study is read with `StudyRepository.get_graphs`."""
     attributes: Dict[str, Any] = {}
     for key, field in STUDY_CONFIG.fields.items():
         if field.required or field.type == "enum":
@@ -148,33 +159,46 @@ def _study_fields_model():
             attributes[key] = (Optional[str], Field(default=None, description=field.label))
     for key in STUDY_CONFIG.inline_categories:
         attributes[key] = (List[str], Field(default_factory=list, description=STUDY_CONFIG.categories[key].description))
-    for key, view in STUDY_CONFIG.stored_views.items():
-        attributes[key] = (Optional[str], Field(default=None, description=f"{view.label}, as JSON groups of tags (utils/views.py)"))
     return create_model("StudyFields", __doc__="The fields of a study, as configured in config/study.yaml.", **attributes)
 
 StudyFields = _study_fields_model()
 
+_derived = DerivedFields()
+
 def study_values(study) -> Dict[str, Any]:
-    """The fields of a study of the database (see StudyFields), read as config/study.yaml says."""
+    """The fields of a study of the database (see StudyFields), read as config/study.yaml says. A field the study has
+    no value for is calculated from its graph if the config says how (`derive`, e.g. the participants of its arms)."""
     values: Dict[str, Any] = {key: getattr(study, field.column) for key, field in STUDY_CONFIG.fields.items()}
+    for key, field in STUDY_CONFIG.fields.items():
+        if field.derive is not None and not (values[key] or "").strip():
+            values[key] = _derived.value(field, getattr(study, GRAPH_FIELD, None)) or values[key]
     for key in STUDY_CONFIG.inline_categories:
         column = getattr(study, key)
         values[key] = [part.strip() for part in column.split(INLINE_SEPARATOR) if part.strip()] if column else []
-    for key, view in STUDY_CONFIG.stored_views.items():
-        values[key] = getattr(study, view.column)
     return values
 
 class StudyPayload(StudyFields):
     """The fields needed to create a study - everything else (studyId, timestamps) is
-    server-generated, so this also doubles as the PUT /studies request body. The values of
-    enum fields (config/study.yaml) must be allowed ones; only checked here, not for the
-    studies already in the database."""
+    server-generated, so this also doubles as the PUT /studies request body. Besides the fields it takes the
+    graph of the study (its arms and their comparisons) as JSON (see utils/graph.py), with the tags by name or id. The values of
+    enum fields (config/study.yaml) must be allowed ones and the graph must be a graph of it; only checked
+    here, not for the studies already in the database."""
+
+    graph: Optional[str] = Field(default=None, description="The graph of the study (its arms and their comparisons) as JSON, see utils/graph.py")
 
     @model_validator(mode="after")
     def _check_enums(self) -> "StudyPayload":
         for key, values in STUDY_CONFIG.enums.items():
             if getattr(self, key) not in values:
                 raise ValueError(f"{key} must be one of: {', '.join(values)}")
+        return self
+
+    @model_validator(mode="after")
+    def _check_graph(self) -> "StudyPayload":
+        try:
+            StoredGraph(STUDY_CONFIG.graph).loads(getattr(self, GRAPH_FIELD))
+        except GraphFormatError as exc:
+            raise ValueError(f"{GRAPH_FIELD}: {exc}") from exc
         return self
 
 class Study(StudyFields):
@@ -191,27 +215,46 @@ class StudyFull(Study):
     as fastapi_app/resources.py's standalone aspect endpoints."""
     reports: Page[ReportPreview] = Field(default_factory=lambda: Page[ReportPreview](items=[]))
     tags: Dict[str, Page[Tag]] = Field(default_factory=dict)
-    # The views of config/study.yaml, by name, with their tags named.
-    views: Dict[str, StudyView] = Field(default_factory=dict)
+    # The graph of config/study.yaml, with its tags named.
+    graph: StudyGraph = Field(default_factory=StudyGraph)
 
-class StudyViewPartSchema(BaseModel):
-    key: str
-    label: Optional[str] = None
+class GraphValueSchema(BaseModel):
+    """What an entity that is a value holds: a tag of a category, or a primitive."""
     category: Optional[str] = None
-    field: Optional[str] = None
-    fields: List[str] = []
+    type: Optional[str] = None
+    values: List[str] = []
 
-class StudyViewSchema(BaseModel):
-    """A view of a study (see `views` in config/study.yaml)."""
+class GraphEntitySchema(BaseModel):
+    """A kind of entity of the graph of a study, e.g. an arm, a population or a dosage (see `graph` in config/study.yaml)."""
     key: str
     label: str
     icon: str
     color: str
-    display: str
-    card: bool
+    # The study itself.
+    root: bool = False
+    value: Optional[GraphValueSchema] = None
+
+class GraphRelationSchema(BaseModel):
+    """A kind of relation between two entities, e.g. the comparison of two arms or the dosage of an arm."""
+    key: str
+    label: str
+    icon: str
+    color: str
+    # The kinds of entity an edge can start and end at.
+    source: List[str]
+    target: List[str]
+    symmetric: bool
+    many: bool
+    required: bool
+    line: bool
     separator: str
-    stored: bool
-    parts: List[StudyViewPartSchema]
+    card: bool
+    # Leads to values: it describes its source (the dosage of an arm) instead of connecting two entities.
+    attribute: bool
+
+class GraphSchema(BaseModel):
+    entities: List[GraphEntitySchema] = []
+    relations: List[GraphRelationSchema] = []
 
 class StudyFieldSchema(BaseModel):
     """A primitive value of a study (see `fields` in config/study.yaml)."""
@@ -243,7 +286,7 @@ class StudySchema(BaseModel):
     fields: List[StudyFieldSchema]
     meta: List[StudyMetaSchema]
     tags: List[TagCategorySchema]
-    views: List[StudyViewSchema] = []
+    graph: GraphSchema = GraphSchema()
 
 class StudyCandidate(Study):
     """A study suggested as a possible match for a report by the similarity search

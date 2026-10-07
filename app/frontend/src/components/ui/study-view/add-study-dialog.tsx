@@ -34,6 +34,8 @@ import { toast } from "sonner";
 import { COUNTRY_OPTIONS } from "./constants";
 import { useStudyFieldValues } from "@/hooks/use-study-schema";
 import {
+  armDraftFromSuggestion,
+  buildGraph,
   createComparisonGroup,
   hasValidComparisonGroups,
 } from "@/lib/comparisonUtils";
@@ -43,12 +45,13 @@ import { useElementHeight } from "@/hooks/use-element-height";
 import { getSimilarTagsByReportId, getSuggestedStudyName } from "@/lib/api/reportApi";
 import { getInterventions } from "@/lib/api/interventionsApi";
 import type {
+  ComparisonSuggestion,
   DurationUnit,
   NewStudySuggestion,
   StudyBaseDto,
-  ComparisonGroup as SuggestedComparisonGroup,
 } from "@/types/apiDTOs";
 import type {
+  ArmDraft,
   ComparisonGroup,
   ComparisonSideKey,
 } from "@/types/comparisons";
@@ -58,22 +61,33 @@ const COMPARISON_CARD_VERTICAL_GAP = 12; // matches space-y-3 spacing to prevent
 const COMPARISON_PANEL_MAX_HEIGHT = "min(110vh, 900px)"; // hard cap so dialog never exceeds viewport
 const buildEmptyComparisonGroups = () => [createComparisonGroup()];
 
+const DURATION_UNITS: DurationUnit[] = ["hours", "days", "weeks", "months", "years"];
+
+const UNIT_HOURS: Record<DurationUnit, number> = { hours: 1, days: 24, weeks: 168, months: 720, years: 8760 };
+
+// The longest duration of the arms as the study will calculate it, e.g. "12 weeks"; empty if no arm has one.
+const longestArmDuration = (groups: ComparisonGroup[]): string => {
+  let longest: { value: number; unit: DurationUnit; hours: number } | null = null;
+  for (const arm of groups.flatMap((group) => [group.a, group.b])) {
+    const value = Number(arm.durationValue);
+    if (!arm.durationUnit || !(value > 0)) continue;
+    const hours = value * UNIT_HOURS[arm.durationUnit];
+    if (!longest || hours > longest.hours) longest = { value, unit: arm.durationUnit, hours };
+  }
+  return longest ? `${longest.value} ${longest.unit}` : "";
+};
+
 const buildComparisonGroupsFromSuggestion = (
-  groups?: SuggestedComparisonGroup | SuggestedComparisonGroup[] | null
+  groups?: ComparisonSuggestion[] | null
 ): ComparisonGroup[] => {
-  if (!groups) {
+  if (!groups || groups.length === 0) {
     return buildEmptyComparisonGroups();
   }
 
-  const normalized = Array.isArray(groups) ? groups : [groups];
-  if (normalized.length === 0) {
-    return buildEmptyComparisonGroups();
-  }
-
-  return normalized.map((group) =>
+  return groups.map((group) =>
     createComparisonGroup({
-      a: [...(group?.intervention ?? [])],
-      b: [...(group?.control ?? [])],
+      a: armDraftFromSuggestion(group.a),
+      b: armDraftFromSuggestion(group.b),
     })
   );
 };
@@ -83,21 +97,12 @@ type SuggestionField = {
   side: ComparisonSideKey;
 };
 
-type StudyDurationUnit = DurationUnit | "Uncertain";
-
 export interface AddStudyDialogProps {
   currentReportId?: number;
   suggestedValues?: NewStudySuggestion;
   onSaveStudy: (values: StudyBaseDto) => Promise<void>;
 }
 
-const buildComparisonPayload = (groups: ComparisonGroup[]) =>
-  groups
-    .map((group) => ({
-      intervention: group.a.map((value) => value.trim()).filter(Boolean),
-      control: group.b.map((value) => value.trim()).filter(Boolean),
-    }))
-    .filter((group) => group.intervention.length > 0 && group.control.length > 0);
 const uniqueKeywords = (data: unknown): string[] => {
   if (!Array.isArray(data)) return [];
   const keywords = data
@@ -105,9 +110,6 @@ const uniqueKeywords = (data: unknown): string[] => {
     .filter((keyword): keyword is string => typeof keyword === "string" && keyword.length > 0);
   return Array.from(new Set(keywords));
 };
-
-const buildDuration = (unit: StudyDurationUnit | undefined, value: string) =>
-  unit === "Uncertain" ? "Uncertain" : unit && value.trim() ? `${value.trim()} ${unit}` : "";
 
 export function AddStudyDialog({
   currentReportId,
@@ -117,12 +119,10 @@ export function AddStudyDialog({
   const [shortName, setShortName] = useState("");
   const statusOptions = useStudyFieldValues("status");
   const [statusOfStudy, setStatusOfStudy] = useState("");
-  const [durationValue, setDurationValue] = useState("");
-  const [durationUnit, setDurationUnit] = useState<StudyDurationUnit | undefined>(
-    undefined
-  );
   const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
   const [numberOfParticipants, setNumberOfParticipants] = useState("");
+  const [durationValue, setDurationValue] = useState("");
+  const [durationUnit, setDurationUnit] = useState<DurationUnit | "">("");
 
   const [countryOpen, setCountryOpen] = useState(false);
 
@@ -132,6 +132,8 @@ export function AddStudyDialog({
   // any particular look.
   const highlight = Boolean(suggestedValues);
 
+  // The arms (`${group id}-${side}`) whose details beyond the interventions are shown.
+  const [openDetails, setOpenDetails] = useState<Set<string>>(new Set());
   const [comparisonGroups, setComparisonGroups] = useState<ComparisonGroup[]>(
     buildEmptyComparisonGroups()
   );
@@ -154,27 +156,23 @@ export function AddStudyDialog({
       setShortName(suggestedValues.short_name ?? "");
       setStatusOfStudy(suggestedValues.status_of_study ?? "");
       setSelectedCountries(suggestedValues.countries);
-      setDurationValue(
-        suggestedValues.duration_value
-          ? String(suggestedValues.duration_value)
-          : ""
-      );
-      setDurationUnit(suggestedValues.duration_unit);
       setNumberOfParticipants(
         suggestedValues.number_of_participants
           ? String(suggestedValues.number_of_participants)
           : ""
       );
+      setDurationValue(suggestedValues.duration ? String(suggestedValues.duration.value) : "");
+      setDurationUnit(suggestedValues.duration?.unit ?? "");
       setComparisonGroups(
-        buildComparisonGroupsFromSuggestion(suggestedValues.comparison)
+        buildComparisonGroupsFromSuggestion(suggestedValues.comparisons)
       );
     } else {
       setShortName("");
       setStatusOfStudy("");
       setSelectedCountries([]);
-      setDurationValue("");
-      setDurationUnit(undefined);
       setNumberOfParticipants("");
+      setDurationValue("");
+      setDurationUnit("");
       setComparisonGroups(buildEmptyComparisonGroups());
     }
     setActiveSuggestionField(null);
@@ -270,21 +268,16 @@ export function AddStudyDialog({
       return;
     }
 
-    const participantsValue = Number(numberOfParticipants);
-    if (Number.isNaN(participantsValue)) {
+    // Both overall values are optional: left empty, the study calculates them from its arms.
+    const participantsValue = numberOfParticipants.trim() === "" ? null : Number(numberOfParticipants);
+    if (participantsValue !== null && Number.isNaN(participantsValue)) {
       toast.error("Enter a valid number of participants.");
       return;
     }
+    const duration = durationValue.trim() && durationUnit ? `${durationValue.trim()} ${durationUnit}` : null;
 
-    const normalizedDuration = buildDuration(durationUnit, durationValue);
-
-    if (!normalizedDuration) {
-      toast.error("Provide a duration value and unit, or mark it as Uncertain.");
-      return;
-    }
-
-    const comparisonPayload = buildComparisonPayload(comparisonGroups);
-    if (comparisonPayload.length === 0) {
+    const graph = buildGraph(comparisonGroups);
+    if (graph === null) {
       toast.error("Add at least one comparison with both sides populated.");
       return;
     }
@@ -298,9 +291,9 @@ export function AddStudyDialog({
       shortName: shortName.trim(),
       status: statusOfStudy.trim(),
       countries: normalizedCountries,
-      duration: normalizedDuration,
-      numberParticipants: String(participantsValue),
-      comparison: JSON.stringify(comparisonPayload),
+      numberParticipants: participantsValue === null ? null : String(participantsValue),
+      duration,
+      graph,
       trialId: null, //TODO
     };
 
@@ -334,11 +327,11 @@ export function AddStudyDialog({
     setComparisonGroups((previous) =>
       previous.map((group) => {
         if (group.id !== groupId) return group;
-        const updatedSide = [...group[side]];
-        updatedSide.splice(index, 1);
+        const interventions = [...group[side].interventions];
+        interventions.splice(index, 1);
         return {
           ...group,
-          [side]: updatedSide,
+          [side]: { ...group[side], interventions },
         };
       })
     );
@@ -370,8 +363,20 @@ export function AddStudyDialog({
           ? group
           : {
               ...group,
-              [side]: [...group[side], trimmed],
+              [side]: { ...group[side], interventions: [...group[side].interventions, trimmed] },
             }
+      )
+    );
+  };
+
+  const updateArm = (
+    groupId: string,
+    side: ComparisonSideKey,
+    changes: Partial<ArmDraft>
+  ) => {
+    setComparisonGroups((previous) =>
+      previous.map((group) =>
+        group.id !== groupId ? group : { ...group, [side]: { ...group[side], ...changes } }
       )
     );
   };
@@ -390,7 +395,7 @@ export function AddStudyDialog({
     source: "suggestion" | "catalog"
   ) => {
     const normalizedItem = item.toLowerCase();
-    const matchIndex = group[side].findIndex(
+    const matchIndex = group[side].interventions.findIndex(
       (entry) => entry.toLowerCase() === normalizedItem
     );
     const isSelected = matchIndex !== -1;
@@ -449,9 +454,9 @@ export function AddStudyDialog({
       !suggestedSet.has(normalizedQuery) &&
       !allInterventions.some((item) => item.toLowerCase() === normalizedQuery);
     const selectionSummary =
-      group[side].length > 0
-        ? `${group[side].length} ${placeholderLabel}${
-            group[side].length > 1 ? "s" : ""
+      group[side].interventions.length > 0
+        ? `${group[side].interventions.length} ${placeholderLabel}${
+            group[side].interventions.length > 1 ? "s" : ""
           } added`
         : `Select ${placeholderLabel.toLowerCase()}`;
 
@@ -556,7 +561,7 @@ export function AddStudyDialog({
           </PopoverContent>
         </Popover>
         <div className="space-y-2 mt-1">
-          {group[side].map((value, index) => (
+          {group[side].interventions.map((value, index) => (
             <div
               key={`${group.id}-${side}-${index}`}
               className="flex items-center justify-between gap-2 rounded-md border border-border/20 bg-muted px-3 py-1 text-sm text-muted-foreground"
@@ -574,13 +579,102 @@ export function AddStudyDialog({
             </div>
           ))}
         </div>
+        {(() => {
+          const arm = group[side];
+          const detailKey = `${group.id}-${side}`;
+          const open = openDetails.has(detailKey);
+          const summary = [
+            arm.participants && `${arm.participants} participants`,
+            arm.dosage,
+            arm.frequency,
+            arm.route,
+            arm.durationValue && arm.durationUnit && `${arm.durationValue} ${arm.durationUnit}`,
+          ].filter(Boolean).join(" · ");
+          return (
+            <>
+              <button
+                type="button"
+                className="flex w-full items-center gap-1 text-left text-xs text-muted-foreground hover:text-foreground"
+                aria-expanded={open}
+                onClick={() =>
+                  setOpenDetails((previous) => {
+                    const next = new Set(previous);
+                    if (!next.delete(detailKey)) next.add(detailKey);
+                    return next;
+                  })
+                }
+              >
+                <span>{open ? "−" : "+"}</span>
+                <span className="shrink-0">{open ? "Hide arm details" : summary ? "Arm details" : "Add arm details"}</span>
+                {!open && summary && <span className="min-w-0 flex-1 truncate">: {summary}</span>}
+              </button>
+              {open && (
+                <div className="space-y-2">
+          <Input
+            aria-label={`Participants of the ${placeholderLabel.toLowerCase()} arm`}
+            placeholder="Participants in this arm"
+            type="number"
+            min="0"
+            value={group[side].participants}
+            onChange={(event) => updateArm(group.id, side, { participants: event.target.value })}
+          />
+          <div className="grid grid-cols-[1fr_1fr] gap-2">
+            <Input
+              aria-label={`Dosage of the ${placeholderLabel.toLowerCase()} arm`}
+              placeholder="Dosage, e.g. 10 mg"
+              value={group[side].dosage}
+              onChange={(event) => updateArm(group.id, side, { dosage: event.target.value })}
+            />
+            <Input
+              aria-label={`Frequency of the ${placeholderLabel.toLowerCase()} arm`}
+              placeholder="Frequency, e.g. daily"
+              value={group[side].frequency}
+              onChange={(event) => updateArm(group.id, side, { frequency: event.target.value })}
+            />
+          </div>
+          <Input
+            aria-label={`Route of the ${placeholderLabel.toLowerCase()} arm`}
+            placeholder="Route, e.g. oral, injection"
+            value={group[side].route}
+            onChange={(event) => updateArm(group.id, side, { route: event.target.value })}
+          />
+          <div className="grid grid-cols-[1fr_1fr] gap-2">
+            <Input
+              aria-label={`Duration of the ${placeholderLabel.toLowerCase()} arm`}
+              placeholder="Duration"
+              type="number"
+              min="0"
+              value={group[side].durationValue}
+              onChange={(event) => updateArm(group.id, side, { durationValue: event.target.value })}
+            />
+            <Select
+              value={group[side].durationUnit || undefined}
+              onValueChange={(value) => updateArm(group.id, side, { durationUnit: value as DurationUnit })}
+            >
+              <SelectTrigger className="w-full" aria-label={`Unit of the duration of the ${placeholderLabel.toLowerCase()} arm`}>
+                <SelectValue placeholder="Unit" />
+              </SelectTrigger>
+              <SelectContent>
+                {DURATION_UNITS.map((unit) => (
+                  <SelectItem key={unit} value={unit}>
+                    {unit}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
     );
   };
 
-  const computedDuration = buildDuration(durationUnit, durationValue);
   const normalizedCountry =
     selectedCountries.length > 0 ? selectedCountries.join(", ") : "Unclear";
+  const longestArm = longestArmDuration(comparisonGroups);
   const hasMultipleComparisonGroups = comparisonGroups.length > 1;
   const comparisonValid = hasValidComparisonGroups(comparisonGroups);
 
@@ -588,9 +682,7 @@ export function AddStudyDialog({
     creatingStudy ||
     shortName.trim().length === 0 ||
     statusOfStudy.trim().length === 0 ||
-    computedDuration.length === 0 ||
-    !comparisonValid ||
-    numberOfParticipants.trim().length === 0;
+    !comparisonValid;
 
   return (
     <Dialog open={addStudyDialogOpen} onOpenChange={setAddStudyDialogOpen}>
@@ -688,56 +780,43 @@ export function AddStudyDialog({
               </PopoverContent>
             </Popover>
           </div>
-          <div className="grid gap-4 grid-cols-[7fr_3fr] items-start">
+          <div className="grid gap-4 grid-cols-[1fr_1fr] items-start">
             <div className="space-y-2">
-              <Label htmlFor="study-duration">Duration</Label>
+              <Label htmlFor="study-participants">Number of participants</Label>
               <Input
-                id="study-duration"
-                placeholder="12"
+                id="study-participants"
                 type="number"
                 min="0"
-                value={durationValue}
-                onChange={(event) => setDurationValue(event.target.value)}
-                disabled={durationUnit === "Uncertain"}
-                required={durationUnit !== "Uncertain"}
+                placeholder="Empty: the sum of the arms"
+                value={numberOfParticipants}
+                onChange={(event) => setNumberOfParticipants(event.target.value)}
               />
             </div>
             <div className="space-y-2">
-              <Label>Unit</Label>
-              <Select
-                value={durationUnit ?? undefined}
-                onValueChange={(value) =>
-                  setDurationUnit(value as StudyDurationUnit | undefined)
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Unit" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="hours">hours</SelectItem>
-                  <SelectItem value="days">days</SelectItem>
-                  <SelectItem value="weeks">weeks</SelectItem>
-                  <SelectItem value="months">months</SelectItem>
-                  <SelectItem value="years">years</SelectItem>
-                  <SelectItem value="Uncertain">Uncertain</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label htmlFor="study-duration">Duration</Label>
+              <div className="grid grid-cols-[1fr_1fr] gap-2">
+                <Input
+                  id="study-duration"
+                  type="number"
+                  min="0"
+                  placeholder={longestArm || "Longest arm"}
+                  value={durationValue}
+                  onChange={(event) => setDurationValue(event.target.value)}
+                />
+                <Select value={durationUnit || undefined} onValueChange={(value) => setDurationUnit(value as DurationUnit)}>
+                  <SelectTrigger className="w-full" aria-label="Unit of the duration of the study">
+                    <SelectValue placeholder="Unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DURATION_UNITS.map((unit) => (
+                      <SelectItem key={unit} value={unit}>
+                        {unit}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="study-participants">Number of participants</Label>
-            <Input
-              id="study-participants"
-              type="number"
-              min="0"
-              placeholder="0"
-              value={numberOfParticipants}
-              onChange={(event) => {
-                const value = event.target.value;
-                setNumberOfParticipants(value);
-              }}
-              required
-            />
           </div>
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-2">

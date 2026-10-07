@@ -81,8 +81,12 @@ class Study(SQLModel, table=True, metadata=metadata_resources):
     date_edited: Optional[str] = Field(default_factory=_current_utc_timestamp)
     number_participants: Optional[str]
     countries: Optional[str]
+    # Legacy plain texts of studies from before the graph, no longer read as fields (`graph.text_column` of
+    # config/study.yaml shows the comparison).
     duration: Optional[str]
     comparison: Optional[str]
+    # The arms of the study and their comparisons: JSON, see src/utils/graph.py.
+    graph: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSONB, nullable=True))
     trial_registration_id: Optional[str] = Field(default=None, sa_column_kwargs={"server_default": FetchedValue()})
 
     __table_args__ = (

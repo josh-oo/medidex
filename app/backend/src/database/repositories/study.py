@@ -14,10 +14,10 @@ from typing import Any, List, Mapping, Optional, Dict, Tuple
 
 from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport, StudyReportAdded
 from ..tagstorage import TAG_COLUMNS, TAG_TABLES
-from .views import StudyViews
+from .graphs import StudyGraphs
 
 from ...utils.postprocessing import normalize_author_names
-from ...utils.dto import StudyView, Tag, study_values
+from ...utils.dto import StudyGraph, Tag, study_values
 from ...utils.studyconfig import INLINE_SEPARATOR, STUDY_CONFIG
 from ...utils.tagconfig import TAG_CATEGORIES
 from ...utils.query_parser import AdvancedSearchField, AndGroup, Comparison, OrGroup, QueryNode
@@ -108,7 +108,7 @@ class StudyRepository:
         self.db = db
         self.user_id = str(user_id)
         self.see_all = see_all
-        self.views = StudyViews(self)
+        self.graphs = StudyGraphs(db)
 
     def _visible(self):
         """The studies this scope may see (see README, "Scopes"): those of the seed data (no study_added
@@ -135,7 +135,8 @@ class StudyRepository:
 
     async def add_study(self, values: Mapping[str, Any]) -> Study:
         """Adds a study from its fields (see StudyFields in utils/dto.py): the primitive fields, the tags kept in a
-        column (e.g. countries) and the stored views, whose tags are resolved and become tags of the study."""
+        column (e.g. countries) and the graph, whose tags are resolved and become tags of the study. Raises
+        GraphFormatError if the graph is no graph of config/study.yaml."""
         #TODO add more sophisticated checks
 
         try:
@@ -146,7 +147,7 @@ class StudyRepository:
 
             self.db.add(new_study)
             await self.db.flush()
-            await self.views.store(new_study, values)
+            await self.graphs.store(new_study, values)
 
             study_added_entry = StudyAdded(
                 study_id=new_study.id,
@@ -165,9 +166,9 @@ class StudyRepository:
                 raise DuplicateShortNameError("short_name already exists")
             raise
 
-    async def get_views(self, studies: List[Study]) -> Dict[int, Dict[str, StudyView]]:
-        """The views of config/study.yaml of the studies, by study, with their tags named."""
-        return await self.views.get(studies)
+    async def get_graphs(self, studies: List[Study]) -> Dict[int, StudyGraph]:
+        """The graphs (config/study.yaml) of the studies, by study, with their tags named."""
+        return await self.graphs.get(studies)
 
     async def search_studies(self, query: str, limit: int, offset: int) -> Tuple[List[Study], bool]:
         """Free-text search across a study's own name/trial ID plus its linked reports'

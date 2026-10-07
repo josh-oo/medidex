@@ -2,9 +2,10 @@
 # study details view (served as GET /study-schema), the study DTOs, the tag endpoints, the tag and study search.
 #
 # A study has four kinds of data:
-#   fields      Primitive values of the study itself (numbers, durations, a status, free text).
+#   fields      Primitive values of the study itself (numbers, a status, free text).
 #   categories  Lists of tags (interventions, conditions, countries, ...).
-#   views       Presentations that put parts of the above together, e.g. a comparison of interventions.
+#   graph       What the study says beyond that, as a graph: nodes (e.g. the arms of the study, each with its
+#               interventions, dosage and duration) connected by relations (e.g. the comparisons of arms).
 #   meta        Metadata of the database record (when it was entered and edited).
 #
 # Colors are names the frontend draws: blue, emerald, rose, amber, slate, sky, violet, teal.
@@ -19,6 +20,12 @@
 #   values   The allowed values of an `enum` field (required for those, and only for those). Creating a
 #            study with another value is rejected.
 #   display  metric (a tile at the top of the details) | text (a paragraph below the tiles) | none (not shown)
+#   derive   An integer or duration field can be calculated from the graph while the study has no value of its own
+#            (so a value given for the study wins, e.g. when a report only states the total):
+#              source          the kind of entity to start at, e.g. arm
+#              path            the relations to follow from there, ending at values, e.g. [participated, size]: the size
+#                              of the population that took part in each arm
+#              aggregate       sum (only if every entity of `source` has a value) | max | min
 fields:
   shortName:
     label: Name
@@ -42,6 +49,7 @@ fields:
     color: blue
     display: metric
     column: number_participants
+    derive: { source: arm, path: [participated, size], aggregate: sum }
   duration:
     label: Duration
     type: duration
@@ -49,6 +57,7 @@ fields:
     color: emerald
     display: metric
     column: duration
+    derive: { source: arm, path: [duration], aggregate: max }
   status:
     label: Status
     type: enum
@@ -58,41 +67,205 @@ fields:
     display: metric
     column: status
 
-# Views. A view shows parts of a study together as groups: each part is the tags of a category or the value
-# of a field (a derived view), and a stored view keeps its groups in a column of the study as JSON, each
-# part as the ids of its tags (see src/utils/views.py). The key is the name of the view in the study DTO
-# (the JSON of a stored view) and in the study details (`views`).
-#   label      Name shown to the user.
-#   column     Stored view: the attribute of the study that holds the groups. Omit it for a derived view,
-#              whose single group is built from the tags and fields of the study.
-#   parts      The parts of a group in reading order, by name, with their `label`. Each has a `category` (the tags of this
-#              category), or - derived views only - a `field`. A stored view's part can also keep the values of
-#              `fields` next to its tags (e.g. `fields: [duration]` for "5 days Drug A vs 10 days Drug A").
-#   separator  Between the parts of a group when it is shown as a line ("Drug A vs Placebo").
-#   symmetric  The order of the parts does not matter (A vs B is B vs A); used to compare groups.
-#   card       Also shown as a line on the study cards.
-#   display    text: a block in the study details, below the tiles.
+# Units of durations ("12 weeks"), largest first. A duration is written in the largest unit that divides it evenly.
+duration_units:
+  - { name: year, seconds: 31536000 }
+  - { name: month, seconds: 2592000 }
+  - { name: week, seconds: 604800 }
+  - { name: day, seconds: 86400 }
+  - { name: hour, seconds: 3600 }
+
+# Graph. What a study says beyond its own fields and tags, as entities and the relations between them. An entity has no
+# properties, only relations to other entities: an arm (an intervention as it is delivered) receives interventions, is
+# given at a dosage and for a duration, and is compared with other arms; a population (a group of participants) has a
+# size, a sex, an age and conditions, and participated in the study as a whole or in an arm. Dosage, duration, size and
+# so on are entities too, namely values: one entity per distinct value, however many arms have it. A study has any
+# number of arms, and any two of them can be compared. The graph is the same for every study; a study keeps its own as
+# JSON in its `graph` column (see src/utils/graph.py).
 #
-# Example of a derived view, to show the number of participants with their tags:
-#   population:
-#     label: Population
-#     icon: users
-#     color: sky
-#     parts:
-#       numberParticipants: { field: numberParticipants }
-#       participants: { category: participants }
-views:
-  comparison:
-    label: Comparison
-    icon: scale
-    color: violet
-    column: comparison
-    separator: " vs "
-    symmetric: true
-    card: true
-    parts:
-      intervention: { label: Interventions, category: interventions }
-      control: { label: Control interventions, category: interventions }
+#   text_column  Column of the study with the plain text of studies from before the graph (shown as it is).
+#
+# entities: the kinds of entity, by name.
+#   label, icon, color   How the entity is drawn.
+#   description          What the entity is (API documentation).
+#   root                 The study itself. Its data are the fields and categories above, so it has nothing here; it is there
+#                        so that relations can start at the study as a whole (its id in the graph is `study`).
+#   value                The entity is a value: a tag of a `category`, or a primitive of a `type` (text | integer | duration
+#                        | enum, an enum with its `values`). It has no relations of its own.
+#
+# relations: the kinds of relation between entities, by name (they share their names with the fields and categories).
+#   description          What the relation says (API documentation).
+#   source, target       The kinds of entity it connects: one kind, or a list of the kinds an edge can start (or end) at.
+#                        A relation that leads to values is an attribute of its source (the dosage of an arm).
+#   many                 An entity can have several (an arm several interventions); otherwise one at most.
+#   required             Identifies the source: an extracted entity without it (an arm without interventions) is left out.
+#   line                 An attribute is part of its source when that is shown as a line ("Drug A + Drug B (10 mg, 5 weeks)").
+#   symmetric            Source and target are interchangeable (A vs B is B vs A); used to compare studies.
+#   separator            Between source and target when the edge is shown as a line ("Drug A vs Placebo").
+#   card                 Also shown as a line on the study cards.
+graph:
+  text_column: comparison
+  entities:
+    study:
+      label: Study
+      icon: file-text
+      color: slate
+      description: The study as a whole.
+      root: true
+    arm:
+      label: Arm
+      icon: pill
+      color: emerald
+      description: An intervention as it is delivered to a group of participants. The control arm of a study is an arm too.
+    population:
+      label: Population
+      icon: users
+      color: sky
+      description: A group of participants, of the whole study or of an arm.
+    intervention:
+      label: Intervention
+      icon: syringe
+      color: emerald
+      description: An intervention, as a tag of the vocabulary.
+      value: { category: interventions }
+    role:
+      label: Role
+      icon: flag
+      color: slate
+      value: { type: enum, values: [intervention, control] }
+    dosage:
+      label: Dosage
+      icon: pill
+      color: emerald
+      description: The dose of an intervention, e.g. 10 mg.
+      value: { type: text }
+    frequency:
+      label: Frequency
+      icon: timer
+      color: emerald
+      description: How often an intervention is given, e.g. twice daily.
+      value: { type: text }
+    route:
+      label: Route
+      icon: syringe
+      color: emerald
+      description: How an intervention is given, e.g. oral or injection.
+      value: { type: text }
+    duration:
+      label: Duration
+      icon: clock
+      color: emerald
+      description: How long an intervention is given, e.g. 12 weeks.
+      value: { type: duration }
+    size:
+      label: Participants
+      icon: users
+      color: sky
+      description: The number of participants of a population.
+      value: { type: integer }
+    sex:
+      label: Sex
+      icon: user
+      color: sky
+      value: { type: enum, values: [female, male, mixed] }
+    age:
+      label: Age
+      icon: baby
+      color: sky
+      description: The age of a population, e.g. 18-65 years.
+      value: { type: text }
+    condition:
+      label: Condition
+      icon: stethoscope
+      color: blue
+      description: A health condition of a population, as a tag of the vocabulary.
+      value: { category: conditions }
+  relations:
+    comparison:
+      label: Comparison
+      icon: scale
+      color: violet
+      description: Two arms that the study compares ("Drug A vs Placebo"). An arm that takes part in several comparisons is one entity.
+      source: arm
+      target: arm
+      symmetric: true
+      many: true
+      separator: " vs "
+      card: true
+    participated:
+      label: Participants
+      icon: users
+      color: sky
+      description: The population that took part in the study as a whole, or in one of its arms.
+      source: [study, arm]
+      target: population
+      separator: ": "
+    interventions:
+      label: Interventions
+      icon: syringe
+      color: emerald
+      description: What an arm receives.
+      source: arm
+      target: intervention
+      many: true
+      required: true
+    role:
+      label: Role
+      icon: flag
+      color: slate
+      description: Whether an arm is evaluated or the control.
+      source: arm
+      target: role
+      line: false
+    dosage:
+      label: Dosage
+      icon: pill
+      color: emerald
+      source: arm
+      target: dosage
+    frequency:
+      label: Frequency
+      icon: timer
+      color: emerald
+      source: arm
+      target: frequency
+    route:
+      label: Route
+      icon: syringe
+      color: emerald
+      source: arm
+      target: route
+    duration:
+      label: Duration
+      icon: clock
+      color: emerald
+      source: arm
+      target: duration
+    size:
+      label: Participants
+      icon: users
+      color: sky
+      source: population
+      target: size
+    sex:
+      label: Sex
+      icon: user
+      color: sky
+      source: population
+      target: sex
+    age:
+      label: Age
+      icon: baby
+      color: sky
+      source: population
+      target: age
+    conditions:
+      label: Conditions
+      icon: stethoscope
+      color: blue
+      source: population
+      target: condition
+      many: true
 
 # Database metadata. The key is the name of the field of the study.
 meta:

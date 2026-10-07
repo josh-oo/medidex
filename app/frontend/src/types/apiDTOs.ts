@@ -129,12 +129,14 @@ export interface StudyBaseDto {
   shortName: string;
   countries: string[];
   numberParticipants: string | null;
+  // Overall duration, e.g. "12 weeks". Null: the study schema calculates it from the arms (`derive` of the field).
   duration: string | null;
-  comparison: string | null;
   trialId: string | null;
+  // The arms of the study and their comparisons as JSON (the graph of the study schema; tags by name or id).
+  graph?: string | null;
 }
 
-export interface StudyDto extends StudyBaseDto {
+export interface StudyDto extends Omit<StudyBaseDto, "graph"> {
   studyId: number;
   createdAt: string | undefined;
   updatedAt: string | undefined;
@@ -149,8 +151,8 @@ export interface StudyDto extends StudyBaseDto {
 export interface StudyFullDto extends StudyDto {
   reports: Page<ReportPreviewDto>;
   tags: Record<string, Page<TagDto>>;
-  // The views of the study schema, by name.
-  views: Record<string, StudyViewDto>;
+  // The graph of the study schema, with its tags named.
+  graph: StudyGraphDto;
 }
 
 // GET /study-schema: what a study consists of and how it is presented (config/study.yaml
@@ -193,47 +195,79 @@ export interface TagCategorySchemaDto {
   description: string;
 }
 
-// A part of a group of a view: the tags of a category, or (derived views) the value of a field.
-export interface StudyViewPartSchemaDto {
-  key: string;
-  label: string | null;
+// What an entity that is a value holds: a tag of a category, or a primitive.
+export interface GraphValueSchemaDto {
   category: string | null;
-  field: string | null;
-  // Fields whose values are kept with the tags of this part (e.g. the duration of each side).
-  fields: string[];
+  type: "integer" | "duration" | "enum" | "text" | null;
+  // The allowed values of an enum (empty for the other types).
+  values: string[];
 }
 
-// A view of a study (`views` of config/study.yaml): parts of the study shown together as groups, e.g. a
-// comparison of interventions ("Drug A vs Placebo"). A stored view keeps its groups in the study.
-export interface StudyViewSchemaDto {
+// A kind of entity of the graph of a study (`graph.entities` of config/study.yaml): an arm (an intervention as it is
+// delivered), a population, or a value such as a dosage. An entity has no properties, only relations.
+export interface GraphEntitySchemaDto {
   key: string;
   label: string;
   icon: string;
   color: StudyColor;
-  display: "text";
+  // The study itself ("study" is its id in the graph).
+  root: boolean;
+  // Set for an entity that is a value (a dosage, an intervention).
+  value: GraphValueSchemaDto | null;
+}
+
+// A kind of relation between two entities (`graph.relations`), e.g. the comparison of two arms, or the dosage of an arm.
+export interface GraphRelationSchemaDto {
+  key: string;
+  label: string;
+  icon: string;
+  color: StudyColor;
+  // The kinds of entity an edge can start and end at.
+  source: string[];
+  target: string[];
+  symmetric: boolean;
+  many: boolean;
+  required: boolean;
+  // An attribute is part of its source when that is shown as a line.
+  line: boolean;
+  // Between source and target when shown as a line ("Drug A vs Placebo").
+  separator: string;
   // Also a line on the study cards.
   card: boolean;
-  // Between the parts of a group shown as a line.
-  separator: string;
-  stored: boolean;
-  parts: StudyViewPartSchemaDto[];
+  // Leads to values: it describes its source (the dosage of an arm) instead of connecting two entities.
+  attribute: boolean;
+}
+
+export interface GraphSchemaDto {
+  entities: GraphEntitySchemaDto[];
+  relations: GraphRelationSchemaDto[];
 }
 
 export interface StudySchemaDto {
   fields: StudyFieldSchemaDto[];
   meta: StudyMetaSchemaDto[];
   tags: TagCategorySchemaDto[];
-  views: StudyViewSchemaDto[];
+  graph: GraphSchemaDto;
 }
 
-export interface ViewPartDto {
-  tags: TagDto[];
-  values: Record<string, string>;
+// A node of the graph of one study: an entity of a kind. A node that is a value holds it (the name of a tag, or text).
+export interface StudyGraphNodeDto {
+  id: string;
+  kind: string;
+  value: string | null;
+  tagId: string | null;
 }
 
-// A view of one study with its tags named. An older study holds a plain text instead of groups.
-export interface StudyViewDto {
-  groups: Record<string, ViewPartDto>[];
+export interface StudyGraphEdgeDto {
+  relation: string;
+  source: string;
+  target: string;
+}
+
+// The graph of one study. An older study holds a plain text instead.
+export interface StudyGraphDto {
+  nodes: StudyGraphNodeDto[];
+  edges: StudyGraphEdgeDto[];
   text: string | null;
 }
 
@@ -355,19 +389,29 @@ export type StudyStatus = string;
 
 export type DurationUnit = "hours" | "days" | "weeks" | "months" | "years";
 
-export interface ComparisonGroup {
-  intervention: string[];
-  control: string[];
+// An arm as suggested for a new study: its interventions (names), and its dosage and duration if the report has them.
+export interface ArmSuggestion {
+  interventions: string[];
+  participants?: number;
+  dosage?: string;
+  frequency?: string;
+  route?: string;
+  duration?: { value: number; unit: DurationUnit };
+}
+
+// Two arms that are compared.
+export interface ComparisonSuggestion {
+  a: ArmSuggestion;
+  b: ArmSuggestion;
 }
 
 export interface NewStudySuggestion {
   short_name: string;
   status_of_study: StudyStatus;
   countries: string[];
-  duration_value: number;
-  duration_unit: DurationUnit;
   number_of_participants: number;
-  comparison: ComparisonGroup[];
+  duration?: { value: number; unit: DurationUnit };
+  comparisons: ComparisonSuggestion[];
 }
 
 export type StreamEventType = "node" | "complete" | "error" | "unknown";

@@ -63,6 +63,10 @@ FROM "tblReport";
 -- base table's when a column is omitted from an updatable-view INSERT).
 ALTER VIEW "report" ALTER COLUMN publication_type_id SET DEFAULT 1;
 
+-- The graph of a study (its arms and their comparisons, see app/backend/src/utils/graph.py) needs a column of its
+-- own in the physical table.
+ALTER TABLE "tblStudy" ADD COLUMN IF NOT EXISTS "Graph" jsonb;
+
 DROP VIEW IF EXISTS "study";
 -- Likewise, tblStudy also has CENTRALStudyID, CENTRALSubmissionStatus,
 -- Notes, DateToCENTRAL, Search_Tagged, UDef4, UDef6 -- unused, left out.
@@ -81,6 +85,7 @@ SELECT
     "Countries" AS countries,
     "Duration" AS duration,
     "Comparison" AS comparison,
+    "Graph" AS graph,
     CASE
         WHEN "ISRCTN" IS NOT NULL AND "TrialRegistrationID" IS NOT NULL
             THEN "ISRCTN" || '; ' || "TrialRegistrationID"
