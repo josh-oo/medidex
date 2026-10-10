@@ -129,10 +129,11 @@ graph:
       description: An intervention, as a tag of the vocabulary.
       value: { category: interventions }
     role:
-      label: Role
+      label: Arm type
       icon: flag
       color: slate
-      value: { type: enum, values: [intervention, control] }
+      description: What an arm is in the study, the evaluated intervention or the control (placebo, sham, usual care, no treatment).
+      value: { type: enum, values: [intervention, control, other] }
     dosage:
       label: Dosage
       icon: pill
@@ -180,6 +181,12 @@ graph:
       color: blue
       description: A health condition of a population, as a tag of the vocabulary.
       value: { category: conditions }
+    outcome:
+      label: Outcome
+      icon: target
+      color: rose
+      description: An outcome measure of the study, as a tag of the vocabulary.
+      value: { category: outcomes }
   relations:
     comparison:
       label: Comparison
@@ -210,10 +217,10 @@ graph:
       many: true
       required: true
     role:
-      label: Role
+      label: Arm type
       icon: flag
       color: slate
-      description: Whether an arm is evaluated or the control.
+      description: Whether the arm gets the evaluated intervention, is a control, or is something else.
       source: arm
       target: role
       line: false
@@ -245,6 +252,7 @@ graph:
       label: Participants
       icon: users
       color: sky
+      description: The number of participants (enrolled, analysed or, for a study not yet carried out, planned).
       source: population
       target: size
     sex:
@@ -265,6 +273,14 @@ graph:
       color: blue
       source: population
       target: condition
+      many: true
+    outcomes:
+      label: Outcomes
+      icon: target
+      color: rose
+      description: The outcomes (endpoints) the study names, primary or secondary alike. They are outcomes of the study (the tags of `outcomes`) too.
+      source: study
+      target: outcome
       many: true
 
 # Database metadata. The key is the name of the field of the study.
