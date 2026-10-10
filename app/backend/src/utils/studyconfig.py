@@ -1,9 +1,11 @@
-"""What a study consists of and how it is presented, read from config/study.yaml."""
+"""What a study consists of and how it is presented, read from the study ontology (config/medidex-study.yaml, LinkML)."""
 
+import re
 from pathlib import Path
-from typing import Dict, Iterator, List, Literal, Optional
+from typing import Any, Dict, Iterator, List, Literal, Optional
 
-import yaml
+from jsonasobj2 import JsonObj, as_dict
+from linkml_runtime.utils.schemaview import SchemaView
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 ColorName = Literal["blue", "emerald", "rose", "amber", "slate", "sky", "violet", "teal"]
@@ -96,7 +98,7 @@ class GraphEntityConfig(BaseModel):
     color: ColorName
     description: Optional[str] = None  # what the entity is, for the API documentation
     # The study itself. There is exactly one such entity, `study`, which needs no JSON of its own: its data are the fields
-    # and categories of config/study.yaml. It is there so that relations can start at the study as a whole.
+    # and categories of the study ontology. It is there so that relations can start at the study as a whole.
     root: bool = False
     value: Optional[ValueConfig] = None  # the entity is a value of this kind (e.g. a dosage, an intervention)
 
@@ -126,6 +128,8 @@ class GraphRelationConfig(BaseModel):
     line: bool = True  # an attribute is part of its source when that is shown as a line ("A + B (10 mg, 5 weeks)")
     separator: str = " · "  # between source and target when the edge is shown as a line ("A vs B")
     card: bool = False  # also shown as a line on the study cards
+    # The relation this one specialises (`is_a` of the ontology): an edge of a primary outcome is an edge of an outcome too.
+    parent: Optional[str] = None
 
     @field_validator("source", "target", mode="before")
     @classmethod
@@ -160,7 +164,16 @@ class GraphConfig(BaseModel):
                 raise ValueError(f"relation '{key}': an attribute starts at an entity that is no value")
             if relation.symmetric and set(relation.source) != set(relation.target):
                 raise ValueError(f"relation '{key}': a symmetric relation connects the same kinds of entity at both ends")
+            if relation.parent is not None and relation.parent not in self.relations:
+                raise ValueError(f"relation '{key}': unknown parent relation '{relation.parent}'")
         return self
+
+    def family(self, relation: str) -> List[str]:
+        """The relation and the relations that specialise it, however deep (has_outcome: has_primary_outcome, ...)."""
+        found = [relation]
+        for key in found:
+            found.extend(child for child, config in self.relations.items() if config.parent == key and child not in found)
+        return found
 
     @property
     def root(self) -> Optional[str]:
@@ -218,10 +231,10 @@ class TagCategoryRegistry(BaseModel):
     @model_validator(mode="after")
     def _check(self) -> "TagCategoryRegistry":
         if not self.categories:
-            raise ValueError("study.yaml defines no categories")
+            raise ValueError("the study ontology defines no tag categories")
         search_fields = [category.search_field for category in self.categories.values()]
         if len(set(search_fields)) != len(search_fields):
-            raise ValueError("study.yaml: search_field must be unique per category")
+            raise ValueError("the study ontology: search_field must be unique per category")
         return self
 
     @property
@@ -260,7 +273,7 @@ class StudyConfig(BaseModel):
         relations = [key for key in self.graph.relations if not self.graph.is_attribute(key)]
         names = [*self.fields, *self.meta, *self.categories, *relations, GRAPH_FIELD]
         if len(set(names)) != len(names):
-            raise ValueError(f"study.yaml: fields, meta, categories and the relations between entities share their names (and `{GRAPH_FIELD}` is taken) and need unique ones")
+            raise ValueError(f"the study ontology: fields, meta, categories and the relations between entities share their names (and `{GRAPH_FIELD}` is taken) and need unique ones")
         seconds = [unit.seconds for unit in self.duration_units]
         if seconds != sorted(set(seconds), reverse=True) or any(value <= 0 for value in seconds):
             raise ValueError("duration_units must be positive and ordered from the largest to the smallest unit")
@@ -268,7 +281,7 @@ class StudyConfig(BaseModel):
             entity.value and entity.value.type == "duration" for entity in self.graph.entities.values()
         )
         if needs_units and not self.duration_units:
-            raise ValueError("study.yaml has durations, but no duration_units")
+            raise ValueError("the study ontology has durations, but no DurationUnit")
         graph = self.graph
         for key, field in self.fields.items():
             derive = field.derive
@@ -297,9 +310,7 @@ class StudyConfig(BaseModel):
 
     @classmethod
     def load(cls, path: Path | None = None) -> "StudyConfig":
-        path = path or Path(__file__).resolve().parent.parent / "config" / "study.yaml"
-        with open(path, encoding="utf-8") as handle:
-            return cls.model_validate(yaml.safe_load(handle))
+        return cls.model_validate(StudyOntology(path).config())
 
     @property
     def enums(self) -> Dict[str, List[str]]:
@@ -314,6 +325,179 @@ class StudyConfig(BaseModel):
     @property
     def tags(self) -> TagCategoryRegistry:
         return TagCategoryRegistry(categories=self.categories)
+
+
+class StudyOntology:
+    """Reads the study ontology (config/medidex-study.yaml, LinkML) as the StudyConfig of the application. The header of
+    the ontology says how its classes are read: the attributes of the root class (the study) are its fields, metadata and
+    tag categories, the slots the classes list are the relations of the graph, and the value classes hold a term of the
+    vocabulary (`concept`) or a primitive (`value`). Presentation and storage are annotations."""
+
+    PATH = Path(__file__).resolve().parent.parent / "config" / "medidex-study.yaml"
+    # The slots that hold what a value node is, not relations of the graph.
+    VALUE_SLOTS = ("concept", "value")
+    # The primitive types of the application, by the LinkML type they derive from (the nearest one wins).
+    TYPES = {"duration": "duration", "integer": "integer", "datetime": "date", "date": "date", "string": "text"}
+    DURATION_UNITS = "DurationUnit"
+
+    def __init__(self, path: Path | str | None = None):
+        self.view = SchemaView(str(path or self.PATH))
+        roots = [name for name, cls in self.view.all_classes().items() if cls.tree_root]
+        if len(roots) != 1:
+            raise ValueError(f"the study ontology needs exactly one tree_root class (the study), not {roots}")
+        self.root = roots[0]
+        self._categories: Dict[str, str] = {}  # value class -> the tag category of the study that holds its terms
+
+    def config(self) -> Dict[str, Any]:
+        """The ontology as the data of a StudyConfig."""
+        fields: Dict[str, Any] = {}
+        meta: Dict[str, Any] = {}
+        categories: Dict[str, Any] = {}
+        for name in self.view.get_class(self.root).attributes:
+            slot = self.view.induced_slot(name, self.root)
+            notes = self._notes(slot)
+            if self._flag(notes.get("meta")):
+                meta[self._camel(name)] = {"label": slot.title or name, "type": self._primitive(slot.range)[0]}
+            elif slot.range in self.view.all_classes() and self._holds_concept(slot.range):
+                self._categories[slot.range] = name
+                categories[name] = {
+                    "label": slot.title or name,
+                    "icon": notes.get("icon"),
+                    "color": notes.get("color"),
+                    "search_field": notes.get("search_field"),
+                    "description": slot.description or "",
+                    "free_text_search": self._flag(notes.get("free_text_search")),
+                    "inline": self._flag(notes.get("inline")),
+                }
+            else:
+                fields[self._camel(name)] = self._field(name, slot, notes)
+        return {
+            "fields": fields,
+            "duration_units": self._duration_units(),
+            "meta": meta,
+            "categories": categories,
+            "graph": self._graph(),
+        }
+
+    # -- the study -------------------------------------------------------------------------------------------------
+
+    def _field(self, name: str, slot, notes: Dict[str, Any]) -> Dict[str, Any]:
+        kind, values = self._primitive(slot.range)
+        field: Dict[str, Any] = {
+            "label": slot.title or name,
+            "type": kind,
+            "icon": notes.get("icon"),
+            "color": notes.get("color"),
+            "display": notes.get("display", "none"),
+            "column": notes.get("column", name),
+            "required": bool(slot.required),
+            "values": values,
+        }
+        if notes.get("derive_source"):
+            field["derive"] = {
+                "source": notes["derive_source"],
+                "path": [step for step in str(notes.get("derive_path", "")).split("/") if step],
+                "aggregate": notes.get("derive_aggregate"),
+            }
+        return field
+
+    def _duration_units(self) -> List[Dict[str, Any]]:
+        enum = self.view.all_enums().get(self.DURATION_UNITS)
+        if enum is None:
+            return []
+        return [{"name": name, "seconds": int(self._notes(value)["seconds"])} for name, value in enum.permissible_values.items()]
+
+    # -- the graph -------------------------------------------------------------------------------------------------
+
+    def _graph(self) -> Dict[str, Any]:
+        classes = list(self.view.all_classes())
+        relations: Dict[str, Any] = {}
+        for name, slot in self.view.all_slots(attributes=False).items():
+            if name in self.VALUE_SLOTS:
+                continue
+            sources = [cls for cls in classes if name in self.view.get_class(cls).slots or name in self._inherited(cls)]
+            if not sources:
+                continue
+            notes = self._notes(slot)
+            relations[name] = {
+                "label": slot.title or name,
+                "icon": notes.get("icon"),
+                "color": notes.get("color"),
+                "description": slot.description,
+                "source": [self._key(cls) for cls in sources],
+                "target": [self._key(slot.range)],
+                "symmetric": self._flag(notes.get("unordered")),
+                "many": bool(slot.multivalued),
+                "required": bool(slot.required),
+                "line": self._flag(notes.get("line", True)),
+                "separator": notes.get("separator", " · "),
+                "card": self._flag(notes.get("card")),
+                "parent": slot.is_a,
+            }
+        used = {self.root} | {
+            cls for cls in classes for relation in relations.values() if self._key(cls) in (*relation["source"], *relation["target"])
+        }
+        entities = {self._key(cls): self._entity(cls) for cls in classes if cls in used}
+        return {"text_column": self._notes(self.view.get_class(self.root)).get("text_column"), "entities": entities, "relations": relations}
+
+    def _entity(self, name: str) -> Dict[str, Any]:
+        cls = self.view.get_class(name)
+        notes = self._notes(cls)
+        entity: Dict[str, Any] = {
+            "label": cls.title or name,
+            "icon": notes.get("icon"),
+            "color": notes.get("color"),
+            "description": cls.description,
+            "root": name == self.root,
+        }
+        if self._holds_concept(name):
+            if name not in self._categories:
+                raise ValueError(f"class {name} holds a term of the vocabulary, but no tag category of the study ({self.root}) holds its terms")
+            entity["value"] = {"category": self._categories[name]}
+        elif "value" in self.view.class_slots(name):
+            kind, values = self._primitive(self.view.induced_slot("value", name).range)
+            entity["value"] = {"type": kind, "values": values}
+        return entity
+
+    def _inherited(self, name: str) -> List[str]:
+        """The slots a class lists through the classes it derives from."""
+        return [slot for ancestor in self.view.class_ancestors(name, reflexive=False) for slot in self.view.get_class(ancestor).slots]
+
+    def _holds_concept(self, name: str) -> bool:
+        return "concept" in self.view.class_slots(name)
+
+    # -- helpers ---------------------------------------------------------------------------------------------------
+
+    def _primitive(self, range_name: Optional[str]) -> tuple[str, List[str]]:
+        """The type of the application (text | integer | duration | enum | date) of a range, with the values of an enum."""
+        name = range_name or self.view.schema.default_range or "string"
+        enum = self.view.all_enums().get(name)
+        if enum is not None:
+            return "enum", [str(value) for value in enum.permissible_values]
+        for ancestor in self.view.type_ancestors(name):
+            if ancestor in self.TYPES:
+                return self.TYPES[ancestor], []
+        raise ValueError(f"the study ontology uses the type {name}, which the application does not know")
+
+    def _key(self, class_name: Optional[str]) -> str:
+        """The key of a class in the application: its name in snake_case (TimePoint -> time_point)."""
+        return re.sub(r"(?<!^)(?=[A-Z])", "_", class_name or "").lower()
+
+    @staticmethod
+    def _camel(name: str) -> str:
+        head, *rest = name.split("_")
+        return head + "".join(part.capitalize() for part in rest)
+
+    @staticmethod
+    def _notes(element) -> Dict[str, Any]:
+        """The annotations of an element as plain values (LinkML holds them as a dict or a JsonObj of Annotations)."""
+        raw = element.annotations
+        items = as_dict(raw).items() if isinstance(raw, JsonObj) else (raw or {}).items()
+        return {tag: (note.get("value") if isinstance(note, dict) else getattr(note, "value", note)) for tag, note in items}
+
+    @staticmethod
+    def _flag(value: Any) -> bool:
+        return value is True or str(value).strip().lower() == "true"
 
 
 STUDY_CONFIG = StudyConfig.load()

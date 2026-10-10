@@ -89,7 +89,7 @@ async def search_studies(
 ) -> Page[Study]:
     return await _search_studies_or_400(ctx, q, limit, cursor)
 
-@router.get("/studies/graphs", summary="The graph of config/study.yaml (the arms of a study and their comparisons) of the specified studies, with their tags named.")
+@router.get("/studies/graphs", summary="The graph of config/medidex-study.yaml (the arms of a study and their comparisons) of the specified studies, with their tags named.")
 async def get_study_graphs(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, StudyGraph]:
     if not study_ids:
         return {}
@@ -147,9 +147,9 @@ async def get_study_persons_single(study_id : int = study_id_path, cutoff: str =
 
 _unknown = [key for key in (*STUDY_CONFIG.fields, *STUDY_CONFIG.meta) if key not in Study.model_fields]
 if _unknown:
-    raise RuntimeError(f"config/study.yaml names fields that a study does not have: {_unknown}")
+    raise RuntimeError(f"config/medidex-study.yaml names fields that a study does not have: {_unknown}")
 
-@router.get("/study-schema", summary="What a study consists of and how it is presented: its primitive fields, its graph (entities such as arms and populations, and the relations between them), its tag categories (with icons and colors) and its database metadata, as configured in config/study.yaml.")
+@router.get("/study-schema", summary="What a study consists of and how it is presented: its primitive fields, its graph (entities such as arms and populations, and the relations between them), its tag categories (with icons and colors) and its database metadata, as configured in config/medidex-study.yaml.")
 async def get_study_schema() -> StudySchema:
     return StudySchema(
         fields=[StudyFieldSchema(key=key, **field.model_dump()) for key, field in STUDY_CONFIG.fields.items()],
@@ -360,7 +360,7 @@ Aspect Endpoints
 """
 
 def _register_tag_routes(category: str) -> None:
-    """The endpoints of one tag category of config/study.yaml: all its tags and the tags of one study."""
+    """The endpoints of one tag category of config/medidex-study.yaml: all its tags and the tags of one study."""
     config = TAG_CATEGORIES[category]
 
     async def get_study_tags_single(

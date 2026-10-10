@@ -1,4 +1,4 @@
-"""Durations as a study keeps them: text such as "12 weeks", in a unit of `duration_units` of config/study.yaml."""
+"""Durations as a study keeps them: text such as "12 weeks", in a unit of `DurationUnit` of config/medidex-study.yaml."""
 
 from __future__ import annotations
 

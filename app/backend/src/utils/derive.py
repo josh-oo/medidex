@@ -1,5 +1,5 @@
 """The fields of a study that are calculated from its graph while the study has no value of its own (`derive` of a field
-in config/study.yaml): the participants of a study as the sum of the sizes of the populations of its arms, its duration
+in config/medidex-study.yaml): the participants of a study as the sum of the sizes of the populations of its arms, its duration
 as the longest duration of an arm. A study that gives its own value, e.g. because the report has no numbers per arm,
 keeps it."""
 

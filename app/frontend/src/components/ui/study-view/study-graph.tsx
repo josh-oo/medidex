@@ -1,4 +1,4 @@
-// The graph of a study (`graph` of config/study.yaml): entities such as the arms and populations of the study, connected
+// The graph of a study (the study ontology, config/medidex-study.yaml): entities such as the arms and populations of the study, connected
 // by relations such as the comparison of two arms ("Drug A (10 mg) vs Placebo"). An entity has no properties, only
 // relations: an arm is described by the interventions, dosage and duration it points to. Which entities and relations
 // exist and how they look comes from the study schema.

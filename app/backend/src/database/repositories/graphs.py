@@ -1,4 +1,4 @@
-"""The graph of a study (`graph` of config/study.yaml): storing it when a study is created, and reading the graphs of
+"""The graph of a study (the study ontology, config/medidex-study.yaml): storing it when a study is created, and reading the graphs of
 studies with their tags named."""
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ class StudyGraphs:
     async def store(self, study: Study, values: Mapping[str, Any]) -> None:
         """Stores the graph of a new study from the payload `values`: the tags of its nodes, given by name or id, become
         ids of the tags of their category (an unknown name becomes a new tag) and are tags of the study. Raises
-        GraphFormatError if the graph is no graph of config/study.yaml."""
+        GraphFormatError if the graph is no graph of config/medidex-study.yaml."""
         document = self.stored.loads(values.get(GRAPH_FIELD))
         if document is None:
             setattr(study, GRAPH_FIELD, None)

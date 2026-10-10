@@ -136,7 +136,7 @@ class StudyRepository:
     async def add_study(self, values: Mapping[str, Any]) -> Study:
         """Adds a study from its fields (see StudyFields in utils/dto.py): the primitive fields, the tags kept in a
         column (e.g. countries) and the graph, whose tags are resolved and become tags of the study. Raises
-        GraphFormatError if the graph is no graph of config/study.yaml."""
+        GraphFormatError if the graph is no graph of config/medidex-study.yaml."""
         #TODO add more sophisticated checks
 
         try:
@@ -167,14 +167,14 @@ class StudyRepository:
             raise
 
     async def get_graphs(self, studies: List[Study]) -> Dict[int, StudyGraph]:
-        """The graphs (config/study.yaml) of the studies, by study, with their tags named."""
+        """The graphs (config/medidex-study.yaml) of the studies, by study, with their tags named."""
         return await self.graphs.get(studies)
 
     async def search_studies(self, query: str, limit: int, offset: int) -> Tuple[List[Study], bool]:
         """Free-text search across a study's own name/trial ID plus its linked reports'
         authors/trial ID - both the confirmed Report.trial_registration_id and the
         unconfirmed report_added.trial_registration_id guess (see their comments in
-        models.py) - and the tags of the categories with free_text_search (config/study.yaml). Returns (page, has_more) - one extra id beyond
+        models.py) - and the tags of the categories with free_text_search (config/medidex-study.yaml). Returns (page, has_more) - one extra id beyond
         the page is fetched so has_more can be determined without a separate count
         query, same convention as StudySimilaritySearchService.get_similar_studies_by_id.
         """
@@ -220,7 +220,7 @@ class StudyRepository:
         """Boolean AND/OR search across studies by field==value comparisons (see
         src/utils/query_parser.py for the grammar and QueryNode shape). Supported fields:
         name/shortName, trialId, author, status and the search field of each tag category
-        (config/study.yaml) - each translated into an ilike match,
+        (config/medidex-study.yaml) - each translated into an ilike match,
         an EXISTS against its join table for the many-to-many aspect fields. Same
         two-phase id-then-hydrate paging convention as search_studies() above.
         """
@@ -399,7 +399,7 @@ class StudyRepository:
         return items, has_more
 
     async def get_study_tags(self, category: str, study_ids: List[int]) -> Dict[int, List[Tag]]:
-        """The tags of a category (a key of config/study.yaml) of each of the studies."""
+        """The tags of a category (a key of config/medidex-study.yaml) of each of the studies."""
         if not study_ids:
             return {}
         if category in TAG_COLUMNS:

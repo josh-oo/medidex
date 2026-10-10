@@ -64,13 +64,14 @@ export function buildGraph(groups: ComparisonGroup[]): string | null {
       edges.push({ relation, source, target });
     }
   };
-  // What an arm says about itself, by relation (the entity kind of each value is named like the relation, except the
-  // interventions): the key of the arm is all of it, so the same arm in two comparisons is one entity.
+  // What an arm says about itself, by relation of the study ontology (the entity kind of each value is the name of the
+  // relation without `has_`, except the interventions): the key of the arm is all of it, so the same arm in two comparisons
+  // is one entity.
   const attributes = (arm: ArmDraft, role: "intervention" | "control"): [string, string, string][] => [
-    ...cleaned(arm.interventions).map((value): [string, string, string] => ["interventions", "intervention", value]),
-    ["role", "role", role],
-    ...(["dosage", "frequency", "route"] as const).flatMap((key): [string, string, string][] => (arm[key].trim() ? [[key, key, arm[key].trim()]] : [])),
-    ...(armDuration(arm) ? ([["duration", "duration", armDuration(arm)]] as [string, string, string][]) : []),
+    ...cleaned(arm.interventions).map((value): [string, string, string] => ["receives", "intervention", value]),
+    ["has_role", "role", role],
+    ...(["dosage", "frequency", "route"] as const).flatMap((key): [string, string, string][] => (arm[key].trim() ? [[`has_${key}`, key, arm[key].trim()]] : [])),
+    ...(armDuration(arm) ? ([["has_duration", "duration", armDuration(arm)]] as [string, string, string][]) : []),
   ];
   const arms = new Map<string, string>();
   const armOf = (arm: ArmDraft, role: "intervention" | "control"): string => {
@@ -87,14 +88,14 @@ export function buildGraph(groups: ComparisonGroup[]): string | null {
   for (const group of groups) {
     if (cleaned(group.a.interventions).length === 0 || cleaned(group.b.interventions).length === 0) continue;
     const [source, target] = [armOf(group.a, "intervention"), armOf(group.b, "control")];
-    link("comparison", source, target);
+    link("compared_with", source, target);
     comparisons += 1;
     for (const [arm, id] of [[group.a, source], [group.b, target]] as const) {
       // An arm has one population, however many comparisons it is in.
       if (arm.participants.trim() && !edges.some((edge) => edge.relation === "participated" && edge.source === id)) {
         const population = add("population");
         link("participated", id, population);
-        link("size", population, valueNode("size", arm.participants.trim()));
+        link("has_size", population, valueNode("size", arm.participants.trim()));
       }
     }
   }

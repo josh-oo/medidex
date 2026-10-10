@@ -82,7 +82,7 @@ class Study(SQLModel, table=True, metadata=metadata_resources):
     number_participants: Optional[str]
     countries: Optional[str]
     # Legacy plain texts of studies from before the graph, no longer read as fields (`graph.text_column` of
-    # config/study.yaml shows the comparison).
+    # config/medidex-study.yaml shows the comparison).
     duration: Optional[str]
     comparison: Optional[str]
     # The arms of the study and their comparisons: JSON, see src/utils/graph.py.

@@ -1,6 +1,7 @@
-"""The graph of a study (`graph` of config/study.yaml) as the study keeps it: JSON with nodes and edges. A node is an
-entity of a kind of the config; it has no properties, only edges (relations) to other nodes. What looks like a property
-of an arm, its dosage or its interventions, is an edge to a node that is a value:
+"""The graph of a study (the entities and relations of the study ontology, config/medidex-study.yaml) as the study
+keeps it: JSON with nodes and edges. A node is an entity of a kind of the ontology; it has no properties, only edges
+(relations) to other nodes. What looks like a property of an arm, its dosage or its interventions, is an edge to a node
+that is a value:
 
     {"nodes": [{"id": "arm1", "kind": "arm"},
                {"id": "arm2", "kind": "arm"},
@@ -8,22 +9,23 @@ of an arm, its dosage or its interventions, is an edge to a node that is a value
                {"id": "dosage1", "kind": "dosage", "value": "10 mg"},
                {"id": "population1", "kind": "population"},
                {"id": "size1", "kind": "size", "value": "60"}],
-     "edges": [{"relation": "interventions", "source": "arm1", "target": "intervention1"},
-               {"relation": "dosage", "source": "arm1", "target": "dosage1"},
-               {"relation": "comparison", "source": "arm1", "target": "arm2"},
+     "edges": [{"relation": "receives", "source": "arm1", "target": "intervention1"},
+               {"relation": "has_dosage", "source": "arm1", "target": "dosage1"},
+               {"relation": "compared_with", "source": "arm1", "target": "arm2"},
                {"relation": "participated", "source": "arm1", "target": "population1"},
-               {"relation": "size", "source": "population1", "target": "size1"}]}
+               {"relation": "has_size", "source": "population1", "target": "size1"}]}
 
-The value of a node that is a tag is the id of the tag. The study itself is a node too (the root entity of
-config/study.yaml), with the id `study` and no JSON of its own, so that a relation can start at the study as a whole:
-{"relation": "participated", "source": "study", "target": "population1"}. A study has as many arms as it has arm
+The value of a node that is a term of the vocabulary is the id of the tag. The study itself is a node too (the root
+entity of the ontology), with the id `study` and no JSON of its own, so that a relation can start at the study as a
+whole: {"relation": "participated", "source": "study", "target": "population1"}. A study has as many arms as it has arm
 nodes, and a comparison connects any two of them; arms without one are fine. A value is one node however many edges
-lead to it (every arm with the dosage "10 mg" points to the same node).
+lead to it (every arm with the dosage "10 mg" points to the same node). A node without edges is fine too.
 
 The study stores it as a JSONB object; creating a study takes the JSON text, also with names instead of ids for the
-tags. Studies from before the entity model hold the arms and populations with their properties inline ({"nodes":
-{"arm": [{"id": ..., "interventions": [...], "dosage": ...}]}, "relations": {"comparison": [...]}}); reading
-converts them."""
+tags. Reading converts older graphs: those with the properties of the entities inline ({"nodes": {"arm": [{"id": ...,
+"interventions": [...], "dosage": ...}]}, "relations": {"comparison": [...]}}), and those from before the ontology,
+whose relations had other names (`comparison`, `interventions`, `dosage`, ...), whose outcomes were values of the study
+rather than entities that measure something, and whose populations could be of the sex `mixed`."""
 
 import json
 import re
@@ -36,7 +38,7 @@ Item = Union[int, str]
 
 
 class GraphFormatError(ValueError):
-    """The graph of a study does not follow the graph of config/study.yaml."""
+    """The graph of a study does not follow the graph of config/medidex-study.yaml."""
 
 
 @dataclass
@@ -74,6 +76,13 @@ class GraphDocument:
 
 
 class StoredGraph:
+    # The relations of graphs from before the study ontology, by their old name.
+    RENAMED = {
+        "comparison": "compared_with", "interventions": "receives", "role": "has_role", "dosage": "has_dosage",
+        "frequency": "has_frequency", "route": "has_route", "duration": "has_duration", "size": "has_size",
+        "sex": "has_sex", "age": "has_age", "conditions": "has_condition", "outcomes": "has_outcome",
+    }
+
     def __init__(self, config: GraphConfig):
         self.config = config
 
@@ -81,7 +90,7 @@ class StoredGraph:
 
     def loads(self, raw: Union[str, Mapping[str, Any], None]) -> Optional[GraphDocument]:
         """The graph of the stored JSON (an object) or of a JSON text, None if there is nothing. Raises
-        GraphFormatError if it is no graph of config/study.yaml."""
+        GraphFormatError if it is no graph of config/medidex-study.yaml."""
         if raw is None or (isinstance(raw, str) and not raw.strip()):
             return None
         try:
@@ -92,6 +101,7 @@ class StoredGraph:
             raise GraphFormatError("the graph is a JSON object with `nodes` and `edges`")
         if isinstance(data.get("nodes"), dict):  # a study from before the entity model
             data = self._legacy(data)
+        data = self._upgrade(data)
         unknown = set(data) - {"nodes", "edges"}
         if unknown:
             raise GraphFormatError(f"unknown keys of the graph: {sorted(unknown)}")
@@ -172,6 +182,7 @@ class StoredGraph:
                     raise GraphFormatError("every node has an `id`")
                 document.nodes.append(GraphNode(str(entry["id"]), kind))
                 for key, value in entry.items():
+                    key = self.RENAMED.get(key, key)
                     relation = self.config.relations.get(key)
                     if key == "id" or relation is None or kind not in relation.source or not self.config.is_attribute(key):
                         continue
@@ -180,8 +191,43 @@ class StoredGraph:
                             target = self._value_node(document, relation.target[0], item)
                             document.edges.append(GraphEdge(key, str(entry["id"]), target))
         for key, edges in (data.get("relations") or {}).items():
-            document.edges.extend(GraphEdge(key, str(edge["source"]), str(edge["target"])) for edge in edges)
+            document.edges.extend(GraphEdge(self.RENAMED.get(key, key), str(edge["source"]), str(edge["target"])) for edge in edges)
         return self.dump(document) or {}
+
+    def _upgrade(self, data: Mapping[str, Any]) -> Dict[str, Any]:
+        """The graph of a study from before the study ontology in its terms: relations with their new names, an outcome
+        that was a tag of the study as an outcome entity that measures it, the sex `mixed` as female and male."""
+        if not isinstance(data.get("nodes") or [], list) or not isinstance(data.get("edges") or [], list):
+            return dict(data)
+        nodes = [dict(entry) if isinstance(entry, dict) else entry for entry in data.get("nodes") or []]
+        edges = [
+            {**entry, "relation": self.RENAMED.get(entry["relation"], entry["relation"])} if isinstance(entry, dict) and "relation" in entry else entry
+            for entry in data.get("edges") or []
+        ]
+        ids = {entry.get("id") for entry in nodes if isinstance(entry, dict)}
+
+        def new_id(kind: str) -> str:
+            number = 1
+            while f"{kind}{number}" in ids:
+                number += 1
+            ids.add(f"{kind}{number}")
+            return f"{kind}{number}"
+
+        for entry in list(nodes):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("kind") == "outcome" and entry.get("value") not in (None, ""):
+                measure = {"id": new_id("measure"), "kind": "measure", "value": entry.pop("value")}
+                nodes.append(measure)
+                edges.append({"relation": "measures", "source": entry["id"], "target": measure["id"]})
+            elif entry.get("kind") == "sex" and str(entry.get("value", "")).strip().lower() == "mixed":
+                entry["value"] = "female"
+                male = {"id": new_id("sex"), "kind": "sex", "value": "male"}
+                nodes.append(male)
+                edges.extend(
+                    {**edge, "target": male["id"]} for edge in list(edges) if isinstance(edge, dict) and edge.get("target") == entry["id"]
+                )
+        return {**data, "nodes": nodes, "edges": edges}
 
     # -- writing ------------------------------------------------------------------------------------------------
 

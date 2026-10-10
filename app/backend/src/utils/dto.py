@@ -125,7 +125,7 @@ class Tag(BaseModel):
     keyword: str
 
 class StudyGraphNode(BaseModel):
-    """A node of the graph of a study: an entity of a kind of config/study.yaml. A node that is a value holds it: the name
+    """A node of the graph of a study: an entity of a kind of config/medidex-study.yaml. A node that is a value holds it: the name
     of the tag (with its id) or the text."""
     id: str
     kind: str
@@ -139,7 +139,7 @@ class StudyGraphEdge(BaseModel):
     target: str
 
 class StudyGraph(BaseModel):
-    """The graph of a study (`graph` of config/study.yaml), the tags named. `text` is the plain text an older study holds
+    """The graph of a study (the study ontology, config/medidex-study.yaml), the tags named. `text` is the plain text an older study holds
     instead of a structure (then there are no nodes)."""
     nodes: List[StudyGraphNode] = Field(default_factory=list)
     edges: List[StudyGraphEdge] = Field(default_factory=list)
@@ -149,7 +149,7 @@ class TagCandidate(Tag):
     relevance: float
 
 def _study_fields_model():
-    """The fields of a study, made from config/study.yaml: its `fields`, the tag categories kept in a column of
+    """The fields of a study, made from config/medidex-study.yaml: the attributes of its Study, the tag categories kept in a column of
     the study (as lists of names, e.g. countries). The graph of a study is read with `StudyRepository.get_graphs`."""
     attributes: Dict[str, Any] = {}
     for key, field in STUDY_CONFIG.fields.items():
@@ -159,14 +159,14 @@ def _study_fields_model():
             attributes[key] = (Optional[str], Field(default=None, description=field.label))
     for key in STUDY_CONFIG.inline_categories:
         attributes[key] = (List[str], Field(default_factory=list, description=STUDY_CONFIG.categories[key].description))
-    return create_model("StudyFields", __doc__="The fields of a study, as configured in config/study.yaml.", **attributes)
+    return create_model("StudyFields", __doc__="The fields of a study, as configured in config/medidex-study.yaml.", **attributes)
 
 StudyFields = _study_fields_model()
 
 _derived = DerivedFields()
 
 def study_values(study) -> Dict[str, Any]:
-    """The fields of a study of the database (see StudyFields), read as config/study.yaml says. A field the study has
+    """The fields of a study of the database (see StudyFields), read as config/medidex-study.yaml says. A field the study has
     no value for is calculated from its graph if the config says how (`derive`, e.g. the participants of its arms)."""
     values: Dict[str, Any] = {key: getattr(study, field.column) for key, field in STUDY_CONFIG.fields.items()}
     for key, field in STUDY_CONFIG.fields.items():
@@ -181,7 +181,7 @@ class StudyPayload(StudyFields):
     """The fields needed to create a study - everything else (studyId, timestamps) is
     server-generated, so this also doubles as the PUT /studies request body. Besides the fields it takes the
     graph of the study (its arms and their comparisons) as JSON (see utils/graph.py), with the tags by name or id. The values of
-    enum fields (config/study.yaml) must be allowed ones and the graph must be a graph of it; only checked
+    enum fields (config/medidex-study.yaml) must be allowed ones and the graph must be a graph of it; only checked
     here, not for the studies already in the database."""
 
     graph: Optional[str] = Field(default=None, description="The graph of the study (its arms and their comparisons) as JSON, see utils/graph.py")
@@ -208,14 +208,14 @@ class Study(StudyFields):
 
 class StudyFull(Study):
     """A Study plus everything the study details view fetches per-study: its linked
-    reports and its tags per category of config/study.yaml (interventions, conditions,
+    reports and its tags per category of config/medidex-study.yaml (interventions, conditions,
     countries, ...). Returned by GET /studies/{study_id}. Each nested list is only its
     first page (see that endpoint's `limit` param, default 10) - page further through any
     one of them with the matching /studies/{study_id}/* endpoint and its nextCursor, same
     as fastapi_app/resources.py's standalone aspect endpoints."""
     reports: Page[ReportPreview] = Field(default_factory=lambda: Page[ReportPreview](items=[]))
     tags: Dict[str, Page[Tag]] = Field(default_factory=dict)
-    # The graph of config/study.yaml, with its tags named.
+    # The graph of config/medidex-study.yaml, with its tags named.
     graph: StudyGraph = Field(default_factory=StudyGraph)
 
 class GraphValueSchema(BaseModel):
@@ -225,7 +225,7 @@ class GraphValueSchema(BaseModel):
     values: List[str] = []
 
 class GraphEntitySchema(BaseModel):
-    """A kind of entity of the graph of a study, e.g. an arm, a population or a dosage (see `graph` in config/study.yaml)."""
+    """A kind of entity of the graph of a study, e.g. an arm, a population or a dosage (see the study ontology, config/medidex-study.yaml)."""
     key: str
     label: str
     icon: str
@@ -251,13 +251,15 @@ class GraphRelationSchema(BaseModel):
     card: bool
     # Leads to values: it describes its source (the dosage of an arm) instead of connecting two entities.
     attribute: bool
+    # The relation it specialises (a primary outcome is an outcome), if any.
+    parent: Optional[str] = None
 
 class GraphSchema(BaseModel):
     entities: List[GraphEntitySchema] = []
     relations: List[GraphRelationSchema] = []
 
 class StudyFieldSchema(BaseModel):
-    """A primitive value of a study (see `fields` in config/study.yaml)."""
+    """A primitive value of a study (see the attributes of Study in config/medidex-study.yaml)."""
     key: str
     label: str
     type: str
@@ -267,13 +269,13 @@ class StudyFieldSchema(BaseModel):
     values: List[str] = []
 
 class StudyMetaSchema(BaseModel):
-    """A metadata field of the database record of a study (see `meta` in config/study.yaml)."""
+    """A metadata field of the database record of a study (see the attributes of Study annotated `meta` in config/medidex-study.yaml)."""
     key: str
     label: str
     type: str
 
 class TagCategorySchema(BaseModel):
-    """A tag category (see `categories` in config/study.yaml)."""
+    """A tag category (see the tag categories of config/medidex-study.yaml)."""
     key: str
     label: str
     icon: str

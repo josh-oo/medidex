@@ -155,7 +155,7 @@ export interface StudyFullDto extends StudyDto {
   graph: StudyGraphDto;
 }
 
-// GET /study-schema: what a study consists of and how it is presented (config/study.yaml
+// GET /study-schema: what a study consists of and how it is presented (config/medidex-study.yaml
 // of the backend). Colors and icons are names; see lib/colors.ts and lib/icons.ts.
 export type StudyColor =
   | "blue"
@@ -203,7 +203,7 @@ export interface GraphValueSchemaDto {
   values: string[];
 }
 
-// A kind of entity of the graph of a study (`graph.entities` of config/study.yaml): an arm (an intervention as it is
+// A kind of entity of the graph of a study (the classes of the study ontology, config/medidex-study.yaml): an arm (an intervention as it is
 // delivered), a population, or a value such as a dosage. An entity has no properties, only relations.
 export interface GraphEntitySchemaDto {
   key: string;
@@ -236,6 +236,8 @@ export interface GraphRelationSchemaDto {
   card: boolean;
   // Leads to values: it describes its source (the dosage of an arm) instead of connecting two entities.
   attribute: boolean;
+  // The relation it specialises (a primary outcome is an outcome), if any.
+  parent: string | null;
 }
 
 export interface GraphSchemaDto {

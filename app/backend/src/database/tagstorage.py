@@ -1,4 +1,4 @@
-"""Where the tags of each category of config/study.yaml are stored."""
+"""Where the tags of each category of config/medidex-study.yaml are stored."""
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
@@ -46,8 +46,8 @@ TAG_COLUMNS: Dict[str, StudyColumn] = {name: storage for name, storage in TAG_ST
 
 _missing = [name for name in TAG_CATEGORIES if name not in TAG_STORAGE]
 if _missing:
-    raise RuntimeError(f"config/study.yaml defines categories without storage in tagstorage.py: {_missing}")
+    raise RuntimeError(f"config/medidex-study.yaml defines categories without storage in tagstorage.py: {_missing}")
 
 _inconsistent = [name for name, storage in TAG_STORAGE.items() if TAG_CATEGORIES[name].inline != isinstance(storage, StudyColumn)]
 if _inconsistent:
-    raise RuntimeError(f"config/study.yaml `inline` disagrees with the storage in tagstorage.py for: {_inconsistent}")
+    raise RuntimeError(f"config/medidex-study.yaml `inline` disagrees with the storage in tagstorage.py for: {_inconsistent}")
