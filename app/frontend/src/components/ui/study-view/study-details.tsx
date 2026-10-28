@@ -5,11 +5,9 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { Separator } from "../separator";
 import { FileText, Download } from "lucide-react";
 import { StudyOverview } from "@/components/ui/study-view/study-details-overview";
 import { StudyAspects, type AspectPageState } from "@/components/ui/study-view/study-details-aspects";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
@@ -17,6 +15,12 @@ import { StudyDto, TagDto, Page } from "@/types/apiDTOs";
 import { getStudyById, getReportsByStudyId, getTagsForStudy } from "@/lib/api/studiesApi";
 import { useStudySchema } from "@/hooks/use-study-schema";
 import { getReportPdf } from "@/lib/api/reportApi";
+import { Pager } from "@/components/ui/pager";
+import { Spinner } from "@/components/ui/spinner";
+import { useClientPages } from "@/hooks/use-client-pages";
+
+// Reports of the study shown per page.
+const REPORTS_PAGE_SIZE = 5;
 
 type ReportListItem = {
   reportId: number;
@@ -46,9 +50,11 @@ const pageToAspectState = (page: Page<TagDto>): AspectPageState => ({
 interface StudyDetailsProps {
   study: StudyDto | null;
   isActive: boolean;
+  /** `inline` renders the details without the sheet around them (e.g. folded out below a study card). */
+  variant?: "sheet" | "inline";
 }
 
-export function StudyDetails({ study, isActive }: StudyDetailsProps) {
+export function StudyDetails({ study, isActive, variant = "sheet" }: StudyDetailsProps) {
   const [reports, setReports] = useState<ReportListItem[]>([]);
   const [reportsNextCursor, setReportsNextCursor] = useState<string | null>(null);
   const [loadingMoreReports, setLoadingMoreReports] = useState(false);
@@ -114,6 +120,14 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
       requestActive = false;
     };
   }, [study, isActive]);
+
+  const reportPages = useClientPages({
+    items: reports,
+    pageSize: REPORTS_PAGE_SIZE,
+    hasMore: reportsNextCursor !== null,
+    loadMore: () => void handleLoadMoreReports(),
+    resetKey: study?.studyId,
+  });
 
   if (!study) {
     return null;
@@ -240,160 +254,138 @@ export function StudyDetails({ study, isActive }: StudyDetailsProps) {
     }
   };
 
+  const body = (
+        <div className="space-y-3">
+          <dl className="divide-y divide-border/50">
+            <StudyOverview study={study} fields={schema?.fields ?? []} />
+            <StudyAspects
+              study={study}
+              loading={detailsLoading || !schema}
+              error={detailsError ?? schemaError}
+              categories={schema?.tags ?? []}
+              tags={Object.fromEntries(
+                (schema?.tags ?? []).map((category) => [category.key, tags[category.key] ?? EMPTY_ASPECT_PAGE])
+              )}
+              onLoadMore={handleLoadMoreTags}
+            />
+          </dl>
+
+          <section>
+            <div className="flex items-center gap-2 px-4 pb-1">
+              <h4 className="text-xs font-medium text-muted-foreground">
+                Reports{" "}
+                <span className="tabular-nums">· {reportsNextCursor ? `${reports.length}+` : reports.length}</span>
+              </h4>
+              <Pager
+                className="ml-auto"
+                range={reportPages.range}
+                canPrev={reportPages.canPrev}
+                canNext={reportPages.canNext}
+                onPrev={reportPages.prev}
+                onNext={reportPages.next}
+                loading={loadingMoreReports}
+              />
+              {reports.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleDownloadAllReportPdfs}
+                  disabled={detailsLoading || downloadingPdfs.has(studyId)}
+                  className={`h-7 text-xs text-muted-foreground ${reportPages.canPrev || reportPages.canNext ? "" : "ml-auto"}`}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {downloadingPdfs.has(studyId) ? "Downloading..." : "Download all"}
+                </Button>
+              )}
+            </div>
+
+            {detailsLoading && (
+              <div className="space-y-1.5 px-4">
+                <Skeleton className="h-4 w-4/5" />
+                <Skeleton className="h-4 w-3/5" />
+              </div>
+            )}
+            {detailsError && (
+              <p className="px-4 text-sm text-destructive">{detailsError}</p>
+            )}
+            {reportPages.isTurning ? (
+              <div className="flex justify-center py-4"><Spinner className="h-4 w-4 text-muted-foreground" /></div>
+            ) : reports.length > 0 ? (
+              <ul className="px-2">
+                {reportPages.pageItems.map((report) => (
+                  <li
+                    key={report.reportId}
+                    className="flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-muted/60"
+                  >
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">#{report.reportId}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm" title={report.title}>
+                      {report.title}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => handleDownloadSingleReportPdf(report.reportId)}
+                      disabled={downloadingSingle.has(report.reportId)}
+                      className="h-7 w-7 shrink-0 text-muted-foreground"
+                      aria-label={`Download the PDF of report ${report.reportId}`}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              !detailsLoading &&
+              !detailsError && (
+                <p className="flex items-center gap-1.5 px-4 text-xs text-muted-foreground">
+                  <FileText className="h-3.5 w-3.5 opacity-50" />
+                  No reports available
+                </p>
+              )
+            )}
+          </section>
+
+          {schema && schema.meta.length > 0 && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 text-[11px] text-muted-foreground">
+              {schema.meta.map((meta) => {
+                const value = study[meta.key];
+                if (!value) return null;
+                return (
+                  <span key={meta.key}>
+                    {meta.label} {new Date(String(value)).toLocaleDateString()}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
+  );
+
+  if (variant === "inline") {
+    return (
+      <div className="py-3">
+        {study.trialId !== null && (
+          <p className="px-4 pb-2 font-mono text-xs text-muted-foreground">{study.trialId}</p>
+        )}
+        {body}
+      </div>
+    );
+  }
+
   return (
     <SheetContent
       side="right"
       className="w-full sm:max-w-2xl overflow-y-auto pb-8"
     >
-      <>
-        <SheetHeader className="border-b border-border/60">
-          <SheetTitle className="text-lg">{studyShortName}</SheetTitle>
-          {study.trialId !== null && (
-            <SheetDescription className="font-mono text-xs">
-              {study.trialId}
-            </SheetDescription>
-          )}
-        </SheetHeader>
-        <div className="space-y-6">
-          <StudyOverview study={study} fields={schema?.fields ?? []} />
-
-          <Separator />
-
-          <StudyAspects
-            study={study}
-            loading={detailsLoading || !schema}
-            error={detailsError ?? schemaError}
-            categories={schema?.tags ?? []}
-            tags={Object.fromEntries(
-              (schema?.tags ?? []).map((category) => [category.key, tags[category.key] ?? EMPTY_ASPECT_PAGE])
-            )}
-            onLoadMore={handleLoadMoreTags}
-          />
-
-          <Separator />
-
-          <div className="space-y-4 px-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold flex items-center gap-2.5">
-                <div className="p-1.5 rounded-md bg-muted">
-                  <FileText className="h-4 w-4" />
-                </div>
-                Reports
-                <Badge variant="secondary" className="text-xs font-normal">
-                  {reportsNextCursor ? `${reports.length}+` : reports.length}
-                </Badge>
-              </h3>
-              {reports.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDownloadAllReportPdfs}
-                  disabled={
-                    detailsLoading ||
-                    downloadingPdfs.has(studyId)
-                  }
-                  className="flex items-center gap-2"
-                >
-                  <Download className="h-4 w-4" />
-                  {downloadingPdfs.has(studyId)
-                    ? "Downloading..."
-                    : "Download All PDFs"}
-                </Button>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              {detailsLoading && (
-                <div className="px-4">
-                  <div className="space-y-2 rounded-md border border-border/60 bg-muted/30 p-3.5">
-                    <div className="flex items-center gap-3">
-                      <Skeleton className="h-6 w-6 rounded-md" />
-                      <Skeleton className="h-4 w-40" />
-                      <Skeleton className="h-3 w-16" />
-                    </div>
-                    <Skeleton className="h-3 w-full" />
-                  </div>
-                </div>
-              )}
-              {detailsError && (
-                <p className="px-4 text-sm text-destructive">{detailsError}</p>
-              )}
-              {reports.length > 0 ? (
-                reports.map((report) => (
-                  <div
-                    key={report.reportId}
-                    className="p-3.5 rounded-md border border-border/60 bg-muted/30 hover:bg-muted/50 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium leading-snug">
-                          {report.title}
-                        </p>
-                        <div className="flex items-center gap-3 mt-2">
-                          <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                            Report ID: {report.reportId}
-                          </code>
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          handleDownloadSingleReportPdf(report.reportId)
-                        }
-                        disabled={downloadingSingle.has(report.reportId)}
-                        className="h-8 w-8 p-0 flex items-center justify-center shrink-0"
-                      >
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                !detailsLoading &&
-                !detailsError && (
-                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                    <FileText className="h-8 w-8 mb-2 opacity-30" />
-                    <p className="text-sm">No reports available</p>
-                  </div>
-                )
-              )}
-              {reportsNextCursor && !detailsLoading && (
-                <div className="flex justify-center pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleLoadMoreReports}
-                    disabled={loadingMoreReports}
-                  >
-                    {loadingMoreReports ? "Loading..." : "Load more"}
-                  </Button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {schema && schema.meta.length > 0 && (
-            <>
-              <Separator />
-              <div className="flex flex-wrap gap-x-6 gap-y-1 px-4 text-xs text-muted-foreground">
-                {schema.meta.map((meta) => {
-                  const value = study[meta.key];
-                  if (!value) return null;
-                  return (
-                    <span key={meta.key}>
-                      {meta.label}:{" "}
-                      <span className="font-medium text-foreground/80">
-                        {new Date(String(value)).toLocaleDateString()}
-                      </span>
-                    </span>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-      </>
+      <SheetHeader className="border-b border-border/60">
+        <SheetTitle className="text-lg">{studyShortName}</SheetTitle>
+        {study.trialId !== null && (
+          <SheetDescription className="font-mono text-xs">
+            {study.trialId}
+          </SheetDescription>
+        )}
+      </SheetHeader>
+      {body}
     </SheetContent>
   );
 }

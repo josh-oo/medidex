@@ -5,7 +5,6 @@
 import type { ReactNode } from "react";
 import { useStudySchema } from "@/hooks/use-study-schema";
 import { useStudyGraph } from "@/hooks/use-study-graph";
-import { colorClasses } from "@/lib/colors";
 import { iconByName } from "@/lib/icons";
 import type {
   GraphEntitySchemaDto,
@@ -15,6 +14,7 @@ import type {
   StudyGraphNodeDto,
 } from "@/types/apiDTOs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DetailRow } from "@/components/ui/study-view/detail-row";
 
 // The id edges use for the study itself (the root entity of the graph schema).
 const STUDY_ID = "study";
@@ -88,28 +88,15 @@ function Chip({ schema, graph, end }: { schema: GraphSchemaDto; graph: StudyGrap
   // What the line leaves out (e.g. the role of an arm) is shown next to it.
   const rest = node ? attributesOf(schema, graph, node).filter(({ relation }) => !relation.line).flatMap(({ values }) => values) : [];
   return (
-    <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground">
+    <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs leading-snug text-foreground">
       {title || entity.label}
       {rest.length > 0 && <span className="ml-1.5 text-muted-foreground">{rest.join(" · ")}</span>}
     </span>
   );
 }
 
-function Heading({ label, icon, color }: { label: string; icon: string; color: GraphRelationSchemaDto["color"] }) {
-  const colors = colorClasses(color);
-  const Icon = iconByName(icon);
-  return (
-    <div className="flex items-center gap-2">
-      <div className={`p-1 rounded ${colors.bg}`}>
-        <Icon className={`h-3.5 w-3.5 ${colors.accent}`} />
-      </div>
-      <span className="text-sm font-medium">{label}</span>
-    </div>
-  );
-}
-
-// The graph of a study in its details: a block per relation between entities with its edges, one per row, and a block per
-// kind of entity for those no relation connects (e.g. an arm that is compared with none). Blocks without content are left out.
+// The graph of a study in its details (rows of a `<dl>`): a row per relation between entities with its edges, one per line, and
+// a row per kind of entity for those no relation connects (e.g. an arm that is compared with none). Rows without content are left out.
 export function StudyGraphBlock({ studyId }: { studyId: number }): ReactNode {
   const { schema } = useStudySchema();
   const graph = useStudyGraph(studyId);
@@ -128,38 +115,35 @@ export function StudyGraphBlock({ studyId }: { studyId: number }): ReactNode {
   return (
     <>
       {relations.map(({ relation, edges }) => (
-        <div key={relation.key} className="space-y-2">
-          <Heading label={relation.label} icon={relation.icon} color={relation.color} />
-          <ul className="space-y-1.5 pl-6">
+        <DetailRow key={relation.key} icon={relation.icon} label={relation.label}>
+          <ul className="space-y-1">
             {edges.map(({ from, to }, index) => (
-              <li key={index} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              <li key={index} className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
                 <Chip schema={schema.graph} graph={graph} end={from} />
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   {relation.separator.trim() || "·"}
                 </span>
                 <Chip schema={schema.graph} graph={graph} end={to} />
               </li>
             ))}
           </ul>
-        </div>
+        </DetailRow>
       ))}
       {loose.map(({ entity, nodes }) => (
-        <div key={entity.key} className="space-y-2">
-          <Heading label={entity.label} icon={entity.icon} color={entity.color} />
-          <ul className="flex flex-wrap gap-1.5 pl-6">
+        <DetailRow key={entity.key} icon={entity.icon} label={entity.label}>
+          <ul className="flex flex-wrap gap-1">
             {nodes.map((node) => (
               <li key={node.id}>
                 <Chip schema={schema.graph} graph={graph} end={{ entity, node }} />
               </li>
             ))}
           </ul>
-        </div>
+        </DetailRow>
       ))}
       {fallback && graph.text && (
-        <div className="space-y-2">
-          <Heading label={fallback.label} icon={fallback.icon} color={fallback.color} />
-          <p className="pl-6 text-sm text-muted-foreground leading-relaxed">{graph.text}</p>
-        </div>
+        <DetailRow icon={fallback.icon} label={fallback.label}>
+          <p className="leading-relaxed">{graph.text}</p>
+        </DetailRow>
       )}
     </>
   );
@@ -175,13 +159,10 @@ export function StudyCardGraph({ studyId }: { studyId: number }): ReactNode {
     .map((relation) => ({ relation, text: relationText(schema.graph, graph, relation) }))
     .filter(({ text }) => text)
     .map(({ relation, text }) => {
-      const colors = colorClasses(relation.color);
       const Icon = iconByName(relation.icon);
       return (
         <div key={relation.key} className="flex items-center gap-1.5 text-muted-foreground flex-1 min-w-0 basis-0 max-w-full overflow-hidden">
-          <div className={`p-0.5 rounded shrink-0 ${colors.bg}`}>
-            <Icon className={`h-3 w-3 ${colors.accent}`} />
-          </div>
+          <Icon className="h-3 w-3 shrink-0" />
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>

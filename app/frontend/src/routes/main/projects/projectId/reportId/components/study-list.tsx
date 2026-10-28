@@ -88,7 +88,7 @@ export default function StudyList() {
 
   if (notFound) {
     return (
-      <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+      <div className="flex min-h-[40vh] w-full items-center justify-center text-sm text-muted-foreground">
         Report not found.
       </div>
     );
@@ -96,7 +96,7 @@ export default function StudyList() {
 
   if (loadError) {
     return (
-      <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+      <div className="flex min-h-[40vh] w-full items-center justify-center text-sm text-muted-foreground">
         Failed to load studies for this report.
       </div>
     );
@@ -122,63 +122,26 @@ export default function StudyList() {
 }
 
 export function StudyListSkeleton() {
-  const rowPlaceholders = Array.from({ length: 7 });
+  const rowPlaceholders = Array.from({ length: 5 });
 
   return (
-    <div className="h-full flex flex-col min-w-0 overflow-hidden pt-5">
-      <div className="px-4 pb-4 border-b border-border space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <Skeleton className="h-6 w-6 rounded" />
-            <Skeleton className="h-6 w-40" />
-            <Skeleton className="h-5 w-10 rounded-full" />
-          </div>
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-8 w-24 rounded-md" />
-            <Skeleton className="h-8 w-32 rounded-md" />
-            <Skeleton className="h-8 w-20 rounded-md" />
-          </div>
-        </div>
+    <div className="space-y-4">
+      <div className="rounded-2xl border bg-card p-5 space-y-3">
+        <Skeleton className="h-5 w-28" />
         <Skeleton className="h-9 w-full rounded-md" />
       </div>
-
-      <div className="flex-1 min-h-0 overflow-y-auto px-4">
-        <div className="pt-3 pb-4 space-y-3">
+      <div className="rounded-2xl border bg-card p-5 space-y-2">
+        <Skeleton className="h-5 w-36 mb-2" />
         {rowPlaceholders.map((_, index) => (
-          <div
-            key={index}
-            className="rounded-lg border border-border/60 bg-card p-4"
-          >
-            <div className="flex items-start">
-              <div className="flex-1 min-w-0 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Skeleton className="h-5 w-2/5" />
-                  <Skeleton className="h-5 w-24 rounded-full" />
-                  <Skeleton className="h-5 w-16 rounded-full" />
-                </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <Skeleton className="h-4 w-4 rounded" />
-                    <Skeleton className="h-4 w-32" />
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Skeleton className="h-4 w-4 rounded" />
-                    <Skeleton className="h-4 w-24" />
-                  </div>
-                  <div className="flex items-center gap-1.5 min-w-[180px] flex-1">
-                    <Skeleton className="h-4 w-4 rounded" />
-                    <Skeleton className="h-4 w-full max-w-[260px]" />
-                  </div>
-                </div>
-              </div>
+          <div key={index} className="flex items-center gap-3 rounded-xl bg-muted/60 p-3">
+            <Skeleton className="h-10 w-10 rounded-full shrink-0" />
+            <div className="flex-1 min-w-0 space-y-2">
+              <Skeleton className="h-4 w-2/5" />
+              <Skeleton className="h-3 w-4/5" />
             </div>
+            <Skeleton className="h-8 w-24 rounded-full shrink-0" />
           </div>
         ))}
-
-          <div className="pt-1">
-            <Skeleton className="h-9 w-44 rounded-md" />
-          </div>
-        </div>
       </div>
     </div>
   );

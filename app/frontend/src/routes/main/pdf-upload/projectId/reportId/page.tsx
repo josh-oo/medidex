@@ -110,11 +110,11 @@ export default function PdfDetailsPage() {
   }, [reportId, setHasPdf]);
 
   return (
-    <div className="pt-4">
-      <div className="px-4 pb-2 border-b border-border">
-        <div className="flex items-center gap-2">
-          <Upload className="h-6 w-6 text-primary" />
-          <h2 className="text-xl font-semibold">Upload PDF</h2>
+    <div className="rounded-2xl border bg-card p-4 sm:p-5 shadow-xs mb-20">
+      <div className="pb-3 border-b border-border">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <Upload className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">Upload PDF</h2>
           {!report ? (
             <span className="text-muted-foreground">Loading doi...</span>
           ) : !report.doi ? (
@@ -204,7 +204,7 @@ export default function PdfDetailsPage() {
       {/* PDF Preview Section */}
       <div className="mt-6">
         {pdfMissing ? (
-          <div className="flex items-center justify-center rounded-md border p-4 text-center" style={{ minHeight: "500px" }}>
+          <div className="flex items-center justify-center rounded-xl bg-muted/50 p-4 text-center" style={{ minHeight: "500px" }}>
             <div>
               <h2 className="mb-2 text-lg font-semibold">PDF Not Found</h2>
               <p className="text-muted-foreground">The requested report PDF is not available yet.</p>
@@ -217,7 +217,7 @@ export default function PdfDetailsPage() {
             type="application/pdf"
             width="100%"
             height="500px"
-            style={{ border: "1px solid #ccc", borderRadius: "8px" }}
+            className="rounded-xl border"
           >
             <div className="p-4 text-center border rounded-md">
               <p className="mb-2">Your browser restricts inline PDF viewing.</p>

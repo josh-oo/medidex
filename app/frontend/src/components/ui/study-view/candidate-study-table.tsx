@@ -1,25 +1,27 @@
 import { useState, useMemo, useCallback, useEffect} from "react";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
   FileText,
   BookMarked,
+  Plus,
   Search,
   Sparkles,
   X,
-  Microscope,
 } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { StudyCard } from "./study-card";
+import { StudyDetails } from "./study-details";
+import { Widget } from "@/components/ui/widget";
 import { AddStudyTriggerSlot } from "@/context/add-study-trigger-context";
 import { AdvancedSearchDialog } from "./advanced-search-dialog";
-import { LoadMoreStudiesButton } from "./load-more-studies-button";
+import { Pager } from "@/components/ui/pager";
+import { useClientPages } from "@/hooks/use-client-pages";
+import { WorkbenchAside } from "@/context/workbench-aside-context";
 import type { StudyCandidateDto, StudyDto, StudyBaseDto, Page } from "@/types/apiDTOs";
 import { ReportBannerSlot, StudyBadgeSlot } from "@/context/study-report-slots-context";
 import { useReportStore } from "@/hooks/use-report-store";
-import { useDetailsSheet } from "@/context/details-sheet-context";
 import { useExtensionRegistry, type StudyLinkReview } from "@/context/extension-registry-context";
 import { assignNewStudyToReportByReportId } from "@/lib/api/reportApi";
 import { searchStudies } from "@/lib/api/studiesApi";
@@ -39,8 +41,10 @@ interface CandidateStudyTableProps {
 
 // The backend rejects shorter queries.
 const MIN_SEARCH_QUERY_LENGTH = 3;
-// Page size for both the explicit search and its "Load more" pagination.
+// Page size for both the explicit search and its pages.
 const SEARCH_PAGE_SIZE = 10;
+// Similar studies shown per page.
+const STUDY_PAGE_SIZE = 10;
 
 // Without an extension reviewing links, every link goes ahead.
 const useNoLinkReview = (): StudyLinkReview => ({ confirmLink: async () => true, dialog: null });
@@ -83,7 +87,11 @@ export function CandidateStudyTable({
     reportId !== undefined ? state.reports[reportId] : undefined
   );
 
-  const {openWithStudyItem } = useDetailsSheet()
+  // The card whose study details are folded out, by its section and study ("similar-12").
+  const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  useEffect(() => {
+    setExpandedCard(null);
+  }, [reportId]);
   const { useStudyLinkReview = useNoLinkReview } = useExtensionRegistry();
   const linkReview = useStudyLinkReview();
 
@@ -261,199 +269,183 @@ export function CandidateStudyTable({
     [runSearch]
   );
 
-  const handleStudyClick = (study: StudyDto) => {
-    openWithStudyItem(study)
+  const renderStudyCard = (section: string, study: SearchResult) => {
+    const cardKey = `${section}-${study.studyId}`;
+    const expanded = expandedCard === cardKey;
+    return (
+      <StudyCard
+        key={cardKey}
+        {...study}
+        isAssigned={assignedStudyIds.has(study.studyId)}
+        expanded={expanded}
+        details={expanded ? <StudyDetails study={study} isActive variant="inline" /> : null}
+        onClick={() => setExpandedCard((current) => (current === cardKey ? null : cardKey))}
+        onAssign={(target) => void handleAssignStudy(target)}
+        badge={<StudyBadgeSlot reportId={reportId} study={study} />}
+        reportId={reportId}
+      />
+    );
   };
 
+  const similarPages = useClientPages({
+    items: candidateStudies,
+    pageSize: STUDY_PAGE_SIZE,
+    hasMore: nextCursor !== null,
+    loadMore: onLoadMore,
+    resetKey: reportId,
+  });
+  const searchPages = useClientPages({
+    items: searchResults ?? [],
+    pageSize: SEARCH_PAGE_SIZE,
+    hasMore: searchNextCursor !== null,
+    loadMore: handleLoadMoreSearch,
+    resetKey: `${reportId}-${submittedQuery}`,
+  });
+
   return (
-    <div className="h-full flex flex-col pt-5">
+    // Room at the bottom for floating actions of extensions (e.g. a chat button).
+    <div className="space-y-4 pb-20">
+      <ReportBannerSlot reportId={reportId} />
 
-      {/* Header - Sticky */}
-      <div className="px-4 pb-4 border-b border-border">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Microscope className="h-6 w-6 text-primary" />
-            </div>
-            <h2 className="text-lg font-semibold">Relevant Studies</h2>
+      {/* Global search across all studies */}
+      <Widget
+        title="Find a study"
+        icon={Search}
+        count={searchResults && !searchPages.canPrev && !searchPages.canNext ? searchResults.length : undefined}
+        actions={
+          searchResults && (
+            <Pager
+              range={searchPages.range}
+              canPrev={searchPages.canPrev}
+              canNext={searchPages.canNext}
+              onPrev={searchPages.prev}
+              onNext={searchPages.next}
+              loading={isLoadingMoreSearch}
+            />
+          )
+        }
+      >
+        <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Name, trial ID, intervention, author... (press Enter)"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setSearchError(null);
+              }}
+              className="pl-9 pr-8 bg-muted/60 border-transparent"
+            />
+            {isSearching ? (
+              <Spinner className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            ) : (
+              (searchQuery || searchResults) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Clear search"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0"
+                  onClick={clearSearch}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              )
+            )}
           </div>
-        </div>
+          <AdvancedSearchDialog onSearch={handleAdvancedSearch} />
+        </form>
+        {searchError && (
+          <p className="mt-1.5 text-xs text-destructive">{searchError}</p>
+        )}
 
-        {/* Global search across all studies */}
-        <div className="mt-3">
-          <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search all studies by name, trial ID, intervention, author... (press Enter)"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setSearchError(null);
-                }}
-                className="pl-9 pr-8"
-              />
-              {isSearching ? (
-                <Spinner className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              ) : (
-                (searchQuery || searchResults) && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label="Clear search"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0"
-                    onClick={clearSearch}
-                  >
-                    <X className="h-3 w-3" />
-                  </Button>
-                )
-              )}
-            </div>
-            <AdvancedSearchDialog onSearch={handleAdvancedSearch} />
-          </form>
-          {searchError && (
-            <p className="mt-1.5 text-xs text-destructive">{searchError}</p>
-          )}
-        </div>
-      </div>
-
-      {/* Scrollable Content */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4">
-        {/* Inside the scroll area, so a banner scrolls away with the list unless it sticks itself */}
-        <ReportBannerSlot reportId={reportId} />
-        <div className="pt-3 pb-24 space-y-6">
-
-          {/* Globally searched studies */}
-          {searchResults && (
-            <div>
-              <div className="flex items-center gap-2 pb-2">
-                <Search className="h-4 w-4 text-muted-foreground" />
-                {isAdvancedSearch ? (
-                  <h3 className="text-sm font-semibold flex items-center gap-2 min-w-0">
-                    <span>Advanced search results for</span>
-                    <code className="text-xs font-normal bg-muted px-1.5 py-0.5 rounded truncate">
-                      {submittedQuery}
-                    </code>
-                  </h3>
-                ) : (
-                  <h3 className="text-sm font-semibold">
-                    Search results for &ldquo;{submittedQuery}&rdquo;
-                  </h3>
-                )}
-                <Badge variant="secondary" className="text-xs font-normal shrink-0">
-                  {searchNextCursor ? `${searchResults.length}+` : searchResults.length}
-                </Badge>
-              </div>
-
-              {searchResults.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 text-muted-foreground border border-dashed border-border rounded-lg">
-                  <p className="text-sm font-medium">No matching studies</p>
-                  <p className="text-xs mt-1">Try a different search query</p>
-                </div>
-              ) : (
-                <>
-                  {searchResults.map((study) => (
-                    <StudyCard
-                      key={`search-${study.studyId}`}
-                      {...study}
-                      isAssigned={assignedStudyIds.has(study.studyId)}
-                      onClick={handleStudyClick}
-                      onAssign={(target) => void handleAssignStudy(target)}
-                      badge={<StudyBadgeSlot reportId={reportId} study={study} />}
-                      reportId={reportId}
-                    />
-                  ))}
-                  {searchNextCursor && (
-                    <LoadMoreStudiesButton onClick={handleLoadMoreSearch} loading={isLoadingMoreSearch} />
-                  )}
-                </>
-              )}
-
-              <div className="pt-4 border-b border-border" />
-            </div>
-          )}
-
-          {/* Studies of reports this report cites by DOI */}
-          {referencedStudies.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 pb-2">
-                <BookMarked className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-semibold">Referenced studies</h3>
-                <Badge variant="secondary" className="text-xs font-normal">
-                  {referencedStudies.length}
-                </Badge>
-              </div>
-              {referencedStudies.map((study) => (
-                <StudyCard
-                  key={`referenced-${study.studyId}`}
-                  {...study}
-                  isAssigned={assignedStudyIds.has(study.studyId)}
-                  onClick={handleStudyClick}
-                  onAssign={(target) => void handleAssignStudy(target)}
-                  badge={<StudyBadgeSlot reportId={reportId} study={study} />}
-                  reportId={reportId}
-                />
-              ))}
-              <div className="pt-4 border-b border-border" />
-            </div>
-          )}
-
-          {/* Similar studies */}
-          <div>
-            {(searchResults || referencedStudies.length > 0) && (
-              <div className="flex items-center gap-2 pb-2">
-                <Sparkles className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-semibold">Similar studies</h3>
-                <Badge variant="secondary" className="text-xs font-normal">
-                  {nextCursor ? `${candidateStudies.length}+` : candidateStudies.length}
-                </Badge>
-              </div>
+        {searchResults && (
+          <div className="mt-4 space-y-2">
+            {isAdvancedSearch ? (
+              <p className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                <span className="shrink-0">Advanced search for</span>
+                <code className="bg-muted px-1.5 py-0.5 rounded truncate">{submittedQuery}</code>
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Results for &ldquo;{submittedQuery}&rdquo;
+              </p>
             )}
 
-            {candidateStudies.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <div className="p-3 rounded-full bg-muted mb-4">
-                  <FileText className="h-6 w-6 opacity-50" />
-                </div>
-                <p className="text-sm font-medium">No studies found</p>
-                <p className="text-xs mt-1">No relevant studies available</p>
+            {searchResults.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground rounded-xl bg-muted/50">
+                <p className="text-sm font-medium">No matching studies</p>
+                <p className="text-xs mt-1">Try a different search query</p>
               </div>
             ) : (
-              <>
-                {candidateStudies.map((study) => (
-                  <StudyCard
-                    key={study.studyId}
-                    {...study}
-                    isAssigned={assignedStudyIds.has(study.studyId)}
-                    onClick={handleStudyClick}
-                    onAssign={(target) => void handleAssignStudy(target)}
-                    badge={<StudyBadgeSlot reportId={reportId} study={study} />}
-                    reportId={reportId}
-                  />
-                ))}
-
-                {/* Load More Button */}
-                {nextCursor && (
-                  <LoadMoreStudiesButton onClick={onLoadMore} loading={isLoadingMore} />
-                )}
-              </>
+              searchPages.isTurning ? (
+                <div className="flex justify-center py-10"><Spinner className="h-5 w-5 text-muted-foreground" /></div>
+              ) : (
+                searchPages.pageItems.map((study) => renderStudyCard("search", study))
+              )
             )}
           </div>
+        )}
+      </Widget>
 
-          {/* Only needed when none of the candidates above match */}
-          <div className="pt-2 border-t border-dashed border-border">
-            <p className="text-xs text-muted-foreground pb-2 pt-3 text-center">
-              None of these match?
-            </p>
-            <AddStudyTriggerSlot
-              currentReportId={reportId}
-              extensions={currentReport?.extensions}
-              onSaveStudy={handleSaveNewStudy}
-            />
+      {/* Studies of reports this report cites by DOI */}
+      {referencedStudies.length > 0 && (
+        <Widget title="Referenced studies" icon={BookMarked} count={referencedStudies.length}>
+          <div className="space-y-2">
+            {referencedStudies.map((study) => renderStudyCard("referenced", study))}
           </div>
-        </div>
-      </div>
+        </Widget>
+      )}
+
+      {/* Similar studies */}
+      <Widget
+        title="Similar studies"
+        icon={Sparkles}
+        // The pager shows the count while there are pages.
+        count={similarPages.canPrev || similarPages.canNext ? undefined : candidateStudies.length}
+        actions={
+          <Pager
+            range={similarPages.range}
+            canPrev={similarPages.canPrev}
+            canNext={similarPages.canNext}
+            onPrev={similarPages.prev}
+            onNext={similarPages.next}
+            loading={isLoadingMore}
+          />
+        }
+      >
+        {candidateStudies.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+            <div className="p-3 rounded-full bg-muted mb-3">
+              <FileText className="h-6 w-6 opacity-50" />
+            </div>
+            <p className="text-sm font-medium">No studies found</p>
+            <p className="text-xs mt-1">No relevant studies available</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {similarPages.isTurning
+              ? <div className="flex justify-center py-10"><Spinner className="h-5 w-5 text-muted-foreground" /></div>
+              : similarPages.pageItems.map((study) => renderStudyCard("similar", study))}
+          </div>
+        )}
+      </Widget>
+
+      {/* Only needed when none of the candidates above match */}
+      <WorkbenchAside>
+      <Widget title="Add new study" icon={Plus}>
+        <p className="-mt-1 mb-4 text-sm text-muted-foreground">
+          None of the suggested studies match? Link this report to a new study.
+        </p>
+        <AddStudyTriggerSlot
+          currentReportId={reportId}
+          extensions={currentReport?.extensions}
+          onSaveStudy={handleSaveNewStudy}
+          inline
+        />
+      </Widget>
+      </WorkbenchAside>
       {linkReview.dialog}
     </div>
   );

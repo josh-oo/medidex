@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { ArrowRight } from "lucide-react";
 import type { TaskDto } from "@/types/apiDTOs";
 
 interface TaskCardProps {
@@ -20,9 +21,9 @@ export function TaskCard({ task, ownerName }: TaskCardProps) {
   return (
     <Link
       to={`/projects/${task.projectId}`}
-      className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+      className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
     >
-      <div className="group relative border bg-card p-5 transition hover:border-primary/40">
+      <div className="group relative rounded-2xl border bg-card p-5 shadow-xs transition hover:shadow-md">
 
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
@@ -31,8 +32,9 @@ export function TaskCard({ task, ownerName }: TaskCardProps) {
             </h3>
             <p className="mt-1 text-xs text-muted-foreground truncate">Owner: {displayOwner}</p>
           </div>
-          <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
             {progressPercent}%
+            <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
           </span>
         </div>
 

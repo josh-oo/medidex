@@ -376,32 +376,21 @@ export default function ReviewDetailsPage() {
   };
 
   if (!reportIdParam) {
-    return (
-      <div className="h-full p-6">
-        <Empty className="h-full border">
-          <EmptyHeader>
-            <EmptyTitle>No report selected</EmptyTitle>
-            <EmptyDescription>
-              Select a report from the list to view assigned studies by annotator.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      </div>
-    );
+    return null;
   }
 
   return (
-    <div className="pt-4">
-      <div className="px-4 pb-2 border-b border-border">
+    <div>
+      <div className="pb-3">
         <div className="flex items-center gap-2">
-          <CircleCheckBig className="h-6 w-6 text-primary" />
-          <h2 className="text-xl font-semibold">Review Annotations</h2>
+          <CircleCheckBig className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-base font-semibold">Review Annotations</h2>
         </div>
       </div>
 
-      <div className="px-4 py-4">
+      <div>
         {reportFlags.length > 0 ? (
-          <section className="mb-8 space-y-4 rounded-none border border-border bg-white p-4 shadow-sm">
+          <section className="mb-8 space-y-4 rounded-2xl border bg-card p-5 shadow-xs">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-foreground">
@@ -427,7 +416,7 @@ export default function ReviewDetailsPage() {
           </section>
         ) : null}
 
-        <section className="mb-8 space-y-4 rounded-none border border-border bg-white p-4 shadow-sm">
+        <section className="mb-8 space-y-4 rounded-2xl border bg-card p-5 shadow-xs">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold uppercase tracking-wide text-foreground">
@@ -667,7 +656,7 @@ export default function ReviewDetailsPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-10 border-destructive/30 bg-white px-6 text-destructive shadow-none hover:bg-destructive/10 hover:shadow-none"
+                className="h-10 border-destructive/30 bg-card px-6 text-destructive shadow-none hover:bg-destructive/10 hover:shadow-none"
                 disabled={isDeletingReport}
               >
                 Delete Report

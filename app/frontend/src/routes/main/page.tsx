@@ -3,10 +3,8 @@ import { getProjects, getTasks } from "@/lib/api/projectApi";
 import { getUserNamesByIds, listUsers } from "@/lib/api/adminApi";
 import { ProjectCard } from "./components/project-card";
 import { TaskCard } from "./components/task-card";
-import { HomeHero } from "./components/home-hero";
-import { QuickStats } from "./components/quick-stats";
 import { Button } from "@/components/ui/button";
-import { FileText, Plus } from "lucide-react";
+import { FileText, FolderKanban, ListChecks, Plus } from "lucide-react";
 import type { ProjectDto, TaskDto } from "@/types/apiDTOs";
 import type { UserDto } from "@/types/user/user.dto";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
@@ -95,41 +93,45 @@ export default function Home() {
     ? "Create a project and assign it to yourself."
     : "Ask an admin to assign you to a project.";
 
-  const totalReports = projects.reduce((sum, b) => sum + b.numberReportsTotal, 0);
-  const totalEmbedded = projects.reduce((sum, b) => sum + b.numberReportsPreProcessed, 0);
-  const totalAssigned = projects.reduce((sum, b) => sum + b.numberReportsReadyForReview, 0);
+  const firstName = user?.name?.split(" ")[0];
+  const createProjectButton = (
+    <CreateProjectDialog
+      onProjectCreated={refreshData}
+      trigger={
+        <Button className="gap-2">
+          <Plus className="h-4 w-4" />
+          Create project
+        </Button>
+      }
+    />
+  );
 
   return (
     <div className="flex-1 overflow-auto">
-      <div className="absolute inset-0 -z-10 overflow-hidden pointer-events-none">
-        <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-gradient-to-bl from-primary/[0.03] via-transparent to-transparent" />
-        <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-gradient-to-tr from-primary/[0.02] via-transparent to-transparent" />
-      </div>
+      <div className="px-4 pt-4 pb-10 md:px-8 md:pt-6 max-w-7xl mx-auto space-y-8">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            {firstName && <p className="text-sm text-muted-foreground">Hello {firstName}</p>}
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {isAdmin ? "Tasks and projects" : "Your tasks"}
+            </h1>
+          </div>
+          {isAdmin && projects.length > 0 && createProjectButton}
+        </div>
 
-      <div className="p-4 md:px-8 md:py-6 max-w-7xl mx-auto">
-        <HomeHero userName={user?.name || "there"} />
-
-        <QuickStats
-          totalProjects={projects.length}
-          totalReports={totalReports}
-          totalAssigned={totalAssigned}
-          totalEmbedded={totalEmbedded}
-        />
-
-        <div className="mt-10">
-          <div className="mb-5">
-            <h2 className="text-xl font-semibold tracking-tight">Your Tasks</h2>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Stay focused on the projects that need your attention right now.
-            </p>
+        <section>
+          <div className="mb-3 flex items-center gap-2">
+            <ListChecks className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">Continue where you left off</h2>
+            <span className="rounded-full bg-muted px-2 text-xs tabular-nums text-muted-foreground">{tasks.length}</span>
           </div>
 
           {tasks.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/25 bg-muted/30 px-6 py-12 text-center">
+            <div className="rounded-2xl border border-dashed bg-card/50 px-6 py-10 text-center">
               <p className="text-sm text-muted-foreground">{emptyTaskMessage}</p>
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {tasks.map((task) => (
                 <TaskCard
                   key={task.projectId}
@@ -139,49 +141,29 @@ export default function Home() {
               ))}
             </div>
           )}
-        </div>
+        </section>
 
         {isAdmin && (
-          <div className="mt-10">
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h2 className="text-xl font-semibold tracking-tight">Your Projects</h2>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  Select a project to start linking the new reports to studies
-                </p>
-              </div>
-              <CreateProjectDialog
-                onProjectCreated={refreshData}
-                trigger={
-                  <Button variant="outline" size="sm" className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    <span className="hidden sm:inline">Create Project</span>
-                  </Button>
-                }
-              />
+          <section>
+            <div className="mb-3 flex items-center gap-2">
+              <FolderKanban className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">Projects</h2>
+              <span className="rounded-full bg-muted px-2 text-xs tabular-nums text-muted-foreground">{projects.length}</span>
             </div>
 
             {projects.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center border-2 border-dashed border-muted-foreground/20 bg-muted/30">
-                <div className="w-16 h-16 bg-primary/10 flex items-center justify-center mb-5 rounded-full">
-                  <FileText className="w-7 h-7 text-primary" />
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed bg-card/50 px-6 py-16 text-center">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+                  <FileText className="h-6 w-6 text-primary" />
                 </div>
-                <h2 className="text-xl font-semibold mb-2">No projects yet</h2>
-                <p className="text-muted-foreground max-w-sm mb-6">
-                  Create your first project to start analyzing reports and discovering study connections.
+                <h3 className="mb-1 text-lg font-semibold">No projects yet</h3>
+                <p className="mb-6 max-w-sm text-sm text-muted-foreground">
+                  A project is a batch of new reports to link to studies. Create one and upload its reports.
                 </p>
-                <CreateProjectDialog
-                  onProjectCreated={refreshData}
-                  trigger={
-                    <Button>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Create your first project
-                    </Button>
-                  }
-                />
+                {createProjectButton}
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {projects.map((project, index) => (
                   <ProjectCard
                     key={project.projectId}
@@ -195,7 +177,7 @@ export default function Home() {
                 ))}
               </div>
             )}
-          </div>
+          </section>
         )}
       </div>
     </div>

@@ -104,7 +104,7 @@ function StageButton({ stage, onClick }: { stage: Stage; onClick: () => void }) 
   return (
     <button
       type="button"
-      className="w-full rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-muted/30"
+      className="w-full rounded-xl bg-muted/50 px-3 py-2 text-left transition-colors hover:bg-muted"
       onClick={(event) => {
         event.stopPropagation();
         onClick();
@@ -364,7 +364,7 @@ export function ProjectCard({
 
   return (
     <div
-      className="group relative text-left bg-card border p-5 transition-all hover:border-primary/40 hover:shadow-md"
+      className="group relative text-left bg-card border rounded-2xl p-5 shadow-xs transition-all hover:shadow-md"
       style={{ animationDelay: `${index * 50}ms` }}
     >
       <div className="flex items-start justify-between gap-3">
@@ -406,7 +406,7 @@ export function ProjectCard({
               <AlertDialogDescription>
                 This will permanently remove all data for this project.
               </AlertDialogDescription>
-              <div className="mt-2 rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-sm text-foreground">
+              <div className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground">
                 {project.name}
               </div>
             </AlertDialogHeader>
@@ -425,7 +425,7 @@ export function ProjectCard({
       </div>
 
       <div className="mt-4 space-y-3">
-        <div className="rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2">
+        <div className="rounded-xl bg-muted/50 px-3 py-2">
           <StageProgress stage={processingStage} tone="muted" />
           <div className="pt-4">
             <StageProgress stage={pdfAutoSearchStage} tone="muted" />
@@ -443,7 +443,7 @@ export function ProjectCard({
           <ArrowDown className="h-4 w-4" />
         </div>
 
-        <div className="rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2">
+        <div className="rounded-xl bg-muted/50 px-3 py-2">
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-1 font-semibold uppercase tracking-wide">
               <Microscope className="h-3.5 w-3.5" aria-hidden />
@@ -463,7 +463,7 @@ export function ProjectCard({
                 return (
                   <div
                     key={panel.userId}
-                    className="min-w-[15rem] rounded-md border border-border/60 bg-background/80 px-3 py-2 text-left flex flex-col justify-between h-full snap-start"
+                    className="min-w-[15rem] rounded-lg bg-card px-3 py-2 text-left flex flex-col justify-between h-full snap-start"
                   >
                     <div className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       <span className="truncate flex items-center gap-1.5">
@@ -481,7 +481,7 @@ export function ProjectCard({
                 );
               })
             ) : (
-              <div className="flex-1 min-w-full flex-shrink-0 rounded-md border border-dashed border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground flex items-center justify-center text-center h-full">
+              <div className="flex-1 min-w-full flex-shrink-0 rounded-lg bg-card px-3 py-2 text-xs text-muted-foreground flex items-center justify-center text-center h-full">
                 Assign at least one studificator to start tracking progress.
               </div>
             )}

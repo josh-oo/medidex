@@ -20,7 +20,7 @@ export function AppHeader() {
   const isAdmin = user?.isAdmin;
 
   return (
-    <header className="bg-background fixed left-0 right-0 top-0 z-50 flex w-full items-center border-b h-14">
+    <header className="bg-canvas fixed left-0 right-0 top-0 z-50 flex w-full items-center h-14 pt-[env(safe-area-inset-top)]">
       <div className="flex h-full w-full items-center justify-between px-4">
         {/* Left side - Logo */}
         <div className="flex items-center">

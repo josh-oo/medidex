@@ -101,6 +101,8 @@ export interface AddStudyDialogProps {
   currentReportId?: number;
   suggestedValues?: NewStudySuggestion;
   onSaveStudy: (values: StudyBaseDto) => Promise<void>;
+  /** Shows the form in place (e.g. as a widget of the report workbench) instead of behind a button and dialog. */
+  inline?: boolean;
 }
 
 const uniqueKeywords = (data: unknown): string[] => {
@@ -115,6 +117,7 @@ export function AddStudyDialog({
   currentReportId,
   suggestedValues,
   onSaveStudy,
+  inline = false,
 }: AddStudyDialogProps) {
   const [shortName, setShortName] = useState("");
   const statusOptions = useStudyFieldValues("status");
@@ -148,6 +151,8 @@ export function AddStudyDialog({
   const [allInterventions, setAllInterventions] = useState<string[]>([]);
 
   const [addStudyDialogOpen, setAddStudyDialogOpen] = useState(false);
+  // An inline form is always shown, so it loads its suggestions right away.
+  const isFormShown = inline || addStudyDialogOpen;
   const [creatingStudy, setCreatingStudy] = useState(false);
   const [firstComparisonElement, setFirstComparisonElement] = useState<HTMLDivElement | null>(null);
 
@@ -182,18 +187,21 @@ export function AddStudyDialog({
     setSuggestionError(null);
   }, [suggestedValues]);
 
+  // A dialog starts over whenever it closes; an inline form whenever the report or its suggestion changes.
   useEffect(() => {
-    if (!addStudyDialogOpen) {
+    if (inline || !addStudyDialogOpen) {
       resetLocalFormState();
     }
   }, [
+    inline,
     addStudyDialogOpen,
     resetLocalFormState,
+    currentReportId,
   ]);
 
   useAbortableEffect(
     async (signal) => {
-      if (!addStudyDialogOpen) return;
+      if (!isFormShown) return;
 
       if (!currentReportId) {
         setSuggestionError("Select a report to load intervention suggestions.");
@@ -218,14 +226,14 @@ export function AddStudyDialog({
         if (!signal.aborted) setIsFetchingSuggestions(false);
       }
     },
-    [addStudyDialogOpen, currentReportId]
+    [isFormShown, currentReportId]
   );
 
   // Prefills the name unless the suggested values bring one.
   const hasSuggestedName = Boolean(suggestedValues?.short_name);
   useAbortableEffect(
     async (signal) => {
-      if (!addStudyDialogOpen || !currentReportId || hasSuggestedName) return;
+      if (!isFormShown || !currentReportId || hasSuggestedName) return;
 
       try {
         const name = await getSuggestedStudyName(Number(currentReportId), { signal });
@@ -235,12 +243,12 @@ export function AddStudyDialog({
         if (!signal.aborted) console.error("Failed to load the suggested study name:", error);
       }
     },
-    [addStudyDialogOpen, currentReportId, hasSuggestedName]
+    [isFormShown, currentReportId, hasSuggestedName]
   );
 
   useAbortableEffect(
     async (signal) => {
-      if (!addStudyDialogOpen || allInterventions.length > 0) return;
+      if (!isFormShown || allInterventions.length > 0) return;
 
       try {
         setAllInterventions(uniqueKeywords(await getInterventions({ signal })));
@@ -250,7 +258,7 @@ export function AddStudyDialog({
         setAllInterventions([]);
       }
     },
-    [addStudyDialogOpen, allInterventions.length]
+    [isFormShown, allInterventions.length]
   );
 
   // With several comparisons the panel is capped at one card's height and scrolls.
@@ -302,6 +310,7 @@ export function AddStudyDialog({
       await onSaveStudy(payload);
       toast.success("New study created and linked to the report.");
       setAddStudyDialogOpen(false);
+      if (inline) resetLocalFormState();
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to save study."
@@ -684,32 +693,9 @@ export function AddStudyDialog({
     statusOfStudy.trim().length === 0 ||
     !comparisonValid;
 
-  return (
-    <Dialog open={addStudyDialogOpen} onOpenChange={setAddStudyDialogOpen}>
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full h-10 border-dashed text-muted-foreground hover:text-foreground"
-        data-highlighted={highlight || undefined}
-        aria-haspopup="dialog"
-        aria-expanded={addStudyDialogOpen}
-        onClick={() => setAddStudyDialogOpen(true)}
-      >
-        <Plus className="h-4 w-4" />
-        Add as new study
-      </Button>
-      <DialogContent
-        className="max-w-[900px] sm:max-w-[720px] w-[min(92vw,900px)] max-h-[90vh] overflow-y-auto"
-        onOpenAutoFocus={(event) => event.preventDefault()}
-      >
-        <DialogHeader>
-          <DialogTitle>Add New Study</DialogTitle>
-          <DialogDescription>
-            Link this report to a new study.
-          </DialogDescription>
-        </DialogHeader>
-        <form className="space-y-4 w-full" onSubmit={handleAddStudySubmit}>
-          <div className="grid gap-4 grid-cols-[7fr_3fr] w-full items-start">
+  const formFields = (
+    <>
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-[7fr_3fr] w-full items-start">
             <div className="space-y-2">
               <Label htmlFor="study-short-name">Short name</Label>
               <Input
@@ -780,7 +766,7 @@ export function AddStudyDialog({
               </PopoverContent>
             </Popover>
           </div>
-          <div className="grid gap-4 grid-cols-[1fr_1fr] items-start">
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-[1fr_1fr] items-start">
             <div className="space-y-2">
               <Label htmlFor="study-participants">Number of participants</Label>
               <Input
@@ -879,6 +865,60 @@ export function AddStudyDialog({
               </div>
             </div>
           </div>
+    </>
+  );
+
+  if (inline) {
+    return (
+      <form className="space-y-4 w-full" onSubmit={handleAddStudySubmit}>
+        {formFields}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={resetLocalFormState}
+              disabled={creatingStudy}
+            >
+              Reset
+            </Button>
+            <Button
+              type="submit"
+              disabled={isSubmitDisabled}
+              data-highlighted={highlight || undefined}
+            >
+              {creatingStudy ? "Saving..." : "Save Study"}
+            </Button>
+          </div>
+      </form>
+    );
+  }
+
+  return (
+    <Dialog open={addStudyDialogOpen} onOpenChange={setAddStudyDialogOpen}>
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full h-10 border-dashed text-muted-foreground hover:text-foreground"
+        data-highlighted={highlight || undefined}
+        aria-haspopup="dialog"
+        aria-expanded={addStudyDialogOpen}
+        onClick={() => setAddStudyDialogOpen(true)}
+      >
+        <Plus className="h-4 w-4" />
+        Add as new study
+      </Button>
+      <DialogContent
+        className="max-w-[900px] sm:max-w-[720px] w-[min(92vw,900px)] max-h-[90vh] overflow-y-auto"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>Add New Study</DialogTitle>
+          <DialogDescription>
+            Link this report to a new study.
+          </DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4 w-full" onSubmit={handleAddStudySubmit}>
+          {formFields}
           <DialogFooter>
             <Button
               type="button"

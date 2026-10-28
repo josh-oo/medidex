@@ -9,7 +9,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-import { Badge } from "@/components/ui/badge";
+import { isNewStudyAssignment } from "@/lib/study-assignment";
+import { cn } from "@/lib/utils";
 import { Loader2, X } from "lucide-react";
 import React, { useState } from "react";
 
@@ -48,26 +49,6 @@ export function ReportAssignedStudiesBadges({
   if (!assignedStudies || assignedStudies.length == 0){
     return null;
   }
-
-  // Utility: toTimestamp
-  const toTimestamp = (value: Date | string | number | null | undefined): number | null => {
-    if (value === null || value === undefined) {
-      return null;
-    }
-    const date = value instanceof Date ? value : new Date(value);
-    const timestamp = date.getTime();
-    return Number.isFinite(timestamp) ? timestamp : null;
-  };
-
-  // Utility: isNewStudyAssignment
-  const isNewStudyAssignment = (
-    studyCreatedAt: Date | string | number | null | undefined,
-    reportCreatedAt: Date | string | number | null | undefined
-  ) => {
-    const studyTimestamp = toTimestamp(studyCreatedAt);
-    const reportTimestamp = toTimestamp(reportCreatedAt);
-    return studyTimestamp !== null && reportTimestamp !== null && studyTimestamp > reportTimestamp;
-  };
 
   // Handle badge click
   const handleStudyBadgeClick = (event: React.MouseEvent, studyId: number) => {
@@ -127,29 +108,39 @@ export function ReportAssignedStudiesBadges({
   };
 
   return (
-    <div className="flex flex-wrap gap-1 mt-4">
+    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      <span className="mr-0.5 text-xs text-muted-foreground">Linked to</span>
       {assignedStudies.map((study) => {
         const assignmentKey = getAssignmentKey(report.reportId, study.studyId);
         // Use local removing state in addition to parent removingAssignments
         const isRemovingAssignment = removingAssignments.has(assignmentKey) || removing.has(assignmentKey);
+        // The same colours as the dots of the report list: blue for a new study, green for an existing one.
         const isNewStudy = isNewStudyAssignment(
           study.createdAt,
           report.createdAt
         );
         return (
-          <Badge
+          <span
             key={study.studyId}
-            variant={isNewStudy ? "destructive" : "outline"}
-            className={`text-xs font-mono cursor-pointer inline-flex items-center gap-1 pr-2 ${
-              isNewStudy ? "" : "border-destructive text-destructive"
-            }`}
-            onClick={(event) => handleStudyBadgeClick(event, study.studyId)}
+            className={cn(
+              "group inline-flex items-center gap-1 rounded-full py-0.5 pl-2.5 pr-1 text-xs font-medium",
+              isNewStudy
+                ? "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300"
+                : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+            )}
           >
-            <span>{study.shortName}</span>
             <button
               type="button"
-              tabIndex={-1}
-              className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-destructive/70 text-destructive-foreground hover:bg-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+              className="cursor-pointer hover:underline"
+              title={isNewStudy ? "New study, created for this report" : "Existing study"}
+              onClick={(event) => handleStudyBadgeClick(event, study.studyId)}
+            >
+              {study.shortName}
+            </button>
+            {isNewStudy && <span className="text-[10px] font-normal opacity-70">new</span>}
+            <button
+              type="button"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full opacity-60 hover:bg-black/5 hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60 dark:hover:bg-white/10"
               title="Remove study from report"
               aria-label={`Remove study ${study.shortName} from report`}
               onClick={(event) => {
@@ -165,7 +156,7 @@ export function ReportAssignedStudiesBadges({
                 <X className="h-3 w-3" />
               )}
             </button>
-          </Badge>
+          </span>
         );
       })}
       {studyToRemove && (

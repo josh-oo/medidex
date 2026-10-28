@@ -4,6 +4,8 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* The tinted ground of the app shell; widgets and cards sit on it as --card. */
+  --canvas: oklch(0.967 0.0015 286);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -12,17 +14,17 @@
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.603 0.2347 26.99);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  --secondary: oklch(0.96 0.002 286);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  --muted: oklch(0.967 0.0015 286);
+  --muted-foreground: oklch(0.53 0.008 286);
+  --accent: oklch(0.96 0.002 286);
   --accent-foreground: oklch(0.603 0.2347 26.99);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.92 0.004 286);
+  --input: oklch(0.9 0.004 286);
+  --ring: oklch(0.7 0.006 286);
   --chart-1: oklch(0.81 0.1 252);
   --chart-2: oklch(0.62 0.19 260);
   --chart-3: oklch(0.55 0.22 263);
@@ -39,7 +41,7 @@
   --font-sans: IBM Plex Sans, ui-sans-serif, sans-serif, system-ui;
   --font-serif: IBM Plex Serif, ui-serif, serif;
   --font-mono: IBM Plex Mono, ui-monospace, monospace;
-  --radius: 0rem;
+  --radius: 0.75rem;
   --shadow-x: 0;
   --shadow-y: 1px;
   --shadow-blur: 3px;
@@ -47,12 +49,12 @@
   --shadow-opacity: 0.1;
   --shadow-color: oklch(0 0 0);
   --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-  --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-  --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0 1px 2px -1px hsl(0 0% 0% / 0.1);
-  --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
-  --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0 2px 4px -1px hsl(0 0% 0% / 0.1);
+  --shadow-xs: 0 1px 2px 0px hsl(240 10% 4% / 0.05);
+  --shadow-sm: 0 1px 2px 0px hsl(240 10% 4% / 0.05),
+    0 2px 8px -2px hsl(240 10% 4% / 0.06);
+  --shadow: 0 1px 2px 0px hsl(240 10% 4% / 0.05), 0 4px 14px -4px hsl(240 10% 4% / 0.08);
+  --shadow-md: 0 1px 2px 0px hsl(240 10% 4% / 0.05),
+    0 6px 18px -6px hsl(240 10% 4% / 0.10);
   --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.1),
     0 4px 6px -1px hsl(0 0% 0% / 0.1);
   --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.1),
@@ -63,25 +65,26 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  --canvas: oklch(0.135 0.003 286);
+  --background: oklch(0.185 0.004 286);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: oklch(0.185 0.004 286);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.269 0 0);
+  --popover: oklch(0.215 0.004 286);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+  --primary: oklch(0.645 0.215 25);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.25 0.004 286);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.371 0 0);
+  --muted: oklch(0.235 0.004 286);
+  --muted-foreground: oklch(0.72 0.008 286);
+  --accent: oklch(0.27 0.005 286);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.275 0 0);
-  --input: oklch(0.325 0 0);
-  --ring: oklch(0.556 0 0);
+  --border: oklch(0.28 0.005 286);
+  --input: oklch(0.32 0.006 286);
+  --ring: oklch(0.55 0.008 286);
   --chart-1: oklch(0.81 0.1 252);
   --chart-2: oklch(0.62 0.19 260);
   --chart-3: oklch(0.55 0.22 263);
@@ -98,7 +101,7 @@
   --font-sans: IBM Plex Sans, ui-sans-serif, sans-serif, system-ui;
   --font-serif: IBM Plex Serif, ui-serif, serif;
   --font-mono: IBM Plex Mono, ui-monospace, monospace;
-  --radius: 0rem;
+  --radius: 0.75rem;
   --shadow-x: 0;
   --shadow-y: 1px;
   --shadow-blur: 3px;
@@ -106,12 +109,10 @@
   --shadow-opacity: 0.1;
   --shadow-color: oklch(0 0 0);
   --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-  --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-  --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0 1px 2px -1px hsl(0 0% 0% / 0.1);
-  --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
-  --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0 2px 4px -1px hsl(0 0% 0% / 0.1);
+  --shadow-xs: 0 0 0 0px transparent;
+  --shadow-sm: 0 1px 2px 0px hsl(0 0% 0% / 0.3);
+  --shadow: 0 1px 2px 0px hsl(0 0% 0% / 0.3);
+  --shadow-md: 0 2px 8px -2px hsl(0 0% 0% / 0.4);
   --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.1),
     0 4px 6px -1px hsl(0 0% 0% / 0.1);
   --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.1),
@@ -120,6 +121,7 @@
 }
 
 @theme inline {
+  --color-canvas: var(--canvas);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -177,7 +179,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-canvas text-foreground;
   }
 }
 
