@@ -289,6 +289,8 @@ export interface GetStudySearchParams {
   q: string;
   limit?: number;
   cursor?: string;
+  // The ids of the study databases to search in; all of them if left out.
+  databases?: number[];
 }
 
 // A study suggested as a possible match for a report by the similarity search
@@ -327,6 +329,8 @@ export interface ProjectDto{
   name: string;
   createdAt: string;
   owner: string;
+  // The study database its reports are matched against and added to.
+  databaseId: number;
   numberReportsReadyForProcessing: number;
   numberReportsTotal: number;
   numberReportsPreProcessed: number;
@@ -349,9 +353,38 @@ export interface TaskDto {
   name: string;
   createdAt: string;
   owner: string;
+  databaseId: number;
   numberReportsTotal: number;
   numberReportsReadyForProcessing: number;
   numberReportsProcessed: number;
+}
+
+// ---------------------------------------------------------------------------
+// Study databases
+// ---------------------------------------------------------------------------
+
+export interface DatabasePayload {
+  name: string;
+  description?: string | null;
+  // Which studies belong in the database, e.g. the inclusion criteria of the register.
+  eligibilityCriteria: string;
+}
+
+// The fields given are changed; an empty description removes it.
+export type DatabaseUpdate = Partial<DatabasePayload>;
+
+export interface DatabaseDto {
+  databaseId: number;
+  name: string;
+  description?: string | null;
+  eligibilityCriteria: string;
+  createdAt: string;
+  // Not all its reports are in the vectorstore yet (e.g. right after an import): its studies are found by the search
+  // but not yet suggested for new reports, and no projects can be uploaded into it.
+  indexing: boolean;
+  numberReportsIndexed: number;
+  numberStudies: number;
+  numberReports: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -50,21 +50,28 @@ study_ids_query =  Query(None, description="List of study IDs (used to filter yo
 study_id_path = Path(..., description="Study ID")
 report_ids_query = Query(None, description="List of ReportIDs (used to filter your results)")
 report_id_path = Path(..., description="ReportID")
+databases_query = Query([], description="Search only: the ids of the study databases to search in; all of them if omitted.")
 
 """
 Study Endpoints
 """
 
-async def _search_studies_or_400(ctx: RequestContext, q: str, limit: int, cursor: Optional[str]) -> Page[Study]:
+async def _search_studies_or_400(ctx: RequestContext, q: str, limit: int, cursor: Optional[str], databases: Optional[List[int]] = None) -> Page[Study]:
     try:
-        return await ctx.study_service.search_studies_page(q, limit, cursor)
+        return await ctx.study_service.search_studies_page(q, limit, cursor, databases)
     except (InvalidCursorError, QuerySyntaxError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-@router.put("/studies", summary="Add new study to the database.")
-async def add_study(study_params: StudyPayload, ctx: RequestContext = Depends(get_context)) -> Study:
+@router.put("/studies", summary="Add new study to a study database.")
+async def add_study(
+    study_params: StudyPayload,
+    databaseId: int = Query(..., description="The study database the study belongs to."),
+    ctx: RequestContext = Depends(get_context),
+) -> Study:
+    if await ctx.database_repo.get_database(databaseId) is None:
+        raise HTTPException(status_code=404, detail=f"Database {databaseId} not found")
     try:
-        return await ctx.study_service.add_study(study_params)
+        return await ctx.study_service.add_study(study_params, databaseId)
     except DuplicateShortNameError:
         raise HTTPException(status_code=409, detail="Shortname already exists")
 
@@ -74,10 +81,11 @@ async def get_studies(
     q: Optional[str] = Query(None, min_length=3, description=SEARCH_QUERY_DESCRIPTION),
     limit: int = Query(25, ge=1, le=100, description="Search only: maximum number of results to return per page."),
     cursor: Optional[str] = Query(None, description="Search only: opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
+    databases: List[int] = databases_query,
     ctx: RequestContext = Depends(get_context),
 ) -> Union[List[Study], Page[Study]]:
     if q is not None:
-        return await _search_studies_or_400(ctx, q, limit, cursor)
+        return await _search_studies_or_400(ctx, q, limit, cursor, databases)
     return await ctx.study_service.get_studies(study_ids)
 
 @router.get("/studies/search", summary="Search studies by name, trial ID, author or intervention - free-text, or advanced AND/OR field matching.")
@@ -85,9 +93,10 @@ async def search_studies(
     q: str = Query(..., min_length=3, description=SEARCH_QUERY_DESCRIPTION),
     limit: int = Query(25, ge=1, le=100, description="Maximum number of results to return per page."),
     cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
+    databases: List[int] = databases_query,
     ctx: RequestContext = Depends(get_context),
 ) -> Page[Study]:
-    return await _search_studies_or_400(ctx, q, limit, cursor)
+    return await _search_studies_or_400(ctx, q, limit, cursor, databases)
 
 @router.get("/studies/graphs", summary="The graph of config/medidex-study.yaml (the arms of a study and their comparisons) of the specified studies, with their tags named.")
 async def get_study_graphs(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, StudyGraph]:
@@ -293,8 +302,12 @@ async def get_pdf(report_id : int, ctx: RequestContext = Depends(get_context)) -
 @router.delete("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Delete the fulltext pdf for a given report")
 async def delete_pdf(report_id : int, ctx: RequestContext = Depends(get_context)) -> Dict[str, Any]:
     try:
-        return await ctx.document_service.delete_pdf(report_id)
+        result = await ctx.document_service.delete_pdf(report_id)
+        await ctx.report_repo.db.commit()
+        await ctx.pubsub_service.publish_report_update(report_id)
+        return result
     except Exception as e:
+        await ctx.report_repo.db.rollback()
         if str(e) == "Report not found":
             raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
         raise HTTPException(status_code=500, detail="Failed to delete PDF.")
@@ -374,8 +387,12 @@ def _register_tag_routes(category: str) -> None:
         next_cursor = encode_cursor(offset + limit) if has_more else None
         return Page[Tag](items=result, nextCursor=next_cursor)
 
-    async def get_all_tags(ids: List[int] = Query(None, description=f"If you are only interested in specific {category}. Leave this blank for retrieving all {category}."), ctx: RequestContext = Depends(get_context)) -> List[Tag]:
-        return tags_to_dto(await ctx.aspect_repo.get_all_tags(category, ids))
+    async def get_all_tags(
+        ids: List[int] = Query(None, description=f"If you are only interested in specific {category}. Leave this blank for retrieving all {category}."),
+        databases: List[int] = Query([], description=f"Only the {category} of studies of these study databases; the whole vocabulary if omitted."),
+        ctx: RequestContext = Depends(get_context),
+    ) -> List[Tag]:
+        return tags_to_dto(await ctx.aspect_repo.get_all_tags(category, ids, databases))
 
     router.add_api_route(f"/studies/{{study_id}}/{category}", get_study_tags_single, methods=["GET"], name=f"get_study_{category}_single",
                          summary=f"Get the {config.description[0].lower()}{config.description[1:]}, paginated.")
@@ -388,8 +405,12 @@ for _category in TAG_CATEGORIES:
     _register_tag_routes(_category)
 
 @router.get("/countries", summary="Get all study countries or filter them by prefix.")
-async def get_all_countries(prefix: Optional[str] = Query(None, description="Filter countries by prefix (case-insensitive)."), ctx: RequestContext = Depends(get_context)) -> List[str]:
-    return await ctx.aspect_repo.get_all_countries(prefix)
+async def get_all_countries(
+    prefix: Optional[str] = Query(None, description="Filter countries by prefix (case-insensitive)."),
+    databases: List[int] = Query([], description="Only the countries of studies of these study databases; all if omitted."),
+    ctx: RequestContext = Depends(get_context),
+) -> List[str]:
+    return await ctx.aspect_repo.get_all_countries(prefix, databases)
 
 """
 Other Endpoints

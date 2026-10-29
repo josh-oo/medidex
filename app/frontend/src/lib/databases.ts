@@ -1,42 +1,94 @@
-// The study databases a search can cover. There is only one for now and the backend has neither a selection nor
-// more databases yet: the picker of the search bar keeps the choice in the URL (?db=) for when it does, and a
-// database "created" there only lives in this session (a mock of the feature).
-import { useSyncExternalStore } from "react";
+// The study databases: separate collections of studies, each with its own projects that bring new reports to it. The
+// list is loaded once and shared by every view (the search picker, the database management); refreshStudyDatabases()
+// loads it again after a change.
+import { useEffect, useSyncExternalStore } from "react";
+import { getDatabases } from "@/lib/api/databaseApi";
+import type { DatabaseDto } from "@/types/apiDTOs";
 
 export interface StudyDatabase {
-  id: string;
+  id: number;
   name: string;
   description?: string;
+  eligibilityCriteria: string;
+  numberStudies: number;
+  numberReports: number;
+  /** Its reports are still being added to the vectorstore (see DatabaseDto.indexing). */
+  indexing: boolean;
+  numberReportsIndexed: number;
 }
 
-/** The database there is today, which every project belongs to until projects carry a database of their own. */
-export const DEFAULT_DATABASE_ID = "medidex";
+interface DatabaseState {
+  loaded: boolean;
+  /** The last load failed (the databases may still be those of an earlier one). */
+  failed: boolean;
+  databases: StudyDatabase[];
+}
 
-let databases: StudyDatabase[] = [{ id: DEFAULT_DATABASE_ID, name: "Medidex" }];
+let state: DatabaseState = { loaded: false, failed: false, databases: [] };
+let pending: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
+  scheduleRefresh();
   return () => listeners.delete(listener);
 };
 
-export function useStudyDatabases(): StudyDatabase[] {
-  return useSyncExternalStore(subscribe, () => databases);
+const toStudyDatabase = (dto: DatabaseDto): StudyDatabase => ({
+  id: dto.databaseId,
+  name: dto.name,
+  description: dto.description || undefined,
+  eligibilityCriteria: dto.eligibilityCriteria,
+  numberStudies: dto.numberStudies,
+  numberReports: dto.numberReports,
+  indexing: dto.indexing,
+  numberReportsIndexed: dto.numberReportsIndexed,
+});
+
+// While a database is being indexed, the list is loaded again every few seconds, as long as a view shows it.
+const INDEXING_REFRESH_MS = 5000;
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+const scheduleRefresh = () => {
+  if (refreshTimer !== null || listeners.size === 0 || !state.databases.some((database) => database.indexing)) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    void refreshStudyDatabases();
+  }, INDEXING_REFRESH_MS);
+};
+
+/** Loads the databases (again), e.g. after one was created; the views using them update. */
+export function refreshStudyDatabases(): Promise<void> {
+  pending ??= getDatabases()
+    .then((dtos) => {
+      state = { loaded: true, failed: false, databases: dtos.map(toStudyDatabase) };
+    })
+    .catch(() => {
+      state = { ...state, loaded: true, failed: true };
+    })
+    .finally(() => {
+      pending = null;
+      listeners.forEach((listener) => listener());
+      scheduleRefresh();
+    });
+  return pending;
 }
 
-/** Mock: adds a database for this session only. */
-export function addStudyDatabase(name: string, description?: string): StudyDatabase {
-  const base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "database";
-  let id = base;
-  for (let n = 2; databases.some((database) => database.id === id); n++) id = `${base}-${n}`;
-  const database = { id, name: name.trim(), description: description?.trim() || undefined };
-  databases = [...databases, database];
-  listeners.forEach((listener) => listener());
-  return database;
+/** The databases, the oldest first; loads them the first time they are asked for. There may be none yet. */
+export function useStudyDatabases(): DatabaseState {
+  const current = useSyncExternalStore(subscribe, () => state);
+  useEffect(() => {
+    if (!state.loaded) void refreshStudyDatabases();
+  }, []);
+  return current;
 }
 
-/** The database a project adds its reports to. Projects do not say yet, so it is the one database there is. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function projectDatabaseId(_project: { projectId: string }): string {
-  return DEFAULT_DATABASE_ID;
+/** The ids of databases kept in the URL (?db=1&db=2), without what is no id. */
+export function parseDatabaseIds(values: string[]): number[] {
+  return values.map(Number).filter((id) => Number.isInteger(id) && id > 0);
+}
+
+/** The database a project adds its reports to. */
+export function projectDatabaseId(project: { databaseId: number }): number {
+  return project.databaseId;
 }

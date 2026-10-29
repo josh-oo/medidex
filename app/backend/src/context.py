@@ -13,6 +13,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database.repositories.aspects import AspectRepository
+from .database.repositories.database import DatabaseRepository
 from .database.repositories.project import ProjectRepository
 from .database.repositories.report import ReportRepository
 from .database.repositories.study import StudyRepository
@@ -21,6 +22,7 @@ from .services.aspects import TagScoringService, TagSimilaritySearchService
 from .services.authors import AuthorFeatureService
 from .services.core import RelatedTagSearchService, StudySimilaritySearchService
 from .services.crawler import CrawlerService, OpenAlexService, crawler_service, open_alex_service
+from .services.database import StudyDatabaseService
 from .services.embedding import EmbeddingService, embedding_service
 from .services.linkage import LinkageService
 from .services.maintenance import MaintenanceService
@@ -60,6 +62,10 @@ class RequestContext:
     @cached_property
     def study_repo(self) -> StudyRepository:
         return StudyRepository(db=self.db, user_id=self.user_id, see_all=self.is_admin)
+
+    @cached_property
+    def database_repo(self) -> DatabaseRepository:
+        return DatabaseRepository(db=self.db, user_id=self.user_id)
 
     @cached_property
     def aspect_repo(self) -> AspectRepository:
@@ -153,7 +159,21 @@ class RequestContext:
 
     @cached_property
     def maintenance_service(self) -> MaintenanceService:
-        return MaintenanceService(report_repo=self.report_repo, vectorstore=self.vectorstore_service)
+        return MaintenanceService(
+            report_repo=self.report_repo,
+            vectorstore=self.vectorstore_service,
+            database_repo=self.database_repo,
+            aspect_repo=self.aspect_repo,
+            embedding_service=self.embedding_service,
+        )
+
+    @cached_property
+    def database_service(self) -> StudyDatabaseService:
+        return StudyDatabaseService(
+            database_repo=self.database_repo,
+            study_repo=self.study_repo,
+            vectorstore=self.vectorstore_service,
+        )
 
     @cached_property
     def study_service(self) -> StudyResourceService:
@@ -164,6 +184,7 @@ class RequestContext:
         return ProjectResourceService(
             project_repo=self.project_repo,
             report_repo=self.report_repo,
+            database_service=self.database_service,
             vectorstore_service=self.vectorstore_service,
             pubsub_service=self.pubsub_service,
             document_service=self.document_service,

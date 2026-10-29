@@ -19,7 +19,6 @@ from ..models import (
     StudyReportAdded,
     ProjectAssignees,
 )
-from .report import ReportRepository
 from typing import Any, Dict, List, Set, Tuple, Optional
 
 
@@ -27,9 +26,8 @@ from typing import Any, Dict, List, Set, Tuple, Optional
 class DeletedProject:
     """What a deleted project had that lives outside the database and has to be removed as well."""
 
+    # The reports, whose vectors and PDF files go as well.
     report_ids: List[int]
-    # Numbers of the PDF files of the reports that have one (report.report_number > 0).
-    pdf_numbers: List[int]
 
 
 class ProjectRepository:
@@ -38,12 +36,13 @@ class ProjectRepository:
         self.db = db
         self.user_id = str(user_id)
 
-    async def add_new_project(self, project_id : str, batch_description : str, reports : List[Report], trial_ids : Optional[List[Optional[str]]] = None):
+    async def add_new_project(self, project_id : str, batch_description : str, reports : List[Report], database_id : int, trial_ids : Optional[List[Optional[str]]] = None):
         try:
             new_project = Project(
                 id=project_id,
                 description=batch_description,
-                uploaded_by=self.user_id
+                uploaded_by=self.user_id,
+                database_id=database_id,
             )
             self.db.add(new_project)
 
@@ -182,13 +181,6 @@ class ProjectRepository:
             report_added.referenced_dois = referenced_dois
         await self.db.flush()
 
-        # auto_searched_pdf gates report.has_pdf's eligibility (see
-        # ReportRepository._compute_has_pdf) - a fulltext file may already exist and just
-        # been waiting on this flag, so re-derive it now instead of leaving it stale until
-        # something else happens to touch this report's PDF/fulltext state. Same session,
-        # different repo class - both just wrap self.db.
-        await ReportRepository(db=self.db, user_id=self.user_id).recompute_has_pdf(report_id)
-
     async def is_project_assignee(self, project_id: str) -> bool:
         if not self.user_id:
             return False
@@ -280,10 +272,7 @@ class ProjectRepository:
 
         reports = [added.report for added in project.reports_added]
         report_ids = [report.id for report in reports]
-        deleted = DeletedProject(
-            report_ids=report_ids,
-            pdf_numbers=[report.report_number for report in reports if (report.report_number or 0) > 0],
-        )
+        deleted = DeletedProject(report_ids=report_ids)
         linked_study_ids = list((await self.db.execute(
             select(StudyReport.study_id).where(StudyReport.report_id.in_(report_ids)).distinct()
         )).scalars().all()) if report_ids else []
@@ -516,6 +505,16 @@ class ProjectRepository:
         )
         await self.db.commit()
         return bool(result.rowcount)
+
+    async def get_database_id_by_report_id(self, report_id: int) -> Optional[int]:
+        """The study database of the report's project, None for a report of no project (e.g. of the seed)."""
+        stmt = (
+            select(Project.database_id)
+            .join(ReportAdded, ReportAdded.project_id == Project.id)
+            .where(ReportAdded.report_id == report_id)
+            .limit(1)
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def get_project_id_by_report_id(self, report_id: int) -> Optional[str]:
         stmt = (

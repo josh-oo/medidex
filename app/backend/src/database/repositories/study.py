@@ -10,7 +10,7 @@ from sqlmodel import select, func, text
 from dotenv import load_dotenv
 
 from datetime import datetime, timezone
-from typing import Any, List, Mapping, Optional, Dict, Tuple
+from typing import Any, List, Mapping, Optional, Dict, Sequence, Tuple
 
 from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport, StudyReportAdded
 from ..tagstorage import TAG_COLUMNS, TAG_TABLES
@@ -127,37 +127,48 @@ class StudyRepository:
         )
         return or_(~created_elsewhere, confirmed)
 
+    @staticmethod
+    def _in_databases(databases: Optional[Sequence[int]]):
+        """The studies of the given study databases; no databases means all of them."""
+        return Study.database_id.in_(list(databases)) if databases else true()
+
     async def commit(self):
         await self.db.commit()
 
     async def rollback(self):
         await self.db.rollback()
 
-    async def add_study(self, values: Mapping[str, Any]) -> Study:
-        """Adds a study from its fields (see StudyFields in utils/dto.py): the primitive fields, the tags kept in a
-        column (e.g. countries) and the graph, whose tags are resolved and become tags of the study. Raises
-        GraphFormatError if the graph is no graph of config/medidex-study.yaml."""
+    async def add_study(self, values: Mapping[str, Any], database_id: int) -> Study:
+        """Adds a study to a study database from its fields (see StudyFields in utils/dto.py): the primitive fields,
+        the tags kept in a column (e.g. countries) and the graph, whose tags are resolved and become tags of the study.
+        It is the study of this scope until a reviewer confirms it (see _visible). Raises GraphFormatError if the graph
+        is no graph of config/medidex-study.yaml, DuplicateShortNameError if the database has a study of that name."""
         #TODO add more sophisticated checks
+        new_study = await self._insert(values, database_id)
+        self.db.add(StudyAdded(study_id=new_study.id, created_by=self.user_id))
+        await self.db.flush()
+        await self.db.refresh(new_study)
+        return new_study
 
+    async def import_study(self, values: Mapping[str, Any], database_id: int, date_entered: Optional[str] = None) -> Study:
+        """Adds a study of an imported database, like add_study, but as the seed data is: without a study_added record,
+        so every scope sees it, and entered when the database it comes from says (now without)."""
+        new_study = await self._insert(values, database_id, date_entered)
+        await self.db.refresh(new_study)
+        return new_study
+
+    async def _insert(self, values: Mapping[str, Any], database_id: int, date_entered: Optional[str] = None) -> Study:
         try:
             columns: Dict[str, Any] = {field.column: values.get(key) for key, field in STUDY_CONFIG.fields.items()}
             for key in STUDY_CONFIG.inline_categories:
                 columns[key] = INLINE_SEPARATOR.join(values.get(key) or [])
-            new_study = Study(**columns)
+            new_study = Study(**columns, database_id=database_id)
+            if date_entered:
+                new_study.date_entered = date_entered
 
             self.db.add(new_study)
             await self.db.flush()
             await self.graphs.store(new_study, values)
-
-            study_added_entry = StudyAdded(
-                study_id=new_study.id,
-                created_by=self.user_id,
-            )
-            self.db.add(study_added_entry)
-
-            await self.db.flush()
-            await self.db.refresh(new_study)
-
             return new_study
 
         except IntegrityError as e:
@@ -166,15 +177,32 @@ class StudyRepository:
                 raise DuplicateShortNameError("short_name already exists")
             raise
 
+    async def add_study_tags(self, study_id: int, category: str, names: List[str]) -> None:
+        """Makes the tags of a category kept in a table (e.g. interventions) tags of the study, by name; an unknown
+        name becomes a new tag (see StudyGraphs.resolve)."""
+        storage = TAG_TABLES[category]
+        existing = set((await self.db.execute(select(storage.link_tag).where(storage.link_study == study_id))).scalars())
+        for tag_id in await self.graphs.resolve(category, names):
+            if tag_id not in existing:
+                self.db.add(storage.link(**{storage.link_study.key: study_id, storage.link_tag.key: tag_id}))
+                existing.add(tag_id)
+        await self.db.flush()
+
+    async def get_database_studies(self, database_id: int) -> List[Study]:
+        """The studies of a study database visible to this scope, by name."""
+        stmt = select(Study).where(Study.database_id == database_id).where(self._visible()).order_by(Study.short_name, Study.id)
+        return list((await self.db.execute(stmt)).scalars().all())
+
     async def get_graphs(self, studies: List[Study]) -> Dict[int, StudyGraph]:
         """The graphs (config/medidex-study.yaml) of the studies, by study, with their tags named."""
         return await self.graphs.get(studies)
 
-    async def search_studies(self, query: str, limit: int, offset: int) -> Tuple[List[Study], bool]:
+    async def search_studies(self, query: str, limit: int, offset: int, databases: Optional[Sequence[int]] = None) -> Tuple[List[Study], bool]:
         """Free-text search across a study's own name/trial ID plus its linked reports'
         authors/trial ID - both the confirmed Report.trial_registration_id and the
         unconfirmed report_added.trial_registration_id guess (see their comments in
-        models.py) - and the tags of the categories with free_text_search (config/medidex-study.yaml). Returns (page, has_more) - one extra id beyond
+        models.py) - and the tags of the categories with free_text_search (config/medidex-study.yaml), in the given
+        study databases (all without). Returns (page, has_more) - one extra id beyond
         the page is fetched so has_more can be determined without a separate count
         query, same convention as StudySimilaritySearchService.get_similar_studies_by_id.
         """
@@ -200,6 +228,7 @@ class StudyRepository:
             id_stmt
             .where(or_(*matches))
             .where(self._visible())
+            .where(self._in_databases(databases))
             .distinct()
             .order_by(Study.short_name, Study.id)
             .offset(offset)
@@ -216,7 +245,7 @@ class StudyRepository:
         page = [studies_by_id[study_id] for study_id in study_ids if study_id in studies_by_id]
         return page, has_more
 
-    async def search_studies_advanced(self, query: QueryNode, limit: int, offset: int) -> Tuple[List[Study], bool]:
+    async def search_studies_advanced(self, query: QueryNode, limit: int, offset: int, databases: Optional[Sequence[int]] = None) -> Tuple[List[Study], bool]:
         """Boolean AND/OR search across studies by field==value comparisons (see
         src/utils/query_parser.py for the grammar and QueryNode shape). Supported fields:
         name/shortName, trialId, author, status and the search field of each tag category
@@ -229,6 +258,7 @@ class StudyRepository:
             select(Study.id, Study.short_name)
             .where(condition)
             .where(self._visible())
+            .where(self._in_databases(databases))
             .distinct()
             .order_by(Study.short_name, Study.id)
             .offset(offset)
@@ -245,8 +275,8 @@ class StudyRepository:
         page = [studies_by_id[study_id] for study_id in study_ids if study_id in studies_by_id]
         return page, has_more
 
-    async def get_studies(self, study_ids: Optional[List[int]] = None) -> List[Study]:
-        stmt = select(Study).where(self._visible())
+    async def get_studies(self, study_ids: Optional[List[int]] = None, databases: Optional[Sequence[int]] = None) -> List[Study]:
+        stmt = select(Study).where(self._visible()).where(self._in_databases(databases))
         if study_ids:
             stmt = stmt.where(Study.id.in_(study_ids))
         result = (await self.db.execute(stmt)).scalars().all()
@@ -254,7 +284,7 @@ class StudyRepository:
         #await asyncio.gather(*[log_event(-1, Event(event_type=f"study::{study_id}::visited", timestamp=datetime.now(timezone.utc).isoformat()), self.user_id) for study_id in study_ids])
         return result
 
-    async def get_studies_by_report_dois(self, dois: List[str]) -> List[Study]:
+    async def get_studies_by_report_dois(self, dois: List[str], databases: Optional[Sequence[int]] = None) -> List[Study]:
         """Studies linked to any report whose DOI is in `dois` (normalized: lowercase, no
         resolver prefix - see crawler.normalize_doi). Report DOIs are stored as uploaded,
         so the bare and https://doi.org/-prefixed spellings are both matched. Link scoping
@@ -272,15 +302,16 @@ class StudyRepository:
             .outerjoin(StudyReportAdded, StudyReportAdded.study_report_id == StudyReport.id)
             .where(func.lower(Report.doi).in_(spellings))
             .where(self._visible())
+            .where(self._in_databases(databases))
             .where(or_(StudyReportAdded.created_by == self.user_id, StudyReportAdded.created_by.is_(None)))
             .distinct()
             .order_by(Study.id)
         )
         return (await self.db.execute(stmt)).scalars().all()
 
-    async def get_study_by_id(self, study_id: int) -> Optional[Study]:
-        """None if there is no such study, or it is not visible to this scope."""
-        stmt = select(Study).where(Study.id == study_id).where(self._visible())
+    async def get_study_by_id(self, study_id: int, databases: Optional[Sequence[int]] = None) -> Optional[Study]:
+        """None if there is no such study, it is not visible to this scope or not in the given study databases."""
+        stmt = select(Study).where(Study.id == study_id).where(self._visible()).where(self._in_databases(databases))
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def search_study_by_shortname(self, shortname: str, cutoff: Optional[str] = None) -> Study:

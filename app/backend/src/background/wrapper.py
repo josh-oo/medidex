@@ -19,6 +19,7 @@ from ..database.sessions import AsyncSessionLocal
 from ..database.models import Report as DbReport, ReportAdded
 from ..services.crawler import OpenAlexWork, normalize_doi
 from .postprocessing import PostprocessingOptions, postprocessor_registry
+from ..utils.pdfs import PdfFiles
 from ..utils.trial_registration_id import is_trial_registration
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,8 @@ async def _auto_search_report_pdf(
     already exists, since the report detail view wants them regardless of PDF status;
     both are None if the lookup failed (nothing to cache).
     """
-    if report.report_number <= 0 and is_trial_registration(report.authors):
+    has_pdf = PdfFiles.path(report.id).is_file()
+    if not has_pdf and is_trial_registration(report.authors):
         # A bare trial registration has no DOI or published PDF - render its
         # registry record as the report's PDF instead.
         try:
@@ -110,7 +112,7 @@ async def _auto_search_report_pdf(
     work = works.get(normalize_doi(report.doi), OpenAlexWork())
     links = work.pdf_links
 
-    if report.report_number > 0:  # report already has a pdf, skip the download attempt
+    if has_pdf:  # report already has a pdf, skip the download attempt
         return None, links, work.referenced_dois
 
     for link in links:
@@ -203,16 +205,14 @@ async def process_report(
                     await session.rollback()
             await ctx.pubsub_service.publish_project_update(project_id)
 
-    async def has_pdf_file(report) -> bool:
-        async with AsyncSessionLocal() as session:
-            current = await RequestContext(db=session, user_id=ctx.user_id).report_repo.get_report_by_id(report.id)
-            return current is not None and (current.report_number or 0) > 0
+    def has_pdf_file(report) -> bool:
+        return PdfFiles.path(report.id).is_file()
 
     async def settle(report, client):
         await asyncio.gather(prepare_vectorstore(report), load_pdf(report, client))
         # Without a PDF the postprocessing waits (stays pending) until one is uploaded manually,
         # which triggers it (see run_pending_postprocessing).
-        if postprocessors and await has_pdf_file(report):
+        if postprocessors and has_pdf_file(report):
             postprocess_tasks.append(asyncio.ensure_future(postprocess(report)))
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
@@ -267,3 +267,15 @@ async def run_pending_postprocessing(report_id: int, user_id: str) -> None:
                 logger.exception("Postprocessing failed for report %s", report_id)
                 await session.rollback()
         await ctx.pubsub_service.publish_project_update(project_id)
+
+
+async def run_index_database_reports(report_ids: List[int], user_id: str) -> None:
+    """Adds the reports of an imported study database to the vectorstore (see StudyDatabaseService.index_reports);
+    until then its studies are only found by the study search, not suggested for new reports."""
+    async with AsyncSessionLocal() as session:
+        ctx = RequestContext(db=session, user_id=user_id)
+        async with _vectorstore_semaphore:
+            try:
+                await ctx.database_service.index_reports(report_ids)
+            except Exception:
+                logger.exception("Adding %s imported reports to the vectorstore failed", len(report_ids))

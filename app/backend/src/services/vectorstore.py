@@ -5,8 +5,9 @@ from qdrant_client.models import Filter, FieldCondition, DatetimeRange
 
 from dotenv import load_dotenv
 import os
+import re
 import numpy as np
-from typing import List, Any, Optional, Dict
+from typing import List, Any, Optional, Dict, Set, Tuple
 
 from src.utils.dto import TagCandidate
 
@@ -36,11 +37,30 @@ def transform_to_report_id(uuid):
     return int(uuid.split("-")[-1])
 
 class VectorstoreService():
+    # The payload field with the studies of one database that a report point belongs to (beside
+    # `belongs_to_study`, which holds those of every database). The study search of a database groups by it, so
+    # it only ever finds studies of that database.
+    DATABASE_FIELD = "database_{}_studies"
+    DATABASE_FIELD_PATTERN = re.compile(r"^database_\d+_studies$")
 
     def __init__(self, user_id : str, embedding_service : EmbeddingService):
         self.client = CLIENT
         self.user_id = user_id
         self.embedding_service = embedding_service
+
+    @classmethod
+    def database_field(cls, database_id: Optional[int]) -> str:
+        """The field a study search groups by: that of the database, `belongs_to_study` for all databases."""
+        return "belongs_to_study" if database_id is None else cls.DATABASE_FIELD.format(database_id)
+
+    @classmethod
+    def database_payload(cls, study_ids: List[int], study_databases: Dict[int, int]) -> Dict[str, List[int]]:
+        """The database fields of a report point linked to `study_ids`, given the database of each study."""
+        payload: Dict[str, List[int]] = {}
+        for study_id in study_ids:
+            if study_id in study_databases:
+                payload.setdefault(cls.database_field(study_databases[study_id]), []).append(study_id)
+        return payload
 
     async def get_collections(self):
         return await self.client.get_collections()
@@ -81,6 +101,30 @@ class VectorstoreService():
         
         return vectorstore_source_ids
 
+    async def get_point_ids(self) -> Set[str]:
+        """The ids of every point of the collection."""
+        ids: Set[str] = set()
+        offset = None
+        while True:
+            points, offset = await self.client.scroll(
+                collection_name=COLLECTION_NAME, limit=10000, offset=offset, with_payload=False, with_vectors=False,
+            )
+            ids.update(str(point.id) for point in points)
+            if offset is None:
+                return ids
+
+    async def upsert_points(self, points: List[Tuple[str, List[float], Dict[str, Any]]]) -> None:
+        """Adds (or replaces) points given as (id, vector, payload)."""
+        if points:
+            await self.client.upsert(
+                collection_name=COLLECTION_NAME, wait=True,
+                points=[PointStruct(id=point_id, vector=vector, payload=payload) for point_id, vector, payload in points],
+            )
+
+    async def delete_points(self, point_ids: List[str]) -> None:
+        if point_ids:
+            await self.client.delete(collection_name=COLLECTION_NAME, points_selector=models.PointIdsList(points=point_ids))
+
     async def link_report_to_study_ids(self, report_id : int, study_ids : List[int], user : str):
         field = "belongs_to_study"
         if user:
@@ -92,7 +136,7 @@ class VectorstoreService():
             points=[transform_to_uuid(report_id)],
         )
 
-    async def link_report_to_study_id(self, report_id : int, study_id : int, user : str):
+    async def link_report_to_study_id(self, report_id : int, study_id : int, database_id : int, user : str):
         point_id = transform_to_uuid(report_id)
         result = await self.client.retrieve(
             collection_name=COLLECTION_NAME,
@@ -118,6 +162,11 @@ class VectorstoreService():
             if study_id not in study_list:
                 study_list.append(study_id)
             update_payload["belongs_to_study"] = study_list
+            field = self.database_field(database_id)
+            database_list = list(payload.get(field) or [])
+            if study_id not in database_list:
+                database_list.append(study_id)
+            update_payload[field] = database_list
 
         if update_payload:
             await self.client.set_payload(
@@ -162,6 +211,10 @@ class VectorstoreService():
             if study_id in study_list:
                 study_list = [sid for sid in study_list if sid != study_id]
                 update_payload["belongs_to_study"] = study_list
+            # The study is in one database, whose field the payload names.
+            for field, database_list in payload.items():
+                if self.DATABASE_FIELD_PATTERN.match(field) and study_id in (database_list or []):
+                    update_payload[field] = [sid for sid in database_list if sid != study_id]
 
         if update_payload:
             await self.client.set_payload(
@@ -276,16 +329,42 @@ class VectorstoreService():
         points = [PointStruct(id=new_id,vector=vector, payload=payload)]
         await self.client.upsert(wait=True, collection_name=COLLECTION_NAME, points=points)
 
-    async def search_report(self, query : Any ,k : int, filter : Any):
+    async def add_study_report_to_vectorstore(self, report, study_ids : List[int], study_databases : Dict[int, int]):
+        """A report already linked to its studies (e.g. of an imported database), found by the study search like
+        the reports of the seed are (see ops/app-init/init.sh). `study_databases` maps each study to its database."""
+        await self.add_report_to_vectorstore(report)
+        await self.client.set_payload(
+            collection_name=COLLECTION_NAME,
+            payload={
+                'is_report': True,
+                'belongs_to_study': study_ids,
+                'belongs_to_trial_id': bool(study_ids),
+                'date_entered': report.date_entered,
+                **self.database_payload(study_ids, study_databases),
+            },
+            points=[transform_to_uuid(report.id)],
+        )
+
+    async def search_report(self, query : Any ,k : int, filter : Any, database_id : Optional[int] = None):
+        """The best-matching report point of each of the top-k studies (groups, by study id) of the database, or of
+        all databases for None."""
+        group_by = self.database_field(database_id)
         return await self.client.query_points_groups(
                 collection_name=COLLECTION_NAME,
                 query=query,
-                group_by="belongs_to_study",  # Path of the field to group by
+                group_by=group_by,  # Path of the field to group by
                 limit=k,  # Max amount of groups
                 group_size=1,  # Max amount of points per group
                 query_filter=filter,
-                with_payload=["belongs_to_study", f"temporary.{self.user_id}.belongs_to_study", "title", "authors", "source_id"],
+                with_payload=[group_by, f"temporary.{self.user_id}.belongs_to_study", "title", "authors", "source_id"],
             )
+
+    def _in_database(self, database_id : Optional[int]) -> List[Any]:
+        """The filter conditions for report points with a study of the database (none for all databases)."""
+        if database_id is None:
+            return []
+        field = self.database_field(database_id)
+        return [models.Filter(must_not=[models.IsEmptyCondition(is_empty=models.PayloadField(key=field))])]
     
     async def get_similar_tags_by_string(self, text : str, sources: List[str], aspect: str, k: int) -> List[TagCandidate]:
         vector = await self.embedding_service.embed(text)
@@ -348,25 +427,26 @@ class VectorstoreService():
                     )
                 )
     
-    async def search_similar_studies(self, query : Any, k : int, cutoff : str):
-        filters = [models.FieldCondition(key="is_report",match=models.MatchValue(value=True))]
+    async def search_similar_studies(self, query : Any, k : int, cutoff : str, database_id : Optional[int] = None):
+        """The top-k studies of the database (all databases for None), each as a group whose id is the study id."""
+        filters = [models.FieldCondition(key="is_report",match=models.MatchValue(value=True)), *self._in_database(database_id)]
         if cutoff:
             filters.append(Filter(
                 must=[
                     FieldCondition(key="date_entered",range=DatetimeRange(lt=datetime.fromisoformat(cutoff)))
                 ]
-            ))    
+            ))
 
         filter = models.Filter(must=filters)
-    
-        search_results = await self.search_report(query,k,filter)
+
+        search_results = await self.search_report(query,k,filter,database_id)
 
         return search_results.groups
-    
-    async def score_studies(self, query : Any, study_ids : List[int]) -> Dict[int, float]:
-        """Relevance of specific studies for `query`, scored exactly like search_similar_studies
-        (best-matching report per study) but restricted to the given studies, so the result
-        doesn't depend on whether they'd have made the top-k of an unrestricted search.
+
+    async def score_studies(self, query : Any, study_ids : List[int], database_id : Optional[int] = None) -> Dict[int, float]:
+        """Relevance of specific studies (of the database, if given) for `query`, scored exactly like
+        search_similar_studies (best-matching report per study) but restricted to the given studies, so the
+        result doesn't depend on whether they'd have made the top-k of an unrestricted search.
         Studies without any embedded report are absent from the result.
         """
         if not study_ids:
@@ -374,9 +454,9 @@ class VectorstoreService():
         wanted = set(study_ids)
         filter = models.Filter(must=[
             models.FieldCondition(key="is_report", match=models.MatchValue(value=True)),
-            models.FieldCondition(key="belongs_to_study", match=models.MatchAny(any=list(wanted))),
+            models.FieldCondition(key=self.database_field(database_id), match=models.MatchAny(any=list(wanted))),
         ])
-        results = await self.search_report(query, len(wanted), filter)
+        results = await self.search_report(query, len(wanted), filter, database_id)
         scores: Dict[int, float] = {}
         for group in results.groups:
             if group.id in wanted and group.hits:

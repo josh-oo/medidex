@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Dict
+from typing import List, Dict, Optional, Sequence
 
 import pypdf
 
@@ -8,16 +8,17 @@ from ..database import StudyRepository, ReportRepository
 from ..database.repositories.report import Report
 from ..utils.dto import Study, studies_to_dto
 
+from ..utils.pdfs import PdfFiles
+
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
-PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
 PLACEHOLDER_PDF_PATH = os.getenv("PLACEHOLDER_PDF_PATH", "/app/placeholder.pdf")
 
 class DocumentService:
+    """The fulltext PDFs of the reports, one file per report named by its id (src/utils/pdfs.py)."""
 
     def __init__(self, report_repo : ReportRepository):
         self.path_cache = {}
@@ -25,24 +26,22 @@ class DocumentService:
         self.report_repo = report_repo
 
     @staticmethod
-    def pdf_file_path(report_number: int) -> str:
-        return os.path.join(PDF_PATH, str(report_number).zfill(5) + ".pdf")
+    def pdf_file_path(report_id: int) -> str:
+        return str(PdfFiles.path(report_id))
 
-    async def get_path(self, report_id: int, mkdirs=False):
+    async def get_path(self, report_id: int) -> str:
+        """The PDF of the report, or the placeholder for a report marked as having none (Report.no_pdf). Raises if
+        there is no such report or it has neither."""
         if report_id not in self.path_cache:
-            report_number = await self.report_repo.get_pdf_numbers_by_report_id(report_id)
-            if report_number is None:
+            report = await self.report_repo.get_report_by_id(report_id)
+            if report is None:
                 raise Exception("Report not found")
-            if not mkdirs and report_number == -1:
-                raise Exception("Report number not found")   
-            if report_number <= 0 and mkdirs:
-                report_number = await self.report_repo.assign_pdf_numbers_for_report_id(report_id)
-            
-            file_name = self.pdf_file_path(report_number)
-            if report_number == 0 and not os.path.isfile(file_name):
-                file_name = PLACEHOLDER_PDF_PATH
-
-            self.path_cache[report_id] = file_name
+            path = self.pdf_file_path(report_id)
+            if not os.path.isfile(path):
+                if not report.no_pdf:
+                    raise Exception("Report has no PDF")
+                path = PLACEHOLDER_PDF_PATH
+            self.path_cache[report_id] = path
         return self.path_cache[report_id]
 
     async def get_pages(self, report_id: int) -> List[str]:
@@ -58,12 +57,7 @@ class DocumentService:
                 print(f"Error extracting text from PDF: {e}")
                 return []
         if report_id not in self.pages_cache:
-            try:
-                path = await self.get_path(report_id)
-                await self.report_repo.db.commit()
-            except:
-                await self.report_repo.db.rollback()
-                raise
+            path = await self.get_path(report_id)
             self.pages_cache[report_id] = await asyncio.to_thread(_sync_extract, path)
         return self.pages_cache[report_id]
 
@@ -73,76 +67,53 @@ class DocumentService:
         pages = await self.get_pages(report_id)
         return await asyncio.to_thread(extract_trial_ids_from_text, "\n".join(pages))
 
-    async def delete_pdf_files(self, report_numbers: List[int]) -> None:
-        """Remove the PDF files with these report numbers (of reports that are deleted); missing files are skipped."""
-        def remove() -> None:
-            for report_number in report_numbers:
-                try:
-                    os.remove(self.pdf_file_path(report_number))
-                except FileNotFoundError:
-                    pass
-
-        await asyncio.to_thread(remove)
+    async def delete_pdf_files(self, report_ids: List[int]) -> None:
+        """Remove the PDF files of these reports (that are deleted); missing files are skipped."""
+        await asyncio.to_thread(PdfFiles.remove, report_ids)
 
     async def delete_pdf(self, report_id: int) -> Dict[str, object]:
+        """Removes the PDF of the report and its mark as having none, so it needs a PDF again. The caller commits."""
         report = await self.report_repo.get_report_by_id(report_id)
         if not report:
             raise Exception("Report not found")
 
-        deleted_pdf = False
-        previous_report_number = report.report_number
-        if previous_report_number is not None and previous_report_number > 0:
-            pdf_path = self.pdf_file_path(previous_report_number)
-            if os.path.exists(pdf_path):
-                os.remove(pdf_path)
-                deleted_pdf = True
-
-        # Reset the report number so future uploads are re-assigned cleanly.
-        report.report_number = -1
-        await self.report_repo.recompute_has_pdf(report_id)
+        deleted_pdf = await asyncio.to_thread(PdfFiles.remove, [report_id]) > 0
+        report.no_pdf = False
         await self.report_repo.db.flush()
-        await self.report_repo.db.commit()
-
         self.path_cache.pop(report_id, None)
+        self.pages_cache.pop(report_id, None)
 
-        return {
-            "report_id": report_id,
-            "deleted_pdf": deleted_pdf,
-            "previous_report_number": previous_report_number,
-        }
-    
+        return {"report_id": report_id, "deleted_pdf": deleted_pdf}
+
+    @staticmethod
+    def write_pdf(report_id: int, content: bytes) -> str:
+        """Stores the PDF of a report (e.g. one of an imported database)."""
+        return str(PdfFiles.write(report_id, content))
+
     async def upload_pdf(self, report_id: int, file):
+        """Stores the uploaded PDF of the report, or without a file marks it as having none ("Not Available"). The
+        caller commits."""
+        report = await self.report_repo.get_report_by_id(report_id)
+        if report is None:
+            raise Exception("Report not found")
+        self.path_cache.pop(report_id, None)
+        self.pages_cache.pop(report_id, None)
 
         if file is None:
-            # Set report_number to 0 and stop
-            report = await self.report_repo.get_report_by_id(report_id)
-            if report:
-                report.report_number = 0
-                await self.report_repo.recompute_has_pdf(report_id)
-                await self.report_repo.db.flush()
+            report.no_pdf = True
+            await self.report_repo.db.flush()
             return {"report_id": report_id, "file_path": None, "size_bytes": 0}
 
-        path = None
-        try:
-            path = await self.get_path(report_id, mkdirs=True)
+        content = await file.read()
+        path = await asyncio.to_thread(self.write_pdf, report_id, content)
+        report.no_pdf = False
+        await self.report_repo.db.flush()
+        return {
+            "report_id": report_id,
+            "file_path": path,
+            "size_bytes": len(content)
+        }
 
-            with open(path, "wb") as f:
-                content = await file.read()
-                f.write(content)
-
-            await self.report_repo.recompute_has_pdf(report_id)
-
-            return {
-                "report_id": report_id,
-                "file_path": path,
-                "size_bytes": len(content)
-            }
-        except Exception:
-            self.path_cache.pop(report_id, None)
-            if path and os.path.exists(path):
-                os.remove(path)
-            raise
-        
 class ReportService:
     def __init__(self, report_repo : ReportRepository, study_repo : StudyRepository, document_service : DocumentService, open_alex_service):
         self.report_repo = report_repo
@@ -192,10 +163,11 @@ class ReportService:
             await self.report_repo.set_referenced_dois(report_id, work.referenced_dois)
         return work.referenced_dois
 
-    async def get_referenced_studies(self, report_id: int) -> List[Study]:
-        """Studies belonging to reports in the database whose DOI this report cites."""
+    async def get_referenced_studies(self, report_id: int, databases: Optional[Sequence[int]] = None) -> List[Study]:
+        """Studies belonging to reports in the database whose DOI this report cites, in the given study databases (all
+        without)."""
         dois = await self.get_referenced_dois(report_id)
-        return studies_to_dto(await self.study_repo.get_studies_by_report_dois(dois))
+        return studies_to_dto(await self.study_repo.get_studies_by_report_dois(dois, databases))
 
     async def get_report(self, report_id: int) -> Report:
         if report_id not in self.report_cache:

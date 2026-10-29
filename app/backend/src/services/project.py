@@ -22,6 +22,7 @@ from ..utils.pagination import decode_cursor, encode_cursor
 from ..utils.ris_parser import UploadedFile, parse_file
 from ..utils.trial_registration_id import extract_trial_id
 from .authorization import ProjectAccessDeniedError
+from .database import DatabaseIndexingError, StudyDatabaseService
 from .report import DocumentService
 from .pubsub import ProjectPubSubService
 from .vectorstore import VectorstoreService
@@ -46,11 +47,13 @@ class ProjectResourceService:
         self,
         project_repo: ProjectRepository,
         report_repo: ReportRepository,
+        database_service: StudyDatabaseService,
         vectorstore_service: VectorstoreService,
         pubsub_service: ProjectPubSubService,
         document_service: DocumentService,
     ):
         self.project_repo = project_repo
+        self.database_service = database_service
         self.report_repo = report_repo
         self.vectorstore_service = vectorstore_service
         self.document_service = document_service
@@ -61,9 +64,8 @@ class ProjectResourceService:
         if not report_ids:
             return set(), set(), set()
 
-        # report.embedded/report.has_pdf are denormalized mirrors of Qdrant/filesystem
-        # state (see models.py) kept in sync by the app itself, so this is now a plain SQL
-        # read instead of a live Qdrant retrieve + a filesystem stat per report.
+        # report_added.embedded mirrors Qdrant (see models.py); whether a report has a PDF
+        # is read from the data volume (see ReportRepository.get_readiness_sets).
         embedded_reports, pdf_ready_reports = await self.report_repo.get_readiness_sets(report_ids)
         # Reports still being postprocessed (e.g. metadata extraction) aren't ready yet either.
         pending_postprocessing = await self.report_repo.get_postprocessing_pending(report_ids)
@@ -103,6 +105,7 @@ class ProjectResourceService:
             projectId=project.id,
             name=project.description,
             createdAt=project.date_created,
+            databaseId=project.database_id,
             numberReportsTotal=len(report_ids),
             numberReportsPreProcessed=len(embedded_reports),
             numberReportsReadyForProcessing=len(ready_reports),
@@ -145,6 +148,7 @@ class ProjectResourceService:
                     name=project.description,
                     owner=project.uploaded_by or "",
                     createdAt=project.date_created,
+                    databaseId=project.database_id,
                     numberReportsTotal=len(report_ids),
                     numberReportsReadyForProcessing=len(ready_for_processing),
                     numberReportsProcessed=user_link_counts.get(project.id, 0),
@@ -172,7 +176,6 @@ class ProjectResourceService:
             title = entry.get('primary_title') or entry.get('title', "")
             authors = entry.get('authors', [])
             abstract = entry.get('abstract', None)
-            report_number = int(entry.get('research_notes', -1))
 
             trial_ids = extract_trial_id(title=title, abstract=abstract, authors=authors)
             trial_id = trial_ids[0] if len(trial_ids) == 1 else None
@@ -189,7 +192,6 @@ class ProjectResourceService:
                 title=safe_title,
                 abstract=safe_abstract,
                 authors=authors_str,
-                report_number=report_number,
                 journal=entry.get('secondary_title', None),
                 year=int(entry.get('year', None)),
                 volume=entry.get('volume', None),
@@ -211,6 +213,7 @@ class ProjectResourceService:
         self,
         project_name: str,
         upload: UploadedFile,
+        database_id: int,
     ) -> Optional[Tuple[Project, List[int]]]:
         """Parse a bibliography file (.ris/.cgi/.nbib, selected by `upload.filename`'s
         extension) into a new project, persist it, and notify subscribers. Who's
@@ -223,14 +226,19 @@ class ProjectResourceService:
         (e.g. FastAPI's BackgroundTasks) - this just hands back the report ids to schedule
         it with.
 
-        Raises RisParseError if the file can't be parsed. Returns None if a project
+        The reports are matched against the studies of `database_id`. Raises DatabaseNotFoundError if there is no
+        such database, DatabaseIndexingError while it is being indexed and RisParseError if the file can't be parsed. Returns None if a project
         with this exact set of reports already exists (see
         build_reports_from_entries's deterministic project_id), otherwise the new
         project's full stats (via get_project_stats) plus its report ids.
         """
+        database = await self.database_service.get_database(database_id)
+        if database.indexing:
+            # Its reports would be matched against studies the vectorstore does not know yet.
+            raise DatabaseIndexingError(f"Database {database.name} is still being indexed; upload projects once it is available")
         entries = await parse_file(upload)
         project_id, reports, trial_ids = self.build_reports_from_entries(entries)
-        saved_reports = await self.project_repo.add_new_project(project_id, project_name, reports, trial_ids)
+        saved_reports = await self.project_repo.add_new_project(project_id, project_name, reports, database_id, trial_ids)
         if saved_reports is None:
             return None
 
@@ -254,7 +262,7 @@ class ProjectResourceService:
 
         # After the database succeeded: nothing in it refers to these any more.
         await self.vectorstore_service.delete_vectors_by_report_ids(deleted.report_ids)
-        await self.document_service.delete_pdf_files(deleted.pdf_numbers)
+        await self.document_service.delete_pdf_files(deleted.report_ids)
         await self.pubsub_service.publish_project_update(project_id)
 
     async def assign_user_to_project(self, project_id: str, assignee_user_id: str) -> Assignee:

@@ -1,15 +1,12 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import String, cast, func, or_
+from sqlalchemy import Integer, String, any_, bindparam, cast, func, or_
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlmodel import select, delete
 
 from ...background.postprocessing import postprocessor_registry
 from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport, StudyReportAdded, FulltextExtractions, ReportFlag
+from ...utils.pdfs import PdfFiles
 from typing import List, Dict, Any, Optional, Set, Tuple
-
-import os
-
-DATABASE_VOLUME = os.getenv("DATABASE_VOLUME")
-PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
 
 class ReportRepository:
     def __init__(self, db : AsyncSession, user_id : str):
@@ -115,23 +112,35 @@ class ReportRepository:
         await self.db.flush()
 
     async def get_readiness_sets(self, report_ids: List[int]) -> Tuple[Set[int], Set[int]]:
-        """Plain SQL read of the embedded/has_pdf columns for the given reports -
-        replaces what used to be a live Qdrant retrieve + per-file filesystem stat call
-        on every read (see ProjectResourceService.get_vectorized_and_ready_report_ids).
-        A report with no report_added row never appears in either returned set.
+        """The given reports that are embedded (report_added.embedded) and those that have
+        a PDF: their PDF search has run (report_added.auto_searched_pdf) and there is a
+        file of theirs on the data volume (src/utils/pdfs.py), or they are marked as having
+        none (Report.no_pdf) - the same rule as has_pdf_clause. A report with no
+        report_added row never appears in either returned set.
         """
         report_ids = report_ids or []
         if not report_ids:
             return set(), set()
 
         stmt = (
-            select(ReportAdded.report_id, ReportAdded.embedded, ReportAdded.has_pdf)
+            select(ReportAdded.report_id, ReportAdded.embedded, ReportAdded.auto_searched_pdf, Report.no_pdf)
+            .join(Report, Report.id == ReportAdded.report_id)
             .where(ReportAdded.report_id.in_(report_ids))
         )
         rows = (await self.db.execute(stmt)).all()
-        embedded = {report_id for report_id, is_embedded, _ in rows if is_embedded}
-        has_pdf = {report_id for report_id, _, pdf_ready in rows if pdf_ready}
+        embedded = {report_id for report_id, is_embedded, _, _ in rows if is_embedded}
+        searched = [(report_id, no_pdf) for report_id, _, auto_searched, no_pdf in rows if auto_searched]
+        stored = PdfFiles.stored(report_id for report_id, no_pdf in searched if not no_pdf)
+        has_pdf = {report_id for report_id, no_pdf in searched if no_pdf or report_id in stored}
         return embedded, has_pdf
+
+    @staticmethod
+    def has_pdf_clause(stored_ids: Set[int]):
+        """Whether a report of a query that joins Report and ReportAdded has a PDF (see
+        get_readiness_sets), given the ids of the reports with a file (PdfFiles.stored_ids).
+        The ids go in as one array, so their number doesn't matter."""
+        stored = bindparam("stored_pdf_ids", sorted(stored_ids), type_=ARRAY(Integer))
+        return ReportAdded.auto_searched_pdf.is_(True) & or_(Report.no_pdf.is_(True), Report.id == any_(stored))
 
     async def get_postprocessing_pending(self, report_ids: List[int]) -> Set[int]:
         """The given reports whose registered postprocessors (src/background/postprocessing.py)
@@ -397,8 +406,9 @@ class ReportRepository:
         ever returns up to `limit` + 1 rows (the extra row is a cheap "is there a next
         page" probe, so the caller never needs a separate COUNT).
 
-        `require_ready`/`with_pdf` read report_added.embedded/report_added.has_pdf directly
-        (see models.py) instead of calling Qdrant or stat()-ing the filesystem per report.
+        `require_ready`/`with_pdf` read report_added.embedded (see models.py) instead of
+        calling Qdrant, and whether a report has a PDF from one listing of the PDF folder
+        (has_pdf_clause) instead of stat()-ing the filesystem per report.
         `processed`/`flagged`/`new_study` are None ("any", no filter), True ("only") or
         False ("exclude") - the FilterMode -> bool translation happens in
         ProjectResourceService (src/services/project.py), which owns that enum
@@ -417,13 +427,16 @@ class ReportRepository:
             .where((Report.title.isnot(None)) | (Report.abstract.isnot(None)))
         )
 
+        if require_ready or with_pdf is not None:
+            has_pdf = self.has_pdf_clause(PdfFiles.stored_ids())
+
         if require_ready:
-            stmt = stmt.where(ReportAdded.embedded.is_(True)).where(ReportAdded.has_pdf.is_(True))
+            stmt = stmt.where(ReportAdded.embedded.is_(True)).where(has_pdf)
             for pending_select in postprocessor_registry.pending_report_ids_selects():
                 stmt = stmt.where(ReportAdded.report_id.not_in(pending_select))
 
         if with_pdf is not None:
-            stmt = stmt.where(ReportAdded.has_pdf.is_(with_pdf))
+            stmt = stmt.where(has_pdf if with_pdf else ~has_pdf)
 
         if restrict_to_ids is not None:
             stmt = stmt.where(Report.id.in_(restrict_to_ids))
@@ -574,110 +587,6 @@ class ReportRepository:
         await self.db.flush()
         return True
 
-
-    async def get_pdf_availabilities(self, report_ids: List[int]) -> List[int]:
-        report_ids = report_ids or []
-        if not report_ids:
-            return []
-
-        # Get all ReportAdded entries for the given report_ids
-        report_added_stmt = select(ReportAdded.report_id, ReportAdded.auto_searched_pdf).where(ReportAdded.report_id.in_(report_ids))
-        report_added_rows = (await self.db.execute(report_added_stmt)).all()
-        report_added_map = {rid: auto for rid, auto in report_added_rows}
-
-        # Get all reports (with report_number) for the given report_ids
-        report_stmt = select(Report.id, Report.report_number).where(Report.id.in_(report_ids)).where(Report.report_number >= 0)
-        report_rows = (await self.db.execute(report_stmt)).all()
-
-        result = []
-        for report_id, report_number in report_rows:
-            # If there is a ReportAdded entry, require auto_searched_pdf == True
-            if report_id in report_added_map:
-                if not report_added_map[report_id]:
-                    continue
-            # If there is no ReportAdded entry, ignore auto_searched_pdf
-            if report_number == 0:
-                result.append(report_id)
-                continue
-            pdf_name = str(report_number).zfill(5) + ".pdf"
-            if os.path.exists(os.path.join(PDF_PATH, pdf_name)):
-                result.append(report_id)
-        return result
-
-    def _compute_has_pdf(self, report: Report, report_added: ReportAdded) -> bool:
-        """Single-report version of get_pdf_availabilities()'s rules - kept in sync with
-        that method's logic since both express the same "does this report have a usable
-        PDF" rule, just for different callers (a live filter there, a value to
-        persist here). Unlike get_pdf_availabilities, always has a report_added row to
-        check (see recompute_has_pdf), so - unlike that method - always requires
-        auto_searched_pdf rather than treating "no report_added row" as an ignore case.
-        The auto_searched_pdf gate is checked first, matching get_pdf_availabilities'
-        order: report_number == 0 does NOT bypass it there, only the PDF-file check.
-        """
-        if not report_added.auto_searched_pdf:
-            return False
-        if report.report_number is None or report.report_number < 0:
-            return False
-        if report.report_number == 0:
-            return True
-
-        pdf_name = str(report.report_number).zfill(5) + ".pdf"
-        return os.path.exists(os.path.join(PDF_PATH, pdf_name))
-
-    async def recompute_has_pdf(self, report_id: int) -> bool:
-        """Re-derives and persists report_added.has_pdf for one report - call after
-        anything that could change its outcome (PDF written/removed, report_number
-        changed, or the project's auto_searched_pdf flag flipped). A report with no
-        report_added row (no current project association) has nowhere to record this and
-        is silently skipped. Commits on its own - see set_embedded()'s docstring for why
-        that's the right tradeoff at these call sites.
-        """
-        report_added = await self.db.get(ReportAdded, report_id)
-        if report_added is None:
-            return False
-        report = await self.db.get(Report, report_id)
-        if report is None:
-            return False
-        value = self._compute_has_pdf(report, report_added)
-        report_added.has_pdf = value
-        await self.db.commit()
-        return value
-
-    async def get_pdf_numbers_by_report_id(self, report_id: int) -> int:
-        """
-        Returns the PDF report number for a given report ID.
-        """
-        report = await self.db.get(Report, report_id)
-        if not report:
-            return None
-        if report.report_number is None:
-            return -1   # report found, but report_number is NULL
-        return report.report_number
-
-    async def assign_pdf_numbers_for_report_id(self, report_id: int) -> int:
-        """
-        Assigns a unique PDF report number to the given report if it does not already have one.
-        Returns the assigned or existing report number.
-        """
-        report = await self.db.get(Report, report_id)
-        if not report:
-            return None  # Report not found
-
-        if report.report_number is not None and report.report_number > 0:
-            return report.report_number  # Already assigned
-
-        # Find the current max report_number
-        stmt = (
-            select(Report.report_number)
-            .where(Report.report_number.isnot(None))
-            .order_by(Report.report_number.desc())
-        )
-        max_number = (await self.db.execute(stmt)).scalars().first()
-        next_number = (max_number or 0) + 1
-
-        report.report_number = next_number
-        await self.db.flush()
-        return next_number
 
     async def save_report_metadata_field(self, report_id: int, field: str, value: Any):
         stmt = select(FulltextExtractions).where(FulltextExtractions.report_id == report_id)

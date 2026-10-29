@@ -51,22 +51,12 @@ services:
     restart: "no"
     depends_on:
       - qdrant
-      - postgres
-      - embedding
       - keycloak
     environment:
       - QDRANT_URL=http://${VECTORSTORE_SERVICE_HOST:-qdrant}:6333
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
       - EMBEDDING_MODEL_DIM=${EMBEDDING_MODEL_DIM:-1024}
       - DATABASE_VOLUME=/data
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB_RESOURCES=${POSTGRES_DB_RESOURCES:-resources}
-      - POSTGRES_DB_LANGGRAPH=${POSTGRES_DB_LANGGRAPH:-langgraph_state}
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - EMBEDDING_MODEL_BASE_URL=http://embedding:80/v1
-      - EMBEDDING_MODEL_API_KEY=${EMBEDDING_MODEL_API_KEY:-unused}
       - KEYCLOAK_URL=http://keycloak:8080
       - KEYCLOAK_REALM=${KEYCLOAK_REALM:-medidex}
       - KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID:-medidex-backoffice}
@@ -84,7 +74,6 @@ services:
     volumes:
       - ./deploy/data/runtime/qdrant:/qdrant/storage
       - ./deploy/data/runtime/backend:/data
-      - ./deploy/data/seed:/seed:ro
     networks:
       - internal_net
 
@@ -151,6 +140,11 @@ services:
     depends_on:
       app-init:
         condition: service_completed_successfully
+      # The backend makes the schema and syncs the vectorstore itself and waits for both while they start.
+      postgres:
+        condition: service_started
+      embedding:
+        condition: service_started
       keycloak:
         condition: service_started
 

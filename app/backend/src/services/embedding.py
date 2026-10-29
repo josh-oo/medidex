@@ -1,4 +1,5 @@
 import os
+from typing import List
 import httpx
 
 import asyncio
@@ -53,6 +54,13 @@ class EmbeddingService:
             vector = response.data[0].embedding
             return vector
         
+    async def embed_many(self, texts: List[str]) -> List[List[float]]:
+        """The vectors of several texts in one request, in their order (for bulk work such as the vectorstore sync)."""
+        async with self.sem:
+            texts = [await self.preprocess(text) for text in texts]
+            response = await self.model.embeddings.create(input=texts, model=None)
+            return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
+
     def readyz(self):
         try:
             resp = httpx.get("http://embedding:80/health", timeout=2.0)

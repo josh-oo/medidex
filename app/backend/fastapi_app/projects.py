@@ -18,6 +18,7 @@ from .deps import get_context
 from src.background.wrapper import run_process_report_background
 
 from src.services.authorization import ProjectAccessDeniedError
+from src.services.database import DatabaseIndexingError, DatabaseNotFoundError
 from src.services.project import (
     ProjectAssigneeAlreadyExistsError,
     ProjectAssigneeNotFoundError,
@@ -38,7 +39,7 @@ async def get_user_tasks(ctx: RequestContext = Depends(get_context)) -> List[Tas
     return await ctx.project_service.get_user_tasks()
 
 @router.post("/projects", dependencies=[Depends(is_admin)], summary="Upload a project (batch of new reports that need to be assigned to studies) (usually in the .ris file format)", status_code=201)
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), options: str = Form("{}", description="JSON object of upload options; each registered report postprocessor reads its own keys (see src/background/postprocessing.py)."), ctx: RequestContext = Depends(get_context)) -> Project:
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), databaseId: int = Form(..., description="The study database whose studies the reports are matched against and added to."), options: str = Form("{}", description="JSON object of upload options; each registered report postprocessor reads its own keys (see src/background/postprocessing.py)."), ctx: RequestContext = Depends(get_context)) -> Project:
 
     # dependencies=[Depends(is_admin)] above is the actual (and only) admin check -
     # who's allowed to create a project is an API-layer permission, not a business
@@ -51,9 +52,14 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
         raise HTTPException(status_code=400, detail="options must be a JSON object")
 
     try:
-        result = await ctx.project_service.create_project(projectName, file)
+        result = await ctx.project_service.create_project(projectName, file, databaseId)
     except RisParseError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except DatabaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DatabaseIndexingError as exc:
+        # Not 409, which the upload dialog reads as "already uploaded".
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
     if result is None:
         raise HTTPException(status_code=409, detail="Project already exists")
     project, report_ids = result

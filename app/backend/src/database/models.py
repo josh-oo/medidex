@@ -1,10 +1,10 @@
 from sqlmodel import SQLModel, Field, Relationship
-from sqlalchemy import MetaData
 from sqlalchemy import Index
 from sqlalchemy import Column
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import UniqueConstraint
 from sqlalchemy import FetchedValue
+from sqlalchemy import func
 from typing import Optional, Dict, Any, List
 import datetime
 
@@ -12,25 +12,9 @@ import datetime
 Resources
 
 These models map onto tables named directly after the generic names used
-here (report, study, ...). The bundled demo data (deploy/data/seed/
-synthetic_seed.sql) creates its tables under these exact names.
-
-If the resources database is instead pointed at a physical schema that uses
-different table/column names (e.g. a Cochrane-style CRG/CENTRAL database),
-deploy/data/seed/views.sql provides an optional adapter: views with these
-same names re-expose that other schema's data so this module -- and
-everything built on top of it -- never has to know about it. See
-ops/app-init/init.sh and deploy/data/seed/schema-adapter.conf for how to
-enable it.
-
-Report and Study only expose the columns the application actually reads or
-writes; a CRG/CENTRAL-style physical schema has several more (CENTRAL*
-submission tracking, UDef* legacy fields, ...) that nothing here uses -- see
-views.sql for the full physical column list those two views would leave out.
+here (report, study, ...), which the backend creates on start
+(src/database/schema.py).
 """
-
-metadata_resources = MetaData()
-
 
 def _current_utc_timestamp() -> str:
     """Return a UTC timestamp string that matches existing DB formatting."""
@@ -41,11 +25,27 @@ def _current_utc_datetime() -> datetime.datetime:
     """Return timezone-aware UTC datetime for TIMESTAMPTZ columns."""
     return datetime.datetime.now(datetime.timezone.utc)
 
-class Report(SQLModel, table=True, metadata=metadata_resources):
+class StudyDatabase(SQLModel, table=True):
+    """A collection of studies of its own (e.g. the register of one review group): its studies, and the projects
+    that bring new reports to them. Matching a report only considers the studies of its project's database. There is
+    no default one: every deployment brings (creates or imports) its own databases."""
+    __tablename__ = "study_database"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    description: Optional[str] = None
+    # Which studies belong in the database (free text, e.g. the inclusion criteria of the register).
+    eligibility_criteria: str
+    date_created: datetime.datetime = Field(default_factory=_current_utc_datetime)
+    created_by: Optional[str] = None
+
+class Report(SQLModel, table=True):
     __tablename__ = "report"
 
     id: int = Field(primary_key=True)
-    report_number: int = -1
+    # No fulltext PDF of the report exists ("Not Available"): it counts as having one, and its PDF is the
+    # placeholder. Whether it has a PDF is read from the data volume (src/utils/pdfs.py), never stored.
+    no_pdf: bool = Field(default=False, nullable=False)
     title: str
     authors: str
     journal: Optional[str]
@@ -66,11 +66,13 @@ class Report(SQLModel, table=True, metadata=metadata_resources):
 
     __table_args__ = (
         Index('idx_report_date_entered', 'date_entered'),  # For date filtering
-        Index('idx_report_report_number', 'report_number'),  # For PDF lookups
         Index('idx_report_trial_id', 'trial_registration_id'),  # For trial ID searches
     )
 
-class Study(SQLModel, table=True, metadata=metadata_resources):
+# Looking reports up by DOI ignores case (StudyRepository.get_studies_by_report_dois).
+Index("idx_report_doi_lower", func.lower(Report.doi))
+
+class Study(SQLModel, table=True):
     __tablename__ = "study"
 
     id: int = Field(primary_key=True)
@@ -88,15 +90,18 @@ class Study(SQLModel, table=True, metadata=metadata_resources):
     # The arms of the study and their comparisons: JSON, see src/utils/graph.py.
     graph: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSONB, nullable=True))
     trial_registration_id: Optional[str] = Field(default=None, sa_column_kwargs={"server_default": FetchedValue()})
+    database_id: int = Field(foreign_key="study_database.id")
 
     __table_args__ = (
         Index('idx_study_date_entered', 'date_entered'),  # For cutoff filtering
+        Index('idx_study_database', 'database_id'),  # For matching within a database
         Index('idx_study_short_name', 'short_name'),  # For trial ID matching
         Index('idx_study_trial_id', 'trial_registration_id'),  # For trial ID lookups
-        UniqueConstraint("short_name", name="uq_study_short_name"),
+        # Unique within a database: an imported database may name its studies like those of another one.
+        UniqueConstraint("database_id", "short_name", name="uq_study_short_name"),
     )
 
-class StudyReport(SQLModel, table=True, metadata=metadata_resources):
+class StudyReport(SQLModel, table=True):
     __tablename__ = "study_report"
 
     id: int = Field(primary_key=True)
@@ -109,73 +114,75 @@ class StudyReport(SQLModel, table=True, metadata=metadata_resources):
         Index('uq_study_report_report_study', 'report_id', 'study_id', unique=True),  # Prevent duplicate links
     )
 
-class Participant(SQLModel, table=True, metadata=metadata_resources):
+class Participant(SQLModel, table=True):
     __tablename__ = "participant"
 
     id: int = Field(primary_key=True)
     description: str
 
-class StudyParticipant(SQLModel, table=True, metadata=metadata_resources):
+class StudyParticipant(SQLModel, table=True):
     __tablename__ = "study_participant"
 
     study_id: int = Field(primary_key=True, foreign_key="study.id", ondelete="CASCADE")
     participant_id: int = Field(primary_key=True, foreign_key="participant.id", ondelete="CASCADE")
 
-class Design(SQLModel, table=True, metadata=metadata_resources):
+class Design(SQLModel, table=True):
     __tablename__ = "design"
 
     id: int = Field(primary_key=True)
     description: Optional[str] = None
 
-class StudyDesign(SQLModel, table=True, metadata=metadata_resources):
+class StudyDesign(SQLModel, table=True):
     __tablename__ = "study_design"
 
     study_id: int = Field(primary_key=True, foreign_key="study.id", ondelete="CASCADE")
     design_id: int = Field(primary_key=True, foreign_key="design.id", ondelete="CASCADE")
 
-class Intervention(SQLModel, table=True, metadata=metadata_resources):
+class Intervention(SQLModel, table=True):
     __tablename__ = "intervention"
 
     id: int = Field(primary_key=True)
     description: Optional[str] = None
 
-class StudyIntervention(SQLModel, table=True, metadata=metadata_resources):
+class StudyIntervention(SQLModel, table=True):
     __tablename__ = "study_intervention"
 
     study_id: int = Field(primary_key=True, foreign_key="study.id", ondelete="CASCADE")
     intervention_id: int = Field(primary_key=True, foreign_key="intervention.id", ondelete="CASCADE")
 
-class Condition(SQLModel, table=True, metadata=metadata_resources):
+class Condition(SQLModel, table=True):
     __tablename__ = "condition"
 
     id: int = Field(primary_key=True)
     description: Optional[str] = None
 
-class StudyCondition(SQLModel, table=True, metadata=metadata_resources):
+class StudyCondition(SQLModel, table=True):
     __tablename__ = "study_condition"
 
     study_id: int = Field(primary_key=True, foreign_key="study.id", ondelete="CASCADE")
     condition_id: int = Field(primary_key=True, foreign_key="condition.id", ondelete="CASCADE")
 
-class Outcome(SQLModel, table=True, metadata=metadata_resources):
+class Outcome(SQLModel, table=True):
     __tablename__ = "outcome"
 
     id: int = Field(primary_key=True)
     description: Optional[str] = None
 
-class StudyOutcome(SQLModel, table=True, metadata=metadata_resources):
+class StudyOutcome(SQLModel, table=True):
     __tablename__ = "study_outcome"
 
     study_id: int = Field(primary_key=True, foreign_key="study.id", ondelete="CASCADE")
     outcome_id: int = Field(primary_key=True, foreign_key="outcome.id", ondelete="CASCADE")
 
-class Project(SQLModel, table=True, metadata=metadata_resources):
+class Project(SQLModel, table=True):
     __tablename__ = "project"
 
     id: str = Field(primary_key=True)
     description: str
     date_created: datetime.datetime = Field(default_factory=_current_utc_datetime)
     uploaded_by: Optional[str]
+    # The database whose studies the reports of the project are matched against and added to.
+    database_id: int = Field(foreign_key="study_database.id")
 
     # Deleting a project deletes the reports it brought in, also those already linked to a study: the
     # cascade runs project -> report_added -> report here, everything below a report (links to studies,
@@ -184,7 +191,7 @@ class Project(SQLModel, table=True, metadata=metadata_resources):
         back_populates="project", sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
 
-class ProjectAssignees(SQLModel, table=True, metadata=metadata_resources):
+class ProjectAssignees(SQLModel, table=True):
     __tablename__ = "project_assignee"
 
     project_id: str = Field(
@@ -198,7 +205,7 @@ class ProjectAssignees(SQLModel, table=True, metadata=metadata_resources):
         Index("idx_project_assignee_assignee", "assignee"),
     )
 
-class FulltextExtractions(SQLModel, table=True, metadata=metadata_resources):
+class FulltextExtractions(SQLModel, table=True):
     __tablename__ = "fulltext_extraction"
 
     report_id: int = Field(primary_key=True, foreign_key="report.id", ondelete="CASCADE")
@@ -206,22 +213,21 @@ class FulltextExtractions(SQLModel, table=True, metadata=metadata_resources):
         sa_column=Column(JSONB, nullable=False)
     )
 
-class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
+class ReportAdded(SQLModel, table=True):
     __tablename__ = "report_added"
 
     report_id: int = Field(primary_key=True, foreign_key="report.id", ondelete="CASCADE")
     project_id: str = Field(foreign_key="project.id", ondelete="CASCADE")
     auto_searched_pdf: bool = Field(default=False, nullable=False)
-    # Denormalized mirrors of external state (Qdrant vector existence / fulltext file
-    # existence on disk), scoped here rather than on Report because they're only
-    # meaningful for the lifetime of this report's project association: cascading away
-    # with this row when the project is deleted is the wanted behavior, not a gap to work
-    # around - Report itself shouldn't carry project-scoped, temporary metadata. Kept in
-    # sync at every write site that changes the underlying state - see
-    # ReportRepository.set_embedded()/recompute_has_pdf() and their callers - rather than
-    # computed on read.
+    # Denormalized mirror of external state (Qdrant vector existence), scoped here rather
+    # than on Report because it's only meaningful for the lifetime of this report's project
+    # association: cascading away with this row when the project is deleted is the wanted
+    # behavior, not a gap to work around - Report itself shouldn't carry project-scoped,
+    # temporary metadata. Kept in sync at every write site that changes the underlying
+    # state - see ReportRepository.set_embedded() and its callers - rather than computed on
+    # read. Whether the report has a PDF is not mirrored: it is read from the data volume
+    # (src/utils/pdfs.py, ReportRepository.get_readiness_sets).
     embedded: bool = Field(default=False, nullable=False)
-    has_pdf: bool = Field(default=False, nullable=False)
     # Cached OpenAlex fulltext-link search result for this report's DOI (see
     # OpenAlexService.get_pdf_links_by_doi) - populated by the post-upload background
     # job (src/background/wrapper.py's _auto_search_report_pdf, via
@@ -256,11 +262,10 @@ class ReportAdded(SQLModel, table=True, metadata=metadata_resources):
     __table_args__ = (
         Index('idx_report_added_project_report', 'project_id', 'report_id'),
         Index('idx_report_added_embedded', 'embedded'),  # For readiness filtering
-        Index('idx_report_added_has_pdf', 'has_pdf'),  # For readiness/with_pdf filtering
         Index('idx_report_added_trial_id', 'trial_registration_id'),  # For trial ID searches
     )
 
-class ProjectInnerScore(SQLModel, table=True, metadata=metadata_resources):
+class ProjectInnerScore(SQLModel, table=True):
     __tablename__ = "project_inner_score"
 
     report_id: int = Field(primary_key=True, foreign_key="report.id", ondelete="CASCADE")
@@ -282,14 +287,14 @@ class ProjectInnerScore(SQLModel, table=True, metadata=metadata_resources):
         ),
     )
 
-class StudyAdded(SQLModel, table=True, metadata=metadata_resources):
+class StudyAdded(SQLModel, table=True):
     __tablename__ = "study_added"
 
     study_id: int = Field(primary_key=True, foreign_key="study.id", ondelete="CASCADE")
     date_created: datetime.datetime = Field(default_factory=_current_utc_datetime)
     created_by: Optional[str]
 
-class StudyReportAdded(SQLModel, table=True, metadata=metadata_resources):
+class StudyReportAdded(SQLModel, table=True):
     __tablename__ = "study_report_added"
 
     study_report_id: int = Field(primary_key=True, foreign_key="study_report.id", ondelete="CASCADE")
@@ -301,7 +306,7 @@ class StudyReportAdded(SQLModel, table=True, metadata=metadata_resources):
         Index('idx_study_report_added_created_by', 'created_by'),  # For user filtering
     )
 
-class ReportFlag(SQLModel, table=True, metadata=metadata_resources):
+class ReportFlag(SQLModel, table=True):
     __tablename__ = "report_flag"
 
     report_id: int = Field(primary_key=True, foreign_key="report.id", ondelete="CASCADE")

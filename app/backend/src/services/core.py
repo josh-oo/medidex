@@ -32,7 +32,16 @@ class StudySimilaritySearchService:
         if not self.user_id:
             self.user_id = "user"
 
-    async def get_similar_study_by_query(self, query : Any, cutoff: str, limit: int, authors:List[str]):
+    async def database_of_report(self, report_id: int) -> Optional[int]:
+        """The study database a report is matched against: that of its project; None (all) for a report of no project."""
+        return await self.project_repo.get_database_id_by_report_id(report_id)
+
+    async def databases_of_report(self, report_id: int) -> Optional[List[int]]:
+        """database_of_report as the `databases` of the repositories."""
+        database_id = await self.database_of_report(report_id)
+        return [database_id] if database_id else None
+
+    async def get_similar_study_by_query(self, query : Any, cutoff: str, limit: int, authors:List[str], database_id: Optional[int] = None):
 
         #Convert TagCategories:
 
@@ -40,18 +49,16 @@ class StudySimilaritySearchService:
         #found_study_titles = {}
         debug_map = {}
 
-        reranked_results = await self.vectorstore.search_similar_studies(query, limit, cutoff)
+        # One group per study of the database, so every hit counts towards `limit`.
+        reranked_results = await self.vectorstore.search_similar_studies(query, limit, cutoff, database_id)
 
         for result in reranked_results:
             for hit in result.hits:
-                candidates = hit.payload['belongs_to_study']
-                for item in candidates:
-                    #item = int(item) #TODO remove later
-                    if item not in found_study_ids:
-                        found_study_ids[item] = hit.score
-                    info = dict(hit.payload)
-                    info['score'] = hit.score
-                    debug_map[item] = debug_map.get(item, []) + [info]
+                if result.id not in found_study_ids:
+                    found_study_ids[result.id] = hit.score
+                info = dict(hit.payload)
+                info['score'] = hit.score
+                debug_map[result.id] = debug_map.get(result.id, []) + [info]
 
         if len(found_study_ids.keys()) == 0:
             return []
@@ -98,7 +105,7 @@ class StudySimilaritySearchService:
         query = self.vectorstore.build_recommandation_based_on_report_id(report.id)
 
         pool_target = offset + limit + 1
-        rows = await self.get_similar_study_by_query(query,cutoff,pool_target, authors)
+        rows = await self.get_similar_study_by_query(query,cutoff,pool_target, authors, await self.database_of_report(report.id))
 
         # Check if there are any similar items in the same project which are more similar than already retrieved existing studies
         if rows:
@@ -141,7 +148,7 @@ class StudySimilaritySearchService:
         requirement, since this needs neither the embedding nor the PDF.
         """
         await get_authorized_project_id(report_id, self.report_service.report_repo, self.project_repo, user_id)
-        studies = await self.report_service.get_referenced_studies(report_id)
+        studies = await self.report_service.get_referenced_studies(report_id, await self.databases_of_report(report_id))
         return await self._with_relevance(report_id, studies)
 
     async def add_relevance(self, report_id: int, studies: List[Study], user_id: Optional[str]) -> List[StudyCandidate]:
@@ -159,7 +166,7 @@ class StudySimilaritySearchService:
         scores = {}
         if studies and report_id in await self.vectorstore.reports_exist([report_id]):
             query = self.vectorstore.build_recommandation_based_on_report_id(report_id)
-            scores = await self.vectorstore.score_studies(query, [study.studyId for study in studies])
+            scores = await self.vectorstore.score_studies(query, [study.studyId for study in studies], await self.database_of_report(report_id))
         return [StudyCandidate(**study.model_dump(), relevance=scores.get(study.studyId, 0.0)) for study in studies]
 
     async def get_similar_studies_page(

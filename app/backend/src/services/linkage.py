@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
@@ -10,11 +10,13 @@ from ..services.study import StudyPayload
 
 
 class StudyNotFoundError(Exception):
-    """There is no such study, or it was created in another scope and is not confirmed (see README, "Scopes")."""
+    """There is no such study, it was created in another scope and is not confirmed (see README, "Scopes"), or it is a
+    study of another database than the report's project."""
 
 
 class ReportNotInProjectError(Exception):
-    """The report has no project association to confirm/unconfirm links within."""
+    """The report has no project association to confirm/unconfirm links within, or (creating a study for it) no study
+    database to add the study to."""
 
 
 class ReportProjectAccessError(Exception):
@@ -52,12 +54,13 @@ class LinkageService:
         check_report_access FastAPI dependency ahead of this call.
         """
         project_id = await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
-        if await self.study_repo.get_study_by_id(study_id) is None:
+        study = await self.study_repo.get_study_by_id(study_id, databases=await self._databases(report_id))
+        if study is None:
             raise StudyNotFoundError(f"Study {study_id} not found")
 
         try:
             await self.report_repo.link_study(report_id, study_id, user_id=user_id)
-            await self.vectorstore.link_report_to_study_id(report_id, study_id, user_id)
+            await self.vectorstore.link_report_to_study_id(report_id, study_id, study.database_id, user_id)
             await self.report_repo.commit()
         except Exception as e:
             await self.report_repo.rollback()
@@ -90,11 +93,15 @@ class LinkageService:
         user_id: Optional[str],
     ) -> Any:
         project_id = await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
+        # The new study goes to the database of the report's project; a report of no project has none.
+        database_id = await self.project_repo.get_database_id_by_report_id(report_id)
+        if database_id is None:
+            raise ReportNotInProjectError(f"Report {report_id} belongs to no project, so there is no database to add the study to")
 
         try:
-            new_study = await self.study_repo.add_study(study.model_dump())
+            new_study = await self.study_repo.add_study(study.model_dump(), database_id)
             await self.report_repo.link_study(report_id, new_study.id, user_id=user_id)
-            await self.vectorstore.link_report_to_study_id(report_id, new_study.id, user_id)
+            await self.vectorstore.link_report_to_study_id(report_id, new_study.id, database_id, user_id)
             await self.report_repo.commit()
         except:
             await self.report_repo.rollback()
@@ -102,6 +109,11 @@ class LinkageService:
         if project_id:
             await self.pubsub_service.publish_project_update(project_id)
         return new_study
+
+    async def _databases(self, report_id: int) -> Optional[List[int]]:
+        """The study database of the report's project (all for a report of no project)."""
+        database_id = await self.project_repo.get_database_id_by_report_id(report_id)
+        return [database_id] if database_id else None
 
     async def set_report_study_link_confirmation(
         self,

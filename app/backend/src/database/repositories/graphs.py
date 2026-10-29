@@ -35,12 +35,12 @@ class StudyGraphs:
         for node in document.nodes:
             category = self._category(node.kind)
             if category is not None:
-                node.value = (await self._resolve(category, [node.value]))[0]  # type: ignore[list-item]
+                node.value = (await self.resolve(category, [node.value]))[0]  # type: ignore[list-item]
         setattr(study, GRAPH_FIELD, self.stored.dump(document))
         await self._link(study.id, document)
         await self.db.flush()
 
-    async def _resolve(self, category: str, items: List[Item]) -> List[int]:
+    async def resolve(self, category: str, items: List[Item]) -> List[int]:
         """The ids of tags of a category given by id or name. A name is matched to an existing tag (ignoring
         case); an unknown one becomes a new tag."""
         if category not in TAG_TABLES:

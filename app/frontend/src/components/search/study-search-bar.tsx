@@ -31,6 +31,8 @@ interface StudySearchBarProps {
   onAddFilter: (filter: StudyFilter) => void;
   /** Closes the search (the button at the end of the bar, or Escape). */
   onClear?: () => void;
+  /** The ids of the databases searched; the suggestions only come from them (all of them if empty). */
+  databases?: number[];
   /** Shown at the start of the bar, e.g. the choice of databases. */
   leading?: ReactNode;
   /** `hero` is the large bar of the start page. */
@@ -38,12 +40,15 @@ interface StudySearchBarProps {
   autoFocus?: boolean;
 }
 
+const NO_DATABASES: number[] = [];
+
 /** The search field with suggestions from the vocabulary of the tag categories and the names of studies. */
 export function StudySearchBar({
   text,
   onSearch,
   onAddFilter,
   onClear,
+  databases = NO_DATABASES,
   leading,
   size = "compact",
   autoFocus,
@@ -58,7 +63,7 @@ export function StudySearchBar({
   const hero = size === "hero";
 
   // The vocabulary is loaded the first time the field is used.
-  const catalogs = useTagCatalogs(focused);
+  const catalogs = useTagCatalogs(focused, databases);
   const trimmed = value.trim();
   const debounced = useDebouncedValue(trimmed, 250);
 
@@ -70,13 +75,13 @@ export function StudySearchBar({
       return;
     }
     let active = true;
-    searchStudies({ q: debounced, limit: MAX_STUDIES })
+    searchStudies({ q: debounced, limit: MAX_STUDIES, databases })
       .then((page) => active && setStudies(page.items))
       .catch(() => active && setStudies([]));
     return () => {
       active = false;
     };
-  }, [debounced, open]);
+  }, [debounced, open, databases]);
 
   const suggestions = useMemo<Suggestion[]>(() => {
     if (trimmed.length < MIN_TAG_TEXT) return [];

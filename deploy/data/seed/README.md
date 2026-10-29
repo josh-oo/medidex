@@ -1,20 +1,21 @@
 # Synthetic seed data
 
-`synthetic_seed.sql` creates deterministic demo data for a fresh Medidex resource database.
-It contains the complete set of explicit titles, abstracts, IDs, and relationships; startup
-does not generate any data.
+[`synthetic_database.zip`](synthetic_database.zip) is a deterministic demo database: an exported database
+archive (`database.json` and `pdfs/`, see "Study databases" in the main README). The backend never loads it on
+its own: import it by hand on the Database management page (name, description and eligibility criteria are in the
+file). The ids of studies and reports are those the importing database gives them.
 
-- 100 studies with IDs in the `1000001`-`1000100` range.
-- An uneven set of 210 reports: most studies have one or two reports, while a smaller number have three or four, including protocol, results, follow-up, and correction/retraction-style records.
-- `pdfs/` contains one dummy PDF per seeded report. Each file contains the report title and abstract and is named by its zero-padded `ReportNumber`. `ReportNumber` is assigned as a globally unique, sequential value (`1`-`210`) matching insertion order, since the backend uses it as the PDF filename lookup key.
-- [`sample_reports.ris`](sample_reports.ris) contains five newest reports from distinct studies for upload testing; those reports are intentionally excluded from the seed.
-- Study/report links and provenance rows required by the backend repositories.
-- Linked conditions, interventions, outcomes, designs, and participant groups.
+- The database itself, "Synthetic RCT register", with a description and eligibility criteria that match the
+  corpus.
+- 101 studies with their linked conditions, interventions, outcomes, designs and participant groups.
+- An uneven set of 220 reports: most studies have one or two reports, while a smaller number have three or four
+  (one has ten), including protocol, results, follow-up, and correction/retraction-style records.
+- A dummy PDF for 211 of the reports (9 have none), each containing the report title and abstract. The import
+  stores each under the id of its report.
 
-During loading, the seed normalizes the corpus for RCT-focused workflows: study
-comparisons are structured: the seed keeps the legacy `comparison` column as `[{"intervention": [ids], "control": [ids]}]`
-and `duration` as text, and the `graph` of every study holds them (its arms, what they receive, their arm types and durations and the comparison between them, see `config/medidex-study.yaml`
-and `app/backend/src/utils/graph.py`): both sides
+The corpus is normalized for RCT-focused workflows: the `graph` of every study holds its
+comparison (its arms, what they receive, their arm types and durations and the comparison between them, see
+`config/medidex-study.yaml` and `app/backend/src/utils/graph.py`): both sides
 are interventions of the study (the control of each study is an intervention of its own), the
 linked study and report designs are normalized to parallel-group randomized
 controlled trials, and every report abstract identifies the underlying randomized
@@ -24,32 +25,10 @@ same realistic trial context. Report titles use varied RCT-style openings rather
 than a single repeated phrase. Trial registration identifiers are shared within a
 study and intentionally present on only a subset of reports.
 
-The SQL creates the study/report/aspect tables when they are absent and leaves an existing
-resource schema unchanged. Every data row is explicit and uses `ON CONFLICT DO NOTHING`,
-so repeated startup is idempotent.
+The import is all or nothing. Importing it twice gives two separate databases.
 
-## Schema: direct vs. adapted
+## Examples
 
-`synthetic_seed.sql` creates its tables (`report`, `study`, `study_report`, ...) directly
-under the generic snake_case names `app/backend/src/database/models.py` expects — this
-dataset is ours end to end, so there's no domain-specific naming to translate.
-
-`views.sql` is a separate, **optional** adapter for the case where `POSTGRES_DB_RESOURCES`
-instead points at a real physical schema that uses different table/column names — e.g. a
-Cochrane-style CRG/CENTRAL database (`tblReport`, `tblStudy`, ...; see
-[`ops/tools/scripts/prepare_database.py`](../../../ops/tools/scripts/prepare_database.py)
-for the tool that produces one from an `.mdb` export). It creates views named after the
-application's schema that re-expose that other schema's data, so the application never has
-to know about it. It is not tied to `synthetic_seed.sql` and does not run against it.
-
-It is disabled by default. To enable it:
-
-1. Edit `views.sql` so its `CREATE VIEW` statements reference your actual physical
-   table/column names (the file documents each mapping; adjust as needed).
-2. Set `APPLY_SCHEMA_VIEWS=true` in [`schema-adapter.conf`](schema-adapter.conf) (read by
-   `ops/app-init/init.sh` on every `app-init` run).
-3. Don't mount `synthetic_seed.sql` for that database — it's demo data and isn't meant to
-   be loaded on top of a real physical schema.
-
-See `ops/app-init/init.sh` (section "2b. CONVENTIONAL-NAMING VIEWS") for exactly how the
-flag is read and applied.
+[`examples/`](examples) holds new reports for upload testing, none of them in the database:
+[`sample_reports.ris`](examples/sample_reports.ris) with nine reports, and the fulltext PDFs of seven of them
+(`Article - ….pdf`).

@@ -315,6 +315,8 @@ class Project(BaseModel):
     name: str
     owner: str
     createdAt: datetime
+    # The study database its reports are matched against and added to.
+    databaseId: int
     numberReportsReadyForProcessing: int = 0
     numberReportsTotal: int
     numberReportsPreProcessed: int = 0
@@ -332,9 +334,77 @@ class Task(BaseModel):
     name: str
     owner: str
     createdAt: datetime
+    databaseId: int
     numberReportsTotal: int = 0
     numberReportsReadyForProcessing: int = 0
     numberReportsProcessed: int
+
+class DatabasePayload(BaseModel):
+    """What describes a study database; the body of POST /databases."""
+    name: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = None
+    eligibilityCriteria: str = Field(min_length=1, description="Which studies belong in the database, e.g. the inclusion criteria of the register.")
+
+class DatabaseUpdate(BaseModel):
+    """The body of PATCH /databases/{id}: the fields given are changed, the others kept. An empty description removes it;
+    name and eligibility criteria cannot be empty."""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = None
+    eligibilityCriteria: Optional[str] = Field(default=None, min_length=1)
+
+class Database(BaseModel):
+    databaseId: int
+    # Not all its reports are in the vectorstore yet (e.g. right after an import): its studies are found by the
+    # search, but not yet suggested for new reports. Seen in the vectorstore on every request, not stored.
+    indexing: bool = False
+    numberReportsIndexed: int = 0
+    name: str
+    description: Optional[str] = None
+    eligibilityCriteria: str
+    createdAt: datetime
+    numberStudies: int = 0
+    numberReports: int = 0
+
+class DatabaseReport(BaseModel):
+    """A report of a study in the exchange format of a database (see DatabaseExport)."""
+    title: str
+    year: int
+    authors: List[str] = Field(default_factory=list)
+    abstract: Optional[str] = None
+    journal: Optional[str] = None
+    volume: Optional[str] = None
+    issue: Optional[str] = None
+    pages: Optional[str] = None
+    language: Optional[str] = None
+    publisher: Optional[str] = None
+    city: Optional[str] = None
+    doi: Optional[str] = None
+    trialId: Optional[str] = None
+    # When the report was entered into the database it comes from ("YYYY-MM-DD HH:MM:SS"); now if left out.
+    createdAt: Optional[str] = None
+    # Its fulltext PDF: the name of the file in the archive of the database (e.g. "pdfs/12.pdf", see utils/archive.py).
+    pdf: Optional[str] = None
+
+class DatabaseStudy(StudyFields):
+    """A study in the exchange format of a database: its fields (config/medidex-study.yaml), its graph with the tags by
+    name, the names of its tags per category kept in tables (e.g. interventions; those kept in a column, e.g. countries,
+    are fields) and its reports."""
+    graph: Optional[Dict[str, Any]] = None
+    tags: Dict[str, List[str]] = Field(default_factory=dict)
+    reports: List[DatabaseReport] = Field(default_factory=list)
+    # When the study was entered into the database it comes from ("YYYY-MM-DD HH:MM:SS"); now if left out.
+    createdAt: Optional[str] = None
+
+class DatabaseExport(BaseModel):
+    """A whole study database as one JSON document, `database.json` of its archive (utils/archive.py) with the PDFs of
+    its reports: what GET /databases/{id}/export returns and POST /databases/import reads (where the request names and
+    describes the new database). Reports linked to several studies are listed under each of them (and imported once)."""
+    format: str = "medidex-database"
+    version: int = 1
+    name: str
+    description: Optional[str] = None
+    eligibilityCriteria: Optional[str] = None
+    studies: List[DatabaseStudy] = Field(default_factory=list)
 
 def tags_to_dto(tags) -> List[Tag]:
     """Converts SQLModel aspect rows (Intervention/Condition/Outcome, dumped to their

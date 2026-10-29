@@ -12,6 +12,7 @@ import { useCuration } from "@/hooks/use-curation";
 import { useAuthStore } from "@/hooks/use-auth";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { useTagCatalogs } from "@/hooks/use-tag-catalog";
+import { parseDatabaseIds } from "@/lib/databases";
 import { useStudySchema } from "@/hooks/use-study-schema";
 import { searchStudies } from "@/lib/api/studiesApi";
 import { PageLink } from "@/lib/page-transition";
@@ -37,7 +38,10 @@ function useSearchState() {
   const [params, setParams] = useSearchParams();
   const text = params.get("q") ?? "";
   const databaseParams = params.getAll("db").join("\n");
-  const databases = useMemo(() => (databaseParams ? databaseParams.split("\n") : []), [databaseParams]);
+  const databases = useMemo(
+    () => (databaseParams ? parseDatabaseIds(databaseParams.split("\n")) : []),
+    [databaseParams]
+  );
   const allParams = params.getAll("all").join("\n");
   const allFields = useMemo(() => (allParams ? allParams.split("\n") : []), [allParams]);
   const filterParams = params.getAll("f").join("\n");
@@ -54,7 +58,7 @@ function useSearchState() {
     (
       nextText: string,
       nextFilters: StudyFilter[],
-      nextDatabases: string[] = databases,
+      nextDatabases: number[] = databases,
       nextAllFields: string[] = allFields
     ) => {
       const next = new URLSearchParams();
@@ -64,7 +68,7 @@ function useSearchState() {
       nextAllFields
         .filter((field) => nextFilters.some((filter) => filter.field === field))
         .forEach((field) => next.append("all", field));
-      nextDatabases.forEach((database) => next.append("db", database));
+      nextDatabases.forEach((database) => next.append("db", String(database)));
       setParams(next);
     },
     [setParams, databases, allFields]
@@ -75,7 +79,7 @@ function useSearchState() {
     filters,
     databases,
     allFields,
-    setDatabases: (nextDatabases: string[]) => update(text, filters, nextDatabases),
+    setDatabases: (nextDatabases: number[]) => update(text, filters, nextDatabases),
     toggleAll: (field: string) =>
       update(
         text,
@@ -147,6 +151,7 @@ export default function Home() {
             onSearch={setText}
             onAddFilter={addFilter}
             onClear={searching ? clear : undefined}
+            databases={databases}
             leading={
               <DatabasePicker selected={databases} onChange={setDatabases} size={searching ? "compact" : "hero"} />
             }
@@ -158,6 +163,7 @@ export default function Home() {
         {searching ? (
           <Results
             query={buildStudyQuery(text, filters, textFields, allFields)}
+            databases={databases}
             text={text}
             filters={filters}
             allFields={allFields}
@@ -176,6 +182,8 @@ export default function Home() {
 
 interface ResultsProps {
   query: string;
+  /** The ids of the databases to search; empty means all of them. */
+  databases: number[];
   text: string;
   filters: StudyFilter[];
   allFields: string[];
@@ -188,6 +196,7 @@ interface ResultsProps {
 // The filters and the results below the search; they fade in when the search starts.
 function Results({
   query,
+  databases,
   text,
   filters,
   allFields,
@@ -196,7 +205,7 @@ function Results({
   onRemoveFilter,
   onClearFilters,
 }: ResultsProps) {
-  const catalogs = useTagCatalogs();
+  const catalogs = useTagCatalogs(true, databases);
   const [results, setResults] = useState<StudyDto[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -215,7 +224,7 @@ function Results({
 
     let cancelled = false;
     setLoading(true);
-    searchStudies({ q: query, limit: PAGE_SIZE })
+    searchStudies({ q: query, limit: PAGE_SIZE, databases })
       .then((page) => {
         if (cancelled) return;
         setResults(page.items);
@@ -230,12 +239,12 @@ function Results({
     return () => {
       cancelled = true;
     };
-  }, [query, tooShort]);
+  }, [query, databases, tooShort]);
 
   const loadMore = () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
-    searchStudies({ q: query, limit: PAGE_SIZE, cursor: nextCursor })
+    searchStudies({ q: query, limit: PAGE_SIZE, cursor: nextCursor, databases })
       .then((page) => {
         setResults((previous) => [...(previous ?? []), ...page.items]);
         setNextCursor(page.nextCursor);

@@ -1,6 +1,8 @@
 #!/bin/sh
-# Combined init: prepares both the qdrant collection and the logic data volume.
+# Combined init: prepares the qdrant collection, the logic data volume and Keycloak.
 # Runs as the one-shot `app-init` service on `docker compose up`, before `logic` starts.
+# It never touches postgres: the backend makes the schema of the resources database and syncs the
+# vectorstore itself when it starts (app/backend/src/background/startup.py).
 set -eu
 
 echo "app-init: starting initialization..."
@@ -11,8 +13,6 @@ echo "app-init: starting initialization..."
 QDRANT_URL="${QDRANT_URL:-http://qdrant:6333}"
 COLLECTION="${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}"
 DIM="${EMBEDDING_MODEL_DIM:-1024}"
-EMBEDDING_URL="${EMBEDDING_MODEL_BASE_URL:-http://embedding:80/v1}"
-EMBEDDING_API_KEY="${EMBEDDING_MODEL_API_KEY:-unused}"
 
 echo "app-init: waiting for qdrant at $QDRANT_URL..."
 attempt=1
@@ -50,312 +50,27 @@ else
 fi
 
 # ============================================================================
-# 2. SYNTHETIC RESOURCE DATA
-# ============================================================================
-POSTGRES_HOST="${POSTGRES_HOST:-postgres}"
-POSTGRES_PORT="${POSTGRES_PORT:-5432}"
-POSTGRES_USER="${POSTGRES_USER:-postgres}"
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
-POSTGRES_DB_RESOURCES="${POSTGRES_DB_RESOURCES:-resources}"
-SEED_FILE="/seed/synthetic_seed.sql"
-
-if [ -f "$SEED_FILE" ]; then
-    echo "app-init: waiting for postgres at $POSTGRES_HOST:$POSTGRES_PORT..."
-    attempt=1
-    # The postgres container runs ops/app-init/postgres-init.sh (which creates
-    # POSTGRES_DB_RESOURCES/LANGGRAPH/KEYCLOAK) before it accepts connections here,
-    # so by the time this succeeds the resource database already exists.
-    until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB_RESOURCES" >/dev/null 2>&1; do
-        if [ "$attempt" -ge 60 ]; then
-            echo "app-init: ERROR: postgres is not reachable after 120s" >&2
-            exit 1
-        fi
-        attempt=$((attempt + 1))
-        sleep 2
-    done
-    resource_table_exists=$(PGPASSWORD="$POSTGRES_PASSWORD" psql \
-        --host "$POSTGRES_HOST" \
-        --port "$POSTGRES_PORT" \
-        --username "$POSTGRES_USER" \
-        --dbname "$POSTGRES_DB_RESOURCES" \
-        --tuples-only --no-align \
-        --command "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'study')")
-    resource_data_exists="no"
-    if [ "$resource_table_exists" = "t" ]; then
-        resource_data_exists=$(PGPASSWORD="$POSTGRES_PASSWORD" psql \
-            --host "$POSTGRES_HOST" \
-            --port "$POSTGRES_PORT" \
-            --username "$POSTGRES_USER" \
-            --dbname "$POSTGRES_DB_RESOURCES" \
-            --tuples-only --no-align \
-            --command 'SELECT EXISTS (SELECT 1 FROM "study")')
-        [ "$resource_data_exists" = "t" ] && resource_data_exists="yes" || resource_data_exists="no"
-    fi
-    if [ "$resource_data_exists" = "yes" ]; then
-        echo "app-init: resource data already exists; preserving it"
-    else
-        echo "app-init: resource data is empty; loading synthetic seed data"
-        PGPASSWORD="$POSTGRES_PASSWORD" psql \
-            --host "$POSTGRES_HOST" \
-            --port "$POSTGRES_PORT" \
-            --username "$POSTGRES_USER" \
-            --dbname "$POSTGRES_DB_RESOURCES" \
-            --set ON_ERROR_STOP=1 \
-            --file "$SEED_FILE"
-    fi
-else
-    echo "app-init: synthetic seed file not mounted; skipping demo data"
-fi
-
-# ============================================================================
-# 2b. CONVENTIONAL-NAMING VIEWS (optional schema adapter)
-# ============================================================================
-# Only needed when the resources database uses a physical schema that
-# doesn't already match the application's (e.g. an imported Cochrane-style
-# CRG/CENTRAL database) -- the bundled synthetic_seed.sql demo data creates
-# its tables directly under the schema the application expects, so this is
-# off by default. Toggle it via deploy/data/seed/schema-adapter.conf.
-# See deploy/data/seed/views.sql for what the adapter does and why.
-SCHEMA_ADAPTER_CONFIG="/seed/schema-adapter.conf"
-APPLY_SCHEMA_VIEWS=false
-if [ -f "$SCHEMA_ADAPTER_CONFIG" ]; then
-    # shellcheck disable=SC1090
-    . "$SCHEMA_ADAPTER_CONFIG"
-fi
-
-VIEWS_FILE="/seed/views.sql"
-if [ "$APPLY_SCHEMA_VIEWS" = "true" ]; then
-    if [ -f "$VIEWS_FILE" ]; then
-        echo "app-init: APPLY_SCHEMA_VIEWS=true; applying conventional-naming views"
-        PGPASSWORD="$POSTGRES_PASSWORD" psql \
-            --host "$POSTGRES_HOST" \
-            --port "$POSTGRES_PORT" \
-            --username "$POSTGRES_USER" \
-            --dbname "$POSTGRES_DB_RESOURCES" \
-            --set ON_ERROR_STOP=1 \
-            --file "$VIEWS_FILE"
-    else
-        echo "app-init: APPLY_SCHEMA_VIEWS=true but views.sql not mounted; skipping view setup" >&2
-        exit 1
-    fi
-else
-    echo "app-init: APPLY_SCHEMA_VIEWS is not 'true'; skipping conventional-naming views"
-fi
-
-# ============================================================================
-# 3. LOGIC DATA VOLUME
+# 2. LOGIC DATA VOLUME
 # ============================================================================
 DATABASE_VOLUME="${DATABASE_VOLUME:?is not set; must point to the data volume}"
 APP_UID="${APP_UID:-999}"
 APP_GID="${APP_GID:-999}"
 
 echo "app-init: preparing data volume at $DATABASE_VOLUME..."
-for dir in logs resources resources/pdfs resources/pdf_metadata; do
+# resources/report_pdfs: the PDFs of the reports, named by report id (app/backend/src/utils/pdfs.py).
+for dir in logs resources resources/report_pdfs resources/pdf_metadata; do
     mkdir -p "$DATABASE_VOLUME/$dir"
 done
-if [ ! -f "$DATABASE_VOLUME/resources/pdfs/00000.pdf" ]; then
-    cp /app-init/data/placeholder.pdf "$DATABASE_VOLUME/resources/pdfs/00000.pdf"
-fi
-if [ -d /seed/pdfs ]; then
-    seed_pdf_count=$(find /seed/pdfs -type f -name '*.pdf' | wc -l | tr -d ' ')
-    echo "app-init: copying $seed_pdf_count seeded PDFs from /seed/pdfs to $DATABASE_VOLUME/resources/pdfs"
-    find /seed/pdfs -type f -name '*.pdf' -exec sh -c '
-        target="$1/resources/pdfs/$(basename "$2")"
-        [ -f "$target" ] || cp "$2" "$target"
-    ' sh "$DATABASE_VOLUME" {} \;
-    runtime_pdf_count=$(find "$DATABASE_VOLUME/resources/pdfs" -type f -name '*.pdf' | wc -l | tr -d ' ')
-    echo "app-init: runtime PDF count is $runtime_pdf_count"
-fi
 chown -R "$APP_UID:$APP_GID" "$DATABASE_VOLUME"
 echo "app-init: data volume prepared for uid $APP_UID:$APP_GID"
 
 # ============================================================================
-# 4. VECTORSTORE SYNC (reports, interventions, conditions, outcomes)
-# ============================================================================
-# Reconciles the qdrant collection with the current contents of report,
-# intervention, condition and outcome on every run, instead of relying on a
-# one-time "already initialized" marker: rows that aren't
-# embedded yet are added, and points whose row no longer exists in postgres
-# (e.g. deleted directly in the database) are removed. Point ids follow the
-# same deterministic scheme as transform_to_uuid() in
-# app/backend/src/services/vectorstore.py, so this only ever touches
-# points produced by that scheme (report/tag ids, not e.g. mesh tags) and
-# leaves everything else in the collection untouched.
-echo "app-init: waiting for postgres at $POSTGRES_HOST:$POSTGRES_PORT..."
-attempt=1
-until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB_RESOURCES" >/dev/null 2>&1; do
-    if [ "$attempt" -ge 60 ]; then
-        echo "app-init: ERROR: postgres is not reachable after 120s" >&2
-        exit 1
-    fi
-    attempt=$((attempt + 1))
-    sleep 2
-done
-
-REPORT_RECORDS="/tmp/report-records.jsonl"
-TAG_RECORDS="/tmp/tag-records.jsonl"
-ID_RECORD_TSV="/tmp/vectorstore-id-record.tsv"
-DESIRED_IDS="/tmp/vectorstore-desired-ids.txt"
-EXISTING_IDS="/tmp/vectorstore-existing-ids.txt"
-EXISTING_MANAGED_IDS="/tmp/vectorstore-existing-managed-ids.txt"
-MISSING_IDS="/tmp/vectorstore-missing-ids.txt"
-STALE_IDS="/tmp/vectorstore-stale-ids.txt"
-MISSING_RECORDS="/tmp/vectorstore-missing-records.jsonl"
-trap 'rm -f "$REPORT_RECORDS" "$TAG_RECORDS" "$ID_RECORD_TSV" "$DESIRED_IDS" \
-    "$EXISTING_IDS" "$EXISTING_MANAGED_IDS" "$MISSING_IDS" "$STALE_IDS" "$MISSING_RECORDS"' EXIT
-
-psql_query=$(cat <<'SQL'
-SELECT json_build_object(
-    'id', format('00000000-0000-4000-a000-%s', lpad(r."id"::text, 12, '0')),
-    'text', btrim(coalesce(r."title", '') || E'\n' || coalesce(r."abstract", '')),
-    'payload', json_build_object(
-        'is_report', true,
-        'belongs_to_study', coalesce((SELECT json_agg(sr."study_id") FROM "study_report" sr WHERE sr."report_id" = r."id"), '[]'::json),
-        'report_id', r."id",
-        'date_entered', r."date_entered",
-        'authors', coalesce((SELECT json_agg(trim(author)) FROM unnest(string_to_array(coalesce(r."authors", ''), '//')) author WHERE trim(author) <> ''), '[]'::json),
-        'title', r."title",
-        'abstract', r."abstract",
-        'belongs_to_trial_id', EXISTS (SELECT 1 FROM "study_report" sr WHERE sr."report_id" = r."id")
-    )
-) FROM "report" r ORDER BY r."id";
-SQL
-)
-PGPASSWORD="$POSTGRES_PASSWORD" psql \
-    --host "$POSTGRES_HOST" \
-    --port "$POSTGRES_PORT" \
-    --username "$POSTGRES_USER" \
-    --dbname "$POSTGRES_DB_RESOURCES" \
-    --tuples-only --no-align --command "$psql_query" > "$REPORT_RECORDS"
-
-tag_query=$(cat <<'SQL'
-SELECT json_build_object(
-    'id', format('00000000-%s-4000-a000-%s', tag, lpad(id::text, 12, '0')),
-    'text', description,
-    'payload', json_build_object(
-        'tree_ids', json_build_array(source),
-        'source', 'internal',
-        'source_id', id::text,
-        'display_name', description,
-        'is_report', false
-    )
-) FROM (
-    SELECT "id", "description", 'interventions' AS source, '0001' AS tag FROM "intervention"
-    UNION ALL
-    SELECT "id", "description", 'conditions', '0002' FROM "condition"
-    UNION ALL
-    SELECT "id", "description", 'outcomes', '0003' FROM "outcome"
-) tags ORDER BY tag, id;
-SQL
-)
-PGPASSWORD="$POSTGRES_PASSWORD" psql \
-    --host "$POSTGRES_HOST" \
-    --port "$POSTGRES_PORT" \
-    --username "$POSTGRES_USER" \
-    --dbname "$POSTGRES_DB_RESOURCES" \
-    --tuples-only --no-align --command "$tag_query" > "$TAG_RECORDS"
-
-# Desired = every report/tag row that currently exists in postgres.
-jq -r '.id' "$REPORT_RECORDS" "$TAG_RECORDS" | sort -u > "$DESIRED_IDS"
-
-# Existing = every point currently in qdrant, paginated via scroll.
-echo "app-init: reading existing vectorstore point ids..."
-: > "$EXISTING_IDS"
-offset="null"
-while :; do
-    if [ "$offset" = "null" ]; then
-        body='{"limit":1000,"with_payload":false,"with_vector":false}'
-    else
-        body=$(jq -cn --argjson offset "$offset" '{limit:1000,with_payload:false,with_vector:false,offset:$offset}')
-    fi
-    response=$(curl -sf -X POST "$QDRANT_URL/collections/$COLLECTION/points/scroll" \
-        -H 'Content-Type: application/json' --data "$body")
-    printf '%s' "$response" | jq -r '.result.points[].id' >> "$EXISTING_IDS"
-    offset=$(printf '%s' "$response" | jq -c '.result.next_page_offset')
-    [ "$offset" = "null" ] && break
-done
-# Restrict to ids in the report (tag 0000) / tag (0001-0003) id space this
-# script owns, e.g. never touch mesh tags (tag 1000) or anything else.
-grep -E '^00000000-000[0-3]-4000-a000-' "$EXISTING_IDS" | sort -u > "$EXISTING_MANAGED_IDS"
-
-comm -23 "$DESIRED_IDS" "$EXISTING_MANAGED_IDS" > "$MISSING_IDS"
-comm -13 "$DESIRED_IDS" "$EXISTING_MANAGED_IDS" > "$STALE_IDS"
-missing_count=$(wc -l < "$MISSING_IDS" | tr -d ' ')
-stale_count=$(wc -l < "$STALE_IDS" | tr -d ' ')
-echo "app-init: vectorstore sync: $missing_count missing, $stale_count stale (of $(wc -l < "$DESIRED_IDS" | tr -d ' ') expected points)"
-
-if [ "$missing_count" -gt 0 ]; then
-    echo "app-init: waiting for embedding service at $EMBEDDING_URL..."
-    attempt=1
-    until curl -sf "$EMBEDDING_URL/embeddings" \
-        -H 'Content-Type: application/json' \
-        -H "Authorization: Bearer $EMBEDDING_API_KEY" \
-        --data '{"input":["initialization probe"],"model":null}' >/dev/null; do
-        if [ "$attempt" -ge 90 ]; then
-            echo "app-init: ERROR: embedding service is not reachable after 180s" >&2
-            exit 1
-        fi
-        attempt=$((attempt + 1))
-        sleep 2
-    done
-
-    upsert_records() {
-        records_file="$1"
-        while IFS= read -r record; do
-            [ -n "$record" ] || continue
-            point_id=$(printf '%s' "$record" | jq -r '.id')
-            text=$(printf '%s' "$record" | jq -r '.text')
-            payload=$(printf '%s' "$record" | jq -c '.payload')
-            request=$(jq -cn --arg text "$text" '{input: [$text], model: null}')
-            response=$(curl -sf "$EMBEDDING_URL/embeddings" \
-                -H 'Content-Type: application/json' \
-                -H "Authorization: Bearer $EMBEDDING_API_KEY" \
-                --data "$request")
-            vector=$(printf '%s' "$response" | jq -c '.data[0].embedding')
-            [ "$vector" != "null" ] || {
-                echo "app-init: ERROR: embedding response did not contain a vector for $point_id" >&2
-                exit 1
-            }
-            point=$(jq -cn \
-                --arg id "$point_id" \
-                --argjson vector "$vector" \
-                --argjson payload "$payload" \
-                '{points: [{id: $id, vector: $vector, payload: $payload}]}')
-            curl -sf -X PUT "$QDRANT_URL/collections/$COLLECTION/points?wait=true" \
-                -H 'Content-Type: application/json' \
-                --data "$point" >/dev/null
-        done < "$records_file"
-    }
-
-    # Use an ASCII unit separator (not a literal in the JSON) to join id/record
-    # so the join survives arbitrary title/abstract text without re-escaping it.
-    us=$(printf '\037')
-    jq -r --arg us "$us" '[.id, tostring] | join($us)' "$REPORT_RECORDS" "$TAG_RECORDS" > "$ID_RECORD_TSV"
-    awk -v FS="$us" 'NR==FNR{miss[$0]=1;next} ($1 in miss){print $2}' "$MISSING_IDS" "$ID_RECORD_TSV" > "$MISSING_RECORDS"
-
-    upsert_records "$MISSING_RECORDS"
-    echo "app-init: embedded and upserted $missing_count missing point(s)"
-fi
-
-if [ "$stale_count" -gt 0 ]; then
-    echo "app-init: deleting $stale_count stale point(s) from vectorstore"
-    delete_ids_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' "$STALE_IDS")
-    curl -sf -X POST "$QDRANT_URL/collections/$COLLECTION/points/delete?wait=true" \
-        -H 'Content-Type: application/json' \
-        --data "{\"points\": $delete_ids_json}" >/dev/null
-fi
-
-if [ "$missing_count" -eq 0 ] && [ "$stale_count" -eq 0 ]; then
-    echo "app-init: vectorstore already in sync with the database"
-fi
-
-# ============================================================================
-# 5. KEYCLOAK ADMIN BOOTSTRAP
+# 3. KEYCLOAK ADMIN BOOTSTRAP
 # ============================================================================
 # Runs on every app-init run (idempotent). Two parts:
-#   5a. grant the medidex-backoffice service account the realm-management
+#   3a. grant the medidex-backoffice service account the realm-management
 #       roles it needs (always).
-#   5b. optionally create/approve an admin account, if ADMIN_EMAIL and
+#   3b. optionally create/approve an admin account, if ADMIN_EMAIL and
 #       ADMIN_PASSWORD are both set.
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://keycloak:8080}"
 KEYCLOAK_REALM="${KEYCLOAK_REALM:-medidex}"
@@ -408,7 +123,7 @@ if [ -z "$kc_backoffice_token" ]; then
     exit 1
 fi
 
-# --- 5a. grant medidex-backoffice its realm-management client roles -------
+# --- 3a. grant medidex-backoffice its realm-management client roles -------
 # Needed so the backend's admin API (app/backend/fastapi_app/admin.py) can
 # manage users. realm-medidex.json
 # declares these too, but that file is only applied on a fresh realm import,
@@ -465,7 +180,7 @@ fi
 # has the permissions (manage-users) that the rest of this script needs.
 kc_token="$kc_backoffice_token"
 
-# --- 5b. optional admin bootstrap account ----------------------------------
+# --- 3b. optional admin bootstrap account ----------------------------------
 # Set both ADMIN_EMAIL and ADMIN_PASSWORD to create an approved admin in
 # Keycloak on startup (idempotent: safe to run on every app-init run).
 if [ -n "${ADMIN_EMAIL:-}" ] && [ -n "${ADMIN_PASSWORD:-}" ]; then

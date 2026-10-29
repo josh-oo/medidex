@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProjectUploadOptionsSlot } from "@/context/study-report-slots-context";
 import { UploadSection, type UploadSectionHandle, type UploadSectionSnapshot } from "@/components/ui/upload/upload-section";
+import type { StudyDatabase } from "@/lib/databases";
 
 interface CreateProjectDialogProps {
   /** Opens the dialog; leave it out to open the dialog from elsewhere (`open`, `onOpenChange`). */
@@ -12,9 +13,11 @@ interface CreateProjectDialogProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   onProjectCreated?: () => void;
+  /** The study database the reports are matched against and added to. */
+  database: StudyDatabase;
 }
 
-export function CreateProjectDialog({ trigger, open: openProp, onOpenChange, onProjectCreated }: CreateProjectDialogProps) {
+export function CreateProjectDialog({ trigger, open: openProp, onOpenChange, onProjectCreated, database }: CreateProjectDialogProps) {
   const [openState, setOpenState] = useState(false);
   const open = openProp ?? openState;
   const setOpen = useCallback(
@@ -52,11 +55,12 @@ export function CreateProjectDialog({ trigger, open: openProp, onOpenChange, onP
       }
       const formData = new FormData();
       formData.append("projectName", trimmedName);
+      formData.append("databaseId", String(database.id));
       formData.append("file", file, file.name);
       formData.append("options", JSON.stringify(options));
       return formData;
     },
-    [projectName, options],
+    [projectName, options, database.id],
   );
 
   const canUpload = projectName.trim().length > 0;
@@ -80,7 +84,10 @@ export function CreateProjectDialog({ trigger, open: openProp, onOpenChange, onP
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Create Project</DialogTitle>
-          <DialogDescription>Provide a project name and upload a RIS file to start processing.</DialogDescription>
+          <DialogDescription>
+            Provide a project name and upload a RIS file to start processing. Its reports are matched against the
+            studies of <span className="font-medium text-foreground">{database.name}</span>.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">

@@ -58,7 +58,7 @@ async def similar_tags(tag_category: TagCategories =Path(..., description="The t
 
 async def _search_studies_with_relevance(ctx: RequestContext, report_id: int, q: str, limit: int, cursor: Optional[str]) -> Page[StudyCandidate]:
     try:
-        page = await ctx.study_service.search_studies_page(q, limit, cursor)
+        page = await ctx.study_service.search_studies_page(q, limit, cursor, await ctx.study_similarity_service.databases_of_report(report_id))
     except (InvalidCursorError, QuerySyntaxError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
@@ -160,6 +160,8 @@ async def link_to_new_study(
         new_study = await ctx.linkage_service.create_study_and_link_to_report(report_id, study, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
         raise_for_report_access(exc)
+    except ReportNotInProjectError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DuplicateShortNameError:
         raise HTTPException(status_code=409, detail="Study shortName already exists")
 
