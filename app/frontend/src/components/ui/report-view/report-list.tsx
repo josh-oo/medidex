@@ -3,7 +3,9 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useReportPages } from "@/hooks/use-report-pages";
 import { useClientPages } from "@/hooks/use-client-pages";
 import { Pager } from "@/components/ui/pager";
-import { FileText, ChevronDown, PanelLeftClose, Search, X } from "lucide-react";
+import { ArrowLeft, FileText, ChevronDown, PanelLeftClose, Search, X } from "lucide-react";
+import { curationPaths } from "@/lib/curation-steps";
+import { PageLink } from "@/lib/page-transition";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -158,8 +160,9 @@ export function ReportList({
       reportIds: reportIdsKey ? reportIdsKey.split(",").map(Number) : [],
       hasMore,
       loadMore: () => loadMoreRef.current(),
+      isLoading,
     });
-  }, [reportIdsKey, hasMore, setNavigation]);
+  }, [reportIdsKey, hasMore, isLoading, setNavigation]);
 
   const selectedIndex = filteredReports.findIndex((report) => report.reportId === selectedReportId);
 
@@ -199,6 +202,12 @@ export function ReportList({
     <div className="h-full flex flex-col">
       <div className="px-3 pt-4 pb-3 space-y-3">
         <div className="flex items-center gap-2 px-1">
+          {/* Back to the projects of the database management. */}
+          <Button asChild variant="ghost" size="icon-sm" className="-ml-1.5 text-muted-foreground">
+            <PageLink to={curationPaths.overview} aria-label="Back to database management" title="Database management">
+              <ArrowLeft className="h-4 w-4" />
+            </PageLink>
+          </Button>
           <h2 className="text-base font-semibold tracking-tight">Reports</h2>
           <span className="text-sm text-muted-foreground tabular-nums">
             {filteredReports.length}{hasMore ? "+" : ""}

@@ -133,15 +133,19 @@ class ProjectResourceService:
         progress_results = await asyncio.gather(
             *(self.get_vectorized_and_ready_report_ids(project.id) for project in projects)
         )
+        report_id_results = await asyncio.gather(
+            *(self.project_repo.get_project_associated_report_ids(project.id) for project in projects)
+        )
 
         tasks: List[Task] = []
-        for project, (_, _, ready_for_processing) in zip(projects, progress_results):
+        for project, (_, _, ready_for_processing), report_ids in zip(projects, progress_results, report_id_results):
             tasks.append(
                 Task(
                     projectId=project.id,
                     name=project.description,
                     owner=project.uploaded_by or "",
                     createdAt=project.date_created,
+                    numberReportsTotal=len(report_ids),
                     numberReportsReadyForProcessing=len(ready_for_processing),
                     numberReportsProcessed=user_link_counts.get(project.id, 0),
                 )

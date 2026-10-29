@@ -11,9 +11,11 @@ import {
   X,
 } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
 import { StudyCard } from "./study-card";
 import { StudyDetails } from "./study-details";
 import { Widget } from "@/components/ui/widget";
+import { STUDY_ROWS_PER_PAGE, StudyRowSkeleton } from "@/components/reports/workbench-skeleton";
 import { AddStudyTriggerSlot } from "@/context/add-study-trigger-context";
 import { AdvancedSearchDialog } from "./advanced-search-dialog";
 import { Pager } from "@/components/ui/pager";
@@ -22,6 +24,7 @@ import { WorkbenchAside } from "@/context/workbench-aside-context";
 import type { StudyCandidateDto, StudyDto, StudyBaseDto, Page } from "@/types/apiDTOs";
 import { ReportBannerSlot, StudyBadgeSlot } from "@/context/study-report-slots-context";
 import { useReportStore } from "@/hooks/use-report-store";
+import { cn } from "@/lib/utils";
 import { useExtensionRegistry, type StudyLinkReview } from "@/context/extension-registry-context";
 import { assignNewStudyToReportByReportId } from "@/lib/api/reportApi";
 import { searchStudies } from "@/lib/api/studiesApi";
@@ -37,14 +40,16 @@ interface CandidateStudyTableProps {
   nextCursor?: string | null;
   isLoadingMore?: boolean;
   onLoadMore?: () => void;
+  /** Out of reach (e.g. the last report's studies, while the next one's load), with the part shown next to the report. */
+  inert?: boolean;
 }
 
 // The backend rejects shorter queries.
 const MIN_SEARCH_QUERY_LENGTH = 3;
 // Page size for both the explicit search and its pages.
 const SEARCH_PAGE_SIZE = 10;
-// Similar studies shown per page.
-const STUDY_PAGE_SIZE = 10;
+// Similar studies shown per page (as many as their skeleton shows).
+const STUDY_PAGE_SIZE = STUDY_ROWS_PER_PAGE;
 
 // Without an extension reviewing links, every link goes ahead.
 const useNoLinkReview = (): StudyLinkReview => ({ confirmLink: async () => true, dialog: null });
@@ -70,6 +75,7 @@ export function CandidateStudyTable({
   nextCursor = null,
   isLoadingMore = false,
   onLoadMore,
+  inert = false,
 }: CandidateStudyTableProps) {
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -161,6 +167,9 @@ export function CandidateStudyTable({
   // drives how the results header displays it.
   const runSearch = useCallback(async (query: string, advanced: boolean = false) => {
     setIsSearching(true);
+    // The results of an earlier search (e.g. of the last report) give way to placeholders, not to a flash of
+    // the old studies.
+    setSearchResults(null);
     setSearchError(null);
     setSubmittedQuery(query);
     setIsAdvancedSearch(advanced);
@@ -360,8 +369,24 @@ export function CandidateStudyTable({
           <p className="mt-1.5 text-xs text-destructive">{searchError}</p>
         )}
 
+        {isSearching && !searchResults && (
+          <div className="mt-4 space-y-2" aria-hidden>
+            <Skeleton className="h-3 w-32" />
+            {[0, 1].map((index) => (
+              <div key={index} className="flex items-center gap-3 rounded-xl bg-muted/60 p-3">
+                <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-4 w-2/5" />
+                  <Skeleton className="h-3 w-4/5" />
+                </div>
+                <Skeleton className="h-8 w-24 shrink-0 rounded-full" />
+              </div>
+            ))}
+          </div>
+        )}
+
         {searchResults && (
-          <div className="mt-4 space-y-2">
+          <div className="mt-4 space-y-2 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
             {isAdvancedSearch ? (
               <p className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
                 <span className="shrink-0">Advanced search for</span>
@@ -380,7 +405,8 @@ export function CandidateStudyTable({
               </div>
             ) : (
               searchPages.isTurning ? (
-                <div className="flex justify-center py-10"><Spinner className="h-5 w-5 text-muted-foreground" /></div>
+                // The next page as rows, so the widget keeps its height while it loads.
+                Array.from({ length: SEARCH_PAGE_SIZE }, (_, index) => <StudyRowSkeleton key={index} />)
               ) : (
                 searchPages.pageItems.map((study) => renderStudyCard("search", study))
               )
@@ -426,7 +452,7 @@ export function CandidateStudyTable({
         ) : (
           <div className="space-y-2">
             {similarPages.isTurning
-              ? <div className="flex justify-center py-10"><Spinner className="h-5 w-5 text-muted-foreground" /></div>
+              ? Array.from({ length: STUDY_PAGE_SIZE }, (_, index) => <StudyRowSkeleton key={index} />)
               : similarPages.pageItems.map((study) => renderStudyCard("similar", study))}
           </div>
         )}
@@ -434,6 +460,7 @@ export function CandidateStudyTable({
 
       {/* Only needed when none of the candidates above match */}
       <WorkbenchAside>
+      <div inert={inert} className={cn("motion-safe:transition-opacity motion-safe:duration-200", inert && "opacity-50 motion-safe:delay-150")}>
       <Widget title="Add new study" icon={Plus}>
         <p className="-mt-1 mb-4 text-sm text-muted-foreground">
           None of the suggested studies match? Link this report to a new study.
@@ -445,6 +472,7 @@ export function CandidateStudyTable({
           inline
         />
       </Widget>
+      </div>
       </WorkbenchAside>
       {linkReview.dialog}
     </div>

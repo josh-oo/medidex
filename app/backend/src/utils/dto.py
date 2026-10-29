@@ -281,6 +281,7 @@ class TagCategorySchema(BaseModel):
     icon: str
     color: str
     searchField: str
+    freeTextSearch: bool
     description: str
 
 class StudySchema(BaseModel):
@@ -331,6 +332,7 @@ class Task(BaseModel):
     name: str
     owner: str
     createdAt: datetime
+    numberReportsTotal: int = 0
     numberReportsReadyForProcessing: int = 0
     numberReportsProcessed: int
 

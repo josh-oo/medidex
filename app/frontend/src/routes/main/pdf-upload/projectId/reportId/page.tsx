@@ -19,12 +19,11 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-import {
-  Upload,
-  FileText,
-  Trash2,
-} from "lucide-react";
+import { ExternalLink, FileText, FileX, Link2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Widget } from "@/components/ui/widget";
+import { openReportPdf } from "@/lib/report-pdf";
 import { deleteReportPdf, getReportPdf, uploadPdf } from "@/lib/api/reportApi";
 import { toast } from "sonner";
 
@@ -78,6 +77,8 @@ export default function PdfDetailsPage() {
     let cancelled = false;
 
     setPdfMissing(false);
+    // Not the last report's PDF while this one's loads (its URL is revoked by then).
+    setPdfUrl(null);
 
     getReportPdf(Number(reportId))
       .then((buffer) => {
@@ -109,131 +110,130 @@ export default function PdfDetailsPage() {
     setIframeKey((k) => k + 1); // force iframe reload
   }, [reportId, setHasPdf]);
 
+  const reportIdNumber = Number(reportId);
+
   return (
-    <div className="rounded-2xl border bg-card p-4 sm:p-5 shadow-xs mb-20">
-      <div className="pb-3 border-b border-border">
-        <div className="flex flex-wrap items-center gap-2 min-w-0">
-          <Upload className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">Upload PDF</h2>
-          {!report ? (
-            <span className="text-muted-foreground">Loading doi...</span>
-          ) : !report.doi ? (
-            <span className="text-muted-foreground">No doi found for this report.</span>
+    // Room at the bottom for floating actions of extensions, as next to the studies.
+    <div className="space-y-4 pb-20">
+      <Widget title="Find the PDF" icon={Link2}>
+        <div className="space-y-1.5 text-sm">
+          {report?.doi ? (
+            <a
+              target="_blank"
+              rel="noopener noreferrer"
+              href={`https://www.doi.org/${report.doi}`}
+              className="flex min-w-0 items-center gap-2 hover:underline"
+            >
+              <span className="shrink-0 font-mono text-xs text-muted-foreground">DOI</span>
+              <span className="truncate">{report.doi}</span>
+            </a>
           ) : (
-            <a target="_blank" href={`https://www.doi.org/${report.doi}`} className="truncate max-w-xs" style={{ display: 'inline-block', verticalAlign: 'middle', color: 'inherit', textDecoration: 'none' }}>{report.doi}</a>
+            <p className="text-muted-foreground">No DOI found for this report.</p>
           )}
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            {hasPdf && (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-destructive"
-                    aria-label="Delete PDF"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete this PDF?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will remove the PDF from the report. You can upload a new one afterward.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleDeletePdf}>
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            )}
-            <Button onClick={handleNotAvailableClick}>
-              Not Available
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      <div className="mb-3 p-4">
-
-        {!report ? (
-          <div className="text-muted-foreground">Loading links...</div>
-        ) : report.fulltextLinks.length === 0 ? (
-          <div className="text-muted-foreground">
-            No links found for this report.
-          </div>
-        ) : (
-          <div>
-            {report.fulltextLinks.map((link, idx) => (
-              <div key={link + idx} className="flex items-center gap-2 mb-1">
-                <FileText className="h-4 w-4 flex-shrink-0" />
-                <a
-                  href={link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="truncate"
-                  title={link}
-                  style={{ maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: 'inherit', textDecoration: 'none', display: 'inline-block', verticalAlign: 'middle' }}
-                >
-                  {link}
-                </a>
-              </div>
-            ))}
-          </div>
-        )}
-
-    <div className="pt-4">
-      <UploadSection
-        key={reportId}
-        ref={uploadSectionRef}
-        onUploadSuccess={handleUploadSuccess}
-        disabled={false}
-        showUploadButton={true}
-        autoStart={false}
-        allowedFileExtension=".pdf"
-        hint="PDF files only"
-        onUpload={(file) => uploadPdf(Number(reportId), file)}
-      />
-      </div>
-
-      {/* PDF Preview Section */}
-      <div className="mt-6">
-        {pdfMissing ? (
-          <div className="flex items-center justify-center rounded-xl bg-muted/50 p-4 text-center" style={{ minHeight: "500px" }}>
-            <div>
-              <h2 className="mb-2 text-lg font-semibold">PDF Not Found</h2>
-              <p className="text-muted-foreground">The requested report PDF is not available yet.</p>
-            </div>
-          </div>
-        ) : pdfUrl ? (
-          <object
-            key={iframeKey}
-            data={pdfUrl}
-            type="application/pdf"
-            width="100%"
-            height="500px"
-            className="rounded-xl border"
-          >
-            <div className="p-4 text-center border rounded-md">
-              <p className="mb-2">Your browser restricts inline PDF viewing.</p>
+          {report && report.fulltextLinks.length === 0 ? (
+            <p className="text-muted-foreground">No fulltext links found for this report.</p>
+          ) : (
+            report?.fulltextLinks.map((link, idx) => (
               <a
-                href={pdfUrl}
+                key={link + idx}
+                href={link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-primary hover:underline"
+                title={link}
+                className="flex min-w-0 items-center gap-2 hover:underline"
               >
-                Open PDF in a new tab
+                <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">{link}</span>
               </a>
+            ))
+          )}
+        </div>
+      </Widget>
+
+      <Widget
+        title="Upload PDF"
+        icon={Upload}
+        actions={
+          <Button type="button" variant="ghost" size="sm" onClick={handleNotAvailableClick}>
+            <FileX />
+            Not available
+          </Button>
+        }
+      >
+        <UploadSection
+          key={reportId}
+          ref={uploadSectionRef}
+          onUploadSuccess={handleUploadSuccess}
+          disabled={false}
+          showUploadButton={true}
+          autoStart={false}
+          allowedFileExtension=".pdf"
+          hint="PDF files only"
+          onUpload={(file) => uploadPdf(reportIdNumber, file)}
+        />
+      </Widget>
+
+      <Widget
+        title="PDF"
+        icon={FileText}
+        actions={
+          pdfUrl && (
+            <>
+              <Button type="button" variant="ghost" size="sm" onClick={() => void openReportPdf(reportIdNumber)}>
+                <ExternalLink />
+                Open in new tab
+              </Button>
+              {hasPdf && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label="Delete PDF"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete this PDF?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will remove the PDF from the report. You can upload a new one afterward.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDeletePdf}>Delete</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+            </>
+          )
+        }
+      >
+        {/* Without a PDF the note is there at once: the report says so before anything loads. */}
+        {pdfMissing || !hasPdf ? (
+          <div className="rounded-xl bg-muted/50 px-4 py-8 text-center">
+            <p className="text-sm font-medium">No PDF yet</p>
+            <p className="mt-1 text-xs text-muted-foreground">Upload one above, or mark it as not available.</p>
+          </div>
+        ) : pdfUrl ? (
+          // A preview to check the upload by; the whole PDF reads better in a tab of its own.
+          <object key={iframeKey} data={pdfUrl} type="application/pdf" className="h-80 w-full rounded-xl border">
+            <div className="p-4 text-center text-sm">
+              <p className="mb-2">Your browser restricts inline PDF viewing.</p>
+              <Button type="button" variant="link" size="sm" onClick={() => void openReportPdf(reportIdNumber)}>
+                Open PDF in a new tab
+              </Button>
             </div>
           </object>
-        ) : null}
-      </div>
+        ) : (
+          <Skeleton className="h-80 w-full rounded-xl" />
+        )}
+      </Widget>
     </div>
-  </div>
   );
 }

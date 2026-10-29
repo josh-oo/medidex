@@ -6,6 +6,7 @@ import {
 } from "react"
 import type { ProjectDto, StudyCandidateDto, StudyDto } from "@/types/apiDTOs"
 import type { AddStudyDialogProps } from "@/components/ui/study-view/add-study-dialog"
+import type { CurationStep } from "@/lib/curation-steps"
 
 export interface ReportActionsSlotProps {
   reportId: number
@@ -88,9 +89,11 @@ export interface ReportAbstractSlotProps {
   text: string | null
 }
 
-export interface ProjectCardSlotProps {
-  project: ProjectDto
-}
+/**
+ * An extra step of the curation of a project (e.g. a postprocessing of its reports), or null when
+ * the project does not go through it. Extra steps come after the PDFs and before the linkage.
+ */
+export type ProjectStepResolver = (project: ProjectDto) => CurationStep | null
 
 /**
  * Rendered in the "Create Project" dialog. `options` is the free-form object sent
@@ -126,8 +129,8 @@ export interface ExtensionRegistry {
   /** Rendered at the bottom of every report card in the report list. */
   reportCardExtras: ComponentType<ReportCardSlotProps>[]
   projectUploadOptions: ComponentType<ProjectUploadOptionsSlotProps>[]
-  /** Rendered below the processing progress bars of every project card (as progress sections). */
-  projectCardProgress: ComponentType<ProjectCardSlotProps>[]
+  /** Extra steps shown in the progress of every project. */
+  projectSteps: ProjectStepResolver[]
   /** Replaces the rendering of a report's abstract in the expanded report card. */
   reportAbstract?: ComponentType<ReportAbstractSlotProps>
   addStudyTrigger?: ComponentType<AddStudyTriggerSlotProps>
@@ -150,7 +153,7 @@ const emptyExtensions: ExtensionRegistry = {
   reportStatuses: [],
   reportCardExtras: [],
   projectUploadOptions: [],
-  projectCardProgress: [],
+  projectSteps: [],
 }
 
 const ExtensionRegistryContext = createContext<ExtensionRegistry>(emptyExtensions)

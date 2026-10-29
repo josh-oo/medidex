@@ -5,11 +5,13 @@ import { AdminGuard } from "@/components/auth/admin-guard";
 import type { GetProjectReportsParams, ProjectAnnotationsDto, ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
 import { getAnnotations, getProjectReportsReview } from "@/lib/api/projectApi";
 import { ReviewAnnotationsProvider } from "./components/review-annotations-context";
-import { Spinner } from "@/components/ui/spinner";
 import { useAuthStore } from "@/hooks/use-auth";
 import { useProjectResource } from "@/hooks/use-project-resource";
 import { ProjectNotFound } from "@/components/reports/project-not-found";
-import { ReportSplitView } from "@/components/reports/report-split-view";
+import { ReportSplitView, ReportSplitViewSkeleton } from "@/components/reports/report-split-view";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Widget } from "@/components/ui/widget";
+import { CircleCheckBig, Trash2 } from "lucide-react";
 import StudySheet from "../../projects/projectId/study-sheet";
 
 interface ProjectReviewData {
@@ -51,9 +53,7 @@ export default function AnnotationsReviewPage() {
       {notFound ? (
         <ProjectNotFound />
       ) : data === null ? (
-        <div className="flex h-full w-full items-center justify-center">
-          <Spinner className="h-6 w-6" />
-        </div>
+        <ReportSplitViewSkeleton panelSkeleton={<ReviewPanelSkeleton />} />
       ) : (
         <div className="h-full flex flex-col overflow-hidden">
           <div className="flex-1 min-h-0 bg-background">
@@ -61,11 +61,12 @@ export default function AnnotationsReviewPage() {
               <ReportSplitView
                 projectId={projectId}
                 reports={data.reports}
-                baseUrl="review"
+                baseUrl="curation/review"
                 editMode={false}
                 filterDimensions={reportFilterDimensions}
                 fetchReports={fetchReports}
                 sheet={<StudySheet />}
+                panelSkeleton={<ReviewPanelSkeleton />}
               >
                 <Outlet />
               </ReportSplitView>
@@ -74,5 +75,34 @@ export default function AnnotationsReviewPage() {
         </div>
       )}
     </AdminGuard>
+  );
+}
+
+// The review panel (./reportId/page.tsx) while it loads: its widgets with their headers and texts, and study rows as
+// outlines of the height of real ones.
+function ReviewPanelSkeleton() {
+  return (
+    <div className="space-y-4 pb-20" aria-busy="true">
+      <Widget title="Final selection" icon={CircleCheckBig}>
+        <p className="-mt-1 mb-4 text-sm text-muted-foreground">
+          Select one or more studies from the annotator suggestions.
+        </p>
+        <div className="space-y-3">
+          {[0, 1].map((index) => (
+            <div key={index} className="flex flex-col gap-3 rounded-xl border bg-card p-4">
+              <Skeleton className="h-6 w-2/5" />
+              <Skeleton className="h-4 w-3/5" />
+              <div className="border-t border-border/60 pt-2">
+                <Skeleton className="h-4 w-64" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </Widget>
+      <Widget title="Delete report" icon={Trash2}>
+        <p className="-mt-1 mb-4 text-sm text-muted-foreground">Permanently removes the report and all of its data.</p>
+        <Skeleton className="h-8 w-28 rounded-md" />
+      </Widget>
+    </div>
   );
 }

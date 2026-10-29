@@ -162,7 +162,7 @@ async def get_study_schema() -> StudySchema:
             ],
         ),
         tags=[
-            TagCategorySchema(key=name, label=config.label, icon=config.icon, color=config.color, searchField=config.search_field, description=config.description)
+            TagCategorySchema(key=name, label=config.label, icon=config.icon, color=config.color, searchField=config.search_field, freeTextSearch=config.free_text_search, description=config.description)
             for name, config in TAG_CATEGORIES.categories.items()
         ],
     )

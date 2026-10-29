@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, ChevronRight, FileX, List, PanelLeftOpen } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileText, FileX, List, PanelLeftOpen } from "lucide-react";
 import { DetailsSheetProvider } from "@/context/details-sheet-context";
 import { ReportNavigationProvider, useReportNavigation } from "@/context/report-navigation-context";
 import { WorkbenchAsideProvider } from "@/context/workbench-aside-context";
@@ -8,10 +9,12 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { ReportList } from "@/components/ui/report-view/report-list";
 import { ReportWidget } from "@/components/reports/report-widget";
 import { Button } from "@/components/ui/button";
+import { Widget } from "@/components/ui/widget";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useReportStore } from "@/hooks/use-report-store";
 import { cn } from "@/lib/utils";
 import type { ReportCurationDto } from "@/types/apiDTOs";
+import { PanelSkeleton, ReportListSkeleton, ReportWidgetSkeleton } from "./workbench-skeleton";
 
 type ReportListProps = ComponentProps<typeof ReportList>;
 
@@ -21,6 +24,8 @@ interface ReportSplitViewProps
   reports: ReportCurationDto[];
   /** Rendered next to the panels inside a DetailsSheetProvider (e.g. the study sheet). */
   sheet?: ReactNode;
+  /** The panel next to the report while it loads (see workbench-skeleton.tsx); a generic outline by default. */
+  panelSkeleton?: ReactNode;
   children: ReactNode;
 }
 
@@ -49,6 +54,32 @@ const writeCollapsed = (collapsed: boolean) => {
   }
 };
 
+// Folding the sidebar away or out changes the whole layout at once (the sidebar, and one or two columns). Where the
+// browser can, it animates the change: every part moves from where it was to where it is now (see the
+// view-transition rules in globals.css). Elsewhere, and with reduced motion, the layout changes at once.
+const withLayoutTransition = (update: () => void) => {
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!document.startViewTransition || reduceMotion) {
+    update();
+    return;
+  }
+  // The parts that move are named for the transition only (see globals.css): a name changes how an element is drawn.
+  const root = document.documentElement;
+  root.dataset.layoutTransition = "";
+  const transition = document.startViewTransition(() => flushSync(update));
+  void transition.finished.finally(() => {
+    delete root.dataset.layoutTransition;
+  });
+};
+
+// Whether the workbench has two columns: from a width that depends on whether the sidebar is folded away.
+function useTwoColumns(collapsed: boolean) {
+  // Both widths are watched, so that folding the sidebar changes the columns in the same render (and transition).
+  const wideWithSidebar = useMediaQuery(TWO_COLUMNS_QUERY);
+  const wideWithoutSidebar = useMediaQuery(TWO_COLUMNS_COLLAPSED_QUERY);
+  return collapsed ? wideWithoutSidebar : wideWithSidebar;
+}
+
 // Keys typed into a field are not shortcuts.
 const isTypingTarget = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
@@ -62,6 +93,7 @@ export function ReportSplitView({
   projectId,
   reports,
   sheet,
+  panelSkeleton,
   children,
   ...listProps
 }: ReportSplitViewProps) {
@@ -72,18 +104,30 @@ export function ReportSplitView({
 
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const wideEnough = useMediaQuery(collapsed ? TWO_COLUMNS_COLLAPSED_QUERY : TWO_COLUMNS_QUERY);
+  const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // The report and the widgets next to it (see WorkbenchAside, e.g. adding a new study) in one column, the studies in the other.
-  const twoColumns = wideEnough;
+  const twoColumns = useTwoColumns(collapsed);
+  const sidebarHidden = collapsed && isDesktop;
   const [aside, setAside] = useState<HTMLDivElement | null>(null);
 
-  useEffect(() => {
+  // Before paint, so that the report widget never shows the first frame without its report.
+  useLayoutEffect(() => {
     setReports(reports);
   }, [reports, setReports]);
 
+  // The next report starts at its top, in whichever of the page or the columns scrolls.
+  const mainRef = useRef<HTMLElement>(null);
+  const reportColumnRef = useRef<HTMLDivElement>(null);
+  const panelColumnRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    for (const element of [mainRef.current, reportColumnRef.current, panelColumnRef.current]) {
+      element?.scrollTo({ top: 0 });
+    }
+  }, [reportId]);
+
   const setCollapsedAndRemember = (value: boolean) => {
-    setCollapsed(value);
     writeCollapsed(value);
+    withLayoutTransition(() => setCollapsed(value));
   };
 
   const hideList = () => {
@@ -109,31 +153,38 @@ export function ReportSplitView({
             />
           )}
 
+          {/* On desktop the sidebar folds away by its width; its content keeps its width, so nothing in it reflows. */}
           <aside
             aria-label="Reports"
+            data-layout-part="report-sidebar"
+            inert={sidebarHidden}
             className={cn(
-              "flex min-h-0 flex-col bg-canvas",
+              "flex min-h-0 shrink-0 flex-col overflow-hidden bg-canvas",
+              "motion-reduce:transition-none",
               listIsDrawer
                 ? cn(
-                    "fixed inset-y-0 left-0 z-[61] w-[min(22rem,85vw)] shadow-xl transition-transform duration-200 motion-reduce:transition-none",
-                    "md:static md:z-auto md:w-72 md:translate-x-0 md:shadow-none lg:w-80",
-                    drawerOpen ? "translate-x-0" : "-translate-x-full",
-                    collapsed && "md:hidden"
+                    "fixed inset-y-0 left-0 z-[61] w-[min(22rem,85vw)] shadow-xl transition-transform duration-200",
+                    "md:static md:z-auto md:translate-x-0 md:shadow-none",
+                    drawerOpen ? "translate-x-0" : "-translate-x-full"
                   )
-                : cn("w-full md:w-72 lg:w-80", collapsed && "md:hidden")
+                : "w-full",
+              collapsed ? "md:w-0" : "md:w-72 lg:w-80"
             )}
           >
-            <ReportList
-              {...listProps}
-              initialReports={reports}
-              onSelect={() => setDrawerOpen(false)}
-              onCollapse={hideList}
-              collapseOnDesktopOnly={!hasReport}
-            />
+            <div className="flex h-full min-h-0 w-full flex-col md:w-72 lg:w-80 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
+              <ReportList
+                {...listProps}
+                initialReports={reports}
+                onSelect={() => setDrawerOpen(false)}
+                onCollapse={hideList}
+                collapseOnDesktopOnly={!hasReport}
+              />
+            </div>
           </aside>
 
           {/* In two columns the page itself stands still and each column scrolls on its own. */}
           <main
+            ref={mainRef}
             className={cn(
               "relative min-h-0 min-w-0 flex-1",
               twoColumns ? "flex flex-col overflow-hidden" : "overflow-y-auto",
@@ -182,15 +233,24 @@ export function ReportSplitView({
                 >
                   {hasReport ? (
                     <>
-                      <div className={cn("min-w-0 space-y-4", twoColumns && SCROLL_COLUMN)}>
+                      <div
+                        ref={reportColumnRef}
+                        data-layout-part="report-column"
+                        className={cn("min-w-0 space-y-4", twoColumns && SCROLL_COLUMN)}
+                      >
                         <ReportWidget reportId={reportId} editMode={listProps.editMode} />
                         {twoColumns && <div ref={setAside} className="space-y-4 empty:hidden" />}
                       </div>
-                      <div className={cn("min-w-0", twoColumns && SCROLL_COLUMN)}>{children}</div>
+                      <div
+                        ref={panelColumnRef}
+                        data-layout-part="study-column"
+                        className={cn("min-w-0", twoColumns && SCROLL_COLUMN)}
+                      >
+                        {children}
+                      </div>
                     </>
                   ) : (
-                    // No report matches the list's search and filters (a report opens on its own otherwise).
-                    <WorkbenchPlaceholder />
+                    <EmptyWorkbench panelSkeleton={panelSkeleton} />
                   )}
                 </div>
               </WorkbenchAsideProvider>
@@ -315,6 +375,58 @@ function ReportPager({ baseUrl, projectId, reportId, showExpand, onExpand, onOpe
       </TooltipProvider>
     </div>
   );
+}
+
+/**
+ * The whole report workbench while its project loads: the sidebar (unless folded away) and the outlines of the
+ * widgets, where the real ones will be.
+ */
+export function ReportSplitViewSkeleton({ panelSkeleton }: { panelSkeleton?: ReactNode }) {
+  const [collapsed] = useState(readCollapsed);
+  const twoColumns = useTwoColumns(collapsed);
+
+  return (
+    <div className="flex h-full min-h-0 w-full bg-canvas" aria-busy="true">
+      {!collapsed && (
+        <div className="hidden w-72 shrink-0 md:block lg:w-80">
+          <ReportListSkeleton />
+        </div>
+      )}
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div className="mx-auto w-full max-w-[1400px] px-3 sm:px-5">
+          {/* The pager's place. */}
+          <div className="mb-1 h-12" />
+          <div className={cn("grid items-start gap-4", twoColumns && "grid-cols-[minmax(0,2fr)_minmax(0,3fr)]")}>
+            <WorkbenchSkeleton panelSkeleton={panelSkeleton} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The two columns of the workbench as outlines: the report, and the panel next to it. */
+function WorkbenchSkeleton({ panelSkeleton }: { panelSkeleton?: ReactNode }) {
+  return (
+    <>
+      <div className="min-w-0 space-y-4">
+        <Widget title="Report" icon={FileText}>
+          <ReportWidgetSkeleton />
+        </Widget>
+      </div>
+      <div className="min-w-0">{panelSkeleton ?? <PanelSkeleton />}</div>
+    </>
+  );
+}
+
+/**
+ * The workbench without an open report. While the list loads, or is about to open its first report (see ReportList),
+ * the outlines of that report; the placeholder only when no report matches the list's search and filters.
+ */
+function EmptyWorkbench({ panelSkeleton }: { panelSkeleton?: ReactNode }) {
+  const { reportIds, isLoading } = useReportNavigation();
+  if (isLoading || reportIds.length > 0) return <WorkbenchSkeleton panelSkeleton={panelSkeleton} />;
+  return <WorkbenchPlaceholder />;
 }
 
 // A still bar standing in for a line of text.

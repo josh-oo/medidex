@@ -7,6 +7,8 @@ interface ReportNavigation {
   hasMore: boolean
   /** Loads the next page of the sidebar list. */
   loadMore: () => void
+  /** The list is still loading, so whether it has reports is not known yet. */
+  isLoading: boolean
 }
 
 type ReportNavigationContextType = ReportNavigation & {
@@ -19,7 +21,12 @@ const ReportNavigationContext = createContext<ReportNavigationContextType | null
 
 /** Shares the report list's order with the workbench, so it can page through the same reports. */
 export function ReportNavigationProvider({ children }: { children: ReactNode }) {
-  const [navigation, setNavigation] = useState<ReportNavigation>({ reportIds: [], hasMore: false, loadMore: noop })
+  const [navigation, setNavigation] = useState<ReportNavigation>({
+    reportIds: [],
+    hasMore: false,
+    loadMore: noop,
+    isLoading: true,
+  })
   const value = useMemo(() => ({ ...navigation, setNavigation }), [navigation])
 
   return <ReportNavigationContext.Provider value={value}>{children}</ReportNavigationContext.Provider>

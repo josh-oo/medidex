@@ -161,7 +161,8 @@ export function StudyCardGraph({ studyId }: { studyId: number }): ReactNode {
     .map(({ relation, text }) => {
       const Icon = iconByName(relation.icon);
       return (
-        <div key={relation.key} className="flex items-center gap-1.5 text-muted-foreground flex-1 min-w-0 basis-0 max-w-full overflow-hidden">
+        // Fades in when the graph arrives (it is loaded after the card).
+        <div key={relation.key} className="flex items-center gap-1.5 text-muted-foreground flex-1 min-w-0 basis-0 max-w-full overflow-hidden motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
           <Icon className="h-3 w-3 shrink-0" />
           <TooltipProvider>
             <Tooltip>

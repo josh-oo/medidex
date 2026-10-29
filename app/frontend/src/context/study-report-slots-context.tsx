@@ -9,7 +9,6 @@ import type {
   ReportCardSlotProps,
   ReportAbstractSlotProps,
   ProjectUploadOptionsSlotProps,
-  ProjectCardSlotProps,
   StudyBadgeSlotProps,
   StudyContextMenuItemProps,
 } from "./extension-registry-context"
@@ -22,7 +21,6 @@ export type {
   ReportCardSlotProps,
   ReportAbstractSlotProps,
   ProjectUploadOptionsSlotProps,
-  ProjectCardSlotProps,
   StudyBadgeSlotProps,
   StudyContextMenuItemProps,
 } from "./extension-registry-context"
@@ -80,7 +78,3 @@ export function ReportAbstractSlot(props: ReportAbstractSlotProps) {
   return Renderer ? <Renderer {...props} /> : <Abstract text={props.text} />
 }
 
-export function ProjectCardProgressSlot(props: ProjectCardSlotProps) {
-  const { projectCardProgress } = useExtensionRegistry()
-  return renderSlots(projectCardProgress, props)
-}
