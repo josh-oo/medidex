@@ -4,38 +4,14 @@ import { relationText } from "@/components/ui/study-view/study-graph";
 import { StudyDetails } from "@/components/ui/study-view/study-details";
 import { useStudyGraph } from "@/hooks/use-study-graph";
 import { useStudySchema } from "@/hooks/use-study-schema";
-import { colorClasses } from "@/lib/colors";
 import { cn } from "@/lib/utils";
-import type { StudyDto, StudyGraphDto, StudySchemaDto, TagCategorySchemaDto } from "@/types/apiDTOs";
+import type { StudyDto } from "@/types/apiDTOs";
 import { Highlight } from "./study-search-bar";
-
-// Tags shown on a card; the rest is counted.
-const MAX_TAGS = 8;
 
 const formatParticipants = (value: string | null) => {
   if (!value) return null;
   const count = Number(value.replace(/,/g, ""));
   return Number.isFinite(count) ? count.toLocaleString() : value;
-};
-
-// The tags of a study, read from its graph: the values whose entity holds a tag of a category (interventions of
-// its arms, conditions of its populations, measures of its outcomes, ...), in the order of the categories.
-const tagsOf = (schema: StudySchemaDto, graph: StudyGraphDto) => {
-  const categoryOf = new Map(
-    schema.graph.entities
-      .filter((entity) => entity.value?.category)
-      .map((entity) => [entity.key, schema.tags.find((tag) => tag.key === entity.value?.category)])
-  );
-  const seen = new Set<string>();
-  const tags: { category: TagCategorySchemaDto; value: string }[] = [];
-  graph.nodes.forEach((node) => {
-    const category = categoryOf.get(node.kind);
-    if (!category || !node.value || seen.has(`${category.key}:${node.value.toLowerCase()}`)) return;
-    seen.add(`${category.key}:${node.value.toLowerCase()}`);
-    tags.push({ category, value: node.value });
-  });
-  const order = schema.tags.map((tag) => tag.key);
-  return tags.sort((a, b) => order.indexOf(a.category.key) - order.indexOf(b.category.key));
 };
 
 interface StudyResultCardProps {
@@ -46,7 +22,7 @@ interface StudyResultCardProps {
   onToggle: () => void;
 }
 
-/** A study found by the search: what it compares, its key facts and tags; its details and reports fold out. */
+/** A study found by the search: what it compares and its key facts; its details and reports fold out. */
 export function StudyResultCard({ study, terms, expanded, onToggle }: StudyResultCardProps) {
   const detailsId = useId();
   const { schema } = useStudySchema();
@@ -63,8 +39,6 @@ export function StudyResultCard({ study, terms, expanded, onToggle }: StudyResul
         : [],
     [schema, graph]
   );
-  const tags = useMemo(() => (schema && graph ? tagsOf(schema, graph) : []), [schema, graph]);
-  const lowerTerms = terms.map((term) => term.toLowerCase()).filter((term) => term.length >= 2);
 
   return (
     <article className="overflow-hidden rounded-2xl border bg-card shadow-xs">
@@ -118,34 +92,6 @@ export function StudyResultCard({ study, terms, expanded, onToggle }: StudyResul
             </span>
           )}
         </div>
-
-        {tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {tags.slice(0, MAX_TAGS).map(({ category, value }) => {
-              const colors = colorClasses(category.color);
-              const matched = lowerTerms.some((term) => value.toLowerCase().includes(term));
-              return (
-                <span
-                  key={`${category.key}-${value}`}
-                  title={category.label}
-                  className={cn(
-                    "rounded-md px-2 py-0.5 text-xs",
-                    colors.bg,
-                    colors.accent,
-                    matched && "font-semibold ring-1 ring-current"
-                  )}
-                >
-                  {value}
-                </span>
-              );
-            })}
-            {tags.length > MAX_TAGS && (
-              <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                +{tags.length - MAX_TAGS} more
-              </span>
-            )}
-          </div>
-        )}
       </button>
 
       {expanded && (

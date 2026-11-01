@@ -81,9 +81,9 @@ or imports one on the Database management page, e.g. the demo database:
 
 # Study databases
 A study database is a collection of studies of its own, with a name, an optional description and eligibility
-criteria (required free text: which studies belong in it). The Database management page shows one tab per database
-with its projects; its details dialog shows the eligibility criteria, and admins edit name, description and criteria
-there and create new projects into the shown database. The REST API:
+criteria (required free text: which studies belong in it). The Database management page shows one card per database
+with its projects below it as numbered updates ("Update 7"), newest first; its details dialog shows the eligibility
+criteria, and admins edit name, description and criteria there and create new updates from the card. The REST API:
 
 | Endpoint | Who | What |
 | --- | --- | --- |

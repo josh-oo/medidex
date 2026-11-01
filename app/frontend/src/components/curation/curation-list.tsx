@@ -3,28 +3,21 @@ import type { Curation } from "@/hooks/use-curation";
 import { ProjectRow } from "./project-row";
 import { TaskRow } from "./task-row";
 
+const newestFirst = (a: { createdAt: string }, b: { createdAt: string }) => b.createdAt.localeCompare(a.createdAt);
+
 /**
- * The curation panel: one row per project, divided by lines, below an optional header. An admin sees the project
- * (with the ring of the linkage leading to their own work when they are assigned too); the tasks of the other
- * projects get rows of their own. `empty` is shown when there is no row.
+ * The updates of a database, newest first, one row each and divided by lines. An admin sees the project (with the
+ * ring of the linkage leading to their own work when they are assigned too); the tasks of the other projects get rows
+ * of their own. `empty` is shown when there is no row.
  */
-export function CurationList({
-  curation,
-  header,
-  empty,
-}: {
-  curation: Curation;
-  header?: ReactNode;
-  empty?: ReactNode;
-}) {
+export function CurationList({ curation, empty }: { curation: Curation; empty?: ReactNode }) {
   const { projects, tasks, ownerNameById, assignableUsers, refresh, removeProject } = curation;
   const otherTasks = tasks.filter((task) => !projects.some((project) => project.projectId === task.projectId));
 
+  if (projects.length + otherTasks.length === 0) return <>{empty}</>;
   return (
-    <section className="divide-y overflow-hidden rounded-2xl border bg-card shadow-xs">
-      {header && <div className="flex items-center justify-between gap-3 px-4 py-2.5">{header}</div>}
-      {projects.length + otherTasks.length === 0 && empty}
-      {projects.map((project) => (
+    <div className="divide-y">
+      {[...projects].sort(newestFirst).map((project) => (
         <ProjectRow
           key={project.projectId}
           project={project}
@@ -34,9 +27,9 @@ export function CurationList({
           onAssigneesChange={refresh}
         />
       ))}
-      {otherTasks.map((task) => (
+      {[...otherTasks].sort(newestFirst).map((task) => (
         <TaskRow key={task.projectId} task={task} ownerName={ownerNameById.get(task.owner)} />
       ))}
-    </section>
+    </div>
   );
 }

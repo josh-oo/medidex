@@ -6,7 +6,7 @@ interface RelativeTimeProps {
   updateIntervalMs?: number;
 }
 
-function parseDate(date: string): Date {
+export function parseDate(date: string): Date {
   // Treat timezone-less timestamps as UTC so server and client parse identically.
   const hasTimezone = /(?:[zZ]|[+-]\d{2}:\d{2})$/.test(date);
   const normalized = hasTimezone ? date : `${date}Z`;

@@ -27,6 +27,9 @@ from .report import DocumentService
 from .pubsub import ProjectPubSubService
 from .vectorstore import VectorstoreService
 
+# Hex characters of the upload fingerprint used as the project id (48 bits).
+PROJECT_ID_LENGTH = 12
+
 
 class ProjectNotFoundError(Exception):
     """No project exists with the given id."""
@@ -206,7 +209,8 @@ class ProjectResourceService:
 
             fingerprint_string += "|".join([safe_title or "", safe_abstract or "", authors_str or ""])
 
-        project_id = hashlib.sha256(fingerprint_string.encode()).hexdigest()
+        # A short prefix of the fingerprint keeps the id readable in URLs while still telling uploads apart.
+        project_id = hashlib.sha256(fingerprint_string.encode()).hexdigest()[:PROJECT_ID_LENGTH]
         return project_id, reports, trial_ids_by_report
 
     async def create_project(

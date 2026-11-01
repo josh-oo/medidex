@@ -15,9 +15,10 @@ export function TaskRow({ task, ownerName }: TaskRowProps) {
   return (
     <CurationRow
       title={task.name}
+      createdAt={task.createdAt}
       subtitle={
         <>
-          {total} reports · created <RelativeTime date={task.createdAt} /> by {ownerName ?? task.owner}
+          {total} reports · <RelativeTime date={task.createdAt} /> by {ownerName ?? task.owner}
         </>
       }
       steps={taskSteps(task)}

@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Widget } from "@/components/ui/widget";
 import { openReportPdf } from "@/lib/report-pdf";
+import { PdfFirstPage } from "@/components/reports/pdf-first-page";
 import { deleteReportPdf, getReportPdf, uploadPdf } from "@/lib/api/reportApi";
 import { toast } from "sonner";
 
@@ -221,17 +222,10 @@ export default function PdfDetailsPage() {
             <p className="mt-1 text-xs text-muted-foreground">Upload one above, or mark it as not available.</p>
           </div>
         ) : pdfUrl ? (
-          // A preview to check the upload by; the whole PDF reads better in a tab of its own.
-          <object key={iframeKey} data={pdfUrl} type="application/pdf" className="h-80 w-full rounded-xl border">
-            <div className="p-4 text-center text-sm">
-              <p className="mb-2">Your browser restricts inline PDF viewing.</p>
-              <Button type="button" variant="link" size="sm" onClick={() => void openReportPdf(reportIdNumber)}>
-                Open PDF in a new tab
-              </Button>
-            </div>
-          </object>
+          // Only the first page, to check the upload by; the whole PDF reads better in a tab of its own.
+          <PdfFirstPage key={iframeKey} url={pdfUrl} onOpen={() => void openReportPdf(reportIdNumber)} />
         ) : (
-          <Skeleton className="h-80 w-full rounded-xl" />
+          <Skeleton className="mx-auto h-[396px] w-[280px] rounded-md" />
         )}
       </Widget>
     </div>

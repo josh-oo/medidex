@@ -66,7 +66,7 @@ function PdfPanelSkeleton() {
         <Skeleton className="h-32 w-full rounded-lg" />
       </Widget>
       <Widget title="PDF" icon={FileText}>
-        <Skeleton className="h-80 w-full rounded-xl" />
+        <Skeleton className="mx-auto h-[396px] w-[280px] rounded-md" />
       </Widget>
     </div>
   );

@@ -87,11 +87,12 @@ function useSearchState() {
         databases,
         allFields.includes(field) ? allFields.filter((other) => other !== field) : [...allFields, field]
       ),
-    setText: (nextText: string) => update(nextText, filters),
+    // What is searched from the bar starts a new search; the filter column narrows the current one.
+    searchText: (nextText: string) => update(nextText, []),
+    searchFilter: (filter: StudyFilter) => update("", [filter]),
     addFilter: (filter: StudyFilter) =>
       update(text, filters.some((active) => sameFilter(active, filter)) ? filters : [...filters, filter]),
     removeFilter: (filter: StudyFilter) => update(text, filters.filter((active) => !sameFilter(active, filter))),
-    clearFilters: () => update(text, []),
     clear: () => update("", []),
   };
 }
@@ -104,10 +105,10 @@ export default function Home() {
     allFields,
     setDatabases,
     toggleAll,
-    setText,
+    searchText,
+    searchFilter,
     addFilter,
     removeFilter,
-    clearFilters,
     clear,
   } = useSearchState();
   const { schema } = useStudySchema();
@@ -148,8 +149,8 @@ export default function Home() {
         >
           <StudySearchBar
             text={text}
-            onSearch={setText}
-            onAddFilter={addFilter}
+            onSearch={searchText}
+            onAddFilter={searchFilter}
             onClear={searching ? clear : undefined}
             databases={databases}
             leading={
@@ -170,7 +171,6 @@ export default function Home() {
             onToggleAll={toggleAll}
             onAddFilter={addFilter}
             onRemoveFilter={removeFilter}
-            onClearFilters={clearFilters}
           />
         ) : (
           <CurationHint />
@@ -190,7 +190,6 @@ interface ResultsProps {
   onToggleAll: (field: string) => void;
   onAddFilter: (filter: StudyFilter) => void;
   onRemoveFilter: (filter: StudyFilter) => void;
-  onClearFilters: () => void;
 }
 
 // The filters and the results below the search; they fade in when the search starts.
@@ -203,7 +202,6 @@ function Results({
   onToggleAll,
   onAddFilter,
   onRemoveFilter,
-  onClearFilters,
 }: ResultsProps) {
   const catalogs = useTagCatalogs(true, databases);
   const [results, setResults] = useState<StudyDto[] | null>(null);
@@ -274,8 +272,6 @@ function Results({
             <StudyFilterPanel
               catalogs={catalogs}
               filters={filters}
-              allFields={allFields}
-              onToggleAll={onToggleAll}
               onAdd={onAddFilter}
               onRemove={onRemoveFilter}
             />
@@ -287,18 +283,12 @@ function Results({
             <p className="text-sm text-muted-foreground">Type at least three characters.</p>
           ) : (
             <QuerySummary
-              count={
-                results
-                  ? `${results.length}${nextCursor ? "+" : ""} ${results.length === 1 ? "study" : "studies"}`
-                  : "Searching…"
-              }
               text={text}
               filters={filters}
               allFields={allFields}
               catalogs={catalogs}
               onToggleAll={onToggleAll}
               onRemove={onRemoveFilter}
-              onClearFilters={onClearFilters}
             />
           )}
 
@@ -349,8 +339,9 @@ function CurationHint() {
   const userId = useAuthStore((s) => s.user?.id);
   const { projectSteps: stepResolvers } = useExtensionRegistry();
 
+  // Counts the updates with open steps, each once however many of its steps are waiting.
   const openTasks = useMemo(() => {
-    const countOpen = (steps: CurationStep[]) => steps.filter((step) => waitingReports(step) > 0).length;
+    const hasOpen = (steps: CurationStep[]) => steps.some((step) => waitingReports(step) > 0);
     const projectIds = new Set(projects.map((project) => project.projectId));
     return [
       ...projects.map((project) => {
@@ -361,11 +352,11 @@ function CurationHint() {
         const extraSteps = stepResolvers
           .map((resolve) => resolve(project))
           .filter((step): step is CurationStep => step !== null);
-        return countOpen(projectSteps(project, role, extraSteps));
+        return hasOpen(projectSteps(project, role, extraSteps));
       }),
       // An admin's own tasks are among the projects already.
-      ...tasks.filter((task) => !projectIds.has(task.projectId)).map((task) => countOpen(taskSteps(task))),
-    ].reduce((sum, count) => sum + count, 0);
+      ...tasks.filter((task) => !projectIds.has(task.projectId)).map((task) => hasOpen(taskSteps(task))),
+    ].filter(Boolean).length;
   }, [projects, tasks, userId, stepResolvers]);
 
   // Only for the people who take part in the curation; admins can always start a project there.

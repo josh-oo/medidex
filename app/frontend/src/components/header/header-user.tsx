@@ -1,4 +1,4 @@
-import { ChevronDown, LogOut } from "lucide-react";
+import { ChevronDown, LogOut, Users } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { getKeycloak } from "@/lib/client/keycloak";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
+import { usePageNavigate } from "@/lib/page-transition";
 
 function getInitials(name: string) {
   const names = name.split(" ");
@@ -27,10 +28,12 @@ export function HeaderUser({
     name: string;
     email: string;
     avatar: string;
+    isAdmin?: boolean;
   };
 }) {
   const initials = getInitials(user.name);
   const { userMenuItems } = useExtensionRegistry();
+  const navigate = usePageNavigate();
 
   const handleLogout = () => {
     getKeycloak().logout({ redirectUri: `${window.location.origin}/login` });
@@ -39,9 +42,9 @@ export function HeaderUser({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="h-9 gap-2 px-2">
+        <Button variant="ghost" className="-mr-2 h-9 gap-2 px-2">
           <Avatar className="h-7 w-7 rounded-full">
-            <AvatarFallback className="rounded-full text-xs">
+            <AvatarFallback className="rounded-full bg-primary/10 text-xs font-medium text-primary">
               {initials}
             </AvatarFallback>
           </Avatar>
@@ -55,7 +58,7 @@ export function HeaderUser({
         <DropdownMenuLabel className="p-0 font-normal">
           <div className="flex items-center gap-2 px-2 py-2 text-left text-sm">
             <Avatar className="h-8 w-8 rounded-full">
-              <AvatarFallback className="rounded-full">
+              <AvatarFallback className="rounded-full bg-primary/10 font-medium text-primary">
                 {initials}
               </AvatarFallback>
             </Avatar>
@@ -68,9 +71,16 @@ export function HeaderUser({
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {user.isAdmin && (
+          <DropdownMenuItem onClick={() => navigate("/user-management")}>
+            <Users className="mr-2 h-4 w-4" />
+            User management
+          </DropdownMenuItem>
+        )}
         {userMenuItems.map((MenuItem, index) => (
           <MenuItem key={`${MenuItem.displayName || MenuItem.name || "item"}-${index}`} user={user} />
         ))}
+        {(user.isAdmin || userMenuItems.length > 0) && <DropdownMenuSeparator />}
         <DropdownMenuItem onClick={handleLogout}>
           <LogOut className="mr-2 h-4 w-4" />
           Log out

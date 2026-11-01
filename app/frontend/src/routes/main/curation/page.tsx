@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Database, DatabaseZap, Download, FileText, ListChecks, Pencil, Plus } from "lucide-react";
+import { Database, DatabaseZap, Download, ListChecks, Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 import { DatabaseDetailsDialog } from "@/components/databases/database-details-dialog";
 import { NewDatabaseDialog } from "@/components/databases/new-database-dialog";
@@ -14,48 +14,16 @@ import { exportDatabase } from "@/lib/api/databaseApi";
 import { projectDatabaseId, useStudyDatabases, type StudyDatabase } from "@/lib/databases";
 import { cn } from "@/lib/utils";
 
-// The maintenance of the study databases in the background: per database its description, its eligibility criteria
-// and its projects (batches of new reports), one row each, with what the admin and the assignees have to do next. Tabs
-// choose the database shown (kept in the URL as ?db=); admins create databases (empty or imported) and projects here.
+// The maintenance of the study databases in the background: one card per database, with its updates (batches of new
+// reports, numbered per database) below it, one row each, with what the admin and the assignees have to do next.
+// Admins create databases (empty or imported) here, and the updates on the card of their database.
 export default function DatabaseManagementPage() {
   const curation = useCuration();
-  const { loading, isAdmin, projects, tasks, refresh } = curation;
+  const { loading, isAdmin } = curation;
   // The rows fade in only when they had to be waited for; known from before, they are there with the page.
   const [fadeIn] = useState(loading);
   const { loaded: databasesLoaded, failed: databasesFailed, databases } = useStudyDatabases();
-  const [params, setParams] = useSearchParams();
   const [newDatabaseOpen, setNewDatabaseOpen] = useState(false);
-  const database: StudyDatabase | undefined =
-    databases.find((other) => String(other.id) === params.get("db")) ?? databases[0];
-  const selectDatabase = (id: number) =>
-    setParams(id === databases[0]?.id ? {} : { db: String(id) }, { replace: true });
-
-  // The curation of the shown database only.
-  const shown: Curation = {
-    ...curation,
-    projects: projects.filter((project) => projectDatabaseId(project) === database?.id),
-    tasks: tasks.filter((task) => projectDatabaseId(task) === database?.id),
-  };
-  const isEmpty = shown.projects.length === 0 && shown.tasks.length === 0;
-
-  // A database that is still being indexed takes no projects: their reports would miss its studies.
-  const createProjectButton = database?.indexing ? (
-    <Button className="gap-2" disabled title={`${database.name} is still being indexed; projects can be added once it is done.`}>
-      <Plus className="h-4 w-4" />
-      New project
-    </Button>
-  ) : database && (
-    <CreateProjectDialog
-      database={database}
-      onProjectCreated={refresh}
-      trigger={
-        <Button className="gap-2">
-          <Plus className="h-4 w-4" />
-          New project
-        </Button>
-      }
-    />
-  );
 
   return (
     <div className="flex-1 overflow-auto">
@@ -68,59 +36,38 @@ export default function DatabaseManagementPage() {
             </p>
           </div>
           {isAdmin && (
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" className="gap-2" onClick={() => setNewDatabaseOpen(true)}>
-                <DatabaseZap className="h-4 w-4" />
-                New database
-              </Button>
-              {createProjectButton}
-            </div>
+            <Button variant="outline" className="gap-2" onClick={() => setNewDatabaseOpen(true)}>
+              <DatabaseZap className="h-4 w-4" />
+              New database
+            </Button>
           )}
         </div>
 
-        {databases.length > 1 && (
-          <DatabaseTabs databases={databases} selected={database?.id} onSelect={selectDatabase} />
-        )}
-
-        {databasesLoaded && !database ? (
+        {!databasesLoaded ? (
+          <DatabaseCardSkeleton />
+        ) : databases.length === 0 ? (
           databasesFailed ? (
             <p className="px-1 text-sm text-muted-foreground">The databases could not be loaded.</p>
           ) : (
             <NoDatabases isAdmin={isAdmin} onCreate={() => setNewDatabaseOpen(true)} />
           )
         ) : (
-          <section aria-labelledby="database-heading" className="space-y-3">
-            {database ? <DatabaseHeader database={database} isAdmin={isAdmin} /> : <Skeleton className="h-5 w-64" />}
-
-            {loading || !database ? (
-              <CurationListSkeleton />
-            ) : !isEmpty ? (
-              <div className={cn(fadeIn && "motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300")}>
-                <CurationList curation={shown} />
-              </div>
-            ) : isAdmin ? (
-              <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed bg-card/50 px-6 py-16 text-center">
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
-                  <FileText className="h-6 w-6 text-primary" />
-                </div>
-                <h3 className="mb-1 text-lg font-semibold">No projects yet</h3>
-                <p className="max-w-sm text-sm text-muted-foreground">
-                  A project is a batch of new reports to link to the studies of {database.name}. Create one with New
-                  project and upload its reports.
-                </p>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-dashed px-4 py-4 text-sm text-muted-foreground">
-                Nothing to curate in this database right now. An admin assigns new batches here.
-              </div>
-            )}
-          </section>
+          <TooltipProvider>
+            <div className="space-y-4">
+              {databases.map((database) => (
+                <DatabaseCard
+                  key={database.id}
+                  database={database}
+                  curation={curation}
+                  fadeIn={fadeIn}
+                />
+              ))}
+            </div>
+          </TooltipProvider>
         )}
       </div>
 
-      {isAdmin && (
-        <NewDatabaseDialog open={newDatabaseOpen} onOpenChange={setNewDatabaseOpen} onCreated={selectDatabase} />
-      )}
+      {isAdmin && <NewDatabaseDialog open={newDatabaseOpen} onOpenChange={setNewDatabaseOpen} />}
     </div>
   );
 }
@@ -136,7 +83,7 @@ function NoDatabases({ isAdmin, onCreate }: { isAdmin: boolean; onCreate: () => 
       <p className="max-w-sm text-sm text-muted-foreground">
         {isAdmin
           ? "A database is a collection of studies, e.g. the register of a review group. Create an empty one or import an exported database to start."
-          : "An admin creates the study databases; their projects show up here."}
+          : "An admin creates the study databases; their updates show up here."}
       </p>
       {isAdmin && (
         <Button className="mt-6 gap-2" onClick={onCreate}>
@@ -148,11 +95,26 @@ function NoDatabases({ isAdmin, onCreate }: { isAdmin: boolean; onCreate: () => 
   );
 }
 
-// The name of the database with what it holds and its description; its eligibility criteria (they can be long) in a
-// dialog, where admins also edit them, its name and its description. Admins export the database here too.
-function DatabaseHeader({ database, isAdmin }: { database: StudyDatabase; isAdmin: boolean }) {
+// The number of the next update of a database: one more than the highest so far, deleted updates keep theirs.
+function nextUpdateNumber(names: string[]): number {
+  const numbers = names.map((name) => Number(/^Update (\d+)$/.exec(name)?.[1] ?? 0));
+  return Math.max(names.length, ...numbers) + 1;
+}
+
+// A database: its name (the description shows on hovering it), what it holds and its actions, with its updates below.
+// Its eligibility criteria (they can be long) are in a dialog, where admins also edit them, its name and description.
+function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase; curation: Curation; fadeIn: boolean }) {
+  const { loading, isAdmin, projects, tasks, refresh } = curation;
   const [details, setDetails] = useState<"view" | "edit" | null>(null);
   const [exporting, setExporting] = useState(false);
+
+  // The curation of this database only.
+  const own: Curation = {
+    ...curation,
+    projects: projects.filter((project) => projectDatabaseId(project) === database.id),
+    tasks: tasks.filter((task) => projectDatabaseId(task) === database.id),
+  };
+  const updateCount = new Set([...own.projects, ...own.tasks].map((update) => update.projectId)).size;
 
   const download = async () => {
     setExporting(true);
@@ -176,58 +138,108 @@ function DatabaseHeader({ database, isAdmin }: { database: StudyDatabase; isAdmi
     }
   };
 
+  const newUpdateLabel = (
+    <>
+      <Plus className="h-4 w-4" />
+      New update
+    </>
+  );
+  // A database that is still being indexed takes no updates: their reports would miss its studies.
+  const newUpdateButton = database.indexing ? (
+    <Button size="sm" className="gap-1.5" disabled title={`${database.name} is still being indexed; updates can be added once it is done.`}>
+      {newUpdateLabel}
+    </Button>
+  ) : (
+    <CreateProjectDialog
+      database={database}
+      number={nextUpdateNumber(own.projects.map((project) => project.name))}
+      onProjectCreated={refresh}
+      trigger={
+        <Button size="sm" className="gap-1.5">
+          {newUpdateLabel}
+        </Button>
+      }
+    />
+  );
+
   return (
-    <div className="space-y-1.5 px-1">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <Database className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <h2 id="database-heading" className="text-sm font-semibold">
-          {database.name}
-        </h2>
-        <span className="text-sm text-muted-foreground">
-          {database.numberStudies} {database.numberStudies === 1 ? "study" : "studies"} · {database.numberReports}{" "}
-          {database.numberReports === 1 ? "report" : "reports"}
+    <section
+      aria-labelledby={`database-${database.id}`}
+      className="overflow-hidden rounded-2xl border bg-card shadow-xs"
+    >
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10">
+          <Database className="h-5 w-5 text-primary" aria-hidden />
         </span>
-        {database.indexing && <IndexingBadge database={database} />}
-        <div className="ml-auto flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-muted-foreground"
-            aria-haspopup="dialog"
-            onClick={() => setDetails("view")}
-          >
-            <ListChecks className="h-3.5 w-3.5" />
-            Eligibility criteria
-          </Button>
-          {isAdmin && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-muted-foreground"
-              aria-haspopup="dialog"
-              onClick={() => setDetails("edit")}
-              title="Edit the name, description and eligibility criteria"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              Edit
-            </Button>
-          )}
-          {isAdmin && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-muted-foreground"
-              disabled={exporting}
-              onClick={() => void download()}
-              title="Download the studies and reports of this database as a file another Medidex can import"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Export
-            </Button>
-          )}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 id={`database-${database.id}`} className="min-w-0 truncate text-base font-semibold">
+              {database.description ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      tabIndex={0}
+                      className="cursor-help rounded-sm underline decoration-muted-foreground/40 decoration-dotted underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                    >
+                      {database.name}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" align="start" sideOffset={6} className="max-w-sm text-left text-sm">
+                    {database.description}
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                database.name
+              )}
+            </h2>
+            {database.indexing && <IndexingBadge database={database} />}
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {database.numberStudies} {database.numberStudies === 1 ? "study" : "studies"} · {database.numberReports}{" "}
+            {database.numberReports === 1 ? "report" : "reports"} · {updateCount} {updateCount === 1 ? "update" : "updates"}
+          </span>
         </div>
+        <div className="ml-auto flex items-center gap-1">
+          <CardAction icon={ListChecks} label="Eligibility criteria" onClick={() => setDetails("view")} dialog />
+          {isAdmin && (
+            <CardAction
+              icon={Pencil}
+              label="Edit the name, description and eligibility criteria"
+              onClick={() => setDetails("edit")}
+              dialog
+            />
+          )}
+          {isAdmin && (
+            <CardAction
+              icon={Download}
+              label="Export: the studies and reports as a file another Medidex can import"
+              onClick={() => void download()}
+              disabled={exporting}
+            />
+          )}
+          {isAdmin && <div className="ml-2">{newUpdateButton}</div>}
+        </div>
+      </header>
+
+      <div className="border-t">
+        {loading ? (
+          <UpdateRowsSkeleton />
+        ) : (
+          <div className={cn(fadeIn && "motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300")}>
+            <CurationList
+              curation={own}
+              empty={
+                <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  {isAdmin
+                    ? "No updates yet. New update uploads a batch of new reports to link to the studies of this database."
+                    : "Nothing to curate in this database right now."}
+                </p>
+              }
+            />
+          </div>
+        )}
       </div>
-      {database.description && <p className="text-sm text-muted-foreground">{database.description}</p>}
+
       <DatabaseDetailsDialog
         database={database}
         open={details !== null}
@@ -235,7 +247,41 @@ function DatabaseHeader({ database, isAdmin }: { database: StudyDatabase; isAdmi
         canEdit={isAdmin}
         editing={details === "edit"}
       />
-    </div>
+    </section>
+  );
+}
+
+// An icon button in the header of a database card, named by its tooltip.
+function CardAction({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+  dialog,
+}: {
+  icon: typeof Database;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  dialog?: boolean;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground"
+          aria-label={label}
+          aria-haspopup={dialog ? "dialog" : undefined}
+          disabled={disabled}
+          onClick={onClick}
+        >
+          <Icon className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -245,7 +291,7 @@ function IndexingBadge({ database }: { database: StudyDatabase }) {
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400"
-      title="Its studies are found by the search, but are only suggested for new reports (and take projects) once all its reports are indexed."
+      title="Its studies are found by the search, but are only suggested for new reports (and take updates) once all its reports are indexed."
     >
       <Spinner className="h-3 w-3" aria-label="Indexing" />
       Indexing {database.numberReportsIndexed} of {database.numberReports}
@@ -253,50 +299,33 @@ function IndexingBadge({ database }: { database: StudyDatabase }) {
   );
 }
 
-// The databases, one tab each.
-function DatabaseTabs({
-  databases,
-  selected,
-  onSelect,
-}: {
-  databases: StudyDatabase[];
-  selected?: number;
-  onSelect: (id: number) => void;
-}) {
+// A database card while the databases load.
+function DatabaseCardSkeleton() {
   return (
-    <div role="tablist" aria-label="Databases" className="flex flex-wrap gap-1">
-      {databases.map((database) => (
-        <button
-          key={database.id}
-          type="button"
-          role="tab"
-          aria-selected={database.id === selected}
-          onClick={() => onSelect(database.id)}
-          className={cn(
-            "rounded-full px-3.5 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            database.id === selected
-              ? "bg-card font-medium text-foreground shadow-xs ring-1 ring-border"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          )}
-        >
-          <span className="inline-flex items-center gap-1.5">
-            {database.name}
-            {database.indexing && <Spinner className="h-3 w-3" aria-label={`${database.name} is being indexed`} />}
-          </span>
-        </button>
-      ))}
+    <div className="overflow-hidden rounded-2xl border bg-card shadow-xs" aria-busy="true">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <Skeleton className="h-10 w-10 rounded-full" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-4 w-48" />
+          <Skeleton className="h-3 w-32" />
+        </div>
+      </div>
+      <div className="border-t">
+        <UpdateRowsSkeleton />
+      </div>
     </div>
   );
 }
 
-// The project rows while they load, the height of real ones.
-function CurationListSkeleton() {
+// The update rows while they load, the height of real ones.
+function UpdateRowsSkeleton() {
   return (
-    <div className="divide-y overflow-hidden rounded-2xl border bg-card shadow-xs" aria-busy="true">
-      {Array.from({ length: 3 }, (_, index) => (
-        <div key={index} className="flex items-center gap-4 px-4 py-4">
+    <div className="divide-y" aria-busy="true">
+      {Array.from({ length: 2 }, (_, index) => (
+        <div key={index} className="flex items-center gap-4 px-4 py-3">
+          <Skeleton className="h-10 w-10 rounded-lg" />
           <div className="min-w-0 flex-1 space-y-2">
-            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-4 w-1/4" />
             <Skeleton className="h-3 w-1/5" />
           </div>
           <div className="flex gap-3">

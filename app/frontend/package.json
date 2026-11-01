@@ -57,9 +57,11 @@
     "keycloak-js": "^26.0.0",
     "lucide-react": "^1.48.0",
     "next-themes": "^0.4.6",
+    "pdfjs-dist": "6.3.289",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-markdown": "^10.1.0",
+    "react-pdf": "^11.0.0",
     "react-resizable-panels": "^3.0.6",
     "react-router-dom": "^7.9.6",
     "recharts": "^2.15.4",
@@ -85,5 +87,8 @@
     "typescript": "^5",
     "typescript-eslint": "^8",
     "vite": "^8"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-serif": "^5.3.0"
   }
 }

@@ -238,7 +238,7 @@ export function ProjectRow({
       onDeleted?.(project.projectId);
     } catch (error) {
       console.error("Failed to delete project", error);
-      window.alert("Unable to delete project. Please try again or contact an administrator.");
+      window.alert("Unable to delete the update. Please try again or contact an administrator.");
     } finally {
       setIsDeleting(false);
     }
@@ -342,7 +342,7 @@ export function ProjectRow({
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onSelect={() => setIsDeleteDialogOpen(true)}>
             <Trash2 className="h-4 w-4" />
-            Delete project…
+            Delete update…
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -379,8 +379,8 @@ export function ProjectRow({
               <AlertTriangle className="h-4 w-4" aria-hidden />
               <span className="text-xs font-semibold uppercase tracking-wide">Danger Zone</span>
             </div>
-            <AlertDialogTitle>Delete project?</AlertDialogTitle>
-            <AlertDialogDescription>This will permanently remove all data for this project.</AlertDialogDescription>
+            <AlertDialogTitle>Delete update?</AlertDialogTitle>
+            <AlertDialogDescription>This will permanently remove all data for this update, its reports included.</AlertDialogDescription>
             <div className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground">{project.name}</div>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2 sm:gap-2">
@@ -390,7 +390,7 @@ export function ProjectRow({
               disabled={isDeleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {isDeleting ? "Deleting..." : "Delete project"}
+              {isDeleting ? "Deleting..." : "Delete update"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -401,9 +401,10 @@ export function ProjectRow({
   return (
     <CurationRow
       title={project.name}
+      createdAt={project.createdAt}
       subtitle={
         <>
-          {project.numberReportsTotal} reports · created <RelativeTime date={project.createdAt} />
+          {project.numberReportsTotal} reports · <RelativeTime date={project.createdAt} />
         </>
       }
       steps={rowSteps}

@@ -14,7 +14,7 @@ interface DatabasePickerProps {
 }
 
 /**
- * The databases to search, as a round button at the start of the search bar. Databases are created on the database
+ * The databases to search, as a round button at the start of the search bar that names them. Databases are created on the database
  * management page.
  */
 export function DatabasePicker({ selected, onChange, size = "compact" }: DatabasePickerProps) {
@@ -45,7 +45,15 @@ export function DatabasePicker({ selected, onChange, size = "compact" }: Databas
             size === "hero" ? "h-10 px-3" : "h-8 px-2.5"
           )}
         >
-          <Database className="h-4 w-4" aria-hidden />
+          <Database className="h-4 w-4 shrink-0" aria-hidden />
+          <span
+            className={cn(
+              "max-w-[10rem] truncate text-sm",
+              size === "hero" ? "ml-0.5 hidden sm:inline" : "ml-0.5 hidden md:inline"
+            )}
+          >
+            {label}
+          </span>
           <ChevronDown className="h-3 w-3" aria-hidden />
         </button>
       </PopoverTrigger>
