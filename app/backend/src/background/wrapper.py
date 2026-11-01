@@ -171,7 +171,7 @@ async def process_report(
                     report.id, fulltext_links=fulltext_links, referenced_dois=referenced_dois
                 )
                 await write_session.commit()
-                await ctx.pubsub_service.publish_project_update(project_id)
+                await ctx.pubsub_service.publish_report_update(report.id, project_id)
 
     async def prepare_vectorstore(report):
         async with _vectorstore_semaphore:
@@ -203,7 +203,7 @@ async def process_report(
                 except Exception:
                     logger.exception("Postprocessing failed for report %s", report.id)
                     await session.rollback()
-            await ctx.pubsub_service.publish_project_update(project_id)
+            await ctx.pubsub_service.publish_report_update(report.id, project_id)
 
     def has_pdf_file(report) -> bool:
         return PdfFiles.path(report.id).is_file()
@@ -246,15 +246,36 @@ async def run_process_report_background(
         await process_report(reports, project_id, ctx, options)
 
 
+async def _pdf_changed(report_id: int, ctx: RequestContext) -> Optional[str]:
+    """Tells every postprocessor that the PDF of the report changed (ReportPostprocessor.pdf_changed); the project of
+    the report, or None for a report of no project (e.g. of an imported database), which is not postprocessed."""
+    report_added = await ctx.db.get(ReportAdded, report_id)
+    if report_added is None:
+        return None
+    for postprocessor in postprocessor_registry.all():
+        await postprocessor.pdf_changed(report_id, report_added.project_id, ctx)
+    return report_added.project_id
+
+
+async def reset_pdf_postprocessing(report_id: int, ctx: RequestContext) -> None:
+    """Drops what the postprocessors made of the PDF of a report that was just deleted, or whose mark as not available
+    was undone: the report waits for a PDF again, as before its first one."""
+    project_id = await _pdf_changed(report_id, ctx)
+    if project_id is not None:
+        await ctx.pubsub_service.publish_report_update(report_id, project_id)
+
+
 async def run_pending_postprocessing(report_id: int, user_id: str) -> None:
     """Runs the postprocessors that are still pending for a report whose PDF was just
-    uploaded manually (they wait for the PDF, see process_report)."""
+    uploaded manually or marked as not available (they wait for the PDF, see process_report);
+    a postprocessor that depends on the PDF is pending again after it changed (see
+    ReportPostprocessor.pdf_changed). They run one after the other, in the order they were registered."""
     async with AsyncSessionLocal() as session:
         ctx = RequestContext(db=session, user_id=user_id)
-        report_added = await session.get(ReportAdded, report_id)
-        if report_added is None:
+        project_id = await _pdf_changed(report_id, ctx)
+        if project_id is None:
             return
-        project_id = report_added.project_id
+        await ctx.pubsub_service.publish_report_update(report_id, project_id)
         for postprocessor in postprocessor_registry.all():
             pending_select = postprocessor.pending_report_ids()
             rows = await session.execute(pending_select.where(pending_select.selected_columns[0] == report_id))
@@ -266,7 +287,7 @@ async def run_pending_postprocessing(report_id: int, user_id: str) -> None:
             except Exception:
                 logger.exception("Postprocessing failed for report %s", report_id)
                 await session.rollback()
-        await ctx.pubsub_service.publish_project_update(project_id)
+        await ctx.pubsub_service.publish_report_update(report_id, project_id)
 
 
 async def run_index_database_reports(report_ids: List[int], user_id: str) -> None:

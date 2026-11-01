@@ -9,6 +9,10 @@ from ..database import ProjectRepository
 class ProjectPubSubService:
     """Redis-backed pub/sub service for project update notifications."""
 
+    # The ids of the reports of a project that changed, on a channel of its own per project (not under channel_prefix,
+    # whose pattern subscribe_to_all_projects listens to).
+    REPORT_CHANNEL_PREFIX = "report-updates"
+
     def __init__(self, project_repo : Optional[ProjectRepository] = None, redis_url: str | None = None, channel_prefix: str = "project-updates") -> None:
         self.project_repo = project_repo
         self._redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -22,11 +26,29 @@ class ProjectPubSubService:
         """Publish a lightweight ping update to all subscribers of a project."""
         await self._redis.publish(self._channel_name(project_id), "ping")
 
-    async def publish_report_update(self, report_id: str) -> None:
-        """Publish a lightweight ping update to all subscribers of a project based on a report."""
-        project_id = await self.project_repo.get_project_id_by_report_id(report_id)
+    def _report_channel_name(self, project_id: str) -> str:
+        return f"{self.REPORT_CHANNEL_PREFIX}:{project_id}"
+
+    async def publish_report_update(self, report_id: int, project_id: Optional[str] = None) -> None:
+        """Publish that a report changed: a ping to the subscribers of its project, and its id to the subscribers
+        of the reports of its project. Without `project_id` it is looked up."""
+        project_id = project_id or await self.project_repo.get_project_id_by_report_id(report_id)
         if project_id:
             await self._redis.publish(self._channel_name(project_id), "ping")
+            await self._redis.publish(self._report_channel_name(project_id), str(report_id))
+
+    async def subscribe_to_project_reports(self, project_id: str) -> PubSub:
+        pubsub = self._redis.pubsub(ignore_subscribe_messages=True)
+        await pubsub.subscribe(self._report_channel_name(project_id))
+        return pubsub
+
+    async def unsubscribe_from_project_reports(self, project_id: str, pubsub: PubSub) -> None:
+        await pubsub.unsubscribe(self._report_channel_name(project_id))
+        await pubsub.aclose()
+
+    async def get_next_report_update(self, pubsub: PubSub) -> int:
+        """The id of the next report that changed (see publish_report_update)."""
+        return int(await self.get_next_project_update(pubsub))
 
     async def get_next_project_update(self, pubsub: PubSub) -> str:
         while True:

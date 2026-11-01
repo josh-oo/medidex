@@ -119,6 +119,10 @@ class ReportIntake(ReportSources):
     include_report_detail branch). The row shape for the admin intake list
     (Page[ReportIntake].items below)."""
     hasPdf: Optional[bool] = None
+    # Marked as having no PDF ("Not available", Report.no_pdf); hasPdf is true for it too.
+    pdfUnavailable: bool = False
+    # Optional data a downstream deployable attaches on request, as on ReportCuration.
+    extensions: Dict[str, Any] = Field(default_factory=dict)
 
 class Tag(BaseModel):
     id: str

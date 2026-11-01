@@ -20,11 +20,12 @@ type ReportState = {
     reports: Record<number, ReportCurationDto>
     setReports: (reports: ReportCurationDto[]) => void
     addReports: (reports: ReportCurationDto[]) => void
+    updateReport: (report: ReportCurationDto) => void
     getReport: (reportId: number) => ReportCurationDto
     addAssignedStudy: (reportId: number, study: StudyDto) => Promise<void>
     syncAssignedStudy: (reportId: number, study: StudyDto) => void
     removeAssignedStudy: (reportId: number, studyId: number) => Promise<void>
-    setHasPdf: (reportId: number, hasPdf : boolean) => void;
+    setHasPdf: (reportId: number, hasPdf : boolean, pdfUnavailable?: boolean) => void;
     setFlag: (reportId: number, flag: string | undefined) => void;
 }
 
@@ -62,6 +63,15 @@ export const useReportStore = create<ReportState>((set, get) => ({
             },
         };
     }),
+
+    // A report as the server sent it after it changed (e.g. the intake stream): newer than what the store holds, so it
+    // replaces the fields it has - unlike addReports, whose fetched snapshot may be older than a local mutation.
+    updateReport: (report) => set((state) => ({
+        reports: {
+            ...state.reports,
+            [report.reportId]: { ...state.reports[report.reportId], ...report },
+        },
+    })),
 
     getReport: (reportId) => {
         const report = get().reports[reportId]
@@ -142,7 +152,7 @@ export const useReportStore = create<ReportState>((set, get) => ({
         })
     },
 
-    setHasPdf(reportId, hasPdf) {
+    setHasPdf(reportId, hasPdf, pdfUnavailable = false) {
         set((state) => {
             const updatedReport = state.reports[reportId];
             if (!updatedReport) {
@@ -154,6 +164,7 @@ export const useReportStore = create<ReportState>((set, get) => ({
                     [reportId]: {
                         ...updatedReport,
                         hasPdf,
+                        pdfUnavailable,
                     },
                 },
             };

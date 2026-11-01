@@ -62,6 +62,8 @@ export interface ReportCurationDto extends ReportDto {
   // Optional for the same reason flag/assignedStudies are: ReportIntakeDto doesn't carry
   // it either, but still needs to satisfy this shape (see this interface's comment).
   preliminaryTrialId?: string | null;
+  // Only the intake rows carry it (see ReportIntakeDto); optional so useReportStore can keep it.
+  pdfUnavailable?: boolean;
   // Optional data a downstream deployable attached on request (see `include` in
   // GetProjectReportsParams), keyed by extension. Empty unless requested.
   extensions?: Record<string, unknown>;
@@ -77,6 +79,10 @@ export interface ReportIntakeDto extends ReportDto {
   doi: string | null;
   fulltextLinks: string[];
   hasPdf: boolean | undefined;
+  // Marked as having no PDF ("Not available"); hasPdf is true for it too.
+  pdfUnavailable: boolean;
+  // Optional data a downstream deployable attached on request, as on ReportCurationDto.
+  extensions?: Record<string, unknown>;
 }
 
 export type ReportChatDto = JsonValue;

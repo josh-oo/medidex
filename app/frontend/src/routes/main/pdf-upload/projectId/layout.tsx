@@ -1,14 +1,18 @@
+import { useCallback, useEffect } from "react";
 import { useParams, Outlet } from "react-router-dom";
 import { AdminGuard } from "@/components/auth/admin-guard";
-import { getProjectReportsIntake } from "@/lib/api/projectApi";
+import { getProjectReportsIntake, streamProjectIntakeUpdates } from "@/lib/api/projectApi";
+import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { useAuthStore } from "@/hooks/use-auth";
+import { useReportStore } from "@/hooks/use-report-store";
 import { useProjectResource } from "@/hooks/use-project-resource";
 import { ProjectNotFound } from "@/components/reports/project-not-found";
 import { ReportSplitView, ReportSplitViewSkeleton } from "@/components/reports/report-split-view";
+import { PdfStatusDot } from "@/components/reports/pdf-status";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Widget } from "@/components/ui/widget";
-import { FileText, Link2, Upload } from "lucide-react";
-import type { ReportFilterDimension } from "@/types/apiDTOs";
+import { FileText, Link2 } from "lucide-react";
+import type { GetProjectReportsParams, ReportFilterDimension } from "@/types/apiDTOs";
 
 const reportFilterDimensions: ReportFilterDimension[] = [
   { field: "withPdf", label: "PDF", onlyLabel: "Has PDF", excludeLabel: "No PDF" },
@@ -17,12 +21,26 @@ const reportFilterDimensions: ReportFilterDimension[] = [
 export default function PdfUploadPage() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
   const isAdmin = useAuthStore((s) => s.user?.isAdmin ?? false);
+  const { reportIncludes } = useExtensionRegistry();
+  const updateReport = useReportStore((state) => state.updateReport);
+  const fetchReports = useCallback(
+    (id: string, filters?: GetProjectReportsParams) => getProjectReportsIntake(id, { ...filters, include: reportIncludes }),
+    [reportIncludes]
+  );
   const { data: reports, notFound } = useProjectResource(
-    () => getProjectReportsIntake(projectId).then((result) => result?.items ?? []),
+    () => fetchReports(projectId).then((result) => result?.items ?? []),
     [],
     [projectId],
     isAdmin
   );
+
+  // A report that changes (its PDF arrives, its postprocessing moves on) comes in again as a whole; started once the list has
+  // filled the store (the split view does that), so it is not reset over the newer rows.
+  const loaded = reports !== null;
+  useEffect(() => {
+    if (!isAdmin || !loaded) return;
+    return streamProjectIntakeUpdates(projectId, updateReport, reportIncludes);
+  }, [projectId, isAdmin, loaded, updateReport, reportIncludes]);
 
   return (
     <AdminGuard>
@@ -39,7 +57,8 @@ export default function PdfUploadPage() {
               baseUrl="curation/pdf-upload"
               editMode={false}
               filterDimensions={reportFilterDimensions}
-              fetchReports={getProjectReportsIntake}
+              fetchReports={fetchReports}
+              renderStatus={(report) => <PdfStatusDot projectId={projectId} reportId={report.reportId} />}
               panelSkeleton={<PdfPanelSkeleton />}
             >
               <Outlet />
@@ -51,8 +70,7 @@ export default function PdfUploadPage() {
   );
 }
 
-// The PDF panel (./reportId/page.tsx) while it loads: its widgets with their headers, the upload area and the preview
-// at their sizes.
+// The PDF panel (./reportId/page.tsx) while it loads: its widgets with their headers, and the upload area at its size.
 function PdfPanelSkeleton() {
   return (
     <div className="space-y-4 pb-20" aria-busy="true">
@@ -62,11 +80,8 @@ function PdfPanelSkeleton() {
           <Skeleton className="h-3.5 w-2/3" />
         </div>
       </Widget>
-      <Widget title="Upload PDF" icon={Upload}>
-        <Skeleton className="h-32 w-full rounded-lg" />
-      </Widget>
       <Widget title="PDF" icon={FileText}>
-        <Skeleton className="mx-auto h-[396px] w-[280px] rounded-md" />
+        <Skeleton className="h-32 w-full rounded-lg" />
       </Widget>
     </div>
   );

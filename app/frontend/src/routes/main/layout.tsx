@@ -1,7 +1,8 @@
-import { useLayoutEffect, useState, type ReactNode } from "react";
+import { Suspense, useLayoutEffect, useState, type ReactNode } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { AppHeader } from "@/components/header/app-header";
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { Spinner } from "@/components/ui/spinner";
 import { inPageTransition, pageCommitted, pageKey } from "@/lib/page-transition";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +20,16 @@ export default function Layout() {
         <main className="pt-14 h-full overflow-hidden flex flex-col">
           {/* Switching between the reports of a project (the same page) keeps the page. */}
           <Page key={pageKey(pathname)}>
-            <Outlet />
+            {/* The pages are lazy chunks: while one loads the header stays (the router's own fallback would replace it). */}
+            <Suspense
+              fallback={
+                <div className="flex flex-1 items-center justify-center">
+                  <Spinner className="h-6 w-6" />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
           </Page>
         </main>
       </div>

@@ -82,6 +82,14 @@ export interface ReportCardSlotProps {
   extensions?: Record<string, unknown>
 }
 
+export interface PdfStatusSlotProps {
+  projectId: string
+  reportId: number
+  hasPdf: boolean
+  /** Marked as having no PDF ("Not available"); hasPdf is true for it too. */
+  pdfUnavailable: boolean
+}
+
 export interface ReportAbstractSlotProps {
   reportId: number
   extensions?: Record<string, unknown>
@@ -131,6 +139,10 @@ export interface ExtensionRegistry {
   projectUploadOptions: ComponentType<ProjectUploadOptionsSlotProps>[]
   /** Extra steps shown in the progress of every project. */
   projectSteps: ProjectStepResolver[]
+  /** Replaces the status dot of a report in the list of the PDF upload (grey: no PDF, green: has one). */
+  pdfStatusDot?: ComponentType<PdfStatusSlotProps>
+  /** Rendered next to the preview in the PDF card of the PDF upload (e.g. how far the PDF has been processed). */
+  pdfStatusPanel?: ComponentType<PdfStatusSlotProps>
   /** Replaces the rendering of a report's abstract in the expanded report card. */
   reportAbstract?: ComponentType<ReportAbstractSlotProps>
   addStudyTrigger?: ComponentType<AddStudyTriggerSlotProps>

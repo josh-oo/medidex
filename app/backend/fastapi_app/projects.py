@@ -173,17 +173,40 @@ async def get_project_reports_intake(
     with_pdf: FilterMode = Query(FilterMode.any, description="Only/exclude reports that have a PDF available."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
+    include: List[str] = _include_query,
 ) -> Page[ReportIntake]:
     try:
-        return await ctx.project_service.get_intake_reports_page(
+        page = await ctx.project_service.get_intake_reports_page(
             project_id,
             search=search,
             with_pdf=with_pdf,
             cursor=cursor,
             limit=limit,
         )
+        return await report_enrichers.apply(page, include, ctx)
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/projects/{project_id}/reports/intake/stream",
+    dependencies=[Depends(is_admin)],
+    summary="Stream the intake row of every report of a project that changes.",
+    description="An SSE event per changed report (an uploaded PDF, a finished postprocessing), its data the row "
+                "as /reports/intake returns it, with the same `include`.",
+)
+async def stream_project_reports_intake(
+    project_id: str,
+    request: Request,
+    ctx: RequestContext = Depends(get_context),
+    include: List[str] = _include_query,
+) -> StreamingResponse:
+    async def rows():
+        async for page in ctx.project_service.stream_intake_report_updates(project_id, request.is_disconnected):
+            page = await report_enrichers.apply(page, include, ctx)
+            yield f"data: {page.items[0].model_dump_json()}\n\n"
+
+    return StreamingResponse(rows(), media_type="text/event-stream")
 
 
 @router.get(

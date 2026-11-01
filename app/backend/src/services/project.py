@@ -349,6 +349,28 @@ class ProjectResourceService:
         finally:
             await self.pubsub_service.unsubscribe_from_project(project_id, pubsub)
 
+    async def stream_intake_report_updates(
+        self, project_id: str, is_disconnected: Callable[[], Awaitable[bool]]
+    ) -> AsyncIterator[Page[ReportIntake]]:
+        """The intake row (see get_intake_reports_page) of every report of the project that changes (its PDF, its
+        postprocessing, see ProjectPubSubService.publish_report_update), as a page of one, until `is_disconnected`
+        reports the caller has gone away. Like stream_project_updates, the caller checks the access first."""
+        pubsub = await self.pubsub_service.subscribe_to_project_reports(project_id)
+        try:
+            while True:
+                if await is_disconnected():
+                    break
+                report_id = await self.pubsub_service.get_next_report_update(pubsub)
+                # Ends the transaction of the last read: the session would hand back the report as it loaded it then.
+                await self.report_repo.db.rollback()
+                report = await self.report_repo.get_report_by_id(report_id)
+                if report is None:
+                    continue
+                yield await self.hydrate_report_page([report], 1, include_report_detail=True)
+        finally:
+            await self.report_repo.db.rollback()
+            await self.pubsub_service.unsubscribe_from_project_reports(project_id, pubsub)
+
     async def get_project_annotations(
         self, project_id: str
     ) -> Dict[int, Dict[str, List[Dict[str, Any]]]]:
@@ -457,6 +479,7 @@ class ProjectResourceService:
                 ReportIntake(
                     **reports_to_dto([report])[0].model_dump(),
                     hasPdf=report.id in reports_with_pdf,
+                    pdfUnavailable=report.no_pdf,
                     doi=report.doi,
                     fulltextLinks=fulltext_links_by_report.get(report.id, []),
                 )

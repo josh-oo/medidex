@@ -1,6 +1,6 @@
 from fastapi import APIRouter, File, UploadFile
 from fastapi import BackgroundTasks, Depends, HTTPException, Query, Path
-from src.background.wrapper import run_pending_postprocessing
+from src.background.wrapper import reset_pdf_postprocessing, run_pending_postprocessing
 from fastapi.responses import FileResponse
 from starlette.responses import Response
 import enum
@@ -305,12 +305,19 @@ async def delete_pdf(report_id : int, ctx: RequestContext = Depends(get_context)
         result = await ctx.document_service.delete_pdf(report_id)
         await ctx.report_repo.db.commit()
         await ctx.pubsub_service.publish_report_update(report_id)
-        return result
     except Exception as e:
         await ctx.report_repo.db.rollback()
         if str(e) == "Report not found":
             raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
         raise HTTPException(status_code=500, detail="Failed to delete PDF.")
+    # Nothing made of the PDF outlives it (e.g. its parsed fulltext); the PDF is gone even if this fails.
+    try:
+        await reset_pdf_postprocessing(report_id, ctx)
+    except Exception:
+        logger.exception("Resetting the postprocessing of report %s failed", report_id)
+        await ctx.report_repo.db.rollback()
+        raise HTTPException(status_code=500, detail="The PDF was deleted, but not what was extracted from it.")
+    return result
 
 @router.get("/reports/{report_id}/flag", summary="Get your report flag for a specific report.")
 async def get_report_flag(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> Optional[Flag]:
