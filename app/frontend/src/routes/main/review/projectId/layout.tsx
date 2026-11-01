@@ -1,5 +1,7 @@
-import { useCallback } from "react";
-import { useParams, Outlet } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { useParams, Outlet, useNavigate } from "react-router-dom";
+import { refreshStudyDatabases } from "@/lib/databases";
+import { curationPaths } from "@/lib/curation-steps";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { AdminGuard } from "@/components/auth/admin-guard";
 import type { GetProjectReportsParams, ProjectAnnotationsDto, ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
@@ -30,6 +32,14 @@ export default function AnnotationsReviewPage() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
   const isAdmin = useAuthStore((s) => s.user?.isAdmin ?? false);
   const { reportIncludes } = useExtensionRegistry();
+  // Bumped when a report is merged or deleted: it has left the review, so the list is loaded again, and the numbers of
+  // the database change.
+  const [version, setVersion] = useState(0);
+  const reportFinished = useCallback(() => {
+    setVersion((value) => value + 1);
+    void refreshStudyDatabases();
+  }, []);
+  const navigate = useNavigate();
   const fetchReports = useCallback(
     (id: string, filters?: GetProjectReportsParams) =>
       getProjectReportsReview(id, { ...filters, include: reportIncludes }),
@@ -44,9 +54,16 @@ export default function AnnotationsReviewPage() {
       return { reports: reportsPage?.items ?? [], annotations: annotations ?? {} };
     },
     emptyReviewData,
-    [projectId],
+    [projectId, version],
     isAdmin
   );
+
+  // The last report is merged or deleted: there is nothing left to review, back to the updates.
+  useEffect(() => {
+    if (version > 0 && data !== null && data.reports.length === 0) {
+      navigate(curationPaths.overview, { replace: true });
+    }
+  }, [version, data, navigate]);
 
   return (
     <AdminGuard>
@@ -57,7 +74,7 @@ export default function AnnotationsReviewPage() {
       ) : (
         <div className="h-full flex flex-col overflow-hidden">
           <div className="flex-1 min-h-0 bg-background">
-            <ReviewAnnotationsProvider annotations={data.annotations}>
+            <ReviewAnnotationsProvider annotations={data.annotations} onReportFinished={reportFinished}>
               <ReportSplitView
                 projectId={projectId}
                 reports={data.reports}
@@ -100,7 +117,9 @@ function ReviewPanelSkeleton() {
         </div>
       </Widget>
       <Widget title="Delete report" icon={Trash2}>
-        <p className="-mt-1 mb-4 text-sm text-muted-foreground">Permanently removes the report and all of its data.</p>
+        <p className="-mt-1 mb-4 text-sm text-muted-foreground">
+          Removes the report from the update; it is kept in the archive only, never added to the database.
+        </p>
         <Skeleton className="h-8 w-28 rounded-md" />
       </Widget>
     </div>

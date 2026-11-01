@@ -3,6 +3,7 @@ import hashlib
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from ..database.models import Project as DbProject, Report as DbReport
+from ..database.repositories.archive import DELETED, MERGED, ArchiveRepository
 from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
 from ..utils.dto import (
@@ -39,6 +40,19 @@ class ProjectAssigneeAlreadyExistsError(Exception):
     """The user is already assigned to this project."""
 
 
+class ProjectWorkIncompleteError(Exception):
+    """The caller has linked (or publicly flagged) no report of the project they have not committed yet, so there is
+    nothing to commit."""
+
+
+class OpenUpdateExistsError(Exception):
+    """The database has an update whose reports are not all merged yet: it takes one update at a time."""
+
+
+class ProjectFinishedError(Exception):
+    """Every report of the project is merged or deleted: it is done and kept as it is (no assignees, no deletion)."""
+
+
 class ProjectAssigneeNotFoundError(Exception):
     """The user isn't assigned to this project."""
 
@@ -54,8 +68,10 @@ class ProjectResourceService:
         vectorstore_service: VectorstoreService,
         pubsub_service: ProjectPubSubService,
         document_service: DocumentService,
+        archive_repo: ArchiveRepository,
     ):
         self.project_repo = project_repo
+        self.archive_repo = archive_repo
         self.database_service = database_service
         self.report_repo = report_repo
         self.vectorstore_service = vectorstore_service
@@ -78,8 +94,13 @@ class ProjectResourceService:
     async def get_project_stats(self, project: DbProject) -> Project:
         """For callers that already have the project row (e.g. get_all_project_stats,
         which just fetched every project).
+
+        The reports of the project are those still in it (report_added) and those finished with (merged or deleted,
+        see UpdateMergeService), which have gone through every step: the counts include them.
         """
         report_ids = await self.project_repo.get_project_associated_report_ids(project.id)
+        outcomes = await self.archive_repo.get_outcome_counts(project.id)
+        finished = sum(outcomes.values())
         auto_searched_pdf_count = await self.project_repo.get_auto_searched_pdf_count_for_project(project.id)
         confirmed_report_count = await self.project_repo.get_confirmed_report_count_for_project(project.id)
 
@@ -91,6 +112,7 @@ class ProjectResourceService:
         assignee_ids = [user_id for user_id, _ in assignees if user_id]
 
         ready_for_review_count = 0
+        completion_map: Dict[int, Set[str]] = {}
         if assignee_ids:
             completion_map = await self.project_repo.get_report_completion_by_users(project.id)
             assignee_set = set(assignee_ids)
@@ -98,9 +120,17 @@ class ProjectResourceService:
                 1 for report_id in report_ids
                 if assignee_set.issubset(completion_map.get(report_id, set()))
             )
+        commit_counts = await self.project_repo.get_commit_counts(project.id)
+        ready_for_merge = await self.project_repo.get_fully_committed_report_ids(project.id) if assignee_ids else set()
 
         assignee_payload = [
-            Assignee(userId=user_id, numberReportsLinked=linked_count)
+            Assignee(
+                userId=user_id,
+                numberReportsLinked=linked_count + finished,
+                numberReportsCompleted=self._completed_count(completion_map, report_ids, user_id) + finished,
+                numberReportsCommitted=commit_counts.get(user_id, 0) + finished,
+                committed=self._has_committed_all(commit_counts, report_ids, finished, user_id),
+            )
             for user_id, linked_count in assignees
         ]
 
@@ -109,18 +139,34 @@ class ProjectResourceService:
             name=project.description,
             createdAt=project.date_created,
             databaseId=project.database_id,
-            numberReportsTotal=len(report_ids),
-            numberReportsPreProcessed=len(embedded_reports),
-            numberReportsReadyForProcessing=len(ready_reports),
-            numberReportsWithPdf=len(reports_with_pdf),
-            numberReportsReadyForReview=ready_for_review_count,
-            numberReportsAutoSearchedPdf=auto_searched_pdf_count,
+            numberReportsTotal=len(report_ids) + finished,
+            numberReportsPreProcessed=len(embedded_reports) + finished,
+            numberReportsReadyForProcessing=len(ready_reports) + finished,
+            numberReportsWithPdf=len(reports_with_pdf) + finished,
+            numberReportsReadyForReview=ready_for_review_count + finished,
+            numberReportsReadyForMerge=len(ready_for_merge) + finished,
+            numberReportsAutoSearchedPdf=auto_searched_pdf_count + finished,
             numberReportsConfirmed=confirmed_report_count,
-            numberReportsPostprocessing=postprocessing_total,
-            numberReportsPostprocessed=postprocessing_finished,
+            numberReportsMerged=outcomes.get(MERGED, 0),
+            numberReportsDeleted=outcomes.get(DELETED, 0),
+            numberReportsPostprocessing=postprocessing_total + finished,
+            numberReportsPostprocessed=postprocessing_finished + finished,
             owner=project.uploaded_by,
             assignees=assignee_payload,
+            locked=bool(assignee_ids)
+            and all(self._has_committed_all(commit_counts, report_ids, finished, user_id) for user_id in assignee_ids),
+            completedAt=await self.archive_repo.get_last_archived_at(project.id) if finished and not report_ids else None,
         )
+
+    @staticmethod
+    def _completed_count(completion_map: Dict[int, Set[str]], report_ids, user_id: str) -> int:
+        """The reports still in the project the user is done with (linked or flagged publicly)."""
+        return sum(1 for report_id in report_ids if user_id in completion_map.get(report_id, set()))
+
+    @staticmethod
+    def _has_committed_all(commit_counts: Dict[str, int], report_ids, finished: int, user_id: str) -> bool:
+        """The user has committed their links of every report still in the project (of a project that has reports)."""
+        return bool(report_ids or finished) and commit_counts.get(user_id, 0) >= len(report_ids)
 
     async def get_all_project_stats(self) -> List[Project]:
         projects = await self.project_repo.get_all_projects()
@@ -142,9 +188,27 @@ class ProjectResourceService:
         report_id_results = await asyncio.gather(
             *(self.project_repo.get_project_associated_report_ids(project.id) for project in projects)
         )
+        completion_maps = await asyncio.gather(
+            *(self.project_repo.get_report_completion_by_users(project.id) for project in projects)
+        )
+        assignee_results = await asyncio.gather(
+            *(self.project_repo.get_project_assignees(project.id) for project in projects)
+        )
+        commit_count_results = await asyncio.gather(
+            *(self.project_repo.get_commit_counts(project.id) for project in projects)
+        )
+        outcome_results = await asyncio.gather(
+            *(self.archive_repo.get_outcome_counts(project.id) for project in projects)
+        )
 
+        user_id = self.project_repo.user_id
         tasks: List[Task] = []
-        for project, (_, _, ready_for_processing), report_ids in zip(projects, progress_results, report_id_results):
+        for project, (_, _, ready_for_processing), report_ids, completion_map, assignees, commit_counts, outcomes in zip(
+            projects, progress_results, report_id_results, completion_maps, assignee_results, commit_count_results,
+            outcome_results,
+        ):
+            # Reports finished with (merged or deleted) count as done in every step, as in get_project_stats.
+            finished = sum(outcomes.values())
             tasks.append(
                 Task(
                     projectId=project.id,
@@ -152,9 +216,16 @@ class ProjectResourceService:
                     owner=project.uploaded_by or "",
                     createdAt=project.date_created,
                     databaseId=project.database_id,
-                    numberReportsTotal=len(report_ids),
-                    numberReportsReadyForProcessing=len(ready_for_processing),
-                    numberReportsProcessed=user_link_counts.get(project.id, 0),
+                    numberReportsTotal=len(report_ids) + finished,
+                    numberReportsReadyForProcessing=len(ready_for_processing) + finished,
+                    numberReportsProcessed=user_link_counts.get(project.id, 0) + finished,
+                    numberReportsCompleted=self._completed_count(completion_map, report_ids, user_id) + finished,
+                    numberReportsCommitted=commit_counts.get(user_id, 0) + finished,
+                    committed=self._has_committed_all(commit_counts, report_ids, finished, user_id),
+                    pendingAssignees=[
+                        assignee for assignee, _ in assignees
+                        if not self._has_committed_all(commit_counts, report_ids, finished, assignee)
+                    ],
                 )
             )
 
@@ -240,6 +311,10 @@ class ProjectResourceService:
         if database.indexing:
             # Its reports would be matched against studies the vectorstore does not know yet.
             raise DatabaseIndexingError(f"Database {database.name} is still being indexed; upload projects once it is available")
+        if await self.project_repo.get_open_project_id(database_id) is not None:
+            raise OpenUpdateExistsError(
+                f"Database {database.name} has an update that is not merged yet; merge it before uploading the next one"
+            )
         entries = await parse_file(upload)
         project_id, reports, trial_ids = self.build_reports_from_entries(entries)
         saved_reports = await self.project_repo.add_new_project(project_id, project_name, reports, database_id, trial_ids)
@@ -260,6 +335,7 @@ class ProjectResourceService:
         uploaded by somebody else (only the uploader can delete a project). Who's allowed to call this
         (ADMIN role) is enforced at the API layer, same as create_project.
         """
+        await self._ensure_not_finished(project_id)
         deleted = await self.project_repo.delete_project(project_id)
         if deleted is None:
             raise ProjectNotFoundError(f"Project {project_id} not found")
@@ -284,6 +360,7 @@ class ProjectResourceService:
         project = await self.project_repo.get_project_by_id(project_id)
         if project is None:
             raise ProjectNotFoundError(f"Project {project_id} not found")
+        await self._ensure_not_finished(project_id)
 
         created = await self.project_repo.add_project_assignee(project_id, assignee_user_id)
         if not created:
@@ -294,6 +371,11 @@ class ProjectResourceService:
         await self.pubsub_service.publish_project_update(project_id)
         return Assignee(userId=assignee_user_id, numberReportsLinked=0)
 
+    async def _ensure_not_finished(self, project_id: str) -> None:
+        """Raises ProjectFinishedError once no report is left in the project and some were merged or deleted."""
+        if not await self.project_repo.get_project_associated_report_ids(project_id) and await self.archive_repo.get_outcome_counts(project_id):
+            raise ProjectFinishedError(f"Every report of project {project_id} is merged; it cannot be changed any more")
+
     async def remove_user_from_project(self, project_id: str, user_id: str) -> None:
         """Remove a user's assignment from a project. Raises
         ProjectNotFoundError if the project doesn't exist, or
@@ -302,6 +384,7 @@ class ProjectResourceService:
         project = await self.project_repo.get_project_by_id(project_id)
         if project is None:
             raise ProjectNotFoundError(f"Project {project_id} not found")
+        await self._ensure_not_finished(project_id)
 
         removed = await self.project_repo.remove_project_assignee(project_id, user_id)
         if not removed:
@@ -309,6 +392,33 @@ class ProjectResourceService:
                 f"{user_id} is not assigned to project {project_id}"
             )
 
+        await self.pubsub_service.publish_project_update(project_id)
+
+    async def commit_project_work(self, project_id: str) -> None:
+        """The caller hands in their links of the reports of the project they are done with (linked or flagged
+        publicly) and have not committed yet: from now on they cannot change them, and once every assignee has
+        committed every report, the project is locked for its owner to merge. Raises ProjectNotFoundError,
+        ProjectAccessDeniedError if the caller is not assigned to it, or ProjectWorkIncompleteError when there is no
+        such report.
+        """
+        # Not get_project_by_id: that only finds the projects the caller uploaded, and assignees commit.
+        project = await self.project_repo.get_project_by_hash(project_id)
+        if project is None:
+            raise ProjectNotFoundError(f"Project {project_id} not found")
+        if not await self.project_repo.is_project_assignee(project_id):
+            raise ProjectAccessDeniedError(f"Not assigned to project {project_id}")
+
+        report_ids = await self.project_repo.get_project_associated_report_ids(project_id)
+        completion_map = await self.project_repo.get_report_completion_by_users(project_id)
+        committed = await self.project_repo.get_committed_report_ids(project_id)
+        done = {
+            report_id for report_id in report_ids
+            if self.project_repo.user_id in completion_map.get(report_id, set()) and report_id not in committed
+        }
+        if not done:
+            raise ProjectWorkIncompleteError(f"No uncommitted report of project {project_id} is linked or flagged yet")
+
+        await self.project_repo.commit_reports(done)
         await self.pubsub_service.publish_project_update(project_id)
 
     async def ensure_project_access(self, project_id: str) -> None:
@@ -383,12 +493,9 @@ class ProjectResourceService:
         if not assignee_ids:
             return {}
 
-        completion_map = await self.project_repo.get_report_completion_by_users(project_id)
-        annotated_report_ids = [
-            report_id
-            for report_id in report_ids
-            if assignee_ids.issubset(completion_map.get(report_id, set()))
-        ]
+        # Ready for the review once every assignee has committed their links of it (see commit_project_work).
+        committed_report_ids = await self.project_repo.get_fully_committed_report_ids(project_id)
+        annotated_report_ids = [report_id for report_id in report_ids if report_id in committed_report_ids]
 
         if not annotated_report_ids:
             return {}
@@ -421,7 +528,7 @@ class ProjectResourceService:
         reviewed: FilterMode,
     ) -> Set[int]:
         """The review view's id-narrowing step: fully-annotated report ids (every project
-        assignee has completed annotating), optionally further narrowed by consensus/reviewed.
+        assignee has committed their links), optionally further narrowed by consensus/reviewed.
         Bounded by the project's annotation rows (get_project_annotations already returns a
         compact per-report structure, no report bodies) - feeds into
         query_project_reports_page's restrict_to_ids rather than filtering an already-hydrated
@@ -516,7 +623,8 @@ class ProjectResourceService:
         limit: int = 50,
     ) -> Page[ReportCuration]:
         """The normal curation view: never includes reports that are still being
-        processed (not yet embedded/PDF-ready) - see get_intake_reports_page for that.
+        processed (not yet embedded/PDF-ready) - see get_intake_reports_page for that -
+        nor those the caller has committed their links of (they are done with them).
         Restricted to project assignees (or whoever uploaded it).
         """
         await self.ensure_project_access(project_id)
@@ -524,6 +632,7 @@ class ProjectResourceService:
         page_rows = await self.report_repo.query_project_reports_page(
             project_id,
             require_ready=True,
+            exclude_ids=await self.project_repo.get_committed_report_ids(project_id),
             search=search,
             processed=filter_mode_to_bool(processed),
             flagged=filter_mode_to_bool(flagged),
@@ -570,7 +679,8 @@ class ProjectResourceService:
         limit: int = 50,
     ) -> Page[ReportCuration]:
         """The admin annotator-review view: always restricted to reports every project
-        assignee has completed annotating, regardless of search/filter.
+        assignee has committed their links of, regardless of search/filter; merged and
+        deleted reports have left the project.
         """
         cursor_id = decode_cursor(cursor) if cursor else None
         restrict_to_ids = await self.review_candidate_report_ids(project_id, consensus, reviewed)

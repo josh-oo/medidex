@@ -11,6 +11,14 @@ interface CurationRowProps {
   subtitle: ReactNode;
   /** The steps a person works on; the rings the current user may act on lead to their pages. */
   steps: CurationStep[];
+  /** What the user can do once they are done with their steps (e.g. commit), right after the name: it never moves
+   * the rings. */
+  action?: ReactNode;
+  /** The user has committed their links: the rings look locked. */
+  locked?: boolean;
+  /** Shown instead of the rings once the steps are behind the project (e.g. the merge of a locked one), as wide as
+   * they were. */
+  outcome?: ReactNode;
   /** The assignees, in a slot of fixed width: more of them never move the rings. */
   people?: ReactNode;
   /** The menu of the project, at the end. */
@@ -22,7 +30,7 @@ interface CurationRowProps {
  * (which are also its actions) and its menu. The columns have the same widths in every row, so the rings line up;
  * on a narrow screen the row wraps.
  */
-export function CurationRow({ title, createdAt, subtitle, steps, people, menu }: CurationRowProps) {
+export function CurationRow({ title, createdAt, subtitle, steps, action, locked, outcome, people, menu }: CurationRowProps) {
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 md:grid md:grid-cols-[minmax(0,1fr)_8rem_auto_2rem]">
       <div className="flex min-w-0 basis-full items-center gap-3 md:basis-auto">
@@ -31,9 +39,18 @@ export function CurationRow({ title, createdAt, subtitle, steps, people, menu }:
           <span className="truncate text-sm font-semibold tabular-nums">{updateLabel(title)}</span>
           <span className="truncate text-xs text-muted-foreground">{subtitle}</span>
         </div>
+        {action && <div className="ml-3 flex min-w-0 items-center">{action}</div>}
       </div>
       <div className="flex min-w-0 justify-end">{people}</div>
-      <StepChain steps={steps} />
+      {outcome ? (
+        // The rings stay, invisible, to give the outcome their width.
+        <div className="grid">
+          <StepChain steps={steps} className="invisible col-start-1 row-start-1" />
+          <div className="col-start-1 row-start-1 flex items-center">{outcome}</div>
+        </div>
+      ) : (
+        <StepChain steps={steps} locked={locked} />
+      )}
       <div className="ml-auto flex justify-end md:ml-0">{menu}</div>
     </div>
   );

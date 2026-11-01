@@ -26,6 +26,7 @@ from src.services.linkage import (
     StudyNotFoundError,
     ReportProjectAccessError,
     ReportStudyLinkNotFoundError,
+    LinksCommittedError,
 )
 
 from src.utils.dto import StudyPayload, Study, StudyCandidate, TagCandidate, Page, studies_to_dto
@@ -128,6 +129,8 @@ async def assign_studies(
         raise_for_report_access(exc)
     except StudyNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LinksCommittedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     payload = {"user": ctx.user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
@@ -144,6 +147,8 @@ async def delete_assigned_studies(
         await ctx.linkage_service.unlink_study_from_report(report_id, study_id, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
         raise_for_report_access(exc)
+    except LinksCommittedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     payload = {"user": ctx.user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
@@ -160,7 +165,7 @@ async def link_to_new_study(
         new_study = await ctx.linkage_service.create_study_and_link_to_report(report_id, study, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
         raise_for_report_access(exc)
-    except ReportNotInProjectError as exc:
+    except (ReportNotInProjectError, LinksCommittedError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DuplicateShortNameError:
         raise HTTPException(status_code=409, detail="Study shortName already exists")

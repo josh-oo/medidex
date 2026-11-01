@@ -8,20 +8,25 @@ interface ReviewAnnotationsContextValue {
     studyId: number,
     confirmed: boolean
   ) => void;
+  /** A report left the review (merged or deleted): the list is loaded again. */
+  reportFinished: () => void;
 }
 
 const ReviewAnnotationsContext = createContext<ReviewAnnotationsContextValue>({
   annotations: {},
   updateConfirmedForReportStudy: () => {},
+  reportFinished: () => {},
 });
 
 interface ReviewAnnotationsProviderProps {
   annotations: ProjectAnnotationsDto;
+  onReportFinished: () => void;
   children: ReactNode;
 }
 
 export function ReviewAnnotationsProvider({
   annotations,
+  onReportFinished,
   children,
 }: ReviewAnnotationsProviderProps) {
   const [annotationsState, setAnnotationsState] = useState<ProjectAnnotationsDto>(annotations);
@@ -29,6 +34,7 @@ export function ReviewAnnotationsProvider({
   const value = useMemo<ReviewAnnotationsContextValue>(
     () => ({
       annotations: annotationsState,
+      reportFinished: onReportFinished,
       updateConfirmedForReportStudy: (reportId, studyId, confirmed) => {
         setAnnotationsState((prev) => {
           const reportAnnotations = prev[reportId];
@@ -62,7 +68,7 @@ export function ReviewAnnotationsProvider({
         });
       },
     }),
-    [annotationsState]
+    [annotationsState, onReportFinished]
   );
 
   return (
@@ -77,6 +83,6 @@ export function useReviewAnnotations(): ProjectAnnotationsDto {
 }
 
 export function useReviewAnnotationsActions() {
-  const { updateConfirmedForReportStudy } = useContext(ReviewAnnotationsContext);
-  return { updateConfirmedForReportStudy };
+  const { updateConfirmedForReportStudy, reportFinished } = useContext(ReviewAnnotationsContext);
+  return { updateConfirmedForReportStudy, reportFinished };
 }

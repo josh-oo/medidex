@@ -27,6 +27,11 @@ class ReportStudyLinkNotFoundError(Exception):
     """No tracked report-study link exists between this report and study."""
 
 
+class LinksCommittedError(Exception):
+    """The caller has committed their links of the report (see ProjectResourceService.commit_project_work) and cannot
+    change them any more."""
+
+
 class LinkageService:
     def __init__(
         self,
@@ -53,7 +58,7 @@ class LinkageService:
         attribution recorded on the link - previously enforced by a separate
         check_report_access FastAPI dependency ahead of this call.
         """
-        project_id = await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
+        project_id = await self._authorized_open_project_id(report_id, user_id)
         study = await self.study_repo.get_study_by_id(study_id, databases=await self._databases(report_id))
         if study is None:
             raise StudyNotFoundError(f"Study {study_id} not found")
@@ -74,7 +79,7 @@ class LinkageService:
         study_id: int,
         user_id: Optional[str],
     ) -> None:
-        project_id = await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
+        project_id = await self._authorized_open_project_id(report_id, user_id)
 
         try:
             await self.report_repo.unlink_study(report_id, study_id, user_id=user_id)
@@ -92,7 +97,7 @@ class LinkageService:
         study: StudyPayload,
         user_id: Optional[str],
     ) -> Any:
-        project_id = await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
+        project_id = await self._authorized_open_project_id(report_id, user_id)
         # The new study goes to the database of the report's project; a report of no project has none.
         database_id = await self.project_repo.get_database_id_by_report_id(report_id)
         if database_id is None:
@@ -109,6 +114,14 @@ class LinkageService:
         if project_id:
             await self.pubsub_service.publish_project_update(project_id)
         return new_study
+
+    async def _authorized_open_project_id(self, report_id: int, user_id: Optional[str]) -> Optional[str]:
+        """The project of the report (see get_authorized_project_id), as long as the caller has not committed their
+        links of the report."""
+        project_id = await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
+        if project_id and await self.project_repo.has_committed_report(report_id):
+            raise LinksCommittedError(f"Your links of report {report_id} are committed and cannot be changed")
+        return project_id
 
     async def _databases(self, report_id: int) -> Optional[List[int]]:
         """The study database of the report's project (all for a report of no project)."""

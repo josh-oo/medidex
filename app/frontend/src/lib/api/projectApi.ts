@@ -181,6 +181,26 @@ export const removeUserFromProject = (
     });
 };
 
+// The caller hands in their links of the project: they cannot change them any more, and once every assignee has, the
+// project is locked for its owner to merge them.
+export const commitProjectWork = (projectId: string, config?: AxiosRequestConfig): Promise<void> => {
+  const path = `/projects/${projectId}/commit`;
+
+  return apiClient
+    .post<void>(path, undefined, config)
+    .then(() => undefined)
+    .catch(error => {
+      console.error(`Error committing the links of project ${projectId}:`, error);
+      if (error.response?.data?.detail) {
+        const errorMessage = typeof error.response.data.detail === "string"
+          ? error.response.data.detail
+          : JSON.stringify(error.response.data.detail);
+        throw new Error(errorMessage);
+      }
+      throw error;
+    });
+};
+
 export const streamProjectUpdates = (
   projectId: string,
   callbacks: StreamCallbacks,

@@ -5,7 +5,7 @@ without one can be marked as having none (Report.no_pdf)."""
 import os
 import uuid
 from pathlib import Path
-from typing import Iterable, Set
+from typing import Iterable, Set, Tuple
 
 from dotenv import load_dotenv
 
@@ -41,6 +41,24 @@ class PdfFiles:
         if len(report_ids) <= cls.STAT_LIMIT:
             return {report_id for report_id in report_ids if cls.path(report_id).is_file()}
         return report_ids & cls.stored_ids()
+
+    @classmethod
+    def usage(cls, report_ids: Iterable[int]) -> Tuple[int, int]:
+        """How many of the reports have a PDF, and how many bytes they take."""
+        report_ids = set(report_ids)
+        if len(report_ids) <= cls.STAT_LIMIT:
+            sizes = [cls.path(report_id).stat().st_size for report_id in cls.stored(report_ids)]
+        else:
+            try:
+                entries = os.scandir(cls.FOLDER)
+            except FileNotFoundError:
+                return 0, 0
+            with entries:
+                sizes = [
+                    entry.stat().st_size for entry in entries
+                    if entry.name.endswith(".pdf") and entry.name[:-4].isdigit() and int(entry.name[:-4]) in report_ids
+                ]
+        return len(sizes), sum(sizes)
 
     @classmethod
     def write(cls, report_id: int, content: bytes) -> Path:

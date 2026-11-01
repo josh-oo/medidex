@@ -11,7 +11,7 @@ from src.background.wrapper import run_index_database_reports
 from src.context import RequestContext
 from src.services.database import DatabaseImportError, DatabaseNotFoundError
 from src.utils.archive import DatabaseArchive, DatabaseArchiveError
-from src.utils.dto import Database, DatabasePayload, DatabaseUpdate
+from src.utils.dto import Database, DatabasePayload, DatabaseStorage, DatabaseUpdate
 
 from .auth import is_admin, is_verified_api_call
 from .deps import get_context
@@ -44,6 +44,18 @@ async def update_database(update: DatabaseUpdate, database_id: int = database_id
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/databases/{database_id}/storage",
+    dependencies=[Depends(is_admin)],
+    summary="What a study database takes in storage: its data, its search index and its PDFs (estimates).",
+)
+async def get_database_storage(database_id: int = database_id_path, ctx: RequestContext = Depends(get_context)) -> DatabaseStorage:
+    try:
+        return await ctx.database_service.get_storage(database_id)
+    except DatabaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post(

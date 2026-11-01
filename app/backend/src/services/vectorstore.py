@@ -4,6 +4,7 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Filter, FieldCondition, DatetimeRange
 
 from dotenv import load_dotenv
+import json
 import os
 import re
 import numpy as np
@@ -258,6 +259,23 @@ class VectorstoreService():
 
         return existing_ids
 
+    async def usage(self, report_ids: List[int], chunk: int = 1000) -> Tuple[int, int]:
+        """How many of the reports have a point, and about how many bytes they take: their vectors as float32 and their
+        payloads as JSON (the index of the collection not included)."""
+        vectors = (await self.client.get_collection(COLLECTION_NAME)).config.params.vectors
+        dimensions = sum(params.size for params in vectors.values()) if isinstance(vectors, dict) else vectors.size
+        points = payload_bytes = 0
+        for start in range(0, len(report_ids), chunk):
+            found = await self.client.retrieve(
+                collection_name=COLLECTION_NAME,
+                ids=[transform_to_uuid(report_id) for report_id in report_ids[start:start + chunk]],
+                with_vectors=False,
+                with_payload=True,
+            )
+            points += len(found)
+            payload_bytes += sum(len(json.dumps(point.payload or {}, ensure_ascii=False).encode()) for point in found)
+        return points, points * dimensions * 4 + payload_bytes
+
     async def calculate_score_pairs(self, report_ids : List[int]):
         # Fetch all vectors
         point_ids = [transform_to_uuid(report_id) for report_id in report_ids]
@@ -343,6 +361,21 @@ class VectorstoreService():
                 **self.database_payload(study_ids, study_databases),
             },
             points=[transform_to_uuid(report.id)],
+        )
+
+    async def merge_report(self, report_id : int, study_ids : List[int], study_databases : Dict[int, int]):
+        """A report of an update merged into the core database: linked to its studies for every scope, like a report
+        of an imported database (see add_study_report_to_vectorstore), its links in the scopes (`temporary`) gone."""
+        await self.client.set_payload(
+            collection_name=COLLECTION_NAME,
+            payload={
+                'is_report': True,
+                'belongs_to_study': study_ids,
+                'belongs_to_trial_id': bool(study_ids),
+                'temporary': {},
+                **self.database_payload(study_ids, study_databases),
+            },
+            points=[transform_to_uuid(report_id)],
         )
 
     async def search_report(self, query : Any ,k : int, filter : Any, database_id : Optional[int] = None):

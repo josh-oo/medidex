@@ -78,6 +78,13 @@ export const confirmStudyForReportByReportId = (
   return apiClient.put<void>(path, null, requestConfig).then(unwrap);
 }
 
+// The owner merges the report into the core database with the studies selected for it (returned), once every
+// assignee has committed it: it leaves the update and is archived.
+export const mergeReport = (reportId: number, config?: AxiosRequestConfig): Promise<number[]> => {
+  const path = `/reports/${reportId}/merge`;
+  return apiClient.post<number[]>(path, null, config).then(unwrap);
+};
+
 export const unconfirmStudyForReportByReportId = (
   reportId: number,
   studyId: number,

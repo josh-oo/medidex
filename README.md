@@ -92,6 +92,7 @@ criteria, and admins edit name, description and criteria there and create new up
 | `POST /databases/import` | admin | a new database from an exported one with its PDFs (multipart: `file` (.zip or .json), `name`, `description`, `eligibilityCriteria`) |
 | `PATCH /databases/{id}` | admin | rename a database or change its description or eligibility criteria |
 | `GET /databases/{id}/export` | admin | the database as a zip archive (`database.json` and the PDFs of its reports) |
+| `GET /databases/{id}/storage` | admin | what the database takes in storage (estimates, shown by the (i) next to its name), split into `database` (what stays: its studies, the reports linked to them, their search index and PDFs) and `updates` (what only its updates need: their projects, reports not linked yet, and tables marked `UPDATE_DATA` in `src/database/models.py`, plus what extensions register in `src/utils/storage.py`); every table with a foreign key to its studies, reports or projects is counted |
 | `POST /projects` | admin | requires the `databaseId` of the project |
 | `PUT /studies?databaseId=…` | any user | a study without a report, in the given database |
 | `GET /studies?q=…&databases=…` | any user | the study search, in the given databases (all without) |
@@ -192,8 +193,13 @@ edit is recorded under (`user_id` of the request):
   everyone. Studies of the seed data (no `study_added` record) are visible to everyone. Admins (reviewers) see
   every scope's studies (`RequestContext.is_admin`); an MCP client acting for an admin does not.
 - **Projects.** A scope needs access to the project: it is assigned to it (`project_assignee`, any string is a
-  valid assignee), which is also what shows its progress among the assignees of the project (Curation page). Reviewing the edits of the scopes
-  finishes the project.
+  valid assignee), which is also what shows its progress among the assignees of the project (Curation page). An
+  assignee commits the reports they are done with (`report_commit`), which then leave their list and cannot be changed.
+  Once every assignee has committed a report, the owner merges it (`POST /reports/{id}/merge`): the selected links
+  become links of every scope and the report leaves the project; or deletes it, so that it never reaches the database.
+  Either way what the project knew of the report goes to `report_archive` (read-only, e.g. for training models) and its
+  update data is removed, the extensions' included (`src/utils/storage.py`). A database takes one open update at a
+  time: the next one is uploaded once every report of the last one is merged or deleted.
 - **Not scoped.** PDFs and their upload are global: a PDF found for a report is the PDF of the report.
 
 Implemented in `StudyRepository._visible()` and `LinkageService` (a study that is not visible cannot be linked).

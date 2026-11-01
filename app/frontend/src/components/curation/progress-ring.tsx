@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { PageLink } from "@/lib/page-transition";
-import { Info } from "lucide-react";
+import { Info, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -16,6 +16,8 @@ const arc = (count: number, total: number) =>
 interface ProgressRingProps {
   step: CurationStep;
   size?: "sm" | "md";
+  /** The user has committed their links: the ring is greyed out and carries a lock. */
+  locked?: boolean;
   className?: string;
 }
 
@@ -23,12 +25,17 @@ interface ProgressRingProps {
  * One step as a ring around its icon: solid for the reports it has done, light for those the steps before have made
  * ready, the track for those still blocked. A step the current user may work on is a button to its page: its icon is
  * in the colour of the controls and it lights up under the pointer. The others show their progress and, when
- * clicked, why the user cannot do the step (`hint`).
+ * clicked, why the user cannot do the step (`hint`). Once the user has committed their links, the rings are `locked`:
+ * grey, with a lock, and lead nowhere.
  */
-export function ProgressRing({ step, size = "md", className }: ProgressRingProps) {
+export function ProgressRing({ step, size = "md", locked = false, className }: ProgressRingProps) {
   const Icon = step.icon;
-  const actionable = Boolean(step.href);
-  const label = actionable && step.action ? `${step.action} · ${step.detail}` : `${step.label} · ${step.detail}`;
+  const actionable = Boolean(step.href) && !locked;
+  const label = locked
+    ? `${step.label} · ${step.detail} · locked`
+    : actionable && step.action
+      ? `${step.action} · ${step.detail}`
+      : `${step.label} · ${step.detail}`;
 
   const ring = (
     <span
@@ -42,7 +49,7 @@ export function ProgressRing({ step, size = "md", className }: ProgressRingProps
       <svg viewBox="0 0 36 36" className="absolute inset-0 h-full w-full -rotate-90" aria-hidden="true">
         <circle cx="18" cy="18" r={RADIUS} fill="none" className="stroke-border" strokeWidth="3.5" />
         {/* An empty arc is left out: with round ends it would still draw a dot. */}
-        {step.ready > 0 && (
+        {step.ready > 0 && !locked && (
           <circle
             cx="18"
             cy="18"
@@ -63,7 +70,7 @@ export function ProgressRing({ step, size = "md", className }: ProgressRingProps
             strokeWidth="3.5"
             strokeLinecap="round"
             strokeDasharray={arc(step.done, step.total)}
-            className="stroke-primary"
+            className={locked ? "stroke-muted-foreground/35" : "stroke-primary"}
           />
         )}
       </svg>
@@ -71,6 +78,11 @@ export function ProgressRing({ step, size = "md", className }: ProgressRingProps
         className={cn(size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4", actionable ? "text-primary" : "text-muted-foreground")}
         aria-hidden
       />
+      {locked && (
+        <span className="absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full border border-border bg-card">
+          <Lock className="h-2.5 w-2.5 text-muted-foreground" aria-hidden />
+        </span>
+      )}
     </span>
   );
 
@@ -82,6 +94,21 @@ export function ProgressRing({ step, size = "md", className }: ProgressRingProps
       </p>
     </TooltipContent>
   );
+
+  if (locked) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span tabIndex={0} aria-label={label} className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+              {ring}
+            </span>
+          </TooltipTrigger>
+          {tooltip}
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
 
   if (step.href) {
     return (

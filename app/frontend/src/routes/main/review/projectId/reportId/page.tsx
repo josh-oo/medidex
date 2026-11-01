@@ -32,7 +32,7 @@ import {
 } from "../components/review-annotations-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import type { StudyDto } from "@/types/apiDTOs";
-import { Calendar, CircleCheckBig, CircleAlert, TriangleAlert, Users, Info, AlertTriangle, Flag, Trash2 } from "lucide-react";
+import { Calendar, CircleCheckBig, CircleAlert, TriangleAlert, Users, Info, AlertTriangle, Flag, Trash2, GitMerge } from "lucide-react";
 import { Widget } from "@/components/ui/widget";
 import { listUsers } from "@/lib/api/adminApi";
 import { getStudyById } from "@/lib/api/studiesApi";
@@ -41,6 +41,7 @@ import {
   confirmStudyForReportByReportId,
   unconfirmStudyForReportByReportId,
   deleteReportById,
+  mergeReport,
 } from "@/lib/api/reportApi";
 
 interface GroupedUserStudy {
@@ -84,7 +85,7 @@ const toggleStudyConfirmation = async (
 
 export default function ReviewDetailsPage() {
   const annotations = useReviewAnnotations();
-  const { updateConfirmedForReportStudy } = useReviewAnnotationsActions();
+  const { updateConfirmedForReportStudy, reportFinished } = useReviewAnnotationsActions();
   const params = useParams();
   const navigate = useNavigate();
   const { openWithStudyId } = useDetailsSheet();
@@ -97,6 +98,8 @@ export default function ReviewDetailsPage() {
   const [isDeletingReport, setIsDeletingReport] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [deleteReportError, setDeleteReportError] = useState<string | null>(null);
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
 
   const toTimestamp = (value: Date | string | number | null | undefined): number | null => {
     if (value === null || value === undefined) {
@@ -347,6 +350,7 @@ export default function ReviewDetailsPage() {
       await deleteReportById(Number(reportIdParam));
 
       setIsDeleteDialogOpen(false);
+      reportFinished();
 
       if (projectIdParam) {
         navigate(curationPaths.review(projectIdParam));
@@ -358,6 +362,27 @@ export default function ReviewDetailsPage() {
       setDeleteReportError("Unable to delete report. Please try again.");
     } finally {
       setIsDeletingReport(false);
+    }
+  };
+
+  // The report goes into the core database with the selected studies and leaves the review; the next one opens.
+  const handleMerge = async () => {
+    if (!reportIdParam || isMerging) {
+      return;
+    }
+
+    setIsMerging(true);
+    setMergeError(null);
+    try {
+      await mergeReport(Number(reportIdParam));
+      reportFinished();
+      navigate(projectIdParam ? curationPaths.review(projectIdParam) : curationPaths.overview);
+    } catch (error) {
+      console.error("Failed to merge report:", error);
+      const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setMergeError(typeof detail === "string" ? detail : "Unable to merge the report. Please try again.");
+    } finally {
+      setIsMerging(false);
     }
   };
 
@@ -405,7 +430,7 @@ export default function ReviewDetailsPage() {
         }
       >
         <p className="-mt-1 mb-4 text-sm text-muted-foreground">
-          Select one or more studies from the annotator suggestions.
+          Select one or more studies from the annotator suggestions, then merge the report into the database.
         </p>
 
         {groupedByUser.length === 0 ? (
@@ -568,11 +593,28 @@ export default function ReviewDetailsPage() {
             })}
           </div>
         )}
+
+        {finalDecisionStudies.length > 0 ? (
+          <div className="mt-4 flex items-center justify-end gap-3">
+            {mergeError ? <p className="text-sm text-destructive">{mergeError}</p> : null}
+            <Button
+              type="button"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => void handleMerge()}
+              disabled={selectedFinalStudyIds.size === 0 || syncingFinalStudyIds.size > 0 || isMerging || isDeletingReport}
+              title={selectedFinalStudyIds.size === 0 ? "Select a study to merge the report with" : undefined}
+            >
+              <GitMerge className="h-4 w-4" />
+              {isMerging ? "Merging..." : "Merge into database"}
+            </Button>
+          </div>
+        ) : null}
       </Widget>
 
       <Widget title="Delete report" icon={Trash2}>
         <p className="-mt-1 mb-4 text-sm text-muted-foreground">
-          Permanently removes the report and all of its data.
+          Removes the report from the update; it is kept in the archive only, never added to the database.
         </p>
         <AlertDialog
           open={isDeleteDialogOpen}
@@ -605,7 +647,7 @@ export default function ReviewDetailsPage() {
               </div>
               <AlertDialogTitle>Delete this report?</AlertDialogTitle>
               <AlertDialogDescription>
-                This will permanently remove all data for this report.
+                The report is removed from the update and kept in the archive only; it is not added to the database.
               </AlertDialogDescription>
               <div className="mt-2 rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-sm text-foreground">
                 Report ID: {reportIdParam}

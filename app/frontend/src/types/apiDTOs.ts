@@ -343,15 +343,30 @@ export interface ProjectDto{
   numberReportsWithPdf: number;
   numberReportsAutoSearchedPdf: number,
   numberReportsReadyForReview: number;
+  // Reports every assignee has committed their links of: the owner can merge them (finished ones included).
+  numberReportsReadyForMerge: number;
   numberReportsConfirmed: number;
+  // Reports finished with: merged into the core database or deleted; both are archived.
+  numberReportsMerged: number;
+  numberReportsDeleted: number;
   numberReportsPostprocessing: number;
   numberReportsPostprocessed: number;
   assignees : AssigneeDto[]
+  // Every assignee has committed their links of every report still in the project: nothing is left to link.
+  locked: boolean;
+  // When its last report was merged or deleted; null while reports are left.
+  completedAt?: string | null;
 }
 
 export interface AssigneeDto {
   userId : string;
   numberReportsLinked: number;
+  // Reports the assignee is done with: linked to a study or flagged publicly.
+  numberReportsCompleted: number;
+  // Reports the assignee has handed in their links of; they cannot change them any more.
+  numberReportsCommitted: number;
+  // Has handed in their links of every report.
+  committed: boolean;
 }
 
 export interface TaskDto {
@@ -363,6 +378,14 @@ export interface TaskDto {
   numberReportsTotal: number;
   numberReportsReadyForProcessing: number;
   numberReportsProcessed: number;
+  // Reports the user is done with: linked to a study or flagged publicly; those not committed yet they can commit.
+  numberReportsCompleted: number;
+  // Reports the user has handed in their links of; they are left out of their curation view.
+  numberReportsCommitted: number;
+  // Has handed in their links of every report.
+  committed: boolean;
+  // The assignees (user ids) who have not committed their links yet: whom the update waits for.
+  pendingAssignees: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -391,6 +414,28 @@ export interface DatabaseDto {
   numberReportsIndexed: number;
   numberStudies: number;
   numberReports: number;
+}
+
+// What one part of a database takes in storage; extras are what the extensions keep elsewhere (e.g. chat histories).
+export interface StorageUsageDto {
+  dataBytes: number;
+  searchIndexBytes: number;
+  pdfBytes: number;
+  pdfFiles: number;
+  extras: { label: string; bytes: number }[];
+}
+
+// What a database takes in storage (estimates): `database` is what stays (its studies, the reports linked to them),
+// `updates` only serves the curation of its updates and goes once they are done.
+export interface DatabaseStorageDto {
+  databaseId: number;
+  // The reports linked to its studies (numberReports of the database).
+  numberReports: number;
+  numberUpdates: number;
+  // The reports its updates brought in, linked or not.
+  numberReportsInUpdates: number;
+  database: StorageUsageDto;
+  updates: StorageUsageDto;
 }
 
 // ---------------------------------------------------------------------------

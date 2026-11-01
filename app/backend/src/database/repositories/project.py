@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from sqlalchemy import exists, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
-from sqlmodel import select, delete, insert
+from sqlmodel import select, delete, insert, update
 from collections import defaultdict
 
 from ..models import (
@@ -18,6 +18,7 @@ from ..models import (
     StudyReport,
     StudyReportAdded,
     ProjectAssignees,
+    ReportCommit,
 )
 from typing import Any, Dict, List, Set, Tuple, Optional
 
@@ -191,6 +192,75 @@ class ProjectRepository:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none() is not None
+
+    async def get_commit_counts(self, project_id: str) -> Dict[str, int]:
+        """How many reports of the project each assignee has committed their links of."""
+        result = await self.db.execute(
+            select(ReportCommit.assignee, func.count(ReportCommit.report_id))
+            .join(ReportAdded, ReportAdded.report_id == ReportCommit.report_id)
+            .where(ReportAdded.project_id == project_id)
+            .group_by(ReportCommit.assignee)
+        )
+        return {assignee: count for assignee, count in result.all()}
+
+    async def get_committed_report_ids(self, project_id: str) -> Set[int]:
+        """The reports of the project the caller has committed their links of."""
+        if not self.user_id:
+            return set()
+        result = await self.db.execute(
+            select(ReportCommit.report_id)
+            .join(ReportAdded, ReportAdded.report_id == ReportCommit.report_id)
+            .where(ReportAdded.project_id == project_id)
+            .where(ReportCommit.assignee == self.user_id)
+        )
+        return set(result.scalars().all())
+
+    async def has_committed_report(self, report_id: int) -> bool:
+        if not self.user_id:
+            return False
+        result = await self.db.execute(
+            select(exists().where(ReportCommit.report_id == report_id).where(ReportCommit.assignee == self.user_id))
+        )
+        return bool(result.scalar())
+
+    async def get_report_committers(self, report_id: int) -> Set[str]:
+        """The assignees who have committed their links of the report."""
+        result = await self.db.execute(select(ReportCommit.assignee).where(ReportCommit.report_id == report_id))
+        return set(result.scalars().all())
+
+    async def get_fully_committed_report_ids(self, project_id: str) -> Set[int]:
+        """The reports of the project every one of its assignees has committed their links of: ready to merge."""
+        assignees = select(ProjectAssignees.assignee).where(ProjectAssignees.project_id == project_id)
+        result = await self.db.execute(
+            select(ReportCommit.report_id)
+            .join(ReportAdded, ReportAdded.report_id == ReportCommit.report_id)
+            .where(ReportAdded.project_id == project_id)
+            .where(ReportCommit.assignee.in_(assignees))
+            .group_by(ReportCommit.report_id)
+            .having(func.count(ReportCommit.assignee) >= assignees.with_only_columns(func.count()).scalar_subquery())
+        )
+        return set(result.scalars().all())
+
+    async def get_open_project_id(self, database_id: int) -> Optional[str]:
+        """The update of the database that still has reports to merge, if there is one."""
+        result = await self.db.execute(
+            select(Project.id)
+            .where(Project.database_id == database_id)
+            .where(exists().where(ReportAdded.project_id == Project.id))
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def commit_reports(self, report_ids: Set[int]) -> None:
+        """Marks the caller's links of the reports as committed."""
+        if not self.user_id or not report_ids:
+            return
+        await self.db.execute(
+            pg_insert(ReportCommit)
+            .values([{"report_id": report_id, "assignee": self.user_id} for report_id in report_ids])
+            .on_conflict_do_nothing(index_elements=["report_id", "assignee"])
+        )
+        await self.db.commit()
 
     async def get_assigned_projects(self) -> List[Project]:
         if not self.user_id:
@@ -502,6 +572,12 @@ class ProjectRepository:
             delete(ProjectAssignees).where(
                 (ProjectAssignees.project_id == project_id) & (ProjectAssignees.assignee == assignee)
             )
+        )
+        # Their commits go with the assignment: assigned again, they start over.
+        await self.db.execute(
+            delete(ReportCommit)
+            .where(ReportCommit.assignee == assignee)
+            .where(ReportCommit.report_id.in_(select(ReportAdded.report_id).where(ReportAdded.project_id == project_id)))
         )
         await self.db.commit()
         return bool(result.rowcount)

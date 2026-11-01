@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -34,8 +34,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { UserPlus, Check, Trash2, AlertTriangle, MoreHorizontal } from "lucide-react";
-import RelativeTime from "@/components/ui/relative-time";
+import { UserPlus, Check, Trash2, AlertTriangle, MoreHorizontal, GitMerge, Info } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import RelativeTime, { parseDate } from "@/components/ui/relative-time";
+import { PageLink } from "@/lib/page-transition";
 import type { ProjectDto, AssigneeDto } from "@/types/apiDTOs";
 import type { UserDto } from "@/types/user/user.dto";
 import {
@@ -52,6 +54,7 @@ import {
 import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { useAuthStore } from "@/hooks/use-auth";
 import { projectSteps, type CurationStep } from "@/lib/curation-steps";
+import { CommitAction } from "./commit-action";
 import { CurationRow } from "./curation-row";
 
 const EMPTY_USERS: UserDto[] = [];
@@ -77,7 +80,9 @@ const getUserInitials = (name?: string) => {
 
 /**
  * A project as an admin sees it: the rings of its steps (the ones the user may work on lead there: the owner uploads
- * PDFs and reviews, the assignees link), its assignees, and a menu to assign people or delete the project.
+ * PDFs, the assignees link and commit their links), its assignees, and a menu to assign people or delete the project.
+ * Once every assignee has committed, the update is locked and the rings give way to the merge of the links (the
+ * owner's).
  */
 export function ProjectRow({
   project,
@@ -174,6 +179,8 @@ export function ProjectRow({
     name: knownUsers.get(id)?.name ?? id,
     icon: extraById.get(id)?.option.icon,
     linkedReports: assigneeMap.get(id)?.numberReportsLinked ?? 0,
+    completedReports: assigneeMap.get(id)?.numberReportsCompleted ?? 0,
+    committed: assigneeMap.get(id)?.committed ?? false,
   }));
 
   const isOwner = Boolean(userId) && project.owner === userId;
@@ -277,12 +284,23 @@ export function ProjectRow({
   };
 
   const assigneeNames = resolvedAssignees.map((assignee) => assignee.name).join(", ");
+  // The review is no ring of its own: once there is something to merge (every assignee has committed a report) or
+  // nothing is left to link (the update is locked), the rings give way to the merge of the links.
+  const review = steps.find((step) => step.key === "review");
+  // Every report is merged or deleted: the update is done, nobody is assigned or deletes it any more.
+  const finished =
+    project.numberReportsTotal > 0 &&
+    project.numberReportsMerged + project.numberReportsDeleted >= project.numberReportsTotal;
+  const showMerge = Boolean(review) && (finished || project.locked || review!.ready > review!.done);
+  const ownAssignment = userId ? assigneeMap.get(userId) : undefined;
   // An admin who is not assigned can assign themselves from the hint of the linkage ring.
-  const rowSteps = steps.map((step) =>
-    step.key === "linkage" && !isAssignee && userId
-      ? { ...step, hintAction: { label: "Assign me", run: () => void toggleAssignee(userId) } }
-      : step
-  );
+  const rowSteps = steps
+    .filter((step) => step.key !== "review")
+    .map((step) =>
+      step.key === "linkage" && !isAssignee && userId && !finished
+        ? { ...step, hintAction: { label: "Assign me", run: () => void toggleAssignee(userId) } }
+        : step
+    );
 
   const people = (
     <TooltipProvider>
@@ -291,21 +309,25 @@ export function ProjectRow({
           <button
             type="button"
             onClick={() => setIsAssignOpen(true)}
+            disabled={finished}
             aria-label={resolvedAssignees.length > 0 ? `Assigned: ${assigneeNames}. Change` : "Assign people"}
-            className="flex h-11 items-center rounded-full px-1.5 transition-colors hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            className="flex h-11 items-center rounded-full px-1.5 transition-colors enabled:hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
             {resolvedAssignees.length > 0 ? (
-              <span className="flex -space-x-2">
-                {resolvedAssignees.slice(0, MAX_AVATARS).map(({ userId: id, name, icon: Icon }) => (
-                  <Avatar key={id} className="h-9 w-9 border-2 border-card bg-muted">
-                    <AvatarFallback className="text-xs font-semibold">
-                      {Icon ? <Icon className="h-4 w-4" aria-hidden /> : getUserInitials(name)}
-                    </AvatarFallback>
-                  </Avatar>
+              <span className="flex -space-x-1">
+                {resolvedAssignees.slice(0, MAX_AVATARS).map(({ userId: id, name, icon: Icon, completedReports, committed }) => (
+                  <AssigneeAvatar
+                    key={id}
+                    completed={completedReports}
+                    total={project.numberReportsTotal}
+                    committed={committed}
+                  >
+                    {Icon ? <Icon className="h-3.5 w-3.5" aria-hidden /> : getUserInitials(name)}
+                  </AssigneeAvatar>
                 ))}
                 {resolvedAssignees.length > MAX_AVATARS && (
-                  <Avatar className="h-9 w-9 border-2 border-card bg-muted">
-                    <AvatarFallback className="text-xs font-semibold">
+                  <Avatar className="m-1 h-8 w-8 border-2 border-card bg-muted">
+                    <AvatarFallback className="text-[11px] font-semibold">
                       +{resolvedAssignees.length - MAX_AVATARS}
                     </AvatarFallback>
                   </Avatar>
@@ -320,7 +342,15 @@ export function ProjectRow({
           </button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>{resolvedAssignees.length > 0 ? `Assigned: ${assigneeNames}` : "Nobody is assigned yet"}</p>
+          {resolvedAssignees.length > 0 ? (
+            resolvedAssignees.map(({ userId: id, name, completedReports, committed }) => (
+              <p key={id}>
+                {name}: {committed ? "committed" : `${completedReports} / ${project.numberReportsTotal} done`}
+              </p>
+            ))
+          ) : (
+            <p>Nobody is assigned yet</p>
+          )}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -408,8 +438,173 @@ export function ProjectRow({
         </>
       }
       steps={rowSteps}
-      people={people}
-      menu={menu}
+      action={
+        isAssignee && ownAssignment && !project.locked ? (
+          <CommitAction
+            projectId={project.projectId}
+            projectName={project.name}
+            completed={ownAssignment.numberReportsCompleted}
+            committed={ownAssignment.numberReportsCommitted}
+            total={project.numberReportsTotal}
+            done={ownAssignment.committed}
+            waitingFor={resolvedAssignees
+              .filter((assignee) => !assignee.committed && assignee.userId !== userId)
+              .map((assignee) => assignee.name)}
+            onCommitted={() => onProjectUpdate?.(project.projectId)}
+          />
+        ) : null
+      }
+      locked={ownAssignment?.committed ?? false}
+      outcome={showMerge && review ? <MergeAction review={review} /> : undefined}
+      people={finished ? undefined : people}
+      menu={
+        finished ? (
+          <UpdateInfo
+            project={project}
+            annotators={resolvedAssignees.map((assignee) => assignee.name)}
+          />
+        ) : (
+          menu
+        )
+      }
     />
+  );
+}
+
+/**
+ * What a finished update was, in place of its menu: when it was created and completed, what became of its reports and
+ * who linked them.
+ */
+function UpdateInfo({ project, annotators }: { project: ProjectDto; annotators: string[] }) {
+  const day = (date: string) => parseDate(date).toLocaleDateString(undefined, { dateStyle: "medium" });
+  const facts = [
+    { label: "Created", value: day(project.createdAt) },
+    { label: "Completed", value: project.completedAt ? day(project.completedAt) : "-" },
+    { label: "Reports", value: project.numberReportsTotal.toLocaleString() },
+    { label: "Merged into the database", value: project.numberReportsMerged.toLocaleString() },
+    { label: "Deleted (archived only)", value: project.numberReportsDeleted.toLocaleString() },
+  ];
+
+  return (
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label={`About ${project.name}`}>
+              <Info className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>About this update</TooltipContent>
+      </Tooltip>
+      <PopoverContent
+        align="end"
+        sideOffset={8}
+        className="w-[min(300px,calc(100vw-2rem))] rounded-2xl border bg-popover p-4 text-popover-foreground shadow-lg"
+      >
+        <p className="text-xs font-medium text-muted-foreground">{project.name}</p>
+        <dl className="mt-3 space-y-1.5 text-sm">
+          {facts.map((fact) => (
+            <div key={fact.label} className="flex justify-between gap-3">
+              <dt className="shrink-0 text-muted-foreground">{fact.label}</dt>
+              <dd className="min-w-0 truncate text-right font-medium tabular-nums" title={fact.value}>{fact.value}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-4 border-t pt-3">
+          <p className="text-xs font-medium text-muted-foreground">Annotators</p>
+          {annotators.length > 0 ? (
+            <ul className="mt-1.5 space-y-1 text-sm">
+              {annotators.map((name) => (
+                <li key={name} className="truncate">{name}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1.5 text-sm text-muted-foreground">Nobody was assigned.</p>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * The merge of the committed links of all assignees, in the review workbench, marked as merged once every report is.
+ * Only the owner merges; the others see why not.
+ */
+function MergeAction({ review }: { review: CurationStep }) {
+  const merged = review.total > 0 && review.done >= review.total;
+  const label = (
+    <>
+      {merged ? <Check className="h-4 w-4" /> : <GitMerge className="h-4 w-4" />}
+      {merged ? "Merged" : "Merge"}
+    </>
+  );
+
+  // Merged, there is nothing left to review.
+  if (!review.href || merged) {
+    return (
+      <span title={merged ? "Every report is merged into the database" : review.hint} className="flex w-full">
+        <Button variant={merged ? "ghost" : "default"} className="h-11 w-full gap-1.5 rounded-full" disabled>
+          {label}
+        </Button>
+      </span>
+    );
+  }
+  return (
+    <Button
+      asChild
+      variant={merged ? "ghost" : "default"}
+      className="h-11 w-full gap-1.5 rounded-full"
+      title={`${review.detail}: open the review workbench`}
+    >
+      <PageLink to={review.href}>{label}</PageLink>
+    </Button>
+  );
+}
+
+/**
+ * An assignee: their avatar in a ring of the reports they are done with, with a check once they have committed their
+ * links.
+ */
+function AssigneeAvatar({
+  completed,
+  total,
+  committed,
+  children,
+}: {
+  completed: number;
+  total: number;
+  committed: boolean;
+  children: ReactNode;
+}) {
+  const circumference = 2 * Math.PI * 16;
+  const done = committed ? total : Math.min(completed, total);
+  return (
+    <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full bg-card">
+      <svg viewBox="0 0 36 36" className="absolute inset-0 h-full w-full -rotate-90" aria-hidden="true">
+        <circle cx="18" cy="18" r="16" fill="none" className="stroke-border" strokeWidth="2.5" />
+        {done > 0 && total > 0 && (
+          <circle
+            cx="18"
+            cy="18"
+            r="16"
+            fill="none"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeDasharray={`${(done / total) * circumference} ${circumference}`}
+            className="stroke-primary"
+          />
+        )}
+      </svg>
+      <Avatar className="h-8 w-8 bg-muted">
+        <AvatarFallback className="text-[11px] font-semibold">{children}</AvatarFallback>
+      </Avatar>
+      {committed && (
+        <span className="absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full border-2 border-card bg-primary">
+          <Check className="h-2.5 w-2.5 text-primary-foreground" strokeWidth={3.5} aria-hidden />
+        </span>
+      )}
+    </span>
   );
 }

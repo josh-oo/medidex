@@ -13,7 +13,7 @@ const groupSteps = (steps: CurationStep[]) =>
   }, []);
 
 /** The steps of a project as rings joined by lines; stacked steps join with a fork. */
-export function StepChain({ steps, className }: { steps: CurationStep[]; className?: string }) {
+export function StepChain({ steps, locked, className }: { steps: CurationStep[]; locked?: boolean; className?: string }) {
   const groups = groupSteps(steps);
 
   return (
@@ -22,12 +22,12 @@ export function StepChain({ steps, className }: { steps: CurationStep[]; classNa
         <Fragment key={group[0].key}>
           {index > 0 && groups[index - 1].length === 1 && <span aria-hidden className="w-3 border-t border-border" />}
           {group.length === 1 ? (
-            <ProgressRing step={group[0]} />
+            <ProgressRing step={group[0]} locked={locked} />
           ) : (
             <>
               <div className="flex flex-col gap-1.5">
                 {group.map((step) => (
-                  <ProgressRing key={step.key} step={step} size="sm" />
+                  <ProgressRing key={step.key} step={step} size="sm" locked={locked} />
                 ))}
               </div>
               {index < groups.length - 1 && (

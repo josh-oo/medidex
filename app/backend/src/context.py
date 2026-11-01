@@ -12,6 +12,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .database.repositories.archive import ArchiveRepository
 from .database.repositories.aspects import AspectRepository
 from .database.repositories.database import DatabaseRepository
 from .database.repositories.project import ProjectRepository
@@ -26,6 +27,7 @@ from .services.database import StudyDatabaseService
 from .services.embedding import EmbeddingService, embedding_service
 from .services.linkage import LinkageService
 from .services.maintenance import MaintenanceService
+from .services.merge import UpdateMergeService
 from .services.naming import StudyNamingService
 from .services.project import ProjectResourceService
 from .services.pubsub import ProjectPubSubService
@@ -58,6 +60,10 @@ class RequestContext:
     @cached_property
     def project_repo(self) -> ProjectRepository:
         return ProjectRepository(db=self.db, user_id=self.user_id)
+
+    @cached_property
+    def archive_repo(self) -> ArchiveRepository:
+        return ArchiveRepository(db=self.db, user_id=self.user_id)
 
     @cached_property
     def study_repo(self) -> StudyRepository:
@@ -154,6 +160,17 @@ class RequestContext:
         )
 
     @cached_property
+    def merge_service(self) -> UpdateMergeService:
+        return UpdateMergeService(
+            project_repo=self.project_repo,
+            report_repo=self.report_repo,
+            archive_repo=self.archive_repo,
+            vectorstore=self.vectorstore_service,
+            document_service=self.document_service,
+            pubsub_service=self.pubsub_service,
+        )
+
+    @cached_property
     def pubsub_service(self) -> ProjectPubSubService:
         return ProjectPubSubService(project_repo=self.project_repo)
 
@@ -188,4 +205,5 @@ class RequestContext:
             vectorstore_service=self.vectorstore_service,
             pubsub_service=self.pubsub_service,
             document_service=self.document_service,
+            archive_repo=self.archive_repo,
         )

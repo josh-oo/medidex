@@ -19,6 +19,8 @@ from src.database.models import Report as DbReport, Study as DbStudy
 from src.database.repositories.study import DuplicateShortNameError
 from src.utils.query_parser import QuerySyntaxError, SEARCH_QUERY_DESCRIPTION
 from src.context import RequestContext
+from src.services.authorization import ProjectAccessDeniedError
+from src.services.project import ProjectNotFoundError
 from .deps import get_context
 
 from src.utils.dto import Study, StudyFull, StudySchema, StudyFieldSchema, StudyMetaSchema, StudyGraph, GraphSchema, GraphEntitySchema, GraphRelationSchema, TagCategorySchema, StudyPayload, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
@@ -226,38 +228,20 @@ async def get_report_by_id(report_id: int = report_id_path, ctx: RequestContext 
     links = await ctx.report_service.get_fulltext_links(report_id)
     return ReportSources(**base.model_dump(), doi=report.doi, fulltextLinks=links)
 
-@router.delete("/reports/{report_id}", status_code=204, summary="Delete a report. Only the owner of the report's project can delete it.")
+@router.delete("/reports/{report_id}", status_code=204, summary="Delete a report of an update. Only the owner of the update can delete it.", description="The report goes to the archive of the update only, never to the core database (see POST /reports/{report_id}/merge).")
 async def delete_report(
     report_id: int = report_id_path,
     ctx: RequestContext = Depends(get_context),
 ):
+    if await ctx.report_repo.get_report_by_id(report_id) is None:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
     try:
-        report = await ctx.report_repo.get_report_by_id(report_id)
-        if report is None:
-            raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
-
-        project_id = await ctx.project_repo.get_project_id_by_report_id(report_id)
-        if project_id is None:
-            raise HTTPException(status_code=400, detail="Report is not associated with a project")
-
-        project = await ctx.project_repo.get_project_by_hash(project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-
-        if project.uploaded_by != str(ctx.user_id):
-            raise HTTPException(status_code=403, detail="Only the project owner can delete reports from this project")
-
-        deleted = await ctx.report_repo.delete_report(report_id)
-        await ctx.report_repo.commit()
-        if not deleted:
-            raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
-
-        await ctx.vectorstore_service.delete_vectors_by_report_ids([report_id])
-        await ctx.pubsub_service.publish_project_update(project_id)
-        return Response(status_code=204)
-    except:
-        await ctx.report_repo.rollback()
-        raise
+        await ctx.merge_service.delete_report(report_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProjectAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return Response(status_code=204)
 
 
 @router.get("/reports/{report_id}/studies", summary="Get the studies linked to this specific report.")

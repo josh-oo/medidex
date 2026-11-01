@@ -1,6 +1,6 @@
 import apiClient from "./apiClient";
 import { unwrap, logAndRethrow } from "./requests";
-import type { DatabaseDto, DatabasePayload, DatabaseUpdate } from "../../types/apiDTOs";
+import type { DatabaseDto, DatabasePayload, DatabaseStorageDto, DatabaseUpdate } from "../../types/apiDTOs";
 
 export const getDatabases = (): Promise<DatabaseDto[]> =>
   apiClient.get<DatabaseDto[]>("/databases").then(unwrap).catch(logAndRethrow("Error fetching databases:"));
@@ -35,3 +35,10 @@ export const exportDatabase = (databaseId: number): Promise<Blob> =>
     .get(`/databases/${databaseId}/export`, { responseType: "blob" })
     .then(unwrap)
     .catch(logAndRethrow(`Error exporting database ${databaseId}:`));
+
+// What the database takes in storage: its data, its search index and its PDFs (admins only).
+export const getDatabaseStorage = (databaseId: number): Promise<DatabaseStorageDto> =>
+  apiClient
+    .get<DatabaseStorageDto>(`/databases/${databaseId}/storage`)
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching the storage of database ${databaseId}:`));

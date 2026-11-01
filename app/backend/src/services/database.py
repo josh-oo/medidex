@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
@@ -13,12 +14,17 @@ from ..utils.dto import (
     DatabaseExport,
     DatabasePayload,
     DatabaseReport,
+    DatabaseStorage,
+    StorageExtra,
+    StorageUsage,
     DatabaseStudy,
     DatabaseUpdate,
     StudyGraph,
     StudyPayload,
 )
 from ..utils.archive import DatabaseArchive
+from ..utils.pdfs import PdfFiles
+from ..utils.storage import update_storage_registry
 from ..utils.studyconfig import GRAPH_FIELD, INLINE_SEPARATOR, STUDY_CONFIG
 from .report import DocumentService
 from .vectorstore import VectorstoreService
@@ -193,6 +199,39 @@ class StudyDatabaseService:
         if database is None:
             raise DatabaseNotFoundError(f"Database {database_id} not found")
         return await self._with_numbers(database)
+
+    async def get_storage(self, database_id: int) -> DatabaseStorage:
+        """What the database takes in storage, split into what stays (`database`) and what only serves its updates
+        (`updates`, see DatabaseStorage). Raises DatabaseNotFoundError."""
+        if await self.database_repo.get_database(database_id) is None:
+            raise DatabaseNotFoundError(f"Database {database_id} not found")
+        linked, in_updates = await self.database_repo.get_report_ids(database_id)
+        unlinked = sorted(set(in_updates) - set(linked))
+        database_bytes, updates_bytes = await self.database_repo.get_table_storage(database_id)
+        extras = [
+            StorageExtra(label=storage.label, bytes=await storage.measure(in_updates))
+            for storage in update_storage_registry.all()
+        ]
+        return DatabaseStorage(
+            databaseId=database_id,
+            numberReports=len(linked),
+            numberUpdates=await self.database_repo.count_projects(database_id),
+            numberReportsInUpdates=len(in_updates),
+            database=await self._usage(database_bytes, linked),
+            updates=await self._usage(updates_bytes, unlinked, [extra for extra in extras if extra.bytes]),
+        )
+
+    async def _usage(self, data_bytes: int, report_ids: List[int], extras: Optional[List[StorageExtra]] = None) -> StorageUsage:
+        """The storage of a part of a database: its rows (`data_bytes`) and the search index and PDFs of its reports."""
+        _, search_bytes = await self.vectorstore.usage(report_ids)
+        files, pdf_bytes = await asyncio.to_thread(PdfFiles.usage, report_ids)
+        return StorageUsage(
+            dataBytes=data_bytes,
+            searchIndexBytes=search_bytes,
+            pdfBytes=pdf_bytes,
+            pdfFiles=files,
+            extras=extras or [],
+        )
 
     async def _indexed(self, report_ids: Dict[int, List[int]]) -> Dict[int, int]:
         """How many of the reports of each database have a point in the vectorstore, asked in chunks."""

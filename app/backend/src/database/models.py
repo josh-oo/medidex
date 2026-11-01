@@ -25,6 +25,17 @@ def _current_utc_datetime() -> datetime.datetime:
     """Return timezone-aware UTC datetime for TIMESTAMPTZ columns."""
     return datetime.datetime.now(datetime.timezone.utc)
 
+# The `info` key of a table whose rows only serve the curation of an update (e.g. the scores between its reports):
+# they count as storage of the updates of a database, even for reports already linked to a study, since they go once
+# the update is done (DatabaseRepository.get_table_storage). Set it with `__table_args__ = UPDATE_DATA` or as the last
+# item of the tuple.
+UPDATE_DATA_KEY = "update_data"
+UPDATE_DATA = {"info": {UPDATE_DATA_KEY: True}}
+# Update data that is only a cache of the curation (e.g. the scores between its reports): dropped when its report is
+# merged, not archived (see ReportArchive).
+ARCHIVE_KEY = "archive"
+UPDATE_CACHE = {"info": {UPDATE_DATA_KEY: True, ARCHIVE_KEY: False}}
+
 class StudyDatabase(SQLModel, table=True):
     """A collection of studies of its own (e.g. the register of one review group): its studies, and the projects
     that bring new reports to them. Matching a report only considers the studies of its project's database. There is
@@ -205,6 +216,41 @@ class ProjectAssignees(SQLModel, table=True):
         Index("idx_project_assignee_assignee", "assignee"),
     )
 
+class ReportCommit(SQLModel, table=True):
+    """An assignee has handed in their links of the report: they cannot change them any more. Once every assignee has
+    committed every report of a project, the project is locked and its owner merges their links (see
+    ProjectResourceService.commit_project_work)."""
+    __tablename__ = "report_commit"
+
+    report_id: int = Field(primary_key=True, foreign_key="report.id", ondelete="CASCADE")
+    assignee: str = Field(primary_key=True)  # user_id
+    date_created: datetime.datetime = Field(default_factory=_current_utc_datetime)
+
+    __table_args__ = (
+        Index("idx_report_commit_assignee", "assignee"),
+        UPDATE_DATA,
+    )
+
+class ReportArchive(SQLModel, table=True):
+    """A report of an update that is done with: merged into the core database or deleted. Read-only, kept for later use
+    (e.g. training models): what the update knew of the report - its links in every scope, flags, commits, the update
+    data of the tables (see UPDATE_DATA) and of the extensions (see src/utils/storage.py) - while the update data itself
+    is removed (see UpdateMergeService). No foreign keys: the archive outlives the report, the project and the
+    database."""
+    __tablename__ = "report_archive"
+
+    report_id: int = Field(primary_key=True)
+    project_id: str = Field(index=True)
+    project_name: str
+    database_id: int = Field(index=True)
+    outcome: str  # merged | deleted
+    # The studies the report was merged into; empty for a deleted report.
+    study_ids: List[int] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
+    archived_by: Optional[str] = None
+    archived_at: datetime.datetime = Field(default_factory=_current_utc_datetime)
+    # Postgres compresses large values of it on its own (TOAST).
+    data: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False))
+
 class FulltextExtractions(SQLModel, table=True):
     __tablename__ = "fulltext_extraction"
 
@@ -285,6 +331,7 @@ class ProjectInnerScore(SQLModel, table=True):
             "score",
             postgresql_using="btree",
         ),
+        UPDATE_CACHE,
     )
 
 class StudyAdded(SQLModel, table=True):

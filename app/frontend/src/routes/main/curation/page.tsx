@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 import { DatabaseDetailsDialog } from "@/components/databases/database-details-dialog";
+import { DatabaseStoragePopover } from "@/components/databases/database-storage-popover";
 import { NewDatabaseDialog } from "@/components/databases/new-database-dialog";
 import { CurationList } from "@/components/curation/curation-list";
 import { useCuration, type Curation } from "@/hooks/use-curation";
@@ -192,6 +193,7 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
                 database.name
               )}
             </h2>
+            {isAdmin && <DatabaseStoragePopover database={database} />}
             {database.indexing && <IndexingBadge database={database} />}
           </div>
           <span className="text-xs text-muted-foreground">

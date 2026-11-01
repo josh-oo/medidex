@@ -11,7 +11,7 @@ const newestFirst = (a: { createdAt: string }, b: { createdAt: string }) => b.cr
  * of their own. `empty` is shown when there is no row.
  */
 export function CurationList({ curation, empty }: { curation: Curation; empty?: ReactNode }) {
-  const { projects, tasks, ownerNameById, assignableUsers, refresh, removeProject } = curation;
+  const { projects, tasks, userNameById, assignableUsers, refresh, removeProject } = curation;
   const otherTasks = tasks.filter((task) => !projects.some((project) => project.projectId === task.projectId));
 
   if (projects.length + otherTasks.length === 0) return <>{empty}</>;
@@ -28,7 +28,7 @@ export function CurationList({ curation, empty }: { curation: Curation; empty?: 
         />
       ))}
       {[...otherTasks].sort(newestFirst).map((task) => (
-        <TaskRow key={task.projectId} task={task} ownerName={ownerNameById.get(task.owner)} />
+        <TaskRow key={task.projectId} task={task} userNameById={userNameById} onCommitted={refresh} />
       ))}
     </div>
   );

@@ -395,6 +395,7 @@ class ReportRepository:
         flagged: Optional[bool] = None,
         new_study: Optional[bool] = None,
         restrict_to_ids: Optional[Set[int]] = None,
+        exclude_ids: Optional[Set[int]] = None,
         cursor_id: Optional[int] = None,
         limit: int = 50,
     ) -> List[Report]:
@@ -415,7 +416,8 @@ class ReportRepository:
         (src/utils/dto.py); this layer only knows plain booleans.
         `restrict_to_ids`, when given, narrows to that id set - used by the review
         endpoint's consensus/reviewed/fully-annotated filters, which need annotation rows
-        this method has no reason to know about.
+        this method has no reason to know about. `exclude_ids` leaves that id set out - used
+        by the curation view for the reports the caller has committed.
         """
         search = search.strip() if search else None
 
@@ -440,6 +442,9 @@ class ReportRepository:
 
         if restrict_to_ids is not None:
             stmt = stmt.where(Report.id.in_(restrict_to_ids))
+
+        if exclude_ids:
+            stmt = stmt.where(Report.id.not_in(exclude_ids))
 
         if cursor_id is not None:
             stmt = stmt.where(Report.id > cursor_id)

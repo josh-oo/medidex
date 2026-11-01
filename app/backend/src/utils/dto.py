@@ -313,6 +313,12 @@ class Flag(FlagPayload):
 class Assignee(BaseModel):
     userId : str
     numberReportsLinked: int = 0
+    # Reports the assignee is done with: linked to a study or flagged publicly.
+    numberReportsCompleted: int = 0
+    # Reports the assignee has handed in their links of (see ReportCommit).
+    numberReportsCommitted: int = 0
+    # Has handed in their links of every report.
+    committed: bool = False
 
 class Project(BaseModel):
     projectId: str
@@ -326,12 +332,21 @@ class Project(BaseModel):
     numberReportsPreProcessed: int = 0
     numberReportsWithPdf: int = 0
     numberReportsReadyForReview: int = 0
+    # Reports every assignee has committed their links of: the owner can merge them (finished ones included).
+    numberReportsReadyForMerge: int = 0
     numberReportsAutoSearchedPdf: int = 0
     numberReportsConfirmed: int = 0
+    # Reports finished with: merged into the core database or deleted (see UpdateMergeService); both are archived.
+    numberReportsMerged: int = 0
+    numberReportsDeleted: int = 0
     # Reports put through a postprocessor (chosen at upload) and how many of them have finished it.
     numberReportsPostprocessing: int = 0
     numberReportsPostprocessed: int = 0
     assignees: List[Assignee] = Field(default_factory=list)
+    # Every assignee has committed their links of every report still in the project: nothing is left to link.
+    locked: bool = False
+    # When its last report was merged or deleted; None while reports are left.
+    completedAt: Optional[datetime] = None
 
 class Task(BaseModel):
     projectId: str
@@ -342,6 +357,14 @@ class Task(BaseModel):
     numberReportsTotal: int = 0
     numberReportsReadyForProcessing: int = 0
     numberReportsProcessed: int
+    # Reports the user is done with: linked to a study or flagged publicly; those not committed yet they can commit.
+    numberReportsCompleted: int = 0
+    # Reports the user has handed in their links of; they are left out of their curation view.
+    numberReportsCommitted: int = 0
+    # Has handed in their links of every report.
+    committed: bool = False
+    # The assignees (user ids) who have not committed their links yet: whom the update waits for.
+    pendingAssignees: List[str] = Field(default_factory=list)
 
 class DatabasePayload(BaseModel):
     """What describes a study database; the body of POST /databases."""
@@ -368,6 +391,34 @@ class Database(BaseModel):
     createdAt: datetime
     numberStudies: int = 0
     numberReports: int = 0
+
+class StorageExtra(BaseModel):
+    """Storage an extension keeps elsewhere (see utils/storage.py), e.g. chat histories."""
+    label: str
+    bytes: int
+
+class StorageUsage(BaseModel):
+    """What one part of a database takes: its rows in the tables of the resource database, its points in the search
+    index (vectors and payloads, without the index of the collection) and its PDFs."""
+    dataBytes: int
+    searchIndexBytes: int
+    pdfBytes: int
+    pdfFiles: int
+    extras: List[StorageExtra] = []
+
+class DatabaseStorage(BaseModel):
+    """What a database takes in storage (GET /databases/{id}/storage), estimates. `database` is what stays: its studies,
+    the reports linked to them and their search index and PDFs. `updates` only serves the curation of its updates
+    (their projects, the reports not linked yet, scores, extracted metadata, proposals, chat histories) and goes
+    once they are done."""
+    databaseId: int
+    # The reports linked to its studies (numberReports of the database).
+    numberReports: int
+    numberUpdates: int
+    # The reports its updates brought in, linked or not.
+    numberReportsInUpdates: int
+    database: StorageUsage
+    updates: StorageUsage
 
 class DatabaseReport(BaseModel):
     """A report of a study in the exchange format of a database (see DatabaseExport)."""
