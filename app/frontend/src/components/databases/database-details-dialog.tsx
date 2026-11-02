@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/dialog";
 import { updateDatabase } from "@/lib/api/databaseApi";
 import { refreshStudyDatabases, type StudyDatabase } from "@/lib/databases";
+import type { EligibilityCriterion } from "@/types/apiDTOs";
+import { EligibilityCriteriaEditor, EligibilityCriteriaList, criteriaComplete, trimCriteria } from "./eligibility-criteria";
 
 interface DatabaseDetailsDialogProps {
   database: StudyDatabase;
@@ -38,7 +40,7 @@ export function DatabaseDetailsDialog({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [eligibilityCriteria, setEligibilityCriteria] = useState("");
+  const [eligibilityCriteria, setEligibilityCriteria] = useState<EligibilityCriterion[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -58,7 +60,7 @@ export function DatabaseDetailsDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const canSave = name.trim().length > 0 && eligibilityCriteria.trim().length > 0 && !saving;
+  const canSave = name.trim().length > 0 && criteriaComplete(eligibilityCriteria) && !saving;
 
   const handleSave = async (event: FormEvent) => {
     event.preventDefault();
@@ -69,7 +71,7 @@ export function DatabaseDetailsDialog({
       await updateDatabase(database.id, {
         name: name.trim(),
         description: description.trim(),
-        eligibilityCriteria: eligibilityCriteria.trim(),
+        eligibilityCriteria: trimCriteria(eligibilityCriteria),
       });
       await refreshStudyDatabases();
       toast.success(`Database "${name.trim()}" saved`);
@@ -84,7 +86,7 @@ export function DatabaseDetailsDialog({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !saving && onOpenChange(nextOpen)}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
         {editing ? (
           <form onSubmit={handleSave} className="space-y-4">
             <DialogHeader>
@@ -108,14 +110,10 @@ export function DatabaseDetailsDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-database-criteria">Eligibility criteria</Label>
-              <Textarea
-                id="edit-database-criteria"
-                value={eligibilityCriteria}
-                onChange={(event) => setEligibilityCriteria(event.target.value)}
-                placeholder="Which studies belong in it, e.g. study design, population, interventions"
-                rows={8}
-              />
+              <Label id="edit-database-criteria-label">Eligibility criteria</Label>
+              <div role="group" aria-labelledby="edit-database-criteria-label">
+                <EligibilityCriteriaEditor criteria={eligibilityCriteria} onChange={setEligibilityCriteria} />
+              </div>
             </div>
             {error && (
               <p role="alert" className="text-sm text-destructive">
@@ -146,9 +144,9 @@ export function DatabaseDetailsDialog({
               <h3 id="database-criteria-heading" className="text-sm font-medium">
                 Eligibility criteria
               </h3>
-              <p className="max-h-[50vh] overflow-auto whitespace-pre-line rounded-xl border bg-muted/40 px-3 py-2.5 text-sm">
-                {database.eligibilityCriteria}
-              </p>
+              <div className="max-h-[50vh] overflow-auto">
+                <EligibilityCriteriaList criteria={database.eligibilityCriteria} />
+              </div>
             </section>
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>

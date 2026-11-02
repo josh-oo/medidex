@@ -308,9 +308,11 @@ class ProjectResourceService:
         project's full stats (via get_project_stats) plus its report ids.
         """
         database = await self.database_service.get_database(database_id)
-        if database.indexing:
+        if database.importing or database.indexing:
             # Its reports would be matched against studies the vectorstore does not know yet.
-            raise DatabaseIndexingError(f"Database {database.name} is still being indexed; upload projects once it is available")
+            raise DatabaseIndexingError(
+                f"Database {database.name} is still being {'imported' if database.importing else 'indexed'}; upload projects once it is available"
+            )
         if await self.project_repo.get_open_project_id(database_id) is not None:
             raise OpenUpdateExistsError(
                 f"Database {database.name} has an update that is not merged yet; merge it before uploading the next one"

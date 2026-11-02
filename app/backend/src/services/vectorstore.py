@@ -347,25 +347,32 @@ class VectorstoreService():
         points = [PointStruct(id=new_id,vector=vector, payload=payload)]
         await self.client.upsert(wait=True, collection_name=COLLECTION_NAME, points=points)
 
-    async def add_study_report_to_vectorstore(self, report, study_ids : List[int], study_databases : Dict[int, int]):
-        """A report already linked to its studies (e.g. of an imported database), found by the study search like
-        the reports of the seed are (see ops/app-init/init.sh). `study_databases` maps each study to its database."""
-        await self.add_report_to_vectorstore(report)
-        await self.client.set_payload(
-            collection_name=COLLECTION_NAME,
-            payload={
-                'is_report': True,
-                'belongs_to_study': study_ids,
-                'belongs_to_trial_id': bool(study_ids),
+    async def add_study_reports_to_vectorstore(self, reports, study_ids : Dict[int, List[int]], study_databases : Dict[int, int]):
+        """Reports already linked to their studies (e.g. of an imported database), found by the study search like
+        the reports of the seed are (see ops/app-init/init.sh): embedded in one request and added in one upsert.
+        `study_ids` holds the studies of each report, `study_databases` maps each study to its database."""
+        texts = ["\n".join(part for part in (report.title, report.abstract) if part) for report in reports]
+        vectors = await self.embedding_service.embed_many(texts)
+        points = []
+        for report, vector in zip(reports, vectors):
+            studies = study_ids[report.id]
+            points.append((transform_to_uuid(report.id), vector, {
+                'title': report.title,
+                'abstract': report.abstract,
+                'source_id': report.id,
+                'authors': [item.strip() for item in report.authors.split("//")],
                 'date_entered': report.date_entered,
-                **self.database_payload(study_ids, study_databases),
-            },
-            points=[transform_to_uuid(report.id)],
-        )
+                'belongs_to_study': studies,
+                'belongs_to_trial_id': bool(studies),
+                'temporary': {},
+                'is_report': True,
+                **self.database_payload(studies, study_databases),
+            }))
+        await self.upsert_points(points)
 
     async def merge_report(self, report_id : int, study_ids : List[int], study_databases : Dict[int, int]):
         """A report of an update merged into the core database: linked to its studies for every scope, like a report
-        of an imported database (see add_study_report_to_vectorstore), its links in the scopes (`temporary`) gone."""
+        of an imported database (see add_study_reports_to_vectorstore), its links in the scopes (`temporary`) gone."""
         await self.client.set_payload(
             collection_name=COLLECTION_NAME,
             payload={

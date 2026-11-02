@@ -12,7 +12,7 @@ import { useCuration } from "@/hooks/use-curation";
 import { useAuthStore } from "@/hooks/use-auth";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { useTagCatalogs } from "@/hooks/use-tag-catalog";
-import { parseDatabaseIds } from "@/lib/databases";
+import { parseDatabaseIds, useStudyDatabases } from "@/lib/databases";
 import { useStudySchema } from "@/hooks/use-study-schema";
 import { searchStudies } from "@/lib/api/studiesApi";
 import { PageLink } from "@/lib/page-transition";
@@ -114,6 +114,9 @@ export default function Home() {
   const { schema } = useStudySchema();
   const textFields = useMemo(() => freeTextFields(schema?.tags ?? []), [schema]);
   const searching = Boolean(text || filters.length);
+  // None created yet, none the user may see, or the list could not be loaded.
+  const { loaded, databases: available } = useStudyDatabases();
+  const noDatabases = loaded && available.every((database) => database.importing);
 
   // One page in two states: the start page with the search in its middle and, once something is searched, the
   // search at the top with the results below. The bar stays the same element and moves between the two.
@@ -158,7 +161,11 @@ export default function Home() {
             }
             size={searching ? "compact" : "hero"}
             autoFocus
+            disabled={noDatabases}
           />
+          {noDatabases && (
+            <p className="mt-3 text-center text-sm text-muted-foreground">No database is accessible right now.</p>
+          )}
         </div>
 
         {searching ? (

@@ -30,7 +30,7 @@ from .services.maintenance import MaintenanceService
 from .services.merge import UpdateMergeService
 from .services.naming import StudyNamingService
 from .services.project import ProjectResourceService
-from .services.pubsub import ProjectPubSubService
+from .services.pubsub import DatabaseStatusService, ProjectPubSubService
 from .services.report import DocumentService, ReportService
 from .services.study import StudyResourceService
 from .services.vectorstore import VectorstoreService
@@ -175,6 +175,10 @@ class RequestContext:
         return ProjectPubSubService(project_repo=self.project_repo)
 
     @cached_property
+    def database_status_service(self) -> DatabaseStatusService:
+        return DatabaseStatusService()
+
+    @cached_property
     def maintenance_service(self) -> MaintenanceService:
         return MaintenanceService(
             report_repo=self.report_repo,
@@ -182,6 +186,7 @@ class RequestContext:
             database_repo=self.database_repo,
             aspect_repo=self.aspect_repo,
             embedding_service=self.embedding_service,
+            status_service=self.database_status_service,
         )
 
     @cached_property
@@ -190,6 +195,7 @@ class RequestContext:
             database_repo=self.database_repo,
             study_repo=self.study_repo,
             vectorstore=self.vectorstore_service,
+            status_service=self.database_status_service,
         )
 
     @cached_property

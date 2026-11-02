@@ -20,6 +20,7 @@ class DatabaseArchive:
         self.document = document
         self._zip = zip_file
         self._directory = directory
+        self._names: Optional[set] = None
 
     @classmethod
     def open(cls, source: Union[Path, BinaryIO]) -> "DatabaseArchive":
@@ -40,6 +41,19 @@ class DatabaseArchive:
                 raise DatabaseArchiveError(f"The archive has no {cls.DOCUMENT}") from exc
         source.seek(0)
         return cls(source.read())
+
+    def has_pdf(self, name: str) -> bool:
+        """Whether the archive has the PDF of that name, without reading it."""
+        parts = Path(name).parts
+        if len(parts) < 2 or parts[0] != self.PDF_FOLDER or ".." in parts:
+            return False
+        if self._zip is not None:
+            if self._names is None:
+                self._names = set(self._zip.namelist())
+            return name in self._names
+        if self._directory is not None:
+            return self._directory.joinpath(*parts).is_file()
+        return False
 
     def pdf(self, name: str) -> Optional[bytes]:
         """The PDF of a report by its name in the archive (e.g. "pdfs/12.pdf"); None if it is not there. Only files

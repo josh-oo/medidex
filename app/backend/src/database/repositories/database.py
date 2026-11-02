@@ -1,6 +1,6 @@
 """The study databases (see StudyDatabase in models.py) and the reports an imported database brings."""
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import Table, exists, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,19 +71,26 @@ class DatabaseRepository:
         )).all())
         return {database_id: (count, reports.get(database_id, 0)) for database_id, count in studies.items()}
 
-    async def add_database(self, name: str, description: Optional[str], eligibility_criteria: Optional[str]) -> StudyDatabase:
-        """A new database; the database numbers it."""
+    async def reserve_database_id(self) -> int:
+        """An id no database has or gets (from the sequence of their ids), for a database added later (add_database)."""
+        return (await self.db.execute(text("SELECT nextval(pg_get_serial_sequence('study_database', 'id'))"))).scalar_one()
+
+    async def add_database(
+        self, name: str, description: Optional[str], eligibility_criteria: List[Dict[str, Any]], database_id: Optional[int] = None
+    ) -> StudyDatabase:
+        """A new database; the database numbers it, unless it gets an id reserved for it (reserve_database_id)."""
         database = StudyDatabase(
+            id=database_id,
             name=name.strip(),
             description=(description or "").strip() or None,
-            eligibility_criteria=(eligibility_criteria or "").strip() or None,
+            eligibility_criteria=eligibility_criteria,
             created_by=self.user_id,
         )
         self.db.add(database)
         await self.db.flush()
         return database
 
-    async def update_database(self, database: StudyDatabase, values: Dict[str, Optional[str]]) -> StudyDatabase:
+    async def update_database(self, database: StudyDatabase, values: Dict[str, Any]) -> StudyDatabase:
         """Changes the given columns of the database (name, description, eligibility_criteria)."""
         for column, value in values.items():
             setattr(database, column, value)

@@ -1,20 +1,34 @@
 // The study databases: separate collections of studies, each with its own projects that bring new reports to it. The
 // list is loaded once and shared by every view (the search picker, the database management); refreshStudyDatabases()
-// loads it again after a change.
+// loads it again after a change. The import and indexing of a database are followed by its status stream.
 import { useEffect, useSyncExternalStore } from "react";
-import { getDatabases } from "@/lib/api/databaseApi";
-import type { DatabaseDto } from "@/types/apiDTOs";
+import axios from "axios";
+import { toast } from "sonner";
+import { getDatabases, importDatabase, streamDatabaseStatus } from "@/lib/api/databaseApi";
+import type { DatabaseDto, DatabasePayload, DatabaseStatusDto, EligibilityCriterion } from "@/types/apiDTOs";
 
 export interface StudyDatabase {
   id: number;
   name: string;
   description?: string;
-  eligibilityCriteria: string;
+  eligibilityCriteria: EligibilityCriterion[];
   numberStudies: number;
   numberReports: number;
   /** Its reports are still being added to the vectorstore (see DatabaseDto.indexing). */
   indexing: boolean;
   numberReportsIndexed: number;
+  /** It is still being imported (see DatabaseDto.importing). */
+  importing: boolean;
+  /** How far its import or indexing is, as its status stream last said; none before it said anything. */
+  status?: DatabaseStatusDto;
+}
+
+/** The file of an import (startDatabaseImport) while it is uploaded: its database has no id before it is. */
+export interface DatabaseUpload {
+  key: number;
+  name: string;
+  loaded: number;
+  total: number;
 }
 
 interface DatabaseState {
@@ -22,16 +36,21 @@ interface DatabaseState {
   /** The last load failed (the databases may still be those of an earlier one). */
   failed: boolean;
   databases: StudyDatabase[];
+  /** The imports of this page whose file is still being uploaded. */
+  uploads: DatabaseUpload[];
 }
 
-let state: DatabaseState = { loaded: false, failed: false, databases: [] };
+let state: DatabaseState = { loaded: false, failed: false, databases: [], uploads: [] };
 let pending: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
-  scheduleRefresh();
-  return () => listeners.delete(listener);
+  syncStreams();
+  return () => {
+    listeners.delete(listener);
+    syncStreams();
+  };
 };
 
 const toStudyDatabase = (dto: DatabaseDto): StudyDatabase => ({
@@ -43,35 +62,138 @@ const toStudyDatabase = (dto: DatabaseDto): StudyDatabase => ({
   numberReports: dto.numberReports,
   indexing: dto.indexing,
   numberReportsIndexed: dto.numberReportsIndexed,
+  importing: dto.importing,
 });
 
-// While a database is being indexed, the list is loaded again every few seconds, as long as a view shows it.
-const INDEXING_REFRESH_MS = 5000;
-let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+// The status stream of every database that is being imported or indexed, as long as a view shows the databases. A
+// stream that broke off is started again after a while, by loading the list again.
+const RECONNECT_MS = 5000;
+const streams = new Map<number, () => void>();
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-const scheduleRefresh = () => {
-  if (refreshTimer !== null || listeners.size === 0 || !state.databases.some((database) => database.indexing)) return;
-  refreshTimer = setTimeout(() => {
-    refreshTimer = null;
+const notify = () => listeners.forEach((listener) => listener());
+
+const syncStreams = () => {
+  const wanted = new Set(
+    listeners.size === 0
+      ? []
+      : state.databases.filter((database) => database.importing || database.indexing).map((database) => database.id),
+  );
+  streams.forEach((stop, databaseId) => {
+    if (wanted.has(databaseId)) return;
+    stop();
+    streams.delete(databaseId);
+  });
+  wanted.forEach((databaseId) => {
+    if (streams.has(databaseId)) return;
+    let ended = false;
+    const stop = streamDatabaseStatus(
+      databaseId,
+      (status) => {
+        if (status.stage === "ready" || status.stage === "failed") ended = true;
+        onStatus(status);
+      },
+      () => {
+        streams.delete(databaseId);
+        if (!ended && reconnectTimer === null) {
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            void refreshStudyDatabases();
+          }, RECONNECT_MS);
+        }
+      },
+    );
+    streams.set(databaseId, stop);
+  });
+};
+
+// A status of a database: its numbers change with it; once it is ready, or its import failed, the list is loaded
+// again (a database whose import failed is no longer in it).
+const onStatus = (status: DatabaseStatusDto) => {
+  const database = state.databases.find((candidate) => candidate.id === status.databaseId);
+  if (status.stage === "failed") {
+    toast.error(`The import of "${database?.name ?? `database ${status.databaseId}`}" failed`, {
+      description: status.message ?? undefined,
+    });
+  }
+  if (status.stage === "ready" || status.stage === "failed") {
     void refreshStudyDatabases();
-  }, INDEXING_REFRESH_MS);
+    return;
+  }
+  // Imported: its numbers of studies and reports are known now.
+  if (database?.importing && status.stage === "indexing") void refreshStudyDatabases();
+  state = {
+    ...state,
+    databases: state.databases.map((candidate) =>
+      candidate.id !== status.databaseId
+        ? candidate
+        : {
+            ...candidate,
+            status,
+            importing: status.stage === "importing",
+            indexing: candidate.indexing || status.stage === "indexing",
+            numberReportsIndexed: status.stage === "indexing" ? status.done : candidate.numberReportsIndexed,
+            numberReports: status.stage === "indexing" ? Math.max(status.total, candidate.numberReports) : candidate.numberReports,
+          },
+    ),
+  };
+  notify();
 };
 
 /** Loads the databases (again), e.g. after one was created; the views using them update. */
 export function refreshStudyDatabases(): Promise<void> {
   pending ??= getDatabases()
     .then((dtos) => {
-      state = { loaded: true, failed: false, databases: dtos.map(toStudyDatabase) };
+      // What the stream of a database still being imported or indexed said is kept until it says more.
+      const statuses = new Map(state.databases.map((database) => [database.id, database.status]));
+      const databases = dtos.map(toStudyDatabase).map((database) =>
+        database.importing || database.indexing ? { ...database, status: statuses.get(database.id) } : database,
+      );
+      state = { ...state, loaded: true, failed: false, databases };
     })
     .catch(() => {
       state = { ...state, loaded: true, failed: true };
     })
     .finally(() => {
       pending = null;
-      listeners.forEach((listener) => listener());
-      scheduleRefresh();
+      notify();
+      syncStreams();
     });
   return pending;
+}
+
+let uploadKey = 0;
+
+// Leaving the page would end an upload.
+const warnOnLeave = (event: BeforeUnloadEvent) => event.preventDefault();
+
+const setUploads = (uploads: DatabaseUpload[]) => {
+  if (uploads.length > 0 && state.uploads.length === 0) window.addEventListener("beforeunload", warnOnLeave);
+  if (uploads.length === 0 && state.uploads.length > 0) window.removeEventListener("beforeunload", warnOnLeave);
+  state = { ...state, uploads };
+  notify();
+};
+
+/**
+ * Imports an exported database (importDatabase): its file is listed as an upload (`uploads`) while it is uploaded,
+ * then the database as being imported. A rejected file is shown as an error.
+ */
+export async function startDatabaseImport(file: File, payload: DatabasePayload): Promise<void> {
+  const key = ++uploadKey;
+  setUploads([...state.uploads, { key, name: payload.name, loaded: 0, total: file.size }]);
+  try {
+    await importDatabase(file, payload, (loaded, total) =>
+      setUploads(state.uploads.map((upload) => (upload.key === key ? { ...upload, loaded, total } : upload))),
+    );
+    await refreshStudyDatabases();
+  } catch (error) {
+    const detail = axios.isAxiosError(error) ? error.response?.data?.detail : undefined;
+    toast.error(`The import of "${payload.name}" failed`, {
+      description: typeof detail === "string" ? detail : "The file could not be uploaded.",
+    });
+  } finally {
+    setUploads(state.uploads.filter((upload) => upload.key !== key));
+  }
 }
 
 /** The databases, the oldest first; loads them the first time they are asked for. There may be none yet. */

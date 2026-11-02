@@ -1,14 +1,20 @@
 import asyncio
+import logging
 import httpx
 from bs4 import BeautifulSoup
 from httpx import ReadTimeout
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
+
+from .registry import ClinicalTrialsGovRegistry, IsrctnRegistry, OmonRegistry, RegistryRecord, TrialRegistry
+
+logger = logging.getLogger(__name__)
 
 class CrawlerService:
     def __init__(self):
-        pass
+        # Primary registers whose own records are read instead of the WHO ICTRP copy.
+        self.registries: List[TrialRegistry] = [ClinicalTrialsGovRegistry(), IsrctnRegistry(), OmonRegistry()]
 
     def html_to_lowest_level_markdown(self, html_content):
         soup = BeautifulSoup(html_content, 'lxml')
@@ -99,14 +105,34 @@ class CrawlerService:
         except ReadTimeout:
             raise Exception("Upstream request timed out")
 
+    async def _get_primary_record(self, trial_id : str) -> Optional[RegistryRecord]:
+        """The record of the trial's primary register if it is one of `registries`;
+        None (the WHO ICTRP record is used) if it isn't or the register fails."""
+        registry = next((r for r in self.registries if r.matches(trial_id)), None)
+        if registry is None:
+            return None
+        try:
+            return await registry.get_record(trial_id)
+        except Exception as exc:
+            logger.warning("%s record of %s failed, using the WHO record: %s", type(registry).__name__, trial_id, exc)
+            return None
+
     async def get_html_for_trial_id(self, trial_id : str):
-        """The registry record as markdown tables."""
+        """The registry record as markdown, the fulltext of a trial registration:
+        written from the primary register's record, or the WHO tables."""
+        trial_id = trial_id.strip()
+        if record := await self._get_primary_record(trial_id):
+            return record.to_markdown()
         parsed_html = await self._fetch_trial_table_html(trial_id)
         return await asyncio.to_thread(self.html_to_lowest_level_markdown, parsed_html)
 
     async def get_pdf_for_trial_id(self, trial_id : str) -> bytes:
         """The registry record rendered as a PDF, so a trial registration can be
-        stored and shown like any other report's PDF."""
+        stored and shown like any other report's PDF (see get_html_for_trial_id
+        for the record it is rendered from)."""
+        trial_id = trial_id.strip()
+        if record := await self._get_primary_record(trial_id):
+            return await asyncio.to_thread(self.html_to_pdf, trial_id, record.to_html())
         parsed_html = await self._fetch_trial_table_html(trial_id)
         return await asyncio.to_thread(self.html_to_pdf, trial_id, parsed_html)
 

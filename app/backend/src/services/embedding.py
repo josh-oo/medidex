@@ -18,6 +18,8 @@ BASE_URL = os.getenv("EMBEDDING_MODEL_BASE_URL")
 API_KEY = os.getenv("EMBEDDING_MODEL_API_KEY")
 
 class EmbeddingService:
+    # Texts per request of embed_many in bulk work (the vectorstore sync, the indexing of an imported database).
+    BATCH = 16
 
     def __init__(self):
         #self.channel = CHANNEL

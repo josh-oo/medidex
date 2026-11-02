@@ -45,6 +45,12 @@ class ReportPostprocessor(Protocol):
         marks the report as pending again here - without a PDF, until the next one arrives. Commit what you write."""
         ...
 
+    async def criteria_changed(self, database_id: int, ctx: "RequestContext") -> Sequence[int]:
+        """Called when the eligibility criteria of a study database were changed (see wrapper.run_criteria_changed): a
+        postprocessor whose result depends on them marks the reports of the database it has to redo as pending and returns
+        their ids, which are then run again; any other returns none. Commit what you write."""
+        ...
+
     def pending_report_ids(self) -> Select:
         """A single-column select of the report ids whose postprocessing has not finished.
         Such reports are not ready for review; a failed run counts as finished."""

@@ -10,7 +10,7 @@ it.
 import asyncio
 import io
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import BinaryIO, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -18,7 +18,10 @@ from ..context import RequestContext
 from ..database.sessions import AsyncSessionLocal
 from ..database.models import Report as DbReport, ReportAdded
 from ..services.crawler import OpenAlexWork, normalize_doi
+from ..services.database import DatabaseImportError
 from .postprocessing import PostprocessingOptions, postprocessor_registry
+from ..utils.archive import DatabaseArchive, DatabaseArchiveError
+from ..utils.dto import DatabasePayload
 from ..utils.pdfs import PdfFiles
 from ..utils.trial_registration_id import is_trial_registration
 
@@ -276,27 +279,62 @@ async def run_pending_postprocessing(report_id: int, user_id: str) -> None:
         if project_id is None:
             return
         await ctx.pubsub_service.publish_report_update(report_id, project_id)
-        for postprocessor in postprocessor_registry.all():
-            pending_select = postprocessor.pending_report_ids()
-            rows = await session.execute(pending_select.where(pending_select.selected_columns[0] == report_id))
-            if rows.first() is None:
-                continue
-            try:
-                # The upload options are not stored; postprocessors only rely on their own pending marker here.
-                await postprocessor.process(report_id, project_id, {}, ctx)
-            except Exception:
-                logger.exception("Postprocessing failed for report %s", report_id)
-                await session.rollback()
-        await ctx.pubsub_service.publish_report_update(report_id, project_id)
+        await _run_pending(report_id, project_id, ctx)
 
 
-async def run_index_database_reports(report_ids: List[int], user_id: str) -> None:
-    """Adds the reports of an imported study database to the vectorstore (see StudyDatabaseService.index_reports);
-    until then its studies are only found by the study search, not suggested for new reports."""
+async def _run_pending(report_id: int, project_id: str, ctx: RequestContext) -> None:
+    """Runs the postprocessors that are pending for the report, one after the other, in the order they were registered."""
+    for postprocessor in postprocessor_registry.all():
+        pending_select = postprocessor.pending_report_ids()
+        rows = await ctx.db.execute(pending_select.where(pending_select.selected_columns[0] == report_id))
+        if rows.first() is None:
+            continue
+        try:
+            # The upload options are not stored; postprocessors only rely on their own pending marker here.
+            await postprocessor.process(report_id, project_id, {}, ctx)
+        except Exception:
+            logger.exception("Postprocessing failed for report %s", report_id)
+            await ctx.db.rollback()
+    await ctx.pubsub_service.publish_report_update(report_id, project_id)
+
+
+async def run_criteria_changed(database_id: int, user_id: str) -> None:
+    """Tells every postprocessor that the eligibility criteria of a database changed (ReportPostprocessor.criteria_changed)
+    and runs what is pending again for the reports they name, one report after the other."""
     async with AsyncSessionLocal() as session:
         ctx = RequestContext(db=session, user_id=user_id)
-        async with _vectorstore_semaphore:
+        report_ids: List[int] = []
+        for postprocessor in postprocessor_registry.all():
+            report_ids.extend(await postprocessor.criteria_changed(database_id, ctx))
+        for report_id in dict.fromkeys(report_ids):
+            report_added = await session.get(ReportAdded, report_id)
+            if report_added is not None:
+                await _run_pending(report_id, report_added.project_id, ctx)
+
+
+async def run_import_database(database_id: int, payload: DatabasePayload, archive: DatabaseArchive, source: BinaryIO, user_id: str) -> None:
+    """Imports the database of StudyDatabaseService.start_import from `archive` (read from `source`, closed when it is
+    done) and then adds its reports to the vectorstore; until then its studies are only found by the study search, not
+    suggested for new reports. Its progress, and why it failed, is published (DatabaseStatusService)."""
+    try:
+        async with AsyncSessionLocal() as session:
+            ctx = RequestContext(db=session, user_id=user_id)
             try:
-                await ctx.database_service.index_reports(report_ids)
+                report_ids = await ctx.database_service.import_database(database_id, payload, archive)
+            except (DatabaseImportError, DatabaseArchiveError, ValueError) as exc:
+                await ctx.database_service.end_import(database_id, str(exc))
+                return
             except Exception:
-                logger.exception("Adding %s imported reports to the vectorstore failed", len(report_ids))
+                logger.exception("Importing database %s failed", database_id)
+                await ctx.database_service.end_import(database_id, "The import failed; the backend log says why.")
+                return
+            finally:
+                source.close()
+            await ctx.database_service.end_import(database_id)
+            async with _vectorstore_semaphore:
+                try:
+                    await ctx.database_service.index_reports(database_id, report_ids)
+                except Exception:
+                    logger.exception("Adding %s imported reports to the vectorstore failed", len(report_ids))
+    except Exception:
+        logger.exception("Importing database %s failed", database_id)

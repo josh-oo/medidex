@@ -81,15 +81,20 @@ or imports one on the Database management page, e.g. the demo database:
 
 # Study databases
 A study database is a collection of studies of its own, with a name, an optional description and eligibility
-criteria (required free text: which studies belong in it). The Database management page shows one card per database
+criteria (which studies belong in it, at least one). A criterion is a text in a category of
+`app/backend/src/config/eligibility.yaml` (population, design, ...; `GET /eligibility-schema`), to include a report
+(it must hold) or to exclude it (it must not hold), with an id that stays when its text is edited. A new category is an
+entry of that file, no code. When the criteria of a database change, the postprocessors are told
+(`ReportPostprocessor.criteria_changed`) and what they mark as pending again runs in the background. The Database management page shows one card per database
 with its projects below it as numbered updates ("Update 7"), newest first; its details dialog shows the eligibility
 criteria, and admins edit name, description and criteria there and create new updates from the card. The REST API:
 
 | Endpoint | Who | What |
 | --- | --- | --- |
+| `GET /eligibility-schema` | any user | the categories of the eligibility criteria, in their order |
 | `GET /databases` | any user | the databases with their number of studies and reports |
 | `POST /databases` | admin | a new, empty database (`name`, `description`, `eligibilityCriteria`) |
-| `POST /databases/import` | admin | a new database from an exported one with its PDFs (multipart: `file` (.zip or .json), `name`, `description`, `eligibilityCriteria`) |
+| `POST /databases/import` | admin | a new database from an exported one with its PDFs (multipart: `file` (.zip or .json), `name`, `description`, `eligibilityCriteria` as a JSON list) |
 | `PATCH /databases/{id}` | admin | rename a database or change its description or eligibility criteria |
 | `GET /databases/{id}/export` | admin | the database as a zip archive (`database.json` and the PDFs of its reports) |
 | `GET /databases/{id}/storage` | admin | what the database takes in storage (estimates, shown by the (i) next to its name), split into `database` (what stays: its studies, the reports linked to them, their search index and PDFs) and `updates` (what only its updates need: their projects, reports not linked yet, and tables marked `UPDATE_DATA` in `src/database/models.py`, plus what extensions register in `src/utils/storage.py`); every table with a foreign key to its studies, reports or projects is counted |
@@ -111,7 +116,7 @@ per category kept in a table, and its reports:
   "version": 1,
   "name": "Paediatric asthma trials",
   "description": "…",
-  "eligibilityCriteria": "…",
+  "eligibilityCriteria": [{"id": "c1", "category": "population", "kind": "include", "text": "…"}],
   "studies": [
     {
       "shortName": "ASTHMA-KIDS-01",
@@ -123,7 +128,7 @@ per category kept in a table, and its reports:
       "graph": { "nodes": [{ "id": "arm1", "kind": "arm", "value": null }], "edges": [] },
       "tags": { "interventions": ["Montelukast"], "conditions": ["Asthma"] },
       "createdAt": "2021-03-01 00:00:00",
-      "reports": [{ "title": "…", "year": 2021, "authors": ["A. Author"], "abstract": "…", "doi": "10.…", "pdf": "pdfs/17.pdf" }]
+      "reports": [{ "id": "17", "title": "…", "year": 2021, "authors": ["A. Author"], "abstract": "…", "doi": "10.…", "pdf": "pdfs/17.pdf" }]
     }
   ]
 }
@@ -132,7 +137,9 @@ per category kept in a table, and its reports:
 An import is all or nothing: a file with an unknown study status, a malformed graph, two studies of the same
 short name, an unknown tag category or a PDF it names but does not contain is rejected with what is wrong. The
 PDFs are stored under the ids the reports get in the importing deployment. Unknown tag names become new tags. A
-report listed under several studies (same DOI, or same title and year) is imported once. Imported studies are
+report listed under several studies is imported once: the entries of the same `id` (an export writes the id of the
+report; any text identifying it in the file), or, for reports without one, of the same DOI or the same title and
+year. Imported studies are
 visible to every scope, like those of the seed. Their reports are added to the vectorstore in the background, and
 until then the studies are found by the search but not yet suggested for new reports.
 [`deploy/data/seed/synthetic_database.zip`](deploy/data/seed/synthetic_database.zip), the demo database, is one

@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import json
 from pathlib import Path
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
@@ -18,14 +19,19 @@ from ..utils.dto import (
     StorageExtra,
     StorageUsage,
     DatabaseStudy,
+    DatabaseStage,
+    DatabaseStatus,
     DatabaseUpdate,
     StudyGraph,
     StudyPayload,
 )
 from ..utils.archive import DatabaseArchive
+from ..utils.eligibility import EligibilityCriteria, EligibilityCriterion
 from ..utils.pdfs import PdfFiles
 from ..utils.storage import update_storage_registry
 from ..utils.studyconfig import GRAPH_FIELD, INLINE_SEPARATOR, STUDY_CONFIG
+from .embedding import EmbeddingService
+from .pubsub import DatabaseStatusService
 from .report import DocumentService
 from .vectorstore import VectorstoreService
 
@@ -35,7 +41,8 @@ class DatabaseNotFoundError(Exception):
 
 
 class DatabaseIndexingError(Exception):
-    """The reports of the database are still being added to the vectorstore (StudyDatabase.indexing)."""
+    """The database is still being imported, or its reports are still being added to the vectorstore (Database.importing
+    and indexing)."""
 
 
 class DatabaseImportError(ValueError):
@@ -51,26 +58,34 @@ class StudyDatabaseService:
     # Reports per request when asking the vectorstore which of them it has.
     VECTORSTORE_CHUNK = 1000
 
-    def __init__(self, database_repo: DatabaseRepository, study_repo: StudyRepository, vectorstore: VectorstoreService):
+    def __init__(
+        self,
+        database_repo: DatabaseRepository,
+        study_repo: StudyRepository,
+        vectorstore: VectorstoreService,
+        status_service: DatabaseStatusService,
+    ):
         self.database_repo = database_repo
         self.study_repo = study_repo
         self.vectorstore = vectorstore
+        self.status_service = status_service
 
     async def get_databases(self) -> List[Database]:
         """The databases with their numbers of studies and reports, and how many of the reports the vectorstore has
-        (a database is still `indexing` while it lacks some)."""
+        (a database is still `indexing` while it lacks some), and then those being imported (`importing`)."""
         databases = await self.database_repo.get_databases()
         counts = await self.database_repo.get_counts()
         indexed = await self._indexed(await self.database_repo.get_report_ids_by_database())
+        imports = {database.databaseId: database for database in await self.status_service.imports()}
         return [
-            self._to_dto(database, *counts.get(database.id, (0, 0)), indexed.get(database.id, 0))
+            imports.pop(database.id, None) or self._to_dto(database, *counts.get(database.id, (0, 0)), indexed.get(database.id, 0))
             for database in databases
-        ]
+        ] + sorted(imports.values(), key=lambda database: database.databaseId)
 
     async def create_database(self, payload: DatabasePayload) -> Database:
         """A new, empty database."""
         try:
-            database = await self.database_repo.add_database(payload.name, payload.description, payload.eligibilityCriteria)
+            database = await self.database_repo.add_database(payload.name, payload.description, self._criteria(payload.eligibilityCriteria))
             await self.database_repo.commit()
         except Exception:
             await self.database_repo.rollback()
@@ -83,15 +98,17 @@ class StudyDatabaseService:
         if database is None:
             raise DatabaseNotFoundError(f"Database {database_id} not found")
         given = update.model_dump(exclude_unset=True)
-        columns = {"name": "name", "description": "description", "eligibilityCriteria": "eligibility_criteria"}
-        values = {
+        columns = {"name": "name", "description": "description"}
+        values: Dict[str, Any] = {
             columns[key]: (value or "").strip() or None
             for key, value in given.items()
-            # Name and criteria are required: null leaves them as they are.
-            if value is not None or key == "description"
+            # The name is required: null leaves it as it is.
+            if key in columns and (value is not None or key == "description")
         }
-        if any(values.get(column) is None for column in ("name", "eligibility_criteria") if column in values):
-            raise ValueError("Name and eligibility criteria cannot be empty")
+        if "name" in values and values["name"] is None:
+            raise ValueError("The name cannot be empty")
+        if update.eligibilityCriteria is not None:
+            values["eligibility_criteria"] = self._criteria(update.eligibilityCriteria)
         try:
             database = await self.database_repo.update_database(database, values)
             await self.database_repo.commit()
@@ -100,30 +117,51 @@ class StudyDatabaseService:
             raise
         return await self._with_numbers(database)
 
-    async def import_database(self, payload: DatabasePayload, archive: DatabaseArchive) -> Tuple[Database, List[int]]:
-        """A new database with the studies, reports and PDFs of an exported one (`archive`, see utils/archive.py);
-        `payload` names and describes it. All or nothing: raises DatabaseImportError, and imports nothing, if the file
-        is no such database or misses a PDF it names. The PDFs are stored under the ids the reports get. Returns the database and
-        the ids of its reports, which still have to be added to the vectorstore (index_reports; left to the caller,
-        which knows how to run it in the background)."""
+    async def start_import(self, payload: DatabasePayload) -> Database:
+        """The database an import (import_database) will make, under an id reserved for it, listed as `importing`
+        until the import ends (end_import)."""
+        database = Database(
+            databaseId=await self.database_repo.reserve_database_id(),
+            importing=True,
+            name=payload.name.strip(),
+            description=(payload.description or "").strip() or None,
+            eligibilityCriteria=EligibilityCriteria.validate(payload.eligibilityCriteria),
+            createdAt=datetime.datetime.now(datetime.timezone.utc),
+        )
+        await self.status_service.start_import(database)
+        return database
+
+    async def import_database(self, database_id: int, payload: DatabasePayload, archive: DatabaseArchive) -> List[int]:
+        """The database of start_import with the studies, reports and PDFs of an exported one (`archive`, see
+        utils/archive.py); `payload` names and describes it. All or nothing: raises DatabaseImportError, and imports
+        nothing, if the file is no such database or misses a PDF it names. The PDFs are stored under the ids the
+        reports get. Its progress is published (DatabaseStatusService). Returns the ids of its reports, which still
+        have to be added to the vectorstore (index_reports)."""
         document = self.parse(archive.document)
         studies = [self._payload(index, study) for index, study in enumerate(document.studies)]
         reports: Dict[Tuple[Any, ...], Tuple[DatabaseReport, List[int]]] = {}
         for study in document.studies:
             for report in study.reports:
                 reports.setdefault(self._report_key(report), (report, []))
-        pdfs = self._pdfs(archive, [report for report, _ in reports.values()])
+        self._check_pdfs(archive, [report for report, _ in reports.values()])
         try:
-            database = await self.database_repo.add_database(payload.name, payload.description, payload.eligibilityCriteria)
+            await self.database_repo.add_database(payload.name, payload.description, self._criteria(payload.eligibilityCriteria), database_id)
+            progress = await self.status_service.progress(database_id, DatabaseStage.importing, "studies", len(studies)).start()
             for study, values in zip(document.studies, studies):
-                new_study = await self.study_repo.import_study(values, database.id, study.createdAt)
+                new_study = await self.study_repo.import_study(values, database_id, study.createdAt)
                 for category, names in study.tags.items():
                     await self.study_repo.add_study_tags(new_study.id, category, names)
                 for report in study.reports:
-                    reports[self._report_key(report)][1].append(new_study.id)
-            saved: List[Tuple[DbReport, Optional[bytes]]] = []
+                    study_ids = reports[self._report_key(report)][1]
+                    # A study lists a report once, however many of its entries are that report.
+                    if new_study.id not in study_ids:
+                        study_ids.append(new_study.id)
+                await progress.advance()
+            progress = await self.status_service.progress(database_id, DatabaseStage.importing, "reports", len(reports)).start()
+            saved: List[Tuple[DbReport, Optional[str]]] = []
             for report, study_ids in reports.values():
-                saved.append((await self.database_repo.add_report(self._to_db_report(report), study_ids), pdfs.get(report.pdf or "")))
+                saved.append((await self.database_repo.add_report(self._to_db_report(report), study_ids), report.pdf))
+                await progress.advance()
             await self.database_repo.commit()
         except DuplicateShortNameError as exc:
             await self.database_repo.rollback()
@@ -131,10 +169,37 @@ class StudyDatabaseService:
         except Exception:
             await self.database_repo.rollback()
             raise
-        for report, pdf in saved:
-            if pdf is not None:
-                DocumentService.write_pdf(report.id, pdf)
-        return self._to_dto(database, len(studies), len(saved)), [report.id for report, _ in saved]
+        # One PDF at a time, read from the archive as it is stored: an archive of a large database does not fit into
+        # memory.
+        pdfs = [(report, name) for report, name in saved if name]
+        progress = await self.status_service.progress(database_id, DatabaseStage.importing, "pdfs", len(pdfs)).start()
+        for report, name in pdfs:
+            await asyncio.to_thread(self._store_pdf, archive, name, report.id)
+            await progress.advance()
+        return [report.id for report, _ in saved]
+
+    async def end_import(self, database_id: int, error: Optional[str] = None) -> None:
+        """Ends the import of the database: it is listed as it is from now on, or, if the import failed with `error`,
+        not at all."""
+        await self.status_service.end_import(database_id)
+        if error is not None:
+            await self.status_service.publish(DatabaseStatus(databaseId=database_id, stage=DatabaseStage.failed, message=error))
+
+    async def get_status(self, database_id: int) -> DatabaseStatus:
+        """Where the database is now: imported (the last status published for it), indexed, ready, or not there
+        because its import failed (lately). Raises DatabaseNotFoundError."""
+        status = await self.status_service.current(database_id)
+        if status is not None and status.stage == DatabaseStage.importing:
+            return status
+        try:
+            database = await self.get_database(database_id)
+        except DatabaseNotFoundError:
+            if status is not None and status.stage == DatabaseStage.failed:
+                return status
+            raise
+        if database.indexing:
+            return DatabaseStatus(databaseId=database_id, stage=DatabaseStage.indexing, done=database.numberReportsIndexed, total=database.numberReports)
+        return DatabaseStatus(databaseId=database_id, stage=DatabaseStage.ready)
 
     async def export_archive(self, database_id: int, target: BinaryIO) -> str:
         """Writes the archive of the database (its document and the PDFs of its reports, see utils/archive.py) to
@@ -168,7 +233,7 @@ class StudyDatabaseService:
         document = DatabaseExport(
             name=database.name,
             description=database.description,
-            eligibilityCriteria=database.eligibility_criteria,
+            eligibilityCriteria=EligibilityCriteria.read(database.eligibility_criteria),
             studies=[
                 DatabaseStudy(
                     **self._fields(study),
@@ -185,16 +250,26 @@ class StudyDatabaseService:
         )
         return document, files
 
-    async def index_reports(self, report_ids: List[int]) -> None:
-        """Adds the reports of an imported database to the vectorstore, so its studies are found for new reports. If
-        this is interrupted, the sync on the next start (MaintenanceService.sync_vectorstore) adds the rest."""
+    async def index_reports(self, database_id: int, report_ids: List[int]) -> None:
+        """Adds the reports of an imported database to the vectorstore, so its studies are found for new reports, and
+        publishes how far it is (DatabaseStatusService). If this is interrupted, the sync on the next start
+        (MaintenanceService.sync_vectorstore) adds the rest."""
         study_ids = await self.database_repo.get_report_study_ids(report_ids)
         study_databases = await self.database_repo.get_study_database_ids()
-        for report in await self.database_repo.get_reports(report_ids):
-            await self.vectorstore.add_study_report_to_vectorstore(report, study_ids[report.id], study_databases)
+        progress = await self.status_service.progress(database_id, DatabaseStage.indexing, None, len(report_ids)).start()
+        reports = await self.database_repo.get_reports(report_ids)
+        for start in range(0, len(reports), EmbeddingService.BATCH):
+            batch = reports[start:start + EmbeddingService.BATCH]
+            await self.vectorstore.add_study_reports_to_vectorstore(batch, study_ids, study_databases)
+            await progress.advance(len(batch))
+        await self.status_service.publish(DatabaseStatus(databaseId=database_id, stage=DatabaseStage.ready))
 
     async def get_database(self, database_id: int) -> Database:
-        """One database with its numbers and whether it is still being indexed. Raises DatabaseNotFoundError."""
+        """One database with its numbers and whether it is still being imported or indexed. Raises
+        DatabaseNotFoundError."""
+        for database in await self.status_service.imports():
+            if database.databaseId == database_id:
+                return database
         database = await self.database_repo.get_database(database_id)
         if database is None:
             raise DatabaseNotFoundError(f"Database {database_id} not found")
@@ -317,7 +392,10 @@ class StudyDatabaseService:
 
     @staticmethod
     def _report_key(report: DatabaseReport) -> Tuple[Any, ...]:
-        """A report listed under several studies is one report."""
+        """A report listed under several studies is one report: the reports of an id, else of a DOI, else of a title
+        and year."""
+        if report.id:
+            return ("id", report.id.strip())
         if report.doi:
             return ("doi", report.doi.strip().lower())
         return ("title", report.title.strip().lower(), report.year)
@@ -327,21 +405,18 @@ class StudyDatabaseService:
         return f"{DatabaseArchive.PDF_FOLDER}/{report.id}.pdf"
 
     @classmethod
-    def _pdfs(cls, archive: DatabaseArchive, reports: List[DatabaseReport]) -> Dict[str, bytes]:
-        """The PDFs the reports name, by name; raises DatabaseImportError if the archive misses one."""
-        pdfs: Dict[str, bytes] = {}
-        missing = []
-        for report in reports:
-            if report.pdf and report.pdf not in pdfs:
-                content = archive.pdf(report.pdf)
-                if content is None:
-                    missing.append(report.pdf)
-                else:
-                    pdfs[report.pdf] = content
+    def _check_pdfs(cls, archive: DatabaseArchive, reports: List[DatabaseReport]) -> None:
+        """Raises DatabaseImportError if the archive misses a PDF the reports name."""
+        missing = sorted({report.pdf for report in reports if report.pdf and not archive.has_pdf(report.pdf)})
         if missing:
             more = f" (and {len(missing) - cls.MAX_IMPORT_ERRORS} more)" if len(missing) > cls.MAX_IMPORT_ERRORS else ""
             raise DatabaseImportError(f"The archive misses the PDFs {', '.join(missing[:cls.MAX_IMPORT_ERRORS])}{more}")
-        return pdfs
+
+    @staticmethod
+    def _store_pdf(archive: DatabaseArchive, name: str, report_id: int) -> None:
+        content = archive.pdf(name)
+        if content is not None:
+            DocumentService.write_pdf(report_id, content)
 
     @staticmethod
     def _to_db_report(report: DatabaseReport) -> DbReport:
@@ -367,6 +442,7 @@ class StudyDatabaseService:
     @classmethod
     def _to_export_report(cls, report: DbReport, has_pdf: bool) -> DatabaseReport:
         return DatabaseReport(
+            id=str(report.id),
             title=report.title,
             year=report.year,
             authors=[author.strip() for author in (report.authors or "").split("//") if author.strip()],
@@ -385,12 +461,17 @@ class StudyDatabaseService:
         )
 
     @staticmethod
+    def _criteria(criteria: List[EligibilityCriterion]) -> List[Dict[str, Any]]:
+        """The criteria as they are stored; raises ValueError for none or a repeated id."""
+        return [criterion.model_dump() for criterion in EligibilityCriteria.validate(criteria)]
+
+    @staticmethod
     def _to_dto(database: StudyDatabase, studies: int = 0, reports: int = 0, indexed: int = 0) -> Database:
         return Database(
             databaseId=database.id,
             name=database.name,
             description=database.description,
-            eligibilityCriteria=database.eligibility_criteria,
+            eligibilityCriteria=EligibilityCriteria.read(database.eligibility_criteria),
             createdAt=database.date_created,
             numberStudies=studies,
             numberReports=reports,

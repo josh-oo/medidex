@@ -45,8 +45,9 @@ class StudyDatabase(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     description: Optional[str] = None
-    # Which studies belong in the database (free text, e.g. the inclusion criteria of the register).
-    eligibility_criteria: str
+    # Which studies belong in the database: its criteria, each a text in a category of config/eligibility.yaml to include
+    # or to exclude a report (see EligibilityCriterion in src/utils/eligibility.py).
+    eligibility_criteria: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
     date_created: datetime.datetime = Field(default_factory=_current_utc_datetime)
     created_by: Optional[str] = None
 

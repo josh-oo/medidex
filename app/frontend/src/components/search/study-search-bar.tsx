@@ -38,6 +38,8 @@ interface StudySearchBarProps {
   /** `hero` is the large bar of the start page. */
   size?: "hero" | "compact";
   autoFocus?: boolean;
+  /** Grays the bar out and takes no input, e.g. while there is no database to search. */
+  disabled?: boolean;
 }
 
 const NO_DATABASES: number[] = [];
@@ -52,6 +54,7 @@ export function StudySearchBar({
   leading,
   size = "compact",
   autoFocus,
+  disabled,
 }: StudySearchBarProps) {
   const [value, setValue] = useState(text);
   const [open, setOpen] = useState(false);
@@ -144,8 +147,10 @@ export function StudySearchBar({
           "flex items-center gap-2 rounded-full border bg-card transition-[box-shadow,padding] duration-500 focus-within:ring-2 focus-within:ring-ring/40",
           hero ? "p-1.5 shadow-md" : "p-1 shadow-xs",
           // With a control at the start the bar is padded evenly on both ends.
-          !leading && (hero ? "pl-4" : "pl-3.5")
+          !leading && (hero ? "pl-4" : "pl-3.5"),
+          disabled && "pointer-events-none opacity-50 shadow-none"
         )}
+        aria-disabled={disabled}
       >
         {leading}
         <Search className={cn("h-4 w-4 shrink-0 text-muted-foreground", leading && "ml-1.5")} aria-hidden />
@@ -160,6 +165,7 @@ export function StudySearchBar({
           aria-activedescendant={showList && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
           value={value}
           autoFocus={autoFocus}
+          disabled={disabled}
           onChange={(event) => {
             setValue(event.target.value);
             setOpen(true);
@@ -197,6 +203,7 @@ export function StudySearchBar({
         <Button
           type="button"
           size={hero ? "default" : "sm"}
+          disabled={disabled}
           className={cn("shrink-0 rounded-full transition-[height,padding] duration-500", hero && "h-10 px-5")}
           onClick={() => trimmed && choose({ kind: "text", text: trimmed })}
         >

@@ -14,11 +14,12 @@ interface DatabasePickerProps {
 }
 
 /**
- * The databases to search, as a round button at the start of the search bar that names them. Databases are created on the database
- * management page.
+ * The databases to search, as a round button at the start of the search bar; their names show on hover and in the popover. Databases
+ * are created on the database management page.
  */
 export function DatabasePicker({ selected, onChange, size = "compact" }: DatabasePickerProps) {
-  const { databases } = useStudyDatabases();
+  // One still being imported has no studies to search yet.
+  const databases = useStudyDatabases().databases.filter((database) => !database.importing);
   const [open, setOpen] = useState(false);
 
   const chosen = databases.filter((database) => selected.length === 0 || selected.includes(database.id));
@@ -46,14 +47,6 @@ export function DatabasePicker({ selected, onChange, size = "compact" }: Databas
           )}
         >
           <Database className="h-4 w-4 shrink-0" aria-hidden />
-          <span
-            className={cn(
-              "max-w-[10rem] truncate text-sm",
-              size === "hero" ? "ml-0.5 hidden sm:inline" : "ml-0.5 hidden md:inline"
-            )}
-          >
-            {label}
-          </span>
           <ChevronDown className="h-3 w-3" aria-hidden />
         </button>
       </PopoverTrigger>

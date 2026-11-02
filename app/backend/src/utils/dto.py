@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, create_model, model_validator
 from .derive import DerivedFields
+from .eligibility import EligibilityCriterion
 from .graph import GraphFormatError, StoredGraph
 from .studyconfig import GRAPH_FIELD, INLINE_SEPARATOR, STUDY_CONFIG
 from typing import Any, Dict, Mapping, Optional, List, TypeVar, Generic
@@ -370,14 +371,25 @@ class DatabasePayload(BaseModel):
     """What describes a study database; the body of POST /databases."""
     name: str = Field(min_length=1, max_length=200)
     description: Optional[str] = None
-    eligibilityCriteria: str = Field(min_length=1, description="Which studies belong in the database, e.g. the inclusion criteria of the register.")
+    eligibilityCriteria: List[EligibilityCriterion] = Field(
+        min_length=1, description="Which studies belong in the database: its criteria, each in a category of GET /eligibility-schema."
+    )
 
 class DatabaseUpdate(BaseModel):
     """The body of PATCH /databases/{id}: the fields given are changed, the others kept. An empty description removes it;
     name and eligibility criteria cannot be empty."""
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     description: Optional[str] = None
-    eligibilityCriteria: Optional[str] = Field(default=None, min_length=1)
+    eligibilityCriteria: Optional[List[EligibilityCriterion]] = Field(default=None, min_length=1)
+
+class EligibilityCategory(BaseModel):
+    """A category of the eligibility criteria (config/eligibility.yaml), an entry of GET /eligibility-schema."""
+    key: str
+    label: str
+    description: str
+
+class EligibilitySchema(BaseModel):
+    categories: List[EligibilityCategory]
 
 class Database(BaseModel):
     databaseId: int
@@ -385,12 +397,33 @@ class Database(BaseModel):
     # search, but not yet suggested for new reports. Seen in the vectorstore on every request, not stored.
     indexing: bool = False
     numberReportsIndexed: int = 0
+    # It is still being imported (POST /databases/import): nothing of it is committed before its studies and reports
+    # all are, and it takes no projects. Its progress is streamed by GET /databases/{database_id}/status.
+    importing: bool = False
     name: str
     description: Optional[str] = None
-    eligibilityCriteria: str
+    eligibilityCriteria: List[EligibilityCriterion]
     createdAt: datetime
     numberStudies: int = 0
     numberReports: int = 0
+
+class DatabaseStage(str, Enum):
+    importing = "importing"
+    indexing = "indexing"
+    ready = "ready"
+    failed = "failed"
+
+class DatabaseStatus(BaseModel):
+    """Where a database is on its way to being usable, an event of GET /databases/{database_id}/status: imported
+    (`step` studies, reports or pdfs, `done` of `total` of them), indexed (`done` of `total` reports in the
+    vectorstore), ready, or failed (the import, `message` says why; nothing of it is kept unless its studies and
+    reports were already committed, while its PDFs were stored)."""
+    databaseId: int
+    stage: DatabaseStage
+    step: Optional[str] = None
+    done: int = 0
+    total: int = 0
+    message: Optional[str] = None
 
 class StorageExtra(BaseModel):
     """Storage an extension keeps elsewhere (see utils/storage.py), e.g. chat histories."""
@@ -422,6 +455,10 @@ class DatabaseStorage(BaseModel):
 
 class DatabaseReport(BaseModel):
     """A report of a study in the exchange format of a database (see DatabaseExport)."""
+    # Which report it is in the file (e.g. its id in the database it comes from): a report listed under several studies
+    # has the same id under each, and reports of other ids are other reports, whatever their DOI or title. Without an
+    # id, reports of the same DOI (or the same title and year) are one.
+    id: Optional[str] = None
     title: str
     year: int
     authors: List[str] = Field(default_factory=list)
@@ -458,7 +495,7 @@ class DatabaseExport(BaseModel):
     version: int = 1
     name: str
     description: Optional[str] = None
-    eligibilityCriteria: Optional[str] = None
+    eligibilityCriteria: List[EligibilityCriterion] = Field(default_factory=list)
     studies: List[DatabaseStudy] = Field(default_factory=list)
 
 def tags_to_dto(tags) -> List[Tag]:

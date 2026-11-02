@@ -24,15 +24,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { createDatabase, importDatabase } from "@/lib/api/databaseApi";
+import { createDatabase } from "@/lib/api/databaseApi";
+import { EligibilityCriteriaEditor, criteriaComplete, trimCriteria } from "./eligibility-criteria";
 import { readZipEntry } from "@/lib/zip";
-import { refreshStudyDatabases } from "@/lib/databases";
-import type { DatabaseDto } from "@/types/apiDTOs";
+import { refreshStudyDatabases, startDatabaseImport } from "@/lib/databases";
+import type { DatabaseDto, EligibilityCriterion } from "@/types/apiDTOs";
 
 interface NewDatabaseDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Called with the id of the new database once it exists. */
+  /** Called with the id of a new empty database once it exists (an imported one is listed while it is uploaded). */
   onCreated?: (id: number) => void;
 }
 
@@ -50,7 +51,7 @@ function errorMessage(error: unknown, fallback: string): string {
 export function NewDatabaseDialog({ open, onOpenChange, onCreated }: NewDatabaseDialogProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [eligibilityCriteria, setEligibilityCriteria] = useState("");
+  const [eligibilityCriteria, setEligibilityCriteria] = useState<EligibilityCriterion[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [fileSummary, setFileSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +62,7 @@ export function NewDatabaseDialog({ open, onOpenChange, onCreated }: NewDatabase
   const reset = () => {
     setName("");
     setDescription("");
-    setEligibilityCriteria("");
+    setEligibilityCriteria([]);
     setFile(null);
     setFileSummary(null);
     setError(null);
@@ -89,10 +90,15 @@ export function NewDatabaseDialog({ open, onOpenChange, onCreated }: NewDatabase
       }
       if (typeof data.name === "string" && !name.trim()) setName(data.name);
       if (typeof data.description === "string" && !description.trim()) setDescription(data.description);
-      if (typeof data.eligibilityCriteria === "string" && !eligibilityCriteria.trim())
+      if (Array.isArray(data.eligibilityCriteria) && eligibilityCriteria.length === 0)
         setEligibilityCriteria(data.eligibilityCriteria);
-      const studies: { reports?: { pdf?: string | null }[] }[] = Array.isArray(data.studies) ? data.studies : [];
-      const reports = studies.flatMap((study) => (Array.isArray(study.reports) ? study.reports : []));
+      const studies: { reports?: { id?: string | null; pdf?: string | null }[] }[] = Array.isArray(data.studies) ? data.studies : [];
+      // A report listed under several studies (the same id) is one report.
+      const byId = new Map<unknown, { pdf?: string | null }>();
+      studies.forEach((study, s) =>
+        (Array.isArray(study.reports) ? study.reports : []).forEach((report, r) => byId.set(report.id?.trim() || `${s}/${r}`, report)),
+      );
+      const reports = [...byId.values()];
       const pdfs = reports.filter((report) => report.pdf).length;
       setFileSummary(`${studies.length} studies, ${reports.length} reports, ${pdfs} PDFs`);
     } catch {
@@ -100,7 +106,7 @@ export function NewDatabaseDialog({ open, onOpenChange, onCreated }: NewDatabase
     }
   };
 
-  const canSubmit = name.trim().length > 0 && eligibilityCriteria.trim().length > 0 && !submitting;
+  const canSubmit = name.trim().length > 0 && criteriaComplete(eligibilityCriteria) && !submitting;
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -117,21 +123,25 @@ export function NewDatabaseDialog({ open, onOpenChange, onCreated }: NewDatabase
     const payload = {
       name: name.trim(),
       description: description.trim() || null,
-      eligibilityCriteria: eligibilityCriteria.trim(),
+      eligibilityCriteria: trimCriteria(eligibilityCriteria),
     };
+    if (file) {
+      // Its card shows how far the upload, the import and the indexing of its reports are.
+      void startDatabaseImport(file, payload);
+      reset();
+      onOpenChange(false);
+      setSubmitting(false);
+      return;
+    }
     try {
-      const database: DatabaseDto = file ? await importDatabase(file, payload) : await createDatabase(payload);
+      const database: DatabaseDto = await createDatabase(payload);
       await refreshStudyDatabases();
-      toast.success(`Database "${database.name}" created`, {
-        description: file
-          ? `${database.numberStudies} studies and ${database.numberReports} reports imported. They are suggested for new reports once indexed.`
-          : undefined,
-      });
+      toast.success(`Database "${database.name}" created`);
       onCreated?.(database.databaseId);
       reset();
       onOpenChange(false);
     } catch (submitError) {
-      setError(errorMessage(submitError, file ? "The import failed." : "The database could not be created."));
+      setError(errorMessage(submitError, "The database could not be created."));
     } finally {
       setSubmitting(false);
     }
@@ -146,7 +156,7 @@ export function NewDatabaseDialog({ open, onOpenChange, onCreated }: NewDatabase
         onOpenChange(nextOpen);
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
         <form onSubmit={handleSubmit} className="space-y-4">
           <DialogHeader>
             <DialogTitle>New database</DialogTitle>
@@ -225,14 +235,14 @@ export function NewDatabaseDialog({ open, onOpenChange, onCreated }: NewDatabase
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="database-criteria">Eligibility criteria</Label>
-            <Textarea
-              id="database-criteria"
-              value={eligibilityCriteria}
-              onChange={(event) => setEligibilityCriteria(event.target.value)}
-              placeholder="Which studies belong in it, e.g. study design, population, interventions"
-              rows={4}
-            />
+            <Label id="database-criteria-label">Eligibility criteria</Label>
+            <p className="text-xs text-muted-foreground">
+              Which studies belong in it: a report is included when every inclusion criterion holds and no exclusion
+              criterion does.
+            </p>
+            <div role="group" aria-labelledby="database-criteria-label">
+              <EligibilityCriteriaEditor criteria={eligibilityCriteria} onChange={setEligibilityCriteria} />
+            </div>
           </div>
 
           {error && (
@@ -254,7 +264,7 @@ export function NewDatabaseDialog({ open, onOpenChange, onCreated }: NewDatabase
               Cancel
             </Button>
             <Button type="submit" disabled={!canSubmit}>
-              {submitting ? (file ? "Importing…" : "Creating…") : file ? "Import database" : "Create database"}
+              {submitting ? "Creating…" : file ? "Import database" : "Create database"}
             </Button>
           </DialogFooter>
         </form>

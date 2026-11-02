@@ -12,7 +12,7 @@ import { NewDatabaseDialog } from "@/components/databases/new-database-dialog";
 import { CurationList } from "@/components/curation/curation-list";
 import { useCuration, type Curation } from "@/hooks/use-curation";
 import { exportDatabase } from "@/lib/api/databaseApi";
-import { projectDatabaseId, useStudyDatabases, type StudyDatabase } from "@/lib/databases";
+import { projectDatabaseId, useStudyDatabases, type DatabaseUpload, type StudyDatabase } from "@/lib/databases";
 import { cn } from "@/lib/utils";
 
 // The maintenance of the study databases in the background: one card per database, with its updates (batches of new
@@ -23,7 +23,7 @@ export default function DatabaseManagementPage() {
   const { loading, isAdmin } = curation;
   // The rows fade in only when they had to be waited for; known from before, they are there with the page.
   const [fadeIn] = useState(loading);
-  const { loaded: databasesLoaded, failed: databasesFailed, databases } = useStudyDatabases();
+  const { loaded: databasesLoaded, failed: databasesFailed, databases, uploads } = useStudyDatabases();
   const [newDatabaseOpen, setNewDatabaseOpen] = useState(false);
 
   return (
@@ -46,7 +46,7 @@ export default function DatabaseManagementPage() {
 
         {!databasesLoaded ? (
           <DatabaseCardSkeleton />
-        ) : databases.length === 0 ? (
+        ) : databases.length === 0 && uploads.length === 0 ? (
           databasesFailed ? (
             <p className="px-1 text-sm text-muted-foreground">The databases could not be loaded.</p>
           ) : (
@@ -62,6 +62,9 @@ export default function DatabaseManagementPage() {
                   curation={curation}
                   fadeIn={fadeIn}
                 />
+              ))}
+              {uploads.map((upload) => (
+                <UploadCard key={upload.key} upload={upload} />
               ))}
             </div>
           </TooltipProvider>
@@ -145,9 +148,14 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
       New update
     </>
   );
-  // A database that is still being indexed takes no updates: their reports would miss its studies.
-  const newUpdateButton = database.indexing ? (
-    <Button size="sm" className="gap-1.5" disabled title={`${database.name} is still being indexed; updates can be added once it is done.`}>
+  // A database that is still being imported or indexed takes no updates: their reports would miss its studies.
+  const newUpdateButton = database.importing || database.indexing ? (
+    <Button
+      size="sm"
+      className="gap-1.5"
+      disabled
+      title={`${database.name} is still being ${database.importing ? "imported" : "indexed"}; updates can be added once it is done.`}
+    >
       {newUpdateLabel}
     </Button>
   ) : (
@@ -193,8 +201,8 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
                 database.name
               )}
             </h2>
-            {isAdmin && <DatabaseStoragePopover database={database} />}
-            {database.indexing && <IndexingBadge database={database} />}
+            {isAdmin && !database.importing && <DatabaseStoragePopover database={database} />}
+            {(database.importing || database.indexing) && <ProgressBadge database={database} />}
           </div>
           <span className="text-xs text-muted-foreground">
             {database.numberStudies} {database.numberStudies === 1 ? "study" : "studies"} · {database.numberReports}{" "}
@@ -208,6 +216,7 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
               icon={Pencil}
               label="Edit the name, description and eligibility criteria"
               onClick={() => setDetails("edit")}
+              disabled={database.importing}
               dialog
             />
           )}
@@ -216,7 +225,7 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
               icon={Download}
               label="Export: the studies and reports as a file another Medidex can import"
               onClick={() => void download()}
-              disabled={exporting}
+              disabled={exporting || database.importing}
             />
           )}
           {isAdmin && <div className="ml-2">{newUpdateButton}</div>}
@@ -287,17 +296,83 @@ function CardAction({
   );
 }
 
-// How far the reports of a database are in the vectorstore; until all are, its studies are found by the search but
-// not suggested for new reports.
-function IndexingBadge({ database }: { database: StudyDatabase }) {
+const IMPORT_STEPS = { studies: "studies", reports: "reports", pdfs: "PDFs" } as const;
+
+const count = (done: number, total: number) => `${done.toLocaleString()} of ${total.toLocaleString()}`;
+
+// A number of bytes as people read it, e.g. "6.2 GB".
+function formatBytes(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+// How far the import of a database is (its studies, its reports, then their PDFs), and then how far its reports are in
+// the vectorstore; until all are, its studies are found by the search but not suggested for new reports.
+function ProgressBadge({ database }: { database: StudyDatabase }) {
+  const { status } = database;
+  if (database.importing) {
+    return (
+      <StatusChip
+        label={status?.step ? `Importing ${IMPORT_STEPS[status.step]} ${count(status.done, status.total)}` : "Importing…"}
+        busy="Importing"
+        title="Nothing of it is kept before its studies and reports all are; it takes updates once it is imported and indexed."
+      />
+    );
+  }
+  return (
+    <StatusChip
+      label={`Indexing ${count(database.numberReportsIndexed, database.numberReports)}`}
+      busy="Indexing"
+      title="Its studies are found by the search, but are only suggested for new reports (and take updates) once all its reports are indexed."
+    />
+  );
+}
+
+function StatusChip({ label, busy, title }: { label: string; busy: string; title: string }) {
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400"
-      title="Its studies are found by the search, but are only suggested for new reports (and take updates) once all its reports are indexed."
+      className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 tabular-nums dark:text-amber-400"
+      title={title}
     >
-      <Spinner className="h-3 w-3" aria-label="Indexing" />
-      Indexing {database.numberReportsIndexed} of {database.numberReports}
+      <Spinner className="h-3 w-3" aria-label={busy} />
+      {label}
     </span>
+  );
+}
+
+// An imported database while its file is uploaded: it has no id, numbers or updates yet. Once the file is in, the card
+// of the database follows its import.
+function UploadCard({ upload }: { upload: DatabaseUpload }) {
+  const percent = upload.total ? Math.floor((100 * upload.loaded) / upload.total) : 0;
+  return (
+    <section aria-label={upload.name} className="overflow-hidden rounded-2xl border bg-card shadow-xs">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10">
+          <Database className="h-5 w-5 text-primary" aria-hidden />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 className="min-w-0 truncate text-base font-semibold">{upload.name}</h2>
+            <StatusChip
+              label={
+                upload.loaded < upload.total
+                  ? `Uploading ${formatBytes(upload.loaded)} of ${formatBytes(upload.total)} (${percent}%)`
+                  : "Uploaded, the import starts…"
+              }
+              busy="Uploading"
+              title="Leaving or reloading this page ends the upload; once the file is uploaded, the import goes on without it."
+            />
+          </div>
+          <span className="text-xs text-muted-foreground">Its file is being uploaded.</span>
+        </div>
+      </header>
+    </section>
   );
 }
 

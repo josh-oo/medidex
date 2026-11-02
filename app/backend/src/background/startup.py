@@ -11,6 +11,7 @@ from typing import Optional
 from ..context import RequestContext
 from ..database.schema import ResourceSchema
 from ..database.sessions import AsyncSessionLocal, engine
+from ..services.pubsub import DatabaseStatusService
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,10 @@ class Startup:
         return cls(ResourceSchema(engine))
 
     async def start(self) -> None:
-        """The schema, before the first request; the vectorstore sync then runs in the background (it embeds, which
-        takes long), until it is done or the backend stops."""
+        """The schema and the end of the imports the last stop interrupted, before the first request; the vectorstore
+        sync then runs in the background (it embeds, which takes long), until it is done or the backend stops."""
         await self.schema.ensure()
+        await DatabaseStatusService().fail_interrupted_imports()
         self._sync = asyncio.create_task(self._sync_vectorstore())
 
     async def stop(self) -> None:

@@ -392,11 +392,32 @@ export interface TaskDto {
 // Study databases
 // ---------------------------------------------------------------------------
 
+// A criterion of a database: a text in a category of the eligibility schema, to include (it must hold) or to exclude
+// (it must not hold) a report. Its id stays when the text is edited.
+export interface EligibilityCriterion {
+  id: string;
+  category: string;
+  kind: "include" | "exclude";
+  text: string;
+}
+
+// A category of the eligibility criteria (config/eligibility.yaml of the backend).
+export interface EligibilityCategoryDto {
+  key: string;
+  label: string;
+  description: string;
+}
+
+// GET /eligibility-schema: the categories in their order.
+export interface EligibilitySchemaDto {
+  categories: EligibilityCategoryDto[];
+}
+
 export interface DatabasePayload {
   name: string;
   description?: string | null;
-  // Which studies belong in the database, e.g. the inclusion criteria of the register.
-  eligibilityCriteria: string;
+  // Which studies belong in the database: at least one criterion.
+  eligibilityCriteria: EligibilityCriterion[];
 }
 
 // The fields given are changed; an empty description removes it.
@@ -406,14 +427,29 @@ export interface DatabaseDto {
   databaseId: number;
   name: string;
   description?: string | null;
-  eligibilityCriteria: string;
+  eligibilityCriteria: EligibilityCriterion[];
   createdAt: string;
   // Not all its reports are in the vectorstore yet (e.g. right after an import): its studies are found by the search
   // but not yet suggested for new reports, and no projects can be uploaded into it.
   indexing: boolean;
   numberReportsIndexed: number;
+  // It is still being imported: nothing of it is committed yet, and no projects can be uploaded into it. Its progress
+  // is streamed by GET /databases/{id}/status (DatabaseStatusDto).
+  importing: boolean;
   numberStudies: number;
   numberReports: number;
+}
+
+// Where a database is on its way to being usable, an event of GET /databases/{id}/status: imported (`step` studies,
+// reports or pdfs, `done` of `total` of them), indexed (`done` of `total` reports), ready, or failed (its import,
+// `message` says why).
+export interface DatabaseStatusDto {
+  databaseId: number;
+  stage: "importing" | "indexing" | "ready" | "failed";
+  step?: "studies" | "reports" | "pdfs" | null;
+  done: number;
+  total: number;
+  message?: string | null;
 }
 
 // What one part of a database takes in storage; extras are what the extensions keep elsewhere (e.g. chat histories).
@@ -481,6 +517,7 @@ export type DurationUnit = "hours" | "days" | "weeks" | "months" | "years";
 // An arm as suggested for a new study: its interventions (names), and its dosage and duration if the report has them.
 export interface ArmSuggestion {
   interventions: string[];
+  role?: "intervention" | "control";
   participants?: number;
   dosage?: string;
   frequency?: string;
@@ -488,10 +525,10 @@ export interface ArmSuggestion {
   duration?: { value: number; unit: DurationUnit };
 }
 
-// Two arms that are compared.
+// Two arms that are compared, by their index in the arms of the suggestion: the evaluated arm and its comparator.
 export interface ComparisonSuggestion {
-  a: ArmSuggestion;
-  b: ArmSuggestion;
+  evaluated: number;
+  comparator: number;
 }
 
 export interface NewStudySuggestion {
@@ -500,6 +537,7 @@ export interface NewStudySuggestion {
   countries: string[];
   number_of_participants: number;
   duration?: { value: number; unit: DurationUnit };
+  arms: ArmSuggestion[];
   comparisons: ComparisonSuggestion[];
 }
 
