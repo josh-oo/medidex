@@ -16,14 +16,13 @@ import httpx
 
 from ..context import RequestContext
 from ..database.sessions import AsyncSessionLocal
-from ..database.models import Report as DbReport, ReportAdded
+from ..database.models import UpdateReport
 from ..services.crawler import OpenAlexWork, normalize_doi
 from ..services.database import DatabaseImportError
 from .postprocessing import PostprocessingOptions, postprocessor_registry
 from ..utils.archive import DatabaseArchive, DatabaseArchiveError
 from ..utils.dto import DatabasePayload
 from ..utils.pdfs import PdfFiles
-from ..utils.trial_registration_id import is_trial_registration
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +70,7 @@ async def _download_pdf_bytes(client: httpx.AsyncClient, url: str) -> Optional[b
     return None
 
 
-async def _fetch_openalex_works(reports: List[DbReport], open_alex_service) -> Optional[Dict[str, OpenAlexWork]]:
+async def _fetch_openalex_works(reports: List[UpdateReport], open_alex_service) -> Optional[Dict[str, OpenAlexWork]]:
     """One batched OpenAlex lookup (fulltext links + cited DOIs) for every report with a
     DOI, instead of one request per report. None means the lookup failed, which callers
     must tell apart from "OpenAlex doesn't know this DOI" (a missing key) so a transient
@@ -88,21 +87,21 @@ async def _fetch_openalex_works(reports: List[DbReport], open_alex_service) -> O
 
 
 async def _auto_search_report_pdf(
-    client: httpx.AsyncClient, report: DbReport, works: Optional[Dict[str, OpenAlexWork]], crawler_service
+    client: httpx.AsyncClient, report: UpdateReport, works: Optional[Dict[str, OpenAlexWork]], crawler_service
 ) -> Tuple[Optional[_InMemoryPdfUpload], Optional[List[str]], Optional[List[str]]]:
     """Try to download one of a report's OpenAlex fulltext links (from the batched lookup
     in _fetch_openalex_works) as its PDF if it doesn't already have one. Returns
-    (pdf, fulltext links, cited DOIs) for the caller to cache on report_added - see
+    (pdf, fulltext links, cited DOIs) for the caller to cache on update_report - see
     ProjectRepository.set_report_auto_searched_pdf. Links are returned even when a PDF
     already exists, since the report detail view wants them regardless of PDF status;
     both are None if the lookup failed (nothing to cache).
     """
     has_pdf = PdfFiles.path(report.id).is_file()
-    if not has_pdf and is_trial_registration(report.authors):
-        # A bare trial registration has no DOI or published PDF - render its
-        # registry record as the report's PDF instead.
+    if not has_pdf and report.is_registry_record():
+        # A registry record has no DOI or published PDF - render its record in the
+        # registry as the report's PDF instead.
         try:
-            return _InMemoryPdfUpload(await crawler_service.get_pdf_for_trial_id(report.authors)), [], []
+            return _InMemoryPdfUpload(await crawler_service.get_pdf_for_trial_id(report.trial_registration_id)), [], []
         except Exception as exc:
             logger.warning("Trial registry PDF failed for report %s: %s", report.id, exc)
             return None, [], []
@@ -143,7 +142,7 @@ async def _finalize_project_upload(project_id: str, project_repo, vectorstore, m
 
 
 async def process_report(
-    reports: List[DbReport], project_id: str, ctx: RequestContext, options: Optional[PostprocessingOptions] = None
+    reports: List[UpdateReport], project_id: str, ctx: RequestContext, options: Optional[PostprocessingOptions] = None
 ) -> None:
     """Auto-search + download each report's PDF and compute its embedding, then
     finalize the project once every report has settled. Postprocessors enabled by
@@ -184,7 +183,7 @@ async def process_report(
                 if not project:  # project already deleted
                     return
                 await ctx.vectorstore_service.add_report_to_vectorstore(report)
-                # Keep report_added.embedded in sync (see its comment in models.py) -
+                # Keep UpdateReport.embedded in sync (see its comment in models.py) -
                 # written through this call's own session/write_ctx, not the outer
                 # request-scoped ctx, since several of these run concurrently via
                 # asyncio.gather() below and a single AsyncSession isn't safe to share
@@ -240,7 +239,7 @@ async def run_process_report_background(
     async with AsyncSessionLocal() as db:
         ctx = RequestContext(db=db, user_id=user_id)
 
-        reports: List[DbReport] = []
+        reports: List[UpdateReport] = []
         for report_id in report_ids:
             report = await ctx.report_repo.get_report_by_id(report_id)
             if report is not None:
@@ -251,13 +250,13 @@ async def run_process_report_background(
 
 async def _pdf_changed(report_id: int, ctx: RequestContext) -> Optional[str]:
     """Tells every postprocessor that the PDF of the report changed (ReportPostprocessor.pdf_changed); the project of
-    the report, or None for a report of no project (e.g. of an imported database), which is not postprocessed."""
-    report_added = await ctx.db.get(ReportAdded, report_id)
-    if report_added is None:
+    the report, or None for a report of the core database, which is not postprocessed."""
+    report = await ctx.db.get(UpdateReport, report_id)
+    if report is None:
         return None
     for postprocessor in postprocessor_registry.all():
-        await postprocessor.pdf_changed(report_id, report_added.project_id, ctx)
-    return report_added.project_id
+        await postprocessor.pdf_changed(report_id, report.project_id, ctx)
+    return report.project_id
 
 
 async def reset_pdf_postprocessing(report_id: int, ctx: RequestContext) -> None:
@@ -307,9 +306,9 @@ async def run_criteria_changed(database_id: int, user_id: str) -> None:
         for postprocessor in postprocessor_registry.all():
             report_ids.extend(await postprocessor.criteria_changed(database_id, ctx))
         for report_id in dict.fromkeys(report_ids):
-            report_added = await session.get(ReportAdded, report_id)
-            if report_added is not None:
-                await _run_pending(report_id, report_added.project_id, ctx)
+            report = await session.get(UpdateReport, report_id)
+            if report is not None:
+                await _run_pending(report_id, report.project_id, ctx)
 
 
 async def run_import_database(database_id: int, payload: DatabasePayload, archive: DatabaseArchive, source: BinaryIO, user_id: str) -> None:

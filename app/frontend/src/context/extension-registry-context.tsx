@@ -112,6 +112,16 @@ export interface ProjectUploadOptionsSlotProps {
   onChange: (options: Record<string, unknown>) => void
 }
 
+/**
+ * Rendered on the review page of a report, below the final selection. `studyIds` are the studies selected for the
+ * report; `onMergeBlock` holds the merge back while it is given a reason (shown next to the button), null releases it.
+ */
+export interface ReviewPanelSlotProps {
+  reportId: number
+  studyIds: number[]
+  onMergeBlock: (reason: string | null) => void
+}
+
 export interface StudyLinkReview {
   /** Called before a report is linked to an existing study; resolves false to cancel the link. */
   confirmLink: (reportId: number, study: StudyDto) => Promise<boolean>
@@ -151,6 +161,8 @@ export interface ExtensionRegistry {
    * Must be stable across renders.
    */
   useStudyLinkReview?: () => StudyLinkReview
+  /** Rendered on the review page of a report, below the final selection; each can hold the merge back. */
+  reviewPanels: ComponentType<ReviewPanelSlotProps>[]
   routes?: ReactNode
 }
 
@@ -166,6 +178,7 @@ const emptyExtensions: ExtensionRegistry = {
   reportCardExtras: [],
   projectUploadOptions: [],
   projectSteps: [],
+  reviewPanels: [],
 }
 
 const ExtensionRegistryContext = createContext<ExtensionRegistry>(emptyExtensions)

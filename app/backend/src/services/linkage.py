@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
@@ -6,25 +6,17 @@ from ..database.repositories.study import StudyRepository
 from .authorization import get_authorized_project_id
 from .pubsub import ProjectPubSubService
 from .vectorstore import VectorstoreService
-from ..services.study import StudyPayload
+from ..utils.dto import StudyPayload
 
 
 class StudyNotFoundError(Exception):
-    """There is no such study, it was created in another scope and is not confirmed (see README, "Scopes"), or it is a
+    """There is no such study, it was created in another scope and no report linked to it is merged yet (see README, "Scopes"), or it is a
     study of another database than the report's project."""
 
 
 class ReportNotInProjectError(Exception):
-    """The report has no project association to confirm/unconfirm links within, or (creating a study for it) no study
-    database to add the study to."""
-
-
-class ReportProjectAccessError(Exception):
-    """The report's project could not be verified as accessible."""
-
-
-class ReportStudyLinkNotFoundError(Exception):
-    """No tracked report-study link exists between this report and study."""
+    """The report is no report of an update (it is one of the core database): only the reports of an update are linked,
+    and its project is the update a new study goes to."""
 
 
 class LinksCommittedError(Exception):
@@ -59,7 +51,7 @@ class LinkageService:
         check_report_access FastAPI dependency ahead of this call.
         """
         project_id = await self._authorized_open_project_id(report_id, user_id)
-        study = await self.study_repo.get_study_by_id(study_id, databases=await self._databases(report_id))
+        study = await self.study_repo.get_study_by_id(study_id, databases=[await self.project_repo.get_database_id_by_report_id(report_id)])
         if study is None:
             raise StudyNotFoundError(f"Study {study_id} not found")
 
@@ -70,8 +62,7 @@ class LinkageService:
         except Exception as e:
             await self.report_repo.rollback()
             raise Exception(f"Failed to add link: {str(e)}")
-        if project_id:
-            await self.pubsub_service.publish_project_update(project_id)
+        await self.pubsub_service.publish_project_update(project_id)
 
     async def unlink_study_from_report(
         self,
@@ -88,8 +79,7 @@ class LinkageService:
         except Exception as e:
             await self.report_repo.rollback()
             raise Exception(f"Failed to delete report-study links: {str(e)}")
-        if project_id:
-            await self.pubsub_service.publish_project_update(project_id)
+        await self.pubsub_service.publish_project_update(project_id)
 
     async def create_study_and_link_to_report(
         self,
@@ -98,65 +88,26 @@ class LinkageService:
         user_id: Optional[str],
     ) -> Any:
         project_id = await self._authorized_open_project_id(report_id, user_id)
-        # The new study goes to the database of the report's project; a report of no project has none.
+        # The new study goes to the update of the report, in the database of its project.
         database_id = await self.project_repo.get_database_id_by_report_id(report_id)
-        if database_id is None:
-            raise ReportNotInProjectError(f"Report {report_id} belongs to no project, so there is no database to add the study to")
 
         try:
-            new_study = await self.study_repo.add_study(study.model_dump(), database_id)
+            new_study = await self.study_repo.add_study(study.model_dump(), project_id, database_id)
             await self.report_repo.link_study(report_id, new_study.id, user_id=user_id)
             await self.vectorstore.link_report_to_study_id(report_id, new_study.id, database_id, user_id)
             await self.report_repo.commit()
         except:
             await self.report_repo.rollback()
             raise
-        if project_id:
-            await self.pubsub_service.publish_project_update(project_id)
+        await self.pubsub_service.publish_project_update(project_id)
         return new_study
 
-    async def _authorized_open_project_id(self, report_id: int, user_id: Optional[str]) -> Optional[str]:
+    async def _authorized_open_project_id(self, report_id: int, user_id: Optional[str]) -> str:
         """The project of the report (see get_authorized_project_id), as long as the caller has not committed their
-        links of the report."""
+        links of the report. Raises ReportNotInProjectError for a report of the core database."""
         project_id = await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
-        if project_id and await self.project_repo.has_committed_report(report_id):
+        if project_id is None:
+            raise ReportNotInProjectError(f"Report {report_id} belongs to no update; only the reports of an update are linked")
+        if await self.project_repo.has_committed_report(report_id):
             raise LinksCommittedError(f"Your links of report {report_id} are committed and cannot be changed")
         return project_id
-
-    async def _databases(self, report_id: int) -> Optional[List[int]]:
-        """The study database of the report's project (all for a report of no project)."""
-        database_id = await self.project_repo.get_database_id_by_report_id(report_id)
-        return [database_id] if database_id else None
-
-    async def set_report_study_link_confirmation(
-        self,
-        report_id: int,
-        study_id: int,
-        confirmed: bool,
-    ) -> None:
-        """Confirm or unconfirm a tracked report-study link (the StudyReportAdded row),
-        used by the admin annotation-review flow. Raises ReportNotInProjectError if the
-        report has no project association, ReportProjectAccessError if that project
-        can't be resolved, or ReportStudyLinkNotFoundError if no tracked link exists
-        between the two - none of these mutate anything, so only a failure inside the
-        actual update needs a rollback.
-        """
-        project_id = await self.project_repo.get_project_id_by_report_id(report_id)
-        if not project_id:
-            raise ReportNotInProjectError(f"Report {report_id} not found in project")
-
-        project = await self.project_repo.get_project_by_id(project_id)
-        if not project:
-            raise ReportProjectAccessError(
-                "You can only confirm links for reports in your own projects"
-            )
-
-        try:
-            updated = await self.report_repo.set_study_report_confirmation(report_id, study_id, confirmed)
-            await self.report_repo.commit()
-        except Exception:
-            await self.report_repo.rollback()
-            raise
-
-        if not updated:
-            raise ReportStudyLinkNotFoundError("Tracked report-study link not found")

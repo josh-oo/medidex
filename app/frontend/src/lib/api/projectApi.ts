@@ -114,7 +114,6 @@ export const getProjectReportsReview = (
       ...config?.params,
       search: filters?.search || undefined,
       consensus: filters?.consensus,
-      reviewed: filters?.reviewed,
       cursor: filters?.cursor,
       limit: filters?.limit,
       include: filters?.include,

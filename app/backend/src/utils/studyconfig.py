@@ -10,9 +10,6 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 ColorName = Literal["blue", "emerald", "rose", "amber", "slate", "sky", "violet", "teal"]
 
-# Separates the tags kept in a column of the study itself (see `inline` of a tag category).
-INLINE_SEPARATOR = "//"
-
 # The name of the field of a study that holds its graph (the column of the study is `graph` as well).
 GRAPH_FIELD = "graph"
 
@@ -144,8 +141,6 @@ class GraphConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Column of the study with the plain text of studies from before the graph, shown as it is.
-    text_column: Optional[str] = None
     entities: Dict[str, GraphEntityConfig] = {}
     relations: Dict[str, GraphRelationConfig] = {}
 
@@ -196,6 +191,16 @@ class GraphConfig(BaseModel):
         """The attribute relations that start at entities of this kind, in the order of the config."""
         return {key: relation for key, relation in self.relations.items() if kind in relation.source and self.is_attribute(key)}
 
+    def study_relation(self, category: str) -> Optional[str]:
+        """The attribute relation by which the study itself holds the tags of the category (e.g. `in_country` for its
+        countries), if there is one."""
+        if self.root is None:
+            return None
+        return next(
+            (key for key, relation in self.attributes_of(self.root).items() if self.entities[relation.target[0]].value.category == category),  # type: ignore[union-attr]
+            None,
+        )
+
     def tag_categories(self) -> List[str]:
         """The categories whose tags entities hold."""
         return list(dict.fromkeys(entity.value.category for entity in self.entities.values() if entity.value and entity.value.category))
@@ -219,8 +224,6 @@ class TagCategoryConfig(BaseModel):
     search_field: str
     description: str
     free_text_search: bool = False
-    # The tags are kept in the column of the study with this name (separated by `//`) instead of a table of their own.
-    inline: bool = False
 
 
 class TagCategoryRegistry(BaseModel):
@@ -304,8 +307,6 @@ class StudyConfig(BaseModel):
             category = entity.value.category if entity.value else None
             if category is not None and category not in self.categories:
                 raise ValueError(f"entity '{entity_key}': unknown category '{category}'")
-            if category is not None and self.categories[category].inline:
-                raise ValueError(f"entity '{entity_key}': the tags of '{category}' are kept in the study and cannot be values")
         return self
 
     @classmethod
@@ -316,11 +317,6 @@ class StudyConfig(BaseModel):
     def enums(self) -> Dict[str, List[str]]:
         """The allowed values of the enum fields, by field."""
         return {key: field.values for key, field in self.fields.items() if field.type == "enum"}
-
-    @property
-    def inline_categories(self) -> List[str]:
-        """The tag categories kept in a column of the study (e.g. countries)."""
-        return [key for key, category in self.categories.items() if category.inline]
 
     @property
     def tags(self) -> TagCategoryRegistry:
@@ -367,7 +363,6 @@ class StudyOntology:
                     "search_field": notes.get("search_field"),
                     "description": slot.description or "",
                     "free_text_search": self._flag(notes.get("free_text_search")),
-                    "inline": self._flag(notes.get("inline")),
                 }
             else:
                 fields[self._camel(name)] = self._field(name, slot, notes)
@@ -438,7 +433,7 @@ class StudyOntology:
             cls for cls in classes for relation in relations.values() if self._key(cls) in (*relation["source"], *relation["target"])
         }
         entities = {self._key(cls): self._entity(cls) for cls in classes if cls in used}
-        return {"text_column": self._notes(self.view.get_class(self.root)).get("text_column"), "entities": entities, "relations": relations}
+        return {"entities": entities, "relations": relations}
 
     def _entity(self, name: str) -> Dict[str, Any]:
         cls = self.view.get_class(name)

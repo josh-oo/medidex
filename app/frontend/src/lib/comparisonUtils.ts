@@ -74,8 +74,8 @@ const armDuration = (arm: ArmDraft): string => {
 // in a comparison and a comparison edge per pair. What an arm says about itself is edges to value entities (its
 // interventions, role, dosage, frequency, route and duration), one entity per distinct value however many arms have it,
 // and the participants of an arm are a population entity that took part in it. Comparisons with an arm without
-// interventions are left out; null if none is left.
-export function buildGraph(arms: StudyArm[], comparisons: ArmComparison[]): string | null {
+// interventions are left out; null if none is left. The countries of the study are edges from the study itself.
+export function buildGraph(arms: StudyArm[], comparisons: ArmComparison[], countries: string[] = []): string | null {
   type Node = { id: string; kind: string; value?: string };
   type Edge = { relation: string; source: string; target: string };
   const nodes: Node[] = [];
@@ -124,5 +124,7 @@ export function buildGraph(arms: StudyArm[], comparisons: ArmComparison[]): stri
     if (valid.some((comparison) => comparison.source === arm.id || comparison.target === arm.id)) entityOf(arm);
   }
   for (const comparison of valid) link("compared_with", entityOf(byId.get(comparison.source)!), entityOf(byId.get(comparison.target)!));
+  // The countries of the study, from the study itself (its id in the graph is `study`).
+  for (const country of cleaned(countries)) link("in_country", "study", valueNode("country", country));
   return JSON.stringify({ nodes, edges });
 }

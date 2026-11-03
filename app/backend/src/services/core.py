@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from ..database.repositories.study import StudyRepository
 from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
@@ -41,7 +43,7 @@ class StudySimilaritySearchService:
         database_id = await self.database_of_report(report_id)
         return [database_id] if database_id else None
 
-    async def get_similar_study_by_query(self, query : Any, cutoff: str, limit: int, authors:List[str], database_id: Optional[int] = None):
+    async def get_similar_study_by_query(self, query : Any, cutoff: Optional[datetime], limit: int, authors:List[str], database_id: Optional[int] = None):
 
         #Convert TagCategories:
 
@@ -86,7 +88,7 @@ class StudySimilaritySearchService:
 
         return rows
 
-    async def get_similar_studies_by_id(self, report_id : int, cutoff: str, limit: int, offset: int):
+    async def get_similar_studies_by_id(self, report_id : int, cutoff: Optional[datetime], limit: int, offset: int):
         """Returns (page, has_more): `page` is the [offset, offset + limit) slice of the
         relevance-ranked candidate pool, `has_more` says whether a further page exists.
         Purely semantic (vectorstore hits plus project studies, then re-sorted by score) -
@@ -100,7 +102,7 @@ class StudySimilaritySearchService:
 
         report = await self.report_service.get_report(report_id)
 
-        authors = [item.strip() for item in report.authors.split("//")]
+        authors = list(report.authors)
 
         query = self.vectorstore.build_recommandation_based_on_report_id(report.id)
 
@@ -172,7 +174,7 @@ class StudySimilaritySearchService:
     async def get_similar_studies_page(
         self,
         report_id: int,
-        cutoff: Optional[str],
+        cutoff: Optional[datetime],
         limit: int,
         cursor: Optional[str],
         user_id: Optional[str],
@@ -237,7 +239,7 @@ class RelatedTagSearchService:
         related_ids = {item.id for items in related_tags.values() for item in items}
         return await self.tag_scoring_service.score_related_tags(related_ids, vectors, aspect)
 
-    async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : str, user_id: Optional[str] = None):
+    async def search_related_tags_by_report_id(self, report_id: int, aspect: TagCategories, k : int, cutoff : Optional[datetime], user_id: Optional[str] = None):
         """`user_id` gates access the same way get_similar_studies_page does (see that
         method's docstring) - previously enforced by a separate check_report_access
         FastAPI dependency ahead of this call.

@@ -284,14 +284,14 @@ export function ProjectRow({
   };
 
   const assigneeNames = resolvedAssignees.map((assignee) => assignee.name).join(", ");
-  // The review is no ring of its own: once there is something to merge (every assignee has committed a report) or
-  // nothing is left to link (the update is locked), the rings give way to the merge of the links.
+  // The review is no ring of its own: once every assignee has committed every report (the update is locked), the
+  // rings give way to the merge of the links.
   const review = steps.find((step) => step.key === "review");
   // Every report is merged or deleted: the update is done, nobody is assigned or deletes it any more.
   const finished =
     project.numberReportsTotal > 0 &&
     project.numberReportsMerged + project.numberReportsDeleted >= project.numberReportsTotal;
-  const showMerge = Boolean(review) && (finished || project.locked || review!.ready > review!.done);
+  const showMerge = Boolean(review) && (finished || project.locked);
   const ownAssignment = userId ? assigneeMap.get(userId) : undefined;
   // An admin who is not assigned can assign themselves from the hint of the linkage ring.
   const rowSteps = steps

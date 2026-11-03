@@ -57,7 +57,7 @@ export interface ReportCurationDto extends ReportDto {
   hasPdf: boolean | undefined;
   flag?: string;
   assignedStudies?: StudyPreviewDto[];
-  // The unconfirmed .ris-upload/fulltext guess (report_added.trial_registration_id) -
+  // The unconfirmed .ris-upload guess (UpdateReport.preliminary_trial_id) -
   // distinct from trialId above, which only ever holds a reviewer-confirmed value.
   // Optional for the same reason flag/assignedStudies are: ReportIntakeDto doesn't carry
   // it either, but still needs to satisfy this shape (see this interface's comment).
@@ -102,7 +102,6 @@ export interface ReportFiltersState {
   flagged?: FilterMode;
   newStudy?: FilterMode;
   consensus?: FilterMode;
-  reviewed?: FilterMode;
 }
 
 // One filter dimension in the report list's filter bar, rendered as a single dropdown button
@@ -129,12 +128,11 @@ export interface GetProjectReportsParams extends ReportFiltersState {
 // ---------------------------------------------------------------------------
 
 // The fields needed to create a study - everything else (studyId, timestamps) is
-// server-generated, so this also doubles as the addStudy request payload.
+// server-generated, so this also doubles as the request payload of POST /reports/{id}/studies.
 export interface StudyBaseDto {
   status: string;
   shortName: string;
-  countries: string[];
-  numberParticipants: string | null;
+  numberParticipants: number | null;
   // Overall duration, e.g. "12 weeks". Null: the study schema calculates it from the arms (`derive` of the field).
   duration: string | null;
   trialId: string | null;
@@ -278,7 +276,6 @@ export interface StudyGraphEdgeDto {
 export interface StudyGraphDto {
   nodes: StudyGraphNodeDto[];
   edges: StudyGraphEdgeDto[];
-  text: string | null;
 }
 
 // Bare-bones Study identity for ReportCurationDto.assignedStudies - the UI only ever
@@ -345,7 +342,6 @@ export interface ProjectDto{
   numberReportsReadyForReview: number;
   // Reports every assignee has committed their links of: the owner can merge them (finished ones included).
   numberReportsReadyForMerge: number;
-  numberReportsConfirmed: number;
   // Reports finished with: merged into the core database or deleted; both are archived.
   numberReportsMerged: number;
   numberReportsDeleted: number;
@@ -493,7 +489,6 @@ export interface AnnotationDto {
   user: string;
   studyId: number;
   studyShortName: string;
-  confirmed: boolean,
 }
 
 export interface AnnotationFlagDto {

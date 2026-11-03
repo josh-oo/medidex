@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
-from ..database.models import Project as DbProject, Report as DbReport
+from ..database.models import Project as DbProject, UpdateReport
 from ..database.repositories.archive import DELETED, MERGED, ArchiveRepository
 from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
@@ -21,7 +21,7 @@ from ..utils.dto import (
 )
 from ..utils.pagination import decode_cursor, encode_cursor
 from ..utils.ris_parser import UploadedFile, parse_file
-from ..utils.trial_registration_id import extract_trial_id
+from ..utils.trial_registration_id import extract_trial_id, is_trial_registration
 from .authorization import ProjectAccessDeniedError
 from .database import DatabaseIndexingError, StudyDatabaseService
 from .report import DocumentService
@@ -83,7 +83,7 @@ class ProjectResourceService:
         if not report_ids:
             return set(), set(), set()
 
-        # report_added.embedded mirrors Qdrant (see models.py); whether a report has a PDF
+        # UpdateReport.embedded mirrors Qdrant (see models.py); whether a report has a PDF
         # is read from the data volume (see ReportRepository.get_readiness_sets).
         embedded_reports, pdf_ready_reports = await self.report_repo.get_readiness_sets(report_ids)
         # Reports still being postprocessed (e.g. metadata extraction) aren't ready yet either.
@@ -95,14 +95,13 @@ class ProjectResourceService:
         """For callers that already have the project row (e.g. get_all_project_stats,
         which just fetched every project).
 
-        The reports of the project are those still in it (report_added) and those finished with (merged or deleted,
+        The reports of the project are those still in it (update_report) and those finished with (merged or deleted,
         see UpdateMergeService), which have gone through every step: the counts include them.
         """
         report_ids = await self.project_repo.get_project_associated_report_ids(project.id)
         outcomes = await self.archive_repo.get_outcome_counts(project.id)
         finished = sum(outcomes.values())
         auto_searched_pdf_count = await self.project_repo.get_auto_searched_pdf_count_for_project(project.id)
-        confirmed_report_count = await self.project_repo.get_confirmed_report_count_for_project(project.id)
 
         embedded_reports, reports_with_pdf, ready_reports = await self.get_vectorized_and_ready_report_ids(project.id)
 
@@ -137,7 +136,7 @@ class ProjectResourceService:
         return Project(
             projectId=project.id,
             name=project.description,
-            createdAt=project.date_created,
+            createdAt=project.created_at,
             databaseId=project.database_id,
             numberReportsTotal=len(report_ids) + finished,
             numberReportsPreProcessed=len(embedded_reports) + finished,
@@ -146,12 +145,11 @@ class ProjectResourceService:
             numberReportsReadyForReview=ready_for_review_count + finished,
             numberReportsReadyForMerge=len(ready_for_merge) + finished,
             numberReportsAutoSearchedPdf=auto_searched_pdf_count + finished,
-            numberReportsConfirmed=confirmed_report_count,
             numberReportsMerged=outcomes.get(MERGED, 0),
             numberReportsDeleted=outcomes.get(DELETED, 0),
             numberReportsPostprocessing=postprocessing_total + finished,
             numberReportsPostprocessed=postprocessing_finished + finished,
-            owner=project.uploaded_by,
+            owner=project.created_by,
             assignees=assignee_payload,
             locked=bool(assignee_ids)
             and all(self._has_committed_all(commit_counts, report_ids, finished, user_id) for user_id in assignee_ids),
@@ -213,8 +211,8 @@ class ProjectResourceService:
                 Task(
                     projectId=project.id,
                     name=project.description,
-                    owner=project.uploaded_by or "",
-                    createdAt=project.date_created,
+                    owner=project.created_by,
+                    createdAt=project.created_at,
                     databaseId=project.database_id,
                     numberReportsTotal=len(report_ids) + finished,
                     numberReportsReadyForProcessing=len(ready_for_processing) + finished,
@@ -232,18 +230,18 @@ class ProjectResourceService:
         return tasks
 
     @staticmethod
-    def build_reports_from_entries(entries: List[dict]) -> Tuple[str, List[DbReport], List[Optional[str]]]:
+    def build_reports_from_entries(entries: List[dict]) -> Tuple[str, List[UpdateReport]]:
         """Turn parsed bibliography entries (src/utils/ris_parser.py's parse_file()
-        output) into unsaved Report rows plus the project id derived from their
+        output) into unsaved UpdateReport rows plus the project id derived from their
         fingerprint - the same deterministic hash a re-upload of the same file
-        must reproduce, so add_new_project() can detect it as a duplicate. Also returns
-        a parallel list of best-effort trial ids (one per report, order-matched) for
-        add_new_project() to seed each report's ReportAdded.trial_registration_id with -
-        this is an unconfirmed guess, so it never lands on Report itself (see that
-        field's comment in models.py).
+        must reproduce, so add_new_project() can detect it as a duplicate. Each report
+        gets a best-effort trial id as its UpdateReport.preliminary_trial_id - an
+        unconfirmed guess, so it never lands on trial_registration_id (see that field's
+        comment in models.py). An entry whose only "author" is a trial registration id is
+        the record of that trial in a registry: a registry record without authors, its trial
+        id confirmed.
         """
-        reports: List[DbReport] = []
-        trial_ids_by_report: List[Optional[str]] = []
+        reports: List[UpdateReport] = []
         fingerprint_string = ""
 
         for entry in entries:
@@ -253,7 +251,9 @@ class ProjectResourceService:
 
             trial_ids = extract_trial_id(title=title, abstract=abstract, authors=authors)
             trial_id = trial_ids[0] if len(trial_ids) == 1 else None
+            registry_record = is_trial_registration(authors)
 
+            # The fingerprint keeps the authors as they were uploaded, so a re-upload reproduces it.
             authors_str = "//".join(authors)
             safe_title = title.replace("\n", " ")
 
@@ -262,10 +262,11 @@ class ProjectResourceService:
             except AttributeError:
                 safe_abstract = str(abstract) if abstract is not None else ""
 
-            reports.append(DbReport(
+            reports.append(UpdateReport(
                 title=safe_title,
                 abstract=safe_abstract,
-                authors=authors_str,
+                authors=[] if registry_record else [author.strip() for author in authors if author.strip()],
+                trial_registration_id=authors[0].strip() if registry_record else None,
                 journal=entry.get('secondary_title', None),
                 year=int(entry.get('year', None)),
                 volume=entry.get('volume', None),
@@ -275,14 +276,14 @@ class ProjectResourceService:
                 publisher=entry.get('publisher', None),
                 city=entry.get('place_published', None),
                 doi=entry.get('doi', None),
+                preliminary_trial_id=trial_id,
             ))
-            trial_ids_by_report.append(trial_id)
 
             fingerprint_string += "|".join([safe_title or "", safe_abstract or "", authors_str or ""])
 
         # A short prefix of the fingerprint keeps the id readable in URLs while still telling uploads apart.
         project_id = hashlib.sha256(fingerprint_string.encode()).hexdigest()[:PROJECT_ID_LENGTH]
-        return project_id, reports, trial_ids_by_report
+        return project_id, reports
 
     async def create_project(
         self,
@@ -318,8 +319,8 @@ class ProjectResourceService:
                 f"Database {database.name} has an update that is not merged yet; merge it before uploading the next one"
             )
         entries = await parse_file(upload)
-        project_id, reports, trial_ids = self.build_reports_from_entries(entries)
-        saved_reports = await self.project_repo.add_new_project(project_id, project_name, reports, database_id, trial_ids)
+        project_id, reports = self.build_reports_from_entries(entries)
+        saved_reports = await self.project_repo.add_new_project(project_id, project_name, reports, database_id)
         if saved_reports is None:
             return None
 
@@ -430,7 +431,7 @@ class ProjectResourceService:
         stream_project_updates below).
         """
         project = await self.project_repo.get_project_by_id(project_id)
-        if project is not None and project.uploaded_by == self.project_repo.user_id:
+        if project is not None and project.created_by == self.project_repo.user_id:
             return
         if not await self.project_repo.is_project_assignee(project_id):
             raise ProjectAccessDeniedError(f"Not assigned to project {project_id}")
@@ -527,10 +528,9 @@ class ProjectResourceService:
         self,
         project_id: str,
         consensus: FilterMode,
-        reviewed: FilterMode,
     ) -> Set[int]:
         """The review view's id-narrowing step: fully-annotated report ids (every project
-        assignee has committed their links), optionally further narrowed by consensus/reviewed.
+        assignee has committed their links), optionally further narrowed by consensus.
         Bounded by the project's annotation rows (get_project_annotations already returns a
         compact per-report structure, no report bodies) - feeds into
         query_project_reports_page's restrict_to_ids rather than filtering an already-hydrated
@@ -554,16 +554,10 @@ class ProjectResourceService:
                 )
             }
 
-        if reviewed is not FilterMode.any:
-            candidate_ids = {
-                report_id for report_id in candidate_ids
-                if matches_filter(any(s["confirmed"] for s in _annotated_studies(report_id)), reviewed)
-            }
-
         return candidate_ids
 
     async def hydrate_report_page(
-        self, page_rows: List[DbReport], limit: int, *, include_report_detail: bool = False
+        self, page_rows: List[UpdateReport], limit: int, *, include_report_detail: bool = False
     ) -> Page[ReportCuration] | Page[ReportIntake]:
         """Turns a page of plain Report rows - as ReportRepository.query_project_reports_page
         returns them, including its +1 lookahead row - into the DTO shape, fetching only
@@ -676,7 +670,6 @@ class ProjectResourceService:
         *,
         search: Optional[str] = None,
         consensus: FilterMode = FilterMode.any,
-        reviewed: FilterMode = FilterMode.any,
         cursor: Optional[str] = None,
         limit: int = 50,
     ) -> Page[ReportCuration]:
@@ -685,7 +678,7 @@ class ProjectResourceService:
         deleted reports have left the project.
         """
         cursor_id = decode_cursor(cursor) if cursor else None
-        restrict_to_ids = await self.review_candidate_report_ids(project_id, consensus, reviewed)
+        restrict_to_ids = await self.review_candidate_report_ids(project_id, consensus)
         page_rows = await self.report_repo.query_project_reports_page(
             project_id,
             require_ready=True,

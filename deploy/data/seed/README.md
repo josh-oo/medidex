@@ -14,7 +14,8 @@ file). The ids of studies and reports are those the importing database gives the
   stores each under the id of its report.
 
 The corpus is normalized for RCT-focused workflows: the `graph` of every study holds its
-comparison (its arms, what they receive, their arm types and durations and the comparison between them, see
+comparison and its countries (its arms, what they receive, their arm types and durations and the comparison between
+them, and the countries it takes place in, see
 `config/medidex-study.yaml` and `app/backend/src/utils/graph.py`): both sides
 are interventions of the study (the control of each study is an intervention of its own), the
 linked study and report designs are normalized to parallel-group randomized

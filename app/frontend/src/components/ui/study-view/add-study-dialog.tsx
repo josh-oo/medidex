@@ -290,22 +290,16 @@ export function AddStudyDialog({
     }
     const duration = durationValue.trim() && durationUnit ? `${durationValue.trim()} ${durationUnit}` : null;
 
-    const graph = buildGraph(arms, comparisons);
+    const graph = buildGraph(arms, comparisons, selectedCountries);
     if (graph === null) {
       toast.error("Compare at least two arms that have interventions.");
       return;
     }
 
-    const normalizedCountries =
-      selectedCountries.length > 0
-        ? selectedCountries.map((country) => country.trim()).filter(Boolean)
-        : ["Unclear"];
-
     const payload: StudyBaseDto = {
       shortName: shortName.trim(),
       status: statusOfStudy.trim(),
-      countries: normalizedCountries,
-      numberParticipants: participantsValue === null ? null : String(participantsValue),
+      numberParticipants: participantsValue,
       duration,
       graph,
       trialId: null, //TODO

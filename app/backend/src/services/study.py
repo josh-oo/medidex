@@ -1,5 +1,5 @@
 from ..database.repositories.study import StudyRepository
-from ..utils.dto import Page, Study, StudyPayload, studies_to_dto
+from ..utils.dto import Page, Study, studies_to_dto
 from ..utils.pagination import decode_cursor, encode_cursor
 from ..utils.query_parser import QueryNode, parse_advanced_query, parse_search_query
 
@@ -8,15 +8,6 @@ from typing import List, Optional, Sequence, Tuple, Union
 class StudyResourceService:
     def __init__(self, study_repo : StudyRepository):
         self.study_repo = study_repo
-
-    async def add_study(self, study : StudyPayload, database_id: int):
-        try:
-            new_study = await self.study_repo.add_study(study.model_dump(), database_id)
-            await self.study_repo.commit()
-            return studies_to_dto([new_study])[0]
-        except:
-            await self.study_repo.rollback()
-            raise
 
     async def get_studies(self, study_ids : List[int]):
         result = await self.study_repo.get_studies(study_ids)

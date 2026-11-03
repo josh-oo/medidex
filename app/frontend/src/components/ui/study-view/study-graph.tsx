@@ -73,13 +73,13 @@ const edgesOf = (schema: GraphSchemaDto, graph: StudyGraphDto, relation: GraphRe
       return from && to ? [{ from, to }] : [];
     });
 
-// The edges of a relation as lines ("A + B vs C"), or an older study's plain text as it is.
+// The edges of a relation as lines ("A + B vs C").
 export function relationText(schema: GraphSchemaDto, graph: StudyGraphDto | null | undefined, relation: GraphRelationSchemaDto): string {
   if (!graph) return "";
   const lines = edgesOf(schema, graph, relation).map(({ from, to }) =>
     [endText(schema, graph, from), endText(schema, graph, to)].filter(Boolean).join(relation.separator),
   );
-  return lines.length > 0 ? lines.join("; ") : (graph.text ?? "");
+  return lines.join("; ");
 }
 
 function Chip({ schema, graph, end }: { schema: GraphSchemaDto; graph: StudyGraphDto; end: End }) {
@@ -110,7 +110,6 @@ export function StudyGraphBlock({ studyId }: { studyId: number }): ReactNode {
     .filter((entity) => !entity.root && !entity.value)
     .map((entity) => ({ entity, nodes: graph.nodes.filter((node) => node.kind === entity.key && !connected.has(node.id)) }))
     .filter(({ nodes }) => nodes.length > 0);
-  const fallback = relations.length === 0 && loose.length === 0 ? schema.graph.relations.find((relation) => !relation.attribute) : undefined;
 
   return (
     <>
@@ -140,11 +139,6 @@ export function StudyGraphBlock({ studyId }: { studyId: number }): ReactNode {
           </ul>
         </DetailRow>
       ))}
-      {fallback && graph.text && (
-        <DetailRow icon={fallback.icon} label={fallback.label}>
-          <p className="leading-relaxed">{graph.text}</p>
-        </DetailRow>
-      )}
     </>
   );
 }

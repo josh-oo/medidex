@@ -8,11 +8,6 @@ import { cn } from "@/lib/utils";
 import type { StudyDto } from "@/types/apiDTOs";
 import { Highlight } from "./study-search-bar";
 
-const formatParticipants = (value: string | null) => {
-  if (!value) return null;
-  const count = Number(value.replace(/,/g, ""));
-  return Number.isFinite(count) ? count.toLocaleString() : value;
-};
 
 interface StudyResultCardProps {
   study: StudyDto;
@@ -27,7 +22,9 @@ export function StudyResultCard({ study, terms, expanded, onToggle }: StudyResul
   const detailsId = useId();
   const { schema } = useStudySchema();
   const graph = useStudyGraph(study.studyId);
-  const participants = formatParticipants(study.numberParticipants);
+  const participants = study.numberParticipants?.toLocaleString();
+  // The countries of the study are values of its graph.
+  const countries = (graph?.nodes ?? []).filter((node) => node.kind === "country" && node.value).map((node) => node.value);
 
   const lines = useMemo(
     () =>
@@ -85,10 +82,10 @@ export function StudyResultCard({ study, terms, expanded, onToggle }: StudyResul
             <Calendar className="h-3.5 w-3.5" aria-hidden />
             {study.duration || "No duration"}
           </span>
-          {study.countries.length > 0 && (
+          {countries.length > 0 && (
             <span className="flex min-w-0 items-center gap-1.5">
               <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              <span className="truncate">{study.countries.join(", ")}</span>
+              <span className="truncate">{countries.join(", ")}</span>
             </span>
           )}
         </div>

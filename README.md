@@ -97,18 +97,18 @@ criteria, and admins edit name, description and criteria there and create new up
 | `POST /databases/import` | admin | a new database from an exported one with its PDFs (multipart: `file` (.zip or .json), `name`, `description`, `eligibilityCriteria` as a JSON list) |
 | `PATCH /databases/{id}` | admin | rename a database or change its description or eligibility criteria |
 | `GET /databases/{id}/export` | admin | the database as a zip archive (`database.json` and the PDFs of its reports) |
-| `GET /databases/{id}/storage` | admin | what the database takes in storage (estimates, shown by the (i) next to its name), split into `database` (what stays: its studies, the reports linked to them, their search index and PDFs) and `updates` (what only its updates need: their projects, reports not linked yet, and tables marked `UPDATE_DATA` in `src/database/models.py`, plus what extensions register in `src/utils/storage.py`); every table with a foreign key to its studies, reports or projects is counted |
+| `GET /databases/{id}/storage` | admin | what the database takes in storage (estimates, shown by the (i) next to its name), split into `database` (what stays: its studies, the reports linked to them, their search index and PDFs) and `updates` (what only its updates need: the tables marked `UPDATE_DATA` in `src/database/models.py` - their projects, reports, studies and links - plus what extensions register in `src/utils/storage.py`); every table with a foreign key to its studies, reports or projects is counted |
 | `POST /projects` | admin | requires the `databaseId` of the project |
-| `PUT /studies?databaseId=…` | any user | a study without a report, in the given database |
 | `GET /studies?q=…&databases=…` | any user | the study search, in the given databases (all without) |
-| `GET /{category}?databases=…`, `GET /countries?databases=…` | any user | the tags used by the studies of the given databases (the whole vocabulary without) |
+| `GET /{category}?databases=…` | any user | the tags of a category (e.g. `/countries`) used by the studies of the given databases (the whole vocabulary without) |
 
 **Exchange format.** An export is a zip archive, `<name>.medidex.zip`, that an import reads back unchanged
 (`app/backend/src/utils/archive.py`): `database.json` (`DatabaseExport` in `app/backend/src/utils/dto.py`) and
 the PDFs of its reports under `pdfs/`, each named by the `pdf` of its report. An import also takes the same
 layout unpacked into a directory or a `database.json` alone, without PDFs. Each study has its
-fields of the study ontology, its graph with the tags by name (see "The study ontology"), the names of its tags
-per category kept in a table, and its reports:
+fields of the study ontology, its graph with the tags by name (see "The study ontology"; its countries are `in_country`
+edges of the study), the names of its tags per category, and its reports. Times are ISO 8601, UTC if they name no
+time zone:
 
 ```json
 {
@@ -122,11 +122,13 @@ per category kept in a table, and its reports:
       "shortName": "ASTHMA-KIDS-01",
       "status": "Closed",
       "trialId": "ISRCTN12345678",
-      "numberParticipants": null,
-      "duration": null,
-      "countries": ["Germany"],
-      "graph": { "nodes": [{ "id": "arm1", "kind": "arm", "value": null }], "edges": [] },
-      "tags": { "interventions": ["Montelukast"], "conditions": ["Asthma"] },
+      "numberParticipants": 120,
+      "duration": "12 weeks",
+      "graph": {
+        "nodes": [{ "id": "arm1", "kind": "arm", "value": null }, { "id": "country1", "kind": "country", "value": "Germany" }],
+        "edges": [{ "relation": "in_country", "source": "study", "target": "country1" }]
+      },
+      "tags": { "interventions": ["Montelukast"], "conditions": ["Asthma"], "design": ["Randomized Controlled Trial"] },
       "createdAt": "2021-03-01 00:00:00",
       "reports": [{ "id": "17", "title": "…", "year": 2021, "authors": ["A. Author"], "abstract": "…", "doi": "10.…", "pdf": "pdfs/17.pdf" }]
     }
@@ -193,23 +195,44 @@ edit is recorded under (`user_id` of the request):
 | MediBot | `bot` | the project automation |
 | MCP client | `<client name> (mcp)` | an MCP client acting for the project's administrator (downstream builds) |
 
-- **Links.** The link of a report to a study is recorded per scope (`study_report_added.created_by`; in the
-  vector store under `temporary.<scope>`), so everyone sees their own links.
-- **Studies.** A study created in a scope (`study_added.created_by`) is only visible to that scope - in search,
-  candidates, details and for linking - until a reviewer confirms a link to it, from then on it is visible to
-  everyone. Studies of the seed data (no `study_added` record) are visible to everyone. Admins (reviewers) see
-  every scope's studies (`RequestContext.is_admin`); an MCP client acting for an admin does not.
+- **Links.** The link of a report of an update to a study is recorded per scope (`update_link.created_by`; in the
+  vector store under `temporary.<scope>`), so everyone sees their own links. The reports of a study - in search,
+  its details and the export - are those of the core database only (`link`): a linked report joins them
+  once it is merged. Only the reports of an update are linked; those of the core database are not.
+- **Search.** The study search (free text and advanced) covers the core database only, for every scope, admins
+  included: no study created in an update, no report of an update, no link that is not merged.
+- **Studies.** A study created in a scope (`update_study.created_by`) is only visible to that scope - in candidates,
+  details and for linking - until a report linked to it is merged into the core database, from then on
+  it is a study of the core database (`study`), visible to everyone. Admins (reviewers) see every scope's studies
+  (`RequestContext.is_admin`); an MCP client acting for an admin does not.
 - **Projects.** A scope needs access to the project: it is assigned to it (`project_assignee`, any string is a
   valid assignee), which is also what shows its progress among the assignees of the project (Curation page). An
   assignee commits the reports they are done with (`report_commit`), which then leave their list and cannot be changed.
-  Once every assignee has committed a report, the owner merges it (`POST /reports/{id}/merge`): the selected links
-  become links of every scope and the report leaves the project; or deletes it, so that it never reaches the database.
-  Either way what the project knew of the report goes to `report_archive` (read-only, e.g. for training models) and its
-  update data is removed, the extensions' included (`src/utils/storage.py`). A database takes one open update at a
-  time: the next one is uploaded once every report of the last one is merged or deleted.
+  Once every assignee has committed a report, the owner merges it (`POST /reports/{id}/merge`): the report, the
+  selected studies created in the update and its links to them move into the core database; or deletes it, so that it
+  never reaches the database. Either way what the project knew of the report goes to `report_archive` (read-only, e.g.
+  for training models) and the report leaves the update with its update data, the extensions' included
+  (`src/utils/storage.py`). A database takes one open update at a time: the next one is uploaded once every report of
+  the last one is merged or deleted.
 - **Not scoped.** PDFs and their upload are global: a PDF found for a report is the PDF of the report.
 
-Implemented in `StudyRepository._visible()` and `LinkageService` (a study that is not visible cannot be linked).
+Implemented in `StudyRepository._visible_drafts()` and `LinkageService` (a study that is not visible cannot be linked).
+
+### The core database and its updates
+
+The two are kept apart by table (`src/database/models.py`). The core tables (`report`, `study`, `link`, the
+tags) hold the core database only; an update has tables of its own: `update_report` for its reports (with what the
+update keeps of them: the PDF search, the embedding, the preliminary trial id), `update_study` for the studies created
+in it and `update_link` for the links of its scopes, each to a study of the core database or of the update. A report
+and a study keep their id when they are merged: both tables of each draw it from one sequence. The tags of a study of
+an update stay names in its graph until it is merged; only then do they become tags of the core database.
+
+Everything that only serves the curation of an update (flags, commits, scores, and the tables of the extensions) is
+marked `UPDATE_DATA` and references the update (`project`, `update_report`, `update_study`) with `ON DELETE CASCADE`:
+deleting a project, or a report of an update when it is merged or deleted, removes it, and never a row of the core
+database. A table with a foreign key to a table of the updates has to be one itself; the backend does not start
+otherwise (`ResourceSchema.check_stages`). What a report keeps in both stages has a table for each, and a merge hook
+(`src/utils/mergehooks.py`) moves its row.
 
 ## embedding
 This service transforms plain text into vector embeddings. It runs HuggingFace

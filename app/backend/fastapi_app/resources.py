@@ -16,15 +16,13 @@ from .auth import is_verified_api_call, is_admin
 
 from src.database.models import Report as DbReport, Study as DbStudy
 
-from src.database.repositories.study import DuplicateShortNameError
 from src.utils.query_parser import QuerySyntaxError, SEARCH_QUERY_DESCRIPTION
 from src.context import RequestContext
 from src.services.authorization import ProjectAccessDeniedError
 from src.services.project import ProjectNotFoundError
 from .deps import get_context
 
-from src.utils.dto import Study, StudyFull, StudySchema, StudyFieldSchema, StudyMetaSchema, StudyGraph, GraphSchema, GraphEntitySchema, GraphRelationSchema, TagCategorySchema, StudyPayload, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
-from src.database.tagstorage import TAG_TABLES
+from src.utils.dto import Study, StudyFull, StudySchema, StudyFieldSchema, StudyMetaSchema, StudyGraph, GraphSchema, GraphEntitySchema, GraphRelationSchema, TagCategorySchema, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
 from src.utils.studyconfig import STUDY_CONFIG
 from src.utils.tagconfig import TAG_CATEGORIES
 from src.utils.pagination import encode_cursor, decode_cursor, InvalidCursorError
@@ -64,19 +62,6 @@ async def _search_studies_or_400(ctx: RequestContext, q: str, limit: int, cursor
     except (InvalidCursorError, QuerySyntaxError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-@router.put("/studies", summary="Add new study to a study database.")
-async def add_study(
-    study_params: StudyPayload,
-    databaseId: int = Query(..., description="The study database the study belongs to."),
-    ctx: RequestContext = Depends(get_context),
-) -> Study:
-    if await ctx.database_repo.get_database(databaseId) is None:
-        raise HTTPException(status_code=404, detail=f"Database {databaseId} not found")
-    try:
-        return await ctx.study_service.add_study(study_params, databaseId)
-    except DuplicateShortNameError:
-        raise HTTPException(status_code=409, detail="Shortname already exists")
-
 @router.get("/studies", summary="Get study details for all studies specified in the query, or - if `q` is given - search studies by name, trial ID, author or intervention (free-text, or advanced AND/OR field matching).")
 async def get_studies(
     study_ids: List[int] = study_ids_query,
@@ -108,11 +93,11 @@ async def get_study_graphs(study_ids: List[int] = study_ids_query, ctx: RequestC
     return await ctx.study_repo.get_graphs(studies)
 
 @router.get("/studies/reports", include_in_schema=False)
-async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[DbReport]]:
+async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: Optional[datetime] = cutoff_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[DbReport]]:
     return await ctx.study_repo.get_study_reports_by_study_ids(study_ids, cutoff)
 
 @router.get("/studies/persons", include_in_schema=False)
-async def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, normalize_names : bool = Query(False), ctx: RequestContext = Depends(get_context)) -> Dict[int, List[str]]:
+async def get_study_persons(study_ids: List[int] = study_ids_query, cutoff: Optional[datetime] = cutoff_query, normalize_names : bool = Query(False), ctx: RequestContext = Depends(get_context)) -> Dict[int, List[str]]:
     return await ctx.study_repo.get_study_persons(study_ids, cutoff, normalize_names)
 
 async def get_study_by_id(study_id: int = study_id_path, ctx: RequestContext = Depends(get_context)) -> DbStudy:
@@ -124,7 +109,7 @@ async def get_study_by_id(study_id: int = study_id_path, ctx: RequestContext = D
 @router.get("/studies/{study_id}/reports", summary="Get reports (id + title only) already belonging to this study, paginated.")
 async def get_study_reports_by_id(
     study_id: int = study_id_path,
-    cutoff: str = cutoff_query,
+    cutoff: Optional[datetime] = cutoff_query,
     limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=100, description="Maximum number of results to return per page."),
     cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
     ctx: RequestContext = Depends(get_context),
@@ -139,8 +124,8 @@ async def get_study_reports_by_id(
     return Page[ReportPreview](items=reports_to_base_dto(reports), nextCursor=next_cursor)
 
 
-@router.get("/studies/{study_id}/date_entered", summary="Get the date when the study was entered into the database")
-async def get_study_date_by_id(study_id: int = study_id_path, ctx: RequestContext = Depends(get_context)) -> str:
+@router.get("/studies/{study_id}/created_at", summary="Get the date when the study was entered into the database")
+async def get_study_date_by_id(study_id: int = study_id_path, ctx: RequestContext = Depends(get_context)) -> datetime:
     result = await ctx.study_repo.get_study_date_by_id(study_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Study {study_id} not found")
@@ -153,7 +138,7 @@ async def _decode_cursor_or_400(cursor: Optional[str]) -> int:
         raise HTTPException(status_code=400, detail=str(exc))
 
 @router.get("/studies/{study_id}/persons", summary="Get all persons (usually only authors) associated with a specific study")
-async def get_study_persons_single(study_id : int = study_id_path, cutoff: str = cutoff_query, normalize_names : bool = Query(False), ctx: RequestContext = Depends(get_context)) -> List[str]:
+async def get_study_persons_single(study_id : int = study_id_path, cutoff: Optional[datetime] = cutoff_query, normalize_names : bool = Query(False), ctx: RequestContext = Depends(get_context)) -> List[str]:
     return await ctx.study_repo.get_study_persons_single(study_id=study_id, cutoff=cutoff, normalize_names=normalize_names)
 
 _unknown = [key for key in (*STUDY_CONFIG.fields, *STUDY_CONFIG.meta) if key not in Study.model_fields]
@@ -213,8 +198,8 @@ Report Endpoints
 @router.get("/reports", summary="Get all report details specified by id.")
 async def get_all_reports(
     report_ids: List[int] = report_ids_query,
-    date_from: Optional[str] = Query(None, description="Filter reports with Dateentered >= this ISO datetime (e.g. '2025-01-13 00:00:00')"),
-    date_to: Optional[str] = Query(None, description="Filter reports with Dateentered <= this ISO datetime (e.g. '2025-01-31 23:59:59')"),
+    date_from: Optional[datetime] = Query(None, description="Filter reports entered at or after this ISO datetime (e.g. '2025-01-13 00:00:00', UTC)"),
+    date_to: Optional[datetime] = Query(None, description="Filter reports entered at or before this ISO datetime (e.g. '2025-01-31 23:59:59', UTC)"),
     ctx: RequestContext = Depends(get_context),
 ) -> List[DbReport]:
     return await ctx.report_repo.get_all_reports(report_ids, date_from, date_to)
@@ -247,8 +232,8 @@ async def delete_report(
 @router.get("/reports/{report_id}/studies", summary="Get the studies linked to this specific report.")
 async def get_report_studies_by_id(
     report_id: int = report_id_path,
-    date_from: Optional[str] = Query(None, description="Filter studies with DateEntered >= this ISO datetime (e.g. '2025-01-13 00:00:00')"),
-    date_to: Optional[str] = Query(None, description="Filter studies with DateEntered <= this ISO datetime (e.g. '2025-01-31 23:59:59')"),
+    date_from: Optional[datetime] = Query(None, description="Filter studies entered at or after this ISO datetime (e.g. '2025-01-13 00:00:00', UTC)"),
+    date_to: Optional[datetime] = Query(None, description="Filter studies entered at or before this ISO datetime (e.g. '2025-01-31 23:59:59', UTC)"),
     ctx: RequestContext = Depends(get_context),
 ) -> List[Study]:
     result = await ctx.report_repo.get_linked_studies(report_id, date_from, date_to)
@@ -387,21 +372,11 @@ def _register_tag_routes(category: str) -> None:
 
     router.add_api_route(f"/studies/{{study_id}}/{category}", get_study_tags_single, methods=["GET"], name=f"get_study_{category}_single",
                          summary=f"Get the {config.description[0].lower()}{config.description[1:]}, paginated.")
-    if category not in TAG_TABLES:
-        return  # tags kept in a column of the study (countries): listed by their own endpoint
     router.add_api_route(f"/{category}", get_all_tags, methods=["GET"], name=f"get_all_{category}", response_model_exclude_none=True,
                          summary=f"Get all {category} or filter them by id.", description=config.description)
 
 for _category in TAG_CATEGORIES:
     _register_tag_routes(_category)
-
-@router.get("/countries", summary="Get all study countries or filter them by prefix.")
-async def get_all_countries(
-    prefix: Optional[str] = Query(None, description="Filter countries by prefix (case-insensitive)."),
-    databases: List[int] = Query([], description="Only the countries of studies of these study databases; all if omitted."),
-    ctx: RequestContext = Depends(get_context),
-) -> List[str]:
-    return await ctx.aspect_repo.get_all_countries(prefix, databases)
 
 """
 Other Endpoints

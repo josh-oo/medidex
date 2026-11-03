@@ -164,6 +164,7 @@ class RequestContext:
         return UpdateMergeService(
             project_repo=self.project_repo,
             report_repo=self.report_repo,
+            study_repo=self.study_repo,
             archive_repo=self.archive_repo,
             vectorstore=self.vectorstore_service,
             document_service=self.document_service,

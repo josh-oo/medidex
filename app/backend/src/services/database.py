@@ -9,7 +9,6 @@ from pydantic import ValidationError
 from ..database.models import Report as DbReport, Study as DbStudy, StudyDatabase
 from ..database.repositories.database import DatabaseRepository
 from ..database.repositories.study import DuplicateShortNameError, StudyRepository
-from ..database.tagstorage import TAG_TABLES
 from ..utils.dto import (
     Database,
     DatabaseExport,
@@ -24,12 +23,14 @@ from ..utils.dto import (
     DatabaseUpdate,
     StudyGraph,
     StudyPayload,
+    study_values,
 )
 from ..utils.archive import DatabaseArchive
 from ..utils.eligibility import EligibilityCriteria, EligibilityCriterion
 from ..utils.pdfs import PdfFiles
 from ..utils.storage import update_storage_registry
-from ..utils.studyconfig import GRAPH_FIELD, INLINE_SEPARATOR, STUDY_CONFIG
+from ..utils.studyconfig import GRAPH_FIELD
+from ..utils.tagconfig import TAG_CATEGORIES
 from .embedding import EmbeddingService
 from .pubsub import DatabaseStatusService
 from .report import DocumentService
@@ -148,7 +149,7 @@ class StudyDatabaseService:
             await self.database_repo.add_database(payload.name, payload.description, self._criteria(payload.eligibilityCriteria), database_id)
             progress = await self.status_service.progress(database_id, DatabaseStage.importing, "studies", len(studies)).start()
             for study, values in zip(document.studies, studies):
-                new_study = await self.study_repo.import_study(values, database_id, study.createdAt)
+                new_study = await self.study_repo.import_study(values, database_id, self._utc(study.createdAt))
                 for category, names in study.tags.items():
                     await self.study_repo.add_study_tags(new_study.id, category, names)
                 for report in study.reports:
@@ -222,7 +223,7 @@ class StudyDatabaseService:
         studies = await self.study_repo.get_database_studies(database_id)
         study_ids = [study.id for study in studies]
         graphs = await self.study_repo.get_graphs(studies)
-        tags = {category: await self.study_repo.get_study_tags(category, study_ids) for category in TAG_TABLES}
+        tags = {category: await self.study_repo.get_study_tags(category, study_ids) for category in TAG_CATEGORIES}
         reports = await self.study_repo.get_study_reports_by_study_ids(study_ids) if study_ids else {}
         files: Dict[str, Path] = {}
         for found in reports.values():
@@ -243,7 +244,7 @@ class StudyDatabaseService:
                         self._to_export_report(report, self._pdf_name(report) in files)
                         for report in sorted(reports.get(study.id, []), key=lambda report: report.id)
                     ],
-                    createdAt=study.date_entered,
+                    createdAt=study.created_at,
                 )
                 for study in studies
             ],
@@ -343,9 +344,9 @@ class StudyDatabaseService:
         if duplicates:
             problems.append(f"Short names used by more than one study: {', '.join(duplicates[:cls.MAX_IMPORT_ERRORS])}")
         for index, study in enumerate(document.studies):
-            unknown = set(study.tags) - set(TAG_TABLES)
+            unknown = set(study.tags) - set(TAG_CATEGORIES)
             if unknown:
-                problems.append(f"studies[{index}] ({study.shortName}): unknown tag categories {sorted(unknown)} (known: {', '.join(TAG_TABLES)})")
+                problems.append(f"studies[{index}] ({study.shortName}): unknown tag categories {sorted(unknown)} (known: {', '.join(TAG_CATEGORIES)})")
         if problems:
             raise DatabaseImportError("; ".join(problems[:cls.MAX_IMPORT_ERRORS]))
         return document
@@ -374,11 +375,12 @@ class StudyDatabaseService:
     def _fields(study: DbStudy) -> Dict[str, Any]:
         """The fields as the study holds them: not the values utils/derive.py would calculate from its graph, which an
         import would turn into values of its own."""
-        values: Dict[str, Any] = {key: getattr(study, field.column) for key, field in STUDY_CONFIG.fields.items()}
-        for key in STUDY_CONFIG.inline_categories:
-            column = getattr(study, key)
-            values[key] = [part.strip() for part in column.split(INLINE_SEPARATOR) if part.strip()] if column else []
-        return values
+        return study_values(study, derive=False)
+
+    @staticmethod
+    def _utc(value: Optional[datetime.datetime]) -> Optional[datetime.datetime]:
+        """A time of the exchange format, which is UTC if it names no time zone."""
+        return value.replace(tzinfo=datetime.timezone.utc) if value is not None and value.tzinfo is None else value
 
     @staticmethod
     def _to_export_graph(graph: StudyGraph) -> Optional[Dict[str, Any]]:
@@ -422,7 +424,7 @@ class StudyDatabaseService:
     def _to_db_report(report: DatabaseReport) -> DbReport:
         db_report = DbReport(
             title=report.title.replace("\n", " "),
-            authors="//".join(author.strip() for author in report.authors if author.strip()),
+            authors=[author.strip() for author in report.authors if author.strip()],
             year=report.year,
             abstract=(report.abstract or "").replace("\n", " "),
             journal=report.journal,
@@ -436,7 +438,7 @@ class StudyDatabaseService:
             trial_registration_id=report.trialId,
         )
         if report.createdAt:
-            db_report.date_entered = report.createdAt
+            db_report.created_at = StudyDatabaseService._utc(report.createdAt)
         return db_report
 
     @classmethod
@@ -445,7 +447,7 @@ class StudyDatabaseService:
             id=str(report.id),
             title=report.title,
             year=report.year,
-            authors=[author.strip() for author in (report.authors or "").split("//") if author.strip()],
+            authors=report.authors,
             abstract=report.abstract or None,
             journal=report.journal,
             volume=report.volume,
@@ -456,7 +458,7 @@ class StudyDatabaseService:
             city=report.city,
             doi=report.doi,
             trialId=report.trial_registration_id,
-            createdAt=report.date_entered,
+            createdAt=report.created_at,
             pdf=cls._pdf_name(report) if has_pdf else None,
         )
 
@@ -472,7 +474,7 @@ class StudyDatabaseService:
             name=database.name,
             description=database.description,
             eligibilityCriteria=EligibilityCriteria.read(database.eligibility_criteria),
-            createdAt=database.date_created,
+            createdAt=database.created_at,
             numberStudies=studies,
             numberReports=reports,
             numberReportsIndexed=indexed,

@@ -126,22 +126,22 @@ class ReportService:
 
     async def get_fulltext_links(self, report_id: int) -> List[str]:
         """OpenAlex fulltext links for a report's DOI. Normally just reads the cache
-        the post-upload background job populates (report_added.fulltext_links - see
+        the post-upload background job populates (UpdateReport.fulltext_links - see
         ProjectRepository.set_report_auto_searched_pdf); falls back to a live OpenAlex
         lookup (and caches it) only for reports that cache predates - e.g. reports
         added before this field existed, or added outside the normal project-upload
         pipeline - so this is a live call at most once per report.
         """
-        report_added = await self.report_repo.get_report_added(report_id)
-        if report_added is not None and report_added.fulltext_links is not None:
-            return report_added.fulltext_links
+        update_report = await self.report_repo.get_update_report(report_id)
+        if update_report is not None and update_report.fulltext_links is not None:
+            return update_report.fulltext_links
 
         report = await self.get_report(report_id)
         if report is None or not report.doi:
             return []
 
         links = list(await self.open_alex_service.get_pdf_links_by_doi(report.doi))
-        if report_added is not None:
+        if update_report is not None:
             await self.report_repo.set_fulltext_links(report_id, links)
         return links
 
@@ -150,16 +150,16 @@ class ReportService:
         refreshes the cached fulltext links) for reports the post-upload job hasn't
         covered - same strategy as get_fulltext_links.
         """
-        report_added = await self.report_repo.get_report_added(report_id)
-        if report_added is not None and report_added.referenced_dois is not None:
-            return report_added.referenced_dois
+        update_report = await self.report_repo.get_update_report(report_id)
+        if update_report is not None and update_report.referenced_dois is not None:
+            return update_report.referenced_dois
 
         report = await self.get_report(report_id)
         if report is None or not report.doi:
             return []
 
         work = await self.open_alex_service.get_work_by_doi(report.doi)
-        if report_added is not None:
+        if update_report is not None:
             await self.report_repo.set_referenced_dois(report_id, work.referenced_dois)
         return work.referenced_dois
 

@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 class MaintenanceService:
     # The tag categories with vectors and the part of their point ids that tells them apart (transform_to_uuid);
     # that of reports is "0000".
-    TAG_POINT_KINDS = {"interventions": "0001", "conditions": "0002", "outcomes": "0003"}
+    TAG_POINT_KINDS = {"interventions": "0001", "conditions": "0002", "outcomes": "0003", "participants": "0004", "design": "0005"}
     # The points the sync owns; others (e.g. MeSH tags, "1000") are left alone.
-    MANAGED_POINT = re.compile(r"^00000000-000[0-3]-4000-a000-")
+    MANAGED_POINT = re.compile(r"^00000000-000[0-5]-4000-a000-")
     # Texts per request to the embedding service, and how long to wait for it while it starts.
     EMBEDDING_BATCH = EmbeddingService.BATCH
     EMBEDDING_ATTEMPTS = 90
@@ -99,8 +99,8 @@ class MaintenanceService:
                     "is_report": True,
                     "belongs_to_study": studies,
                     "report_id": report.id,
-                    "date_entered": report.date_entered,
-                    "authors": [author.strip() for author in (report.authors or "").split("//") if author.strip()],
+                    "created_at": report.created_at.isoformat(),
+                    "authors": list(report.authors),
                     "title": report.title,
                     "abstract": report.abstract,
                     "belongs_to_trial_id": bool(studies),

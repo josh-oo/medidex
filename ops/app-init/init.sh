@@ -35,12 +35,12 @@ else
         -d "{\"vectors\":{\"size\":$DIM,\"distance\":\"Cosine\"},\"on_disk_payload\":true}"
 
     # Index payload fields used by logic filters
-    for field in is_report source tree_ids source_id belongs_to_trial_id belongs_to_study date_entered; do
+    for field in is_report source tree_ids source_id belongs_to_trial_id belongs_to_study created_at; do
         schema="keyword"
         [ "$field" = "is_report" ] && schema="bool"
         [ "$field" = "belongs_to_trial_id" ] && schema="bool"
         [ "$field" = "source_id" ] && schema="uuid"
-        [ "$field" = "date_entered" ] && schema="datetime"
+        [ "$field" = "created_at" ] && schema="datetime"
         
         curl -sf -o /dev/null -X PUT "$QDRANT_URL/collections/$COLLECTION/index?wait=true" \
             -H 'Content-Type: application/json' \

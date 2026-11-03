@@ -65,38 +65,12 @@ export const assignStudyToReportByReportId = (
   return apiClient.put<void>(path, null, requestConfig).then(unwrap);
 }
 
-export const confirmStudyForReportByReportId = (
-  reportId: number,
-  studyId: number,
-  config?: AxiosRequestConfig
-): Promise<void> => {
-  const path = `/reports/${reportId}/studies/${studyId}/confirmation`;
-  const requestConfig = {
-    ...config,
-  };
-
-  return apiClient.put<void>(path, null, requestConfig).then(unwrap);
-}
-
-// The owner merges the report into the core database with the studies selected for it (returned), once every
-// assignee has committed it: it leaves the update and is archived.
-export const mergeReport = (reportId: number, config?: AxiosRequestConfig): Promise<number[]> => {
+// The owner merges the report into the core database with the studies selected for it among those linked (returned),
+// once every assignee has committed it: it leaves the update and is archived.
+export const mergeReport = (reportId: number, studyIds: number[], config?: AxiosRequestConfig): Promise<number[]> => {
   const path = `/reports/${reportId}/merge`;
-  return apiClient.post<number[]>(path, null, config).then(unwrap);
+  return apiClient.post<number[]>(path, { studyIds }, config).then(unwrap);
 };
-
-export const unconfirmStudyForReportByReportId = (
-  reportId: number,
-  studyId: number,
-  config?: AxiosRequestConfig
-): Promise<void> => {
-  const path = `/reports/${reportId}/studies/${studyId}/confirmation`;
-
-  return apiClient
-    .delete<void>(path, config)
-    .then(unwrap)
-    .catch(logAndRethrow(`Error removing confirmation for study ${studyId} in report ${reportId}:`));
-}
 
 //remove studies from a report
 export const removeStudyFromReportByReportId = (

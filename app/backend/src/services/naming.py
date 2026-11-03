@@ -5,11 +5,10 @@ from __future__ import annotations
 import re
 import string
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
-from ..database.models import Report, Study
+from ..database.models import ReportFields, Study, UpdateStudy
 from ..database.repositories.report import ReportRepository
-from ..utils.trial_registration_id import is_trial_registration
 
 
 class StudyNamingService:
@@ -37,10 +36,12 @@ class StudyNamingService:
         return base + self._suffix(index)
 
     async def _taken_names(self, base: str) -> set[str]:
-        """The lowercased names of the studies called `base`, with or without a letter appended."""
-        result = await self.db.execute(
-            select(Study.short_name).where(func.lower(Study.short_name).startswith(base.lower(), autoescape=True))
-        )
+        """The lowercased names of the studies (of the core database and of the updates) called `base`, with or without
+        a letter appended."""
+        result = await self.db.execute(union_all(*(
+            select(model.short_name).where(func.lower(model.short_name).startswith(base.lower(), autoescape=True))
+            for model in (Study, UpdateStudy)
+        )))
         pattern = re.compile(re.escape(base) + "[a-z]?", re.I)
         return {name.lower() for (name,) in result.all() if pattern.fullmatch(name)}
 
@@ -49,10 +50,10 @@ class StudyNamingService:
         return string.ascii_lowercase[index] if index < len(string.ascii_lowercase) else str(index)
 
     @classmethod
-    def _author_year(cls, report: Report) -> str:
-        if is_trial_registration(report.authors):
-            return report.authors.strip()
-        first = next((author.strip() for author in (report.authors or "").split("//") if author.strip()), "")
+    def _author_year(cls, report: ReportFields) -> str:
+        if report.is_registry_record():
+            return report.trial_registration_id
+        first = next((author.strip() for author in report.authors if author.strip()), "")
         return f"{cls._surname(first) or 'Unknown'} {report.year}"
 
     @staticmethod

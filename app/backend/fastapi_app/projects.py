@@ -4,6 +4,7 @@ from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, Backg
 from fastapi.responses import Response, StreamingResponse
 from typing import Dict, List, Any, Optional
 import json
+from pydantic import BaseModel
 import logging
 
 from src.utils.ris_parser import RisParseError
@@ -142,10 +143,15 @@ async def commit_project_work(project_id: str = project_id_path, ctx: RequestCon
 
     return Response(status_code=204)
 
-@router.post("/reports/{report_id}/merge", dependencies=[Depends(is_admin)], summary="Merge a report of an update into the core database.", description="Once every assignee of its update has committed their links of the report, its owner merges it with the studies they selected: the links become links of the core database, which every scope sees, the report leaves the update, and what the update knew of it is archived. Returns the ids of the studies it was merged into.")
-async def merge_report(report_id: int, ctx: RequestContext = Depends(get_context)) -> List[int]:
+class MergeRequest(BaseModel):
+    # The studies to merge the report with, among those the assignees linked it to.
+    studyIds: List[int]
+
+
+@router.post("/reports/{report_id}/merge", dependencies=[Depends(is_admin)], summary="Merge a report of an update into the core database.", description="Once every assignee of its update has committed their links of the report, its owner merges it with the studies they select among those linked: the links become links of the core database, which every scope sees, the report leaves the update, and what the update knew of it is archived. Returns the ids of the studies it was merged into.")
+async def merge_report(report_id: int, body: MergeRequest, ctx: RequestContext = Depends(get_context)) -> List[int]:
     try:
-        return await ctx.merge_service.merge_report(report_id)
+        return await ctx.merge_service.merge_report(report_id, body.studyIds)
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ProjectAccessDeniedError as exc:
@@ -257,7 +263,6 @@ async def get_project_reports_review(
     ctx: RequestContext = Depends(get_context),
     search: Optional[str] = _search_query,
     consensus: FilterMode = Query(FilterMode.any, description="Only/exclude reports where annotators agree on the linked study."),
-    reviewed: FilterMode = Query(FilterMode.any, description="Only/exclude reports where an annotator has confirmed their annotation."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
     include: List[str] = _include_query,
@@ -267,7 +272,6 @@ async def get_project_reports_review(
             project_id,
             search=search,
             consensus=consensus,
-            reviewed=reviewed,
             cursor=cursor,
             limit=limit,
         )

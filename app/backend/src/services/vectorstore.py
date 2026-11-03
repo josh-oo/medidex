@@ -315,7 +315,7 @@ class VectorstoreService():
     async def add_report_to_vectorstore(self, report):
         title = report.title
         abstract = report.abstract
-        authors = [item.strip() for item in report.authors.split("//")]
+        authors = list(report.authors)
 
         text_to_process = []
         if title:
@@ -332,7 +332,7 @@ class VectorstoreService():
             'abstract': abstract,
             'source_id': report.id,
             'authors': authors,
-            'date_entered': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            'created_at': report.created_at.isoformat(),
             'belongs_to_study': [],
             'belongs_to_trial_id': False,
             'temporary': {},
@@ -360,8 +360,8 @@ class VectorstoreService():
                 'title': report.title,
                 'abstract': report.abstract,
                 'source_id': report.id,
-                'authors': [item.strip() for item in report.authors.split("//")],
-                'date_entered': report.date_entered,
+                'authors': list(report.authors),
+                'created_at': report.created_at.isoformat(),
                 'belongs_to_study': studies,
                 'belongs_to_trial_id': bool(studies),
                 'temporary': {},
@@ -467,13 +467,13 @@ class VectorstoreService():
                     )
                 )
     
-    async def search_similar_studies(self, query : Any, k : int, cutoff : str, database_id : Optional[int] = None):
+    async def search_similar_studies(self, query : Any, k : int, cutoff : Optional[datetime], database_id : Optional[int] = None):
         """The top-k studies of the database (all databases for None), each as a group whose id is the study id."""
         filters = [models.FieldCondition(key="is_report",match=models.MatchValue(value=True)), *self._in_database(database_id)]
         if cutoff:
             filters.append(Filter(
                 must=[
-                    FieldCondition(key="date_entered",range=DatetimeRange(lt=datetime.fromisoformat(cutoff)))
+                    FieldCondition(key="created_at",range=DatetimeRange(lt=cutoff))
                 ]
             ))
 

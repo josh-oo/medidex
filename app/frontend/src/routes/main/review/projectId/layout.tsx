@@ -23,7 +23,6 @@ interface ProjectReviewData {
 
 const reportFilterDimensions: ReportFilterDimension[] = [
   { field: "consensus", label: "Agreement", onlyLabel: "Consensus", excludeLabel: "Conflict" },
-  { field: "reviewed", label: "Review", onlyLabel: "Reviewed", excludeLabel: "Pending review" },
 ];
 
 const emptyReviewData: ProjectReviewData = { reports: [], annotations: {} };

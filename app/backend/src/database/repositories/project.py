@@ -3,22 +3,19 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from dataclasses import dataclass
 from sqlalchemy import exists, func
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import selectinload
-from sqlmodel import select, delete, insert, update
+from sqlmodel import select, delete, insert
 from collections import defaultdict
 
 from ..models import (
-    Report,
     Study,
-    ReportAdded,
     ReportFlag,
     Project,
     ProjectInnerScore,
-    StudyAdded,
-    StudyReport,
-    StudyReportAdded,
     ProjectAssignees,
     ReportCommit,
+    UpdateLink,
+    UpdateReport,
+    UpdateStudy,
 )
 from typing import Any, Dict, List, Set, Tuple, Optional
 
@@ -37,32 +34,21 @@ class ProjectRepository:
         self.db = db
         self.user_id = str(user_id)
 
-    async def add_new_project(self, project_id : str, batch_description : str, reports : List[Report], database_id : int, trial_ids : Optional[List[Optional[str]]] = None):
+    async def add_new_project(self, project_id : str, batch_description : str, reports : List[UpdateReport], database_id : int):
+        """Adds the project (the update) with its reports; None if the project exists already."""
         try:
             new_project = Project(
                 id=project_id,
                 description=batch_description,
-                uploaded_by=self.user_id,
+                created_by=self.user_id,
                 database_id=database_id,
             )
             self.db.add(new_project)
+            await self.db.flush()
 
-            # Add all reports at once
+            for report in reports:
+                report.project_id = project_id
             self.db.add_all(reports)
-            await self.db.flush()  # Flush once to get all IDs
-
-            # Create all ReportAdded entries - trial_ids (parallel to reports, from
-            # ProjectResourceService.build_reports_from_entries's .ris-upload parse)
-            # lands here rather than on Report itself, since it's an unconfirmed,
-            # project-scoped guess - see ReportAdded.trial_registration_id in models.py.
-            if trial_ids is None:
-                trial_ids = [None] * len(reports)
-            report_added_entries = [
-                ReportAdded(report_id=report.id, project_id=project_id, trial_registration_id=trial_id)
-                for report, trial_id in zip(reports, trial_ids)
-            ]
-            self.db.add_all(report_added_entries)
-
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()
@@ -81,59 +67,32 @@ class ProjectRepository:
         project = await self.db.execute(stmt)
         return project.scalar_one_or_none()
 
-    async def get_similar_report_studies(self, report_id: int, min_score: float) -> List[Study]:
-        """
-        Internal implementation to get studies linked to similar reports.
-
-        Args:
-            report_id: The reference report ID
-            min_score: Minimum similarity score threshold
-            user_id: Filter by user who created the study-report link
-            session: Database session
-
-        Returns:
-            List of Study objects linked to similar reports, or empty list if report doesn't exist
-        """
-        # Check if report exists
-        report = await self.db.get(Report, report_id)
-        if not report:
-            return []
-
-        # Query to get studies from similar reports
-        # Note: We select ProjectInnerScore.score to make it available for ORDER BY
-        stmt = (
-            select(Study, ProjectInnerScore.score)
-            .distinct()
-            .join(StudyReport, StudyReport.study_id == Study.id)
-            .join(
-                ProjectInnerScore,
-                (ProjectInnerScore.other_id == StudyReport.report_id) &
-                (ProjectInnerScore.report_id == report_id) &
-                (ProjectInnerScore.score >= min_score)
-            )
-            .outerjoin(StudyReportAdded, StudyReport.id == StudyReportAdded.study_report_id)
-        )
-
-        # Filter by user if specified
-        if self.user_id:
-            stmt = stmt.where(
-                (StudyReportAdded.created_by == self.user_id) |
-                (StudyReportAdded.created_by.is_(None))
-            )
-
-        # Order by similarity score (descending)
-        stmt = stmt.order_by(ProjectInnerScore.score.desc())
-
-        result = await self.db.execute(stmt)
-
-        return result.all()
+    async def get_similar_report_studies(self, report_id: int, min_score: float) -> List[Tuple[Any, float]]:
+        """The studies (of the core database or of the update) this scope linked the reports of the update similar to
+        the report to (see ProjectInnerScore), with the score of the similar report, the most similar first; empty if
+        the report is no report of an update."""
+        rows: List[Tuple[Any, float]] = []
+        for model, column in ((Study, UpdateLink.study_id), (UpdateStudy, UpdateLink.update_study_id)):
+            rows += (await self.db.execute(
+                select(model, ProjectInnerScore.score)
+                .distinct()
+                .join(UpdateLink, column == model.id)
+                .join(
+                    ProjectInnerScore,
+                    (ProjectInnerScore.other_id == UpdateLink.report_id) &
+                    (ProjectInnerScore.report_id == report_id) &
+                    (ProjectInnerScore.score >= min_score)
+                )
+                .where(UpdateLink.created_by == self.user_id)
+            )).all()
+        return sorted(rows, key=lambda row: row[1], reverse=True)
 
     async def get_project_by_id(self, project_id: str):
         if not self.user_id:
             raise ValueError("User ID is required to retrieve projects.")
 
         stmt = select(Project).where(Project.id == project_id)
-        stmt = stmt.where(Project.uploaded_by == self.user_id)
+        stmt = stmt.where(Project.created_by == self.user_id)
 
         project = await self.db.execute(stmt)
         return project.scalar_one_or_none()
@@ -143,14 +102,14 @@ class ProjectRepository:
             raise ValueError("User ID is required to retrieve projects.")
 
         stmt = select(Project)
-        stmt = stmt.where(Project.uploaded_by == self.user_id)
+        stmt = stmt.where(Project.created_by == self.user_id)
 
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
     async def get_project_associated_report_ids(self, project_id : str):
         result = await self.db.execute(
-            select(ReportAdded.report_id).where(ReportAdded.project_id == project_id)
+            select(UpdateReport.id).where(UpdateReport.project_id == project_id)
         )
         return result.scalars().all()
 
@@ -164,22 +123,18 @@ class ProjectRepository:
         pass already did to find a PDF to auto-download (see
         src/background/wrapper.py's _auto_search_report_pdf) - cached here alongside
         the flag so report detail views don't have to re-query OpenAlex live
-        (see report_added.fulltext_links's comment in models.py). `referenced_dois` is
-        the same pass's list of cited DOIs (see report_added.referenced_dois).
+        (see UpdateReport.fulltext_links's comment in models.py). `referenced_dois` is
+        the same pass's list of cited DOIs (see UpdateReport.referenced_dois).
         """
-        stmt = (
-            select(ReportAdded)
-            .where(ReportAdded.report_id == report_id)
-        )
-        report_added = (await self.db.execute(stmt)).scalar_one_or_none()
-        if report_added is None:
+        report = await self.db.get(UpdateReport, report_id)
+        if report is None:
             return
 
-        report_added.auto_searched_pdf = True
+        report.auto_searched_pdf = True
         if fulltext_links is not None:
-            report_added.fulltext_links = fulltext_links
+            report.fulltext_links = fulltext_links
         if referenced_dois is not None:
-            report_added.referenced_dois = referenced_dois
+            report.referenced_dois = referenced_dois
         await self.db.flush()
 
     async def is_project_assignee(self, project_id: str) -> bool:
@@ -197,8 +152,8 @@ class ProjectRepository:
         """How many reports of the project each assignee has committed their links of."""
         result = await self.db.execute(
             select(ReportCommit.assignee, func.count(ReportCommit.report_id))
-            .join(ReportAdded, ReportAdded.report_id == ReportCommit.report_id)
-            .where(ReportAdded.project_id == project_id)
+            .join(UpdateReport, UpdateReport.id == ReportCommit.report_id)
+            .where(UpdateReport.project_id == project_id)
             .group_by(ReportCommit.assignee)
         )
         return {assignee: count for assignee, count in result.all()}
@@ -209,8 +164,8 @@ class ProjectRepository:
             return set()
         result = await self.db.execute(
             select(ReportCommit.report_id)
-            .join(ReportAdded, ReportAdded.report_id == ReportCommit.report_id)
-            .where(ReportAdded.project_id == project_id)
+            .join(UpdateReport, UpdateReport.id == ReportCommit.report_id)
+            .where(UpdateReport.project_id == project_id)
             .where(ReportCommit.assignee == self.user_id)
         )
         return set(result.scalars().all())
@@ -233,8 +188,8 @@ class ProjectRepository:
         assignees = select(ProjectAssignees.assignee).where(ProjectAssignees.project_id == project_id)
         result = await self.db.execute(
             select(ReportCommit.report_id)
-            .join(ReportAdded, ReportAdded.report_id == ReportCommit.report_id)
-            .where(ReportAdded.project_id == project_id)
+            .join(UpdateReport, UpdateReport.id == ReportCommit.report_id)
+            .where(UpdateReport.project_id == project_id)
             .where(ReportCommit.assignee.in_(assignees))
             .group_by(ReportCommit.report_id)
             .having(func.count(ReportCommit.assignee) >= assignees.with_only_columns(func.count()).scalar_subquery())
@@ -246,7 +201,7 @@ class ProjectRepository:
         result = await self.db.execute(
             select(Project.id)
             .where(Project.database_id == database_id)
-            .where(exists().where(ReportAdded.project_id == Project.id))
+            .where(exists().where(UpdateReport.project_id == Project.id))
             .limit(1)
         )
         return result.scalar_one_or_none()
@@ -270,33 +225,17 @@ class ProjectRepository:
             select(Project)
             .join(ProjectAssignees, ProjectAssignees.project_id == Project.id)
             .where(ProjectAssignees.assignee == self.user_id)
-            .order_by(Project.date_created.desc())
+            .order_by(Project.created_at.desc())
         )
 
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
-    async def get_confirmed_report_count_for_project(self, project_id: str) -> int:
-            """
-            Returns the number of distinct reports for a given project
-            that are confirmed (StudyReportAdded.confirmed == True).
-            """
-            stmt = (
-                select(func.count(func.distinct(ReportAdded.report_id)))
-                .select_from(ReportAdded)
-                .join(StudyReport, StudyReport.report_id == ReportAdded.report_id)
-                .join(StudyReportAdded, StudyReportAdded.study_report_id == StudyReport.id)
-                .where(ReportAdded.project_id == project_id)
-                .where(StudyReportAdded.confirmed.is_(True))
-            )
-            result = await self.db.execute(stmt)
-            return int(result.scalar_one() or 0)
-
     async def get_auto_searched_pdf_count_for_project(self, project_id: str) -> int:
         stmt = (
-            select(func.count(ReportAdded.report_id))
-            .where(ReportAdded.project_id == project_id)
-            .where(ReportAdded.auto_searched_pdf.is_(True))
+            select(func.count(UpdateReport.id))
+            .where(UpdateReport.project_id == project_id)
+            .where(UpdateReport.auto_searched_pdf.is_(True))
         )
         result = await self.db.execute(stmt)
         return int(result.scalar_one() or 0)
@@ -306,23 +245,19 @@ class ProjectRepository:
             raise ValueError("User ID is required to retrieve project information.")
 
         stmt = (
-            select(ReportAdded.project_id, func.count(func.distinct(StudyReport.report_id)))
-            .select_from(StudyReportAdded)
-            .join(StudyReport, StudyReportAdded.study_report_id == StudyReport.id)
-            .join(ReportAdded, ReportAdded.report_id == StudyReport.report_id)
-            .where(StudyReportAdded.created_by == self.user_id)
-            .group_by(ReportAdded.project_id)
+            select(UpdateReport.project_id, func.count(func.distinct(UpdateLink.report_id)))
+            .join(UpdateReport, UpdateReport.id == UpdateLink.report_id)
+            .where(UpdateLink.created_by == self.user_id)
+            .group_by(UpdateReport.project_id)
         )
 
         result = await self.db.execute(stmt)
         return {project_id: count for project_id, count in result.all()}
 
     async def delete_project(self, project_id: str) -> Optional[DeletedProject]:
-        """Delete a project with everything it brought into the database, so that the database is as it was
-        before the project was added: its reports, also those already linked to a study (a cascade of the
-        models and the foreign keys, see Project.reports_added), and the studies created in the application
-        (they have a study_added record) that have no report left afterwards. Studies that existed before
-        stay, minus the links to the deleted reports.
+        """Delete a project with everything it brought in that is not merged yet: its reports of the update with
+        their links, and the studies created in it (the foreign keys of the tables of the updates, see UPDATE_DATA).
+        The core database stays as it is, the reports already merged into it included.
 
         Only the uploader can delete a project. Returns None, deleting nothing, if there is no such project
         or it was uploaded by somebody else; otherwise what is left to remove outside the database.
@@ -333,30 +268,15 @@ class ProjectRepository:
         stmt = (
             select(Project)
             .where(Project.id == project_id)
-            .where(Project.uploaded_by == self.user_id)
-            .options(selectinload(Project.reports_added).selectinload(ReportAdded.report))
+            .where(Project.created_by == self.user_id)
         )
         project = (await self.db.execute(stmt)).scalar_one_or_none()
         if project is None:
             return None
 
-        reports = [added.report for added in project.reports_added]
-        report_ids = [report.id for report in reports]
-        deleted = DeletedProject(report_ids=report_ids)
-        linked_study_ids = list((await self.db.execute(
-            select(StudyReport.study_id).where(StudyReport.report_id.in_(report_ids)).distinct()
-        )).scalars().all()) if report_ids else []
-
+        deleted = DeletedProject(report_ids=list(await self.get_project_associated_report_ids(project_id)))
         try:
-            await self.db.delete(project)
-            await self.db.flush()
-            if linked_study_ids:
-                # The one thing a cascade cannot express: a study goes when its last report goes.
-                has_report = exists().where(StudyReport.study_id == Study.id)
-                created_here = exists().where(StudyAdded.study_id == Study.id)
-                await self.db.execute(
-                    delete(Study).where(Study.id.in_(linked_study_ids)).where(created_here).where(~has_report)
-                )
+            await self.db.execute(delete(Project).where(Project.id == project_id))
             await self.db.commit()
         except Exception:
             await self.db.rollback()
@@ -365,11 +285,11 @@ class ProjectRepository:
 
     async def project_item_to_report_id(self, project_id: str, report_index: int):
         stmt = (
-            select(ReportAdded.report_id)
+            select(UpdateReport.id)
             .where(
-                ReportAdded.project_id == project_id,
+                UpdateReport.project_id == project_id,
             )
-            .order_by(ReportAdded.report_id)
+            .order_by(UpdateReport.id)
             .offset(report_index)
             .limit(1)
         )
@@ -407,15 +327,13 @@ class ProjectRepository:
             return []
 
         count_stmt = (
-            select(StudyReportAdded.created_by, func.count(func.distinct(StudyReport.report_id)))
-            .select_from(StudyReportAdded)
-            .join(StudyReport, StudyReportAdded.study_report_id == StudyReport.id)
-            .join(ReportAdded, ReportAdded.report_id == StudyReport.report_id)
+            select(UpdateLink.created_by, func.count(func.distinct(UpdateLink.report_id)))
+            .join(UpdateReport, UpdateReport.id == UpdateLink.report_id)
             .where(
-                (ReportAdded.project_id == project_id)
-                & (StudyReportAdded.created_by.in_(assignees))
+                (UpdateReport.project_id == project_id)
+                & (UpdateLink.created_by.in_(assignees))
             )
-            .group_by(StudyReportAdded.created_by)
+            .group_by(UpdateLink.created_by)
         )
 
         count_result = await self.db.execute(count_stmt)
@@ -425,12 +343,9 @@ class ProjectRepository:
 
     async def get_report_completion_by_users(self, project_id: str) -> Dict[int, Set[str]]:
         stmt = (
-            select(StudyReport.report_id, StudyReportAdded.created_by)
-            .select_from(StudyReportAdded)
-            .join(StudyReport, StudyReportAdded.study_report_id == StudyReport.id)
-            .join(ReportAdded, ReportAdded.report_id == StudyReport.report_id)
-            .where(ReportAdded.project_id == project_id)
-            .where(StudyReportAdded.created_by.isnot(None))
+            select(UpdateLink.report_id, UpdateLink.created_by)
+            .join(UpdateReport, UpdateReport.id == UpdateLink.report_id)
+            .where(UpdateReport.project_id == project_id)
         )
 
         result = await self.db.execute(stmt)
@@ -444,8 +359,8 @@ class ProjectRepository:
         public_flag_stmt = (
             select(ReportFlag.report_id, ReportFlag.created_by)
             .select_from(ReportFlag)
-            .join(ReportAdded, ReportAdded.report_id == ReportFlag.report_id)
-            .where(ReportAdded.project_id == project_id)
+            .join(UpdateReport, UpdateReport.id == ReportFlag.report_id)
+            .where(UpdateReport.project_id == project_id)
             .where(ReportFlag.public.is_(True))
         )
 
@@ -466,25 +381,24 @@ class ProjectRepository:
         if not assignees:
             return {}
 
+        study_id = func.coalesce(UpdateLink.study_id, UpdateLink.update_study_id)
         stmt = (
             select(
-                StudyReport.report_id,
-                StudyReportAdded.created_by,
-                Study.id,
-                Study.short_name,
-                StudyReportAdded.confirmed,
+                UpdateLink.report_id,
+                UpdateLink.created_by,
+                study_id,
+                func.coalesce(Study.short_name, UpdateStudy.short_name),
             )
-            .select_from(StudyReport)
-            .join(StudyReportAdded, StudyReportAdded.study_report_id == StudyReport.id)
-            .join(ReportAdded, ReportAdded.report_id == StudyReport.report_id)
-            .join(Study, Study.id == StudyReport.study_id)
-            .where(ReportAdded.project_id == project_id)
-            .where(StudyReportAdded.created_by.in_(assignees))
-            .order_by(StudyReport.report_id, StudyReportAdded.created_by, Study.id)
+            .join(UpdateReport, UpdateReport.id == UpdateLink.report_id)
+            .outerjoin(Study, Study.id == UpdateLink.study_id)
+            .outerjoin(UpdateStudy, UpdateStudy.id == UpdateLink.update_study_id)
+            .where(UpdateReport.project_id == project_id)
+            .where(UpdateLink.created_by.in_(assignees))
+            .order_by(UpdateLink.report_id, UpdateLink.created_by, study_id)
         )
 
         if report_ids:
-            stmt = stmt.where(StudyReport.report_id.in_(report_ids))
+            stmt = stmt.where(UpdateLink.report_id.in_(report_ids))
 
         annotations: Dict[int, Dict[str, List[Dict[str, Any]]]] = defaultdict(
             lambda: {"studies": [], "flags": []}
@@ -492,13 +406,12 @@ class ProjectRepository:
 
         result = await self.db.execute(stmt)
         rows = result.all()
-        for report_id, created_by, study_id, study_name, confirmed in rows:
+        for report_id, created_by, study_id, study_name in rows:
             annotations[report_id]["studies"].append(
                 {
                     "user": created_by,
                     "studyId": study_id,
                     "studyShortName": study_name,
-                    "confirmed": bool(confirmed),
                 }
             )
 
@@ -509,8 +422,8 @@ class ProjectRepository:
                 ReportFlag.message,
             )
             .select_from(ReportFlag)
-            .join(ReportAdded, ReportAdded.report_id == ReportFlag.report_id)
-            .where(ReportAdded.project_id == project_id)
+            .join(UpdateReport, UpdateReport.id == ReportFlag.report_id)
+            .where(UpdateReport.project_id == project_id)
             .where(ReportFlag.created_by.in_(assignees))
             .where(ReportFlag.public.is_(True))
             .order_by(ReportFlag.report_id, ReportFlag.created_by)
@@ -538,7 +451,7 @@ class ProjectRepository:
         ownership_stmt = (
             select(Project.id)
             .where(Project.id == project_id)
-            .where(Project.uploaded_by == self.user_id)
+            .where(Project.created_by == self.user_id)
             .limit(1)
         )
         ownership_result = await self.db.execute(ownership_stmt)
@@ -561,7 +474,7 @@ class ProjectRepository:
         ownership_stmt = (
             select(Project.id)
             .where(Project.id == project_id)
-            .where(Project.uploaded_by == self.user_id)
+            .where(Project.created_by == self.user_id)
             .limit(1)
         )
         ownership_result = await self.db.execute(ownership_stmt)
@@ -577,27 +490,22 @@ class ProjectRepository:
         await self.db.execute(
             delete(ReportCommit)
             .where(ReportCommit.assignee == assignee)
-            .where(ReportCommit.report_id.in_(select(ReportAdded.report_id).where(ReportAdded.project_id == project_id)))
+            .where(ReportCommit.report_id.in_(select(UpdateReport.id).where(UpdateReport.project_id == project_id)))
         )
         await self.db.commit()
         return bool(result.rowcount)
 
     async def get_database_id_by_report_id(self, report_id: int) -> Optional[int]:
-        """The study database of the report's project, None for a report of no project (e.g. of the seed)."""
+        """The study database of the report's project, None for a report of the core database."""
         stmt = (
             select(Project.database_id)
-            .join(ReportAdded, ReportAdded.project_id == Project.id)
-            .where(ReportAdded.report_id == report_id)
-            .limit(1)
+            .join(UpdateReport, UpdateReport.project_id == Project.id)
+            .where(UpdateReport.id == report_id)
         )
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def get_project_id_by_report_id(self, report_id: int) -> Optional[str]:
-        stmt = (
-            select(ReportAdded.project_id)
-            .where(ReportAdded.report_id == report_id)
-            .limit(1)
-        )
+        stmt = select(UpdateReport.project_id).where(UpdateReport.id == report_id)
 
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
