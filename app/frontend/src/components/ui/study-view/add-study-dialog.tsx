@@ -85,6 +85,13 @@ const longestArmDuration = (arms: StudyArm[]): string => {
   return longest ? `${longest.value} ${longest.unit}` : "";
 };
 
+// The participants of the arms added up, as the study will calculate them: only if every arm has a number (a part would
+// understate the total); empty otherwise.
+const armParticipantsSum = (arms: StudyArm[]): string => {
+  const numbers = arms.map((arm) => Number(arm.participants));
+  return arms.length > 0 && numbers.every((value) => Number.isInteger(value) && value > 0) ? String(numbers.reduce((sum, value) => sum + value, 0)) : "";
+};
+
 const buildArmsFromSuggestion = (
   suggestion: NewStudySuggestion
 ): { arms: StudyArm[]; comparisons: ArmComparison[] } => {
@@ -282,15 +289,19 @@ export function AddStudyDialog({
       return;
     }
 
-    // Both overall values are optional: left empty, the study calculates them from its arms.
+    // Both overall values are optional: left empty, the study calculates them from its arms. Like everything of the form
+    // they are written into the graph, the only source of what the study says (onto the graph it was prefilled from).
     const participantsValue = numberOfParticipants.trim() === "" ? null : Number(numberOfParticipants);
-    if (participantsValue !== null && Number.isNaN(participantsValue)) {
+    if (participantsValue !== null && (Number.isNaN(participantsValue) || !Number.isInteger(participantsValue) || participantsValue < 0)) {
       toast.error("Enter a valid number of participants.");
       return;
     }
-    const duration = durationValue.trim() && durationUnit ? `${durationValue.trim()} ${durationUnit}` : null;
+    const duration = durationValue.trim() && durationUnit ? `${durationValue.trim()} ${durationUnit}` : undefined;
 
-    const graph = buildGraph(arms, comparisons, selectedCountries);
+    const graph = buildGraph(arms, comparisons, selectedCountries, suggestedValues?.graph, {
+      duration,
+      participants: participantsValue === null ? undefined : String(participantsValue),
+    });
     if (graph === null) {
       toast.error("Compare at least two arms that have interventions.");
       return;
@@ -299,8 +310,9 @@ export function AddStudyDialog({
     const payload: StudyBaseDto = {
       shortName: shortName.trim(),
       status: statusOfStudy.trim(),
-      numberParticipants: participantsValue,
-      duration,
+      // Views of the graph (above), which holds them.
+      numberParticipants: null,
+      duration: null,
       graph,
       trialId: null, //TODO
     };
@@ -633,6 +645,7 @@ export function AddStudyDialog({
   const normalizedCountry =
     selectedCountries.length > 0 ? selectedCountries.join(", ") : "Unclear";
   const longestArm = longestArmDuration(arms);
+  const armsSum = armParticipantsSum(arms);
   const comparisonValid = hasValidComparisons(arms, comparisons);
 
   const isSubmitDisabled =
@@ -721,7 +734,7 @@ export function AddStudyDialog({
                 id="study-participants"
                 type="number"
                 min="0"
-                placeholder="Empty: the sum of the arms"
+                placeholder={armsSum ? `${armsSum} (sum of the arms)` : "Empty: the sum of the arms"}
                 value={numberOfParticipants}
                 onChange={(event) => setNumberOfParticipants(event.target.value)}
               />
@@ -733,7 +746,7 @@ export function AddStudyDialog({
                   id="study-duration"
                   type="number"
                   min="0"
-                  placeholder={longestArm || "Longest arm"}
+                  placeholder={longestArm || "Duration"}
                   value={durationValue}
                   onChange={(event) => setDurationValue(event.target.value)}
                 />

@@ -24,17 +24,17 @@ class DurationUnitConfig(BaseModel):
 
 
 class FieldDeriveConfig(BaseModel):
-    """How a field of the study is calculated from its graph while the study has no value of its own: for every entity
-    of kind `source` (e.g. every arm), follow the relations of `path` (e.g. participated, size) to the values at their
-    end, and aggregate them."""
+    """A rule by which a field of the study is read from its graph: for every entity of kind `source` (e.g. every arm, or
+    the study itself), follow the relations of `path` (e.g. participated, has_size) to the values at their end, and
+    aggregate them."""
 
     model_config = ConfigDict(extra="forbid")
 
-    source: str  # the kind of entity to start at (a key of `graph.entities`)
+    source: str  # the kind of entity to start at (a key of `graph.entities`, the root for the study itself)
     path: List[str]  # relations (keys of `graph.relations`), each starting where the one before ended; the last ends at values
-    # sum: the values of every entity added up (only if every entity has one, as a part would understate the total);
-    # max, min: the largest, smallest value among the entities that have one.
-    aggregate: Literal["sum", "max", "min"]
+    # first: the first value; sum: the values of every entity added up (only if every entity has one, as a part would
+    # understate the total); max, min: the largest, smallest value among the entities that have one.
+    aggregate: Literal["first", "sum", "max", "min"]
 
 
 class StudyFieldConfig(BaseModel):
@@ -50,12 +50,14 @@ class StudyFieldConfig(BaseModel):
     column: str  # the attribute of the study in the database (see src/database/models.py)
     required: bool = False  # an enum field always is
     values: List[str] = []  # allowed values of an enum
-    derive: Optional[FieldDeriveConfig] = None  # what the field is while the study has no value of its own
+    # What the field is, read from the graph: the first rule that gives a value. A derived field is a view of the graph,
+    # its column a copy written with the graph (src/database/repositories/graphs.py).
+    derive: List[FieldDeriveConfig] = []
 
     @model_validator(mode="after")
     def _check_values(self) -> "StudyFieldConfig":
-        if self.derive is not None and self.type not in ("integer", "duration"):
-            raise ValueError("only integer and duration fields can be derived from the graph")
+        if self.derive and self.type == "enum":
+            raise ValueError("an enum field cannot be derived from the graph")
         if (self.type == "enum") != bool(self.values):
             raise ValueError("`values` is required for (and only for) fields of type enum")
         if len(set(self.values)) != len(self.values):
@@ -224,6 +226,7 @@ class TagCategoryConfig(BaseModel):
     search_field: str
     description: str
     free_text_search: bool = False
+    detail_of: Optional[str] = None  # the field (its key, camelCase) the tags are shown with in the study details
 
 
 class TagCategoryRegistry(BaseModel):
@@ -287,22 +290,22 @@ class StudyConfig(BaseModel):
             raise ValueError("the study ontology has durations, but no DurationUnit")
         graph = self.graph
         for key, field in self.fields.items():
-            derive = field.derive
-            if derive is None:
-                continue
-            if derive.source not in graph.entities or any(step not in graph.relations for step in derive.path) or not derive.path:
-                raise ValueError(f"field '{key}': unknown entity or relation in `derive`")
-            kinds = {derive.source}
-            for step in derive.path:
-                relation = graph.relations[step]
-                if not kinds & set(relation.source):
-                    raise ValueError(f"field '{key}': '{step}' does not start where the path is")
-                kinds = set(relation.target)
-            ends = [graph.entities[kind].value for kind in kinds]
-            if any(value is None or value.type != field.type for value in ends):
-                raise ValueError(f"field '{key}' is of type {field.type}, but its `derive` path does not end at such values")
-            if derive.aggregate == "sum" and field.type != "integer":
-                raise ValueError(f"field '{key}': only integers can be summed")
+            for derive in field.derive:
+                if derive.source not in graph.entities or any(step not in graph.relations for step in derive.path) or not derive.path:
+                    raise ValueError(f"field '{key}': unknown entity or relation in `derive`")
+                kinds = {derive.source}
+                for step in derive.path:
+                    relation = graph.relations[step]
+                    if not kinds & set(relation.source):
+                        raise ValueError(f"field '{key}': '{step}' does not start where the path is")
+                    kinds = set(relation.target)
+                ends = [graph.entities[kind].value for kind in kinds]
+                if any(value is None or value.type != field.type for value in ends):
+                    raise ValueError(f"field '{key}' is of type {field.type}, but its `derive` path does not end at such values")
+                if derive.aggregate == "sum" and field.type != "integer":
+                    raise ValueError(f"field '{key}': only integers can be summed")
+                if derive.aggregate in ("max", "min") and field.type not in ("integer", "duration"):
+                    raise ValueError(f"field '{key}': only numbers and durations have a largest or smallest value")
         for entity_key, entity in graph.entities.items():
             category = entity.value.category if entity.value else None
             if category is not None and category not in self.categories:
@@ -363,6 +366,7 @@ class StudyOntology:
                     "search_field": notes.get("search_field"),
                     "description": slot.description or "",
                     "free_text_search": self._flag(notes.get("free_text_search")),
+                    "detail_of": self._camel(notes["detail_of"]) if notes.get("detail_of") else None,
                 }
             else:
                 fields[self._camel(name)] = self._field(name, slot, notes)
@@ -388,13 +392,16 @@ class StudyOntology:
             "required": bool(slot.required),
             "values": values,
         }
-        if notes.get("derive_source"):
-            field["derive"] = {
-                "source": notes["derive_source"],
-                "path": [step for step in str(notes.get("derive_path", "")).split("/") if step],
-                "aggregate": notes.get("derive_aggregate"),
-            }
+        field["derive"] = [self._derive(rule) for rule in str(notes.get("derive") or "").split("|") if rule.strip()]
         return field
+
+    @staticmethod
+    def _derive(rule: str) -> Dict[str, Any]:
+        """A rule of `derive`: `<kind> <path> <aggregate>`."""
+        parts = rule.split()
+        if len(parts) != 3:
+            raise ValueError(f"the rule of a derived field is `<kind> <path> <aggregate>`, not {rule.strip()!r}")
+        return {"source": parts[0], "path": [step for step in parts[1].split("/") if step], "aggregate": parts[2]}
 
     def _duration_units(self) -> List[Dict[str, Any]]:
         enum = self.view.all_enums().get(self.DURATION_UNITS)

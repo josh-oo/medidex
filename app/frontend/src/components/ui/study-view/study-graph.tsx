@@ -95,19 +95,25 @@ function Chip({ schema, graph, end }: { schema: GraphSchemaDto; graph: StudyGrap
   );
 }
 
-// The graph of a study in its details (rows of a `<dl>`): a row per relation between entities with its edges, one per line, and
-// a row per kind of entity for those no relation connects (e.g. an arm that is compared with none). Rows without content are left out.
+// The graph of a study in its details (rows of a `<dl>`): the study-level details are its fields, so only the summary of
+// the arms is added, a row per relation between them (the comparisons) with its edges, one per line, and a row for the
+// arms no comparison connects. What belongs to the study or an arm alone (the participants of an arm, the outcomes) is
+// left out. Rows without content are left out.
 export function StudyGraphBlock({ studyId }: { studyId: number }): ReactNode {
   const { schema } = useStudySchema();
   const graph = useStudyGraph(studyId);
   if (!schema || !graph) return null;
-  const relations = schema.graph.relations
-    .filter((relation) => !relation.attribute)
+  const root = schema.graph.entities.find((entity) => entity.root)?.key;
+  const pairs = schema.graph.relations.filter(
+    (relation) => !relation.attribute && relation.many && !relation.source.includes(root ?? STUDY_ID) && !relation.target.includes(root ?? STUDY_ID),
+  );
+  const kinds = new Set(pairs.flatMap((relation) => [...relation.source, ...relation.target]));
+  const relations = pairs
     .map((relation) => ({ relation, edges: edgesOf(schema.graph, graph, relation) }))
     .filter(({ edges }) => edges.length > 0);
   const connected = new Set(relations.flatMap(({ edges }) => edges.flatMap(({ from, to }) => [from.node?.id, to.node?.id])));
   const loose = schema.graph.entities
-    .filter((entity) => !entity.root && !entity.value)
+    .filter((entity) => kinds.has(entity.key))
     .map((entity) => ({ entity, nodes: graph.nodes.filter((node) => node.kind === entity.key && !connected.has(node.id)) }))
     .filter(({ nodes }) => nodes.length > 0);
 

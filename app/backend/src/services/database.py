@@ -373,9 +373,8 @@ class StudyDatabaseService:
 
     @staticmethod
     def _fields(study: DbStudy) -> Dict[str, Any]:
-        """The fields as the study holds them: not the values utils/derive.py would calculate from its graph, which an
-        import would turn into values of its own."""
-        return study_values(study, derive=False)
+        """The fields of the study; those derived from its graph are views of it, which an import writes back unchanged."""
+        return study_values(study)
 
     @staticmethod
     def _utc(value: Optional[datetime.datetime]) -> Optional[datetime.datetime]:

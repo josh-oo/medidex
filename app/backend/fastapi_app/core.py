@@ -28,6 +28,7 @@ from src.services.linkage import (
 )
 
 from src.utils.dto import StudyPayload, Study, StudyCandidate, TagCandidate, Page, studies_to_dto
+from src.utils.graph import GraphFormatError
 from src.utils.pagination import InvalidCursorError
 from src.utils.tagconfig import TAG_CATEGORIES
 from src.utils.query_parser import QuerySyntaxError, SEARCH_QUERY_DESCRIPTION
@@ -167,6 +168,8 @@ async def link_to_new_study(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DuplicateShortNameError:
         raise HTTPException(status_code=409, detail="Study shortName already exists")
+    except GraphFormatError as exc:  # the graph breaks a rule of the study ontology
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     payload = {"user": ctx.user_id, "event_type": "study::links::changed::new", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
