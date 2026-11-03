@@ -16,6 +16,11 @@ load_dotenv()
 
 BASE_URL = os.getenv("EMBEDDING_MODEL_BASE_URL")
 API_KEY = os.getenv("EMBEDDING_MODEL_API_KEY")
+# The model asked for in every request: required by hosted APIs (e.g. "openai/text-embedding-3-small" on OpenRouter),
+# ignored by the local text-embeddings-inference container, which serves the one model it was started with.
+MODEL = os.getenv("EMBEDDING_MODEL_ID")
+# Probed by readyz; empty for a hosted API, which has no health endpoint of its own.
+HEALTH_URL = os.getenv("EMBEDDING_MODEL_HEALTH_URL")
 
 class EmbeddingService:
     # Texts per request of embed_many in bulk work (the vectorstore sync, the indexing of an imported database).
@@ -51,7 +56,7 @@ class EmbeddingService:
             text = await self.preprocess(text)
             response = await self.model.embeddings.create(
                 input=[text],
-                model=None
+                model=MODEL
             )
             vector = response.data[0].embedding
             return vector
@@ -60,12 +65,14 @@ class EmbeddingService:
         """The vectors of several texts in one request, in their order (for bulk work such as the vectorstore sync)."""
         async with self.sem:
             texts = [await self.preprocess(text) for text in texts]
-            response = await self.model.embeddings.create(input=texts, model=None)
+            response = await self.model.embeddings.create(input=texts, model=MODEL)
             return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
 
     def readyz(self):
+        if not HEALTH_URL:
+            return {"status": "healthy", "message": "hosted service, not probed"}
         try:
-            resp = httpx.get("http://embedding:80/health", timeout=2.0)
+            resp = httpx.get(HEALTH_URL, timeout=2.0)
 
             if resp.status_code == 200:
                 return {"status": "healthy", "message": "subservice reachable"}

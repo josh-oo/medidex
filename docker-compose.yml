@@ -79,6 +79,9 @@ services:
 
   embedding:
     container_name: embedding
+    # The local model; a hosted API (EMBEDDING_MODEL_BASE_URL) needs no container, so it only runs with this profile.
+    profiles:
+      - local-embedding
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9.4
     command: >
       --model-id ${EMBEDDING_MODEL_ID:-BAAI/bge-m3}
@@ -113,6 +116,9 @@ services:
       - DATABASE_VOLUME=/data
       - EMBEDDING_MODEL_BASE_URL=${EMBEDDING_MODEL_BASE_URL:-http://embedding:80/v1}
       - EMBEDDING_MODEL_API_KEY=${EMBEDDING_MODEL_API_KEY:-unused}
+      - EMBEDDING_MODEL_ID=${EMBEDDING_MODEL_ID:-BAAI/bge-m3}
+      # Empty for a hosted API: it is not probed by /readyz then.
+      - EMBEDDING_MODEL_HEALTH_URL=${EMBEDDING_MODEL_HEALTH_URL-http://embedding:80/health}
       - VECTORSTORE_SERVICE_HOST=${VECTORSTORE_SERVICE_HOST:-qdrant}
       - VECTORSTORE_SERVICE_PORT=${VECTORSTORE_SERVICE_PORT:-6334}
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
@@ -145,6 +151,8 @@ services:
         condition: service_started
       embedding:
         condition: service_started
+        # Absent when the embeddings come from a hosted API (no local-embedding profile).
+        required: false
       keycloak:
         condition: service_started
 
