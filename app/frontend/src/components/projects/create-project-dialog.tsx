@@ -7,12 +7,23 @@ import { ProjectUploadOptionsSlot } from "@/context/study-report-slots-context";
 import { UploadSection, type UploadSectionHandle, type UploadSectionSnapshot } from "@/components/ui/upload/upload-section";
 
 interface CreateProjectDialogProps {
-  trigger: ReactNode;
+  /** Opens the dialog; leave it out to open the dialog from elsewhere (`open`, `onOpenChange`). */
+  trigger?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   onProjectCreated?: () => void;
 }
 
-export function CreateProjectDialog({ trigger, onProjectCreated }: CreateProjectDialogProps) {
-  const [open, setOpen] = useState(false);
+export function CreateProjectDialog({ trigger, open: openProp, onOpenChange, onProjectCreated }: CreateProjectDialogProps) {
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = useCallback(
+    (nextOpen: boolean) => {
+      setOpenState(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [onOpenChange],
+  );
   const [projectName, setProjectName] = useState("");
   const [options, setOptions] = useState<Record<string, unknown>>({});
   const uploadSectionRef = useRef<UploadSectionHandle>(null);
@@ -30,7 +41,7 @@ export function CreateProjectDialog({ trigger, onProjectCreated }: CreateProject
       resetState();
       onProjectCreated?.();
     },
-    [resetState, onProjectCreated],
+    [resetState, onProjectCreated, setOpen],
   );
 
   const buildFormData = useCallback(
@@ -65,7 +76,7 @@ export function CreateProjectDialog({ trigger, onProjectCreated }: CreateProject
         }
       }}
     >
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Create Project</DialogTitle>

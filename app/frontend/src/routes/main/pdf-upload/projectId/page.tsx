@@ -1,8 +1,5 @@
+// The report list opens its first report right away (see ReportList), so this only shows while it does,
+// or for a project without reports.
 export default function PdfDetailsEmpty() {
-
-  return (
-    <div className="h-full flex items-center justify-center text-muted-foreground">
-        <p className="text-lg">Please select a report</p>
-    </div>
-  );
+  return null;
 }

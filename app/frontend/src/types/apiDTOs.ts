@@ -192,6 +192,8 @@ export interface TagCategorySchemaDto {
   icon: string;
   color: StudyColor;
   searchField: string;
+  /** Whether the plain free-text search also looks in the tags of the category. */
+  freeTextSearch: boolean;
   description: string;
 }
 
@@ -347,6 +349,7 @@ export interface TaskDto {
   name: string;
   createdAt: string;
   owner: string;
+  numberReportsTotal: number;
   numberReportsReadyForProcessing: number;
   numberReportsProcessed: number;
 }

@@ -23,9 +23,9 @@ export default function UserManagementPage() {
 
   return (
     <AdminGuard>
-      <div className="p-4 md:px-8 md:py-6">
+      <div className="p-4 md:px-8 md:py-6 max-w-6xl mx-auto w-full">
         <h1 className="text-2xl font-bold">User Management</h1>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-muted-foreground">
           Welcome to the user management page
         </p>
         <div className="mt-4"></div>
@@ -36,7 +36,7 @@ export default function UserManagementPage() {
         ) : users.length > 0 ? (
           <UserTable initialUsers={users} />
         ) : (
-          <div className="text-center text-gray-500 py-6">No users found</div>
+          <div className="text-center text-muted-foreground py-6">No users found</div>
         )}
       </div>
     </AdminGuard>

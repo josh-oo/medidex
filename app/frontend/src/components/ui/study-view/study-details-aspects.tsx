@@ -1,22 +1,16 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Badge } from "@/components/ui/badge";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Info, CircleDashed } from "lucide-react";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import {
   StudyDto,
   TagCategorySchemaDto,
   TagDto,
 } from "@/types/apiDTOs";
 import { getPersonsForStudy } from "@/lib/api/studiesApi";
-import { colorClasses, type ColorClasses } from "@/lib/colors";
-import { iconByName } from "@/lib/icons";
+import { DetailChips, DetailRow } from "@/components/ui/study-view/detail-row";
+
+// The persons shown before "+N more".
+const PERSONS_SHOWN = 6;
 
 // A paginated aspect list's current state, as owned and fetched by the parent
 // (StudyDetails, via GET /studies/{study_id} and this category's own
@@ -38,9 +32,6 @@ interface StudyAspectsProps {
   onLoadMore: (category: string) => void;
 }
 
-// How the persons (the authors of the study), which are no tag category, are drawn.
-const PERSONS_COLORS: ColorClasses = colorClasses("violet");
-
 export function StudyAspects({
   study,
   loading,
@@ -52,6 +43,7 @@ export function StudyAspects({
   const [persons, setPersons] = useState<string[]>([]);
   const [personsLoading, setPersonsLoading] = useState(true);
   const [personsError, setPersonsError] = useState<string | null>(null);
+  const [personsExpanded, setPersonsExpanded] = useState(false);
 
   useEffect(() => {
     if (!study) {
@@ -99,183 +91,64 @@ export function StudyAspects({
 
   if (isLoading) {
     return (
-      <div className="space-y-4 px-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold flex items-center gap-2.5">
-            <div className="p-1.5 rounded-md bg-muted">
-              <Info className="h-4 w-4" />
+      <>
+        {[...categories.map((category) => category.key), "persons"].map((category) => (
+          <div key={category} className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-3 px-4 py-1.5 sm:grid-cols-[8rem_minmax(0,1fr)]">
+            <Skeleton className="h-3 w-20" />
+            <div className="flex flex-wrap gap-1">
+              <Skeleton className="h-5 w-24 rounded-md" />
+              <Skeleton className="h-5 w-16 rounded-md" />
             </div>
-            Tags
-          </h3>
-        </div>
-        <div className="space-y-4">
-          {[...categories.map((category) => category.key), "persons"].map((category) => (
-            <div key={category} className="space-y-2 px-1">
-              <div className="flex items-center gap-3">
-                <Skeleton className="h-6 w-6" />
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-3 w-12" />
-              </div>
-              <div className="space-y-2">
-                {[...Array(2)].map((_, index) => (
-                  <Skeleton
-                    key={index}
-                    className="h-4 w-full rounded-xl"
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        ))}
+      </>
     );
   }
 
-  const renderTagItems = (category: TagCategorySchemaDto) => {
-    const { items, nextCursor, loadingMore } = tags[category.key];
-    const colors = colorClasses(category.color);
-
-    if (!items.length) {
-      return (
-        <div className="flex items-center gap-3 py-6 px-4 text-muted-foreground">
-          <CircleDashed className="h-4 w-4 opacity-50" />
-          <p className="text-sm">No {category.label.toLowerCase()} available</p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-2 py-3">
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className={`p-3.5 rounded-md border-l-2 ${colors.border} ${colors.bg} transition-colors`}
-          >
-            <p className="text-foreground text-sm leading-relaxed">
-              {item.keyword}
-            </p>
-          </div>
-        ))}
-        {nextCursor && (
-          <div className="flex justify-center pt-1">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onLoadMore(category.key)}
-              disabled={loadingMore}
-            >
-              {loadingMore ? "Loading..." : "Load more"}
-            </Button>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderPersonItems = (items: string[], emptyMessage: string) => {
-    if (!items.length) {
-      return (
-        <div className="flex items-center gap-3 py-6 px-4 text-muted-foreground">
-          <CircleDashed className="h-4 w-4 opacity-50" />
-          <p className="text-sm">{emptyMessage}</p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-2 py-3">
-        {items.map((item, index) => (
-          <div
-            key={index}
-            className={`p-3.5 rounded-md border-l-2 ${PERSONS_COLORS.border} ${PERSONS_COLORS.bg} transition-colors`}
-          >
-            <p className="text-foreground text-sm leading-relaxed">{item}</p>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  const renderAccordionItem = (
-    value: string,
-    label: string,
-    icon: string,
-    color: string,
-    count: number,
-    children: ReactNode,
-    hasMore = false
-  ) => {
-    const colors = colorClasses(color);
-    const Icon = iconByName(icon);
-
-    return (
-      <AccordionItem
-        key={value}
-        value={value}
-        className="border-b border-border/50 last:border-b-0"
-      >
-        <AccordionTrigger className="py-4 hover:no-underline hover:bg-muted/30 px-1 rounded-md transition-colors">
-          <div className="flex items-center gap-3">
-            <div className={`p-1.5 rounded-md ${colors.bg}`}>
-              <Icon className={`h-4 w-4 ${colors.accent}`} />
-            </div>
-            <span className="text-sm font-medium">{label}</span>
-            <Badge
-              variant="secondary"
-              className="ml-1 h-5 px-1.5 text-xs font-normal"
-            >
-              {hasMore ? `${count}+` : count}
-            </Badge>
-          </div>
-        </AccordionTrigger>
-        <AccordionContent className="pb-2 pt-0 px-1">{children}</AccordionContent>
-      </AccordionItem>
-    );
-  };
+  const shownPersons = personsExpanded ? persons : persons.slice(0, PERSONS_SHOWN);
 
   return (
-    <div className="space-y-4 px-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold flex items-center gap-2.5">
-          <div className="p-1.5 rounded-md bg-muted">
-            <Info className="h-4 w-4" />
+    <>
+      {combinedError && <p className="px-4 py-1.5 text-sm text-destructive">{combinedError}</p>}
+      {categories.map((category) => {
+        const { items, nextCursor, loadingMore } = tags[category.key];
+        if (items.length === 0) return null;
+        return (
+          <DetailRow key={category.key} icon={category.icon} label={category.label}>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <DetailChips values={items.map((item) => item.keyword)} />
+              {nextCursor && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0 text-xs text-muted-foreground"
+                  onClick={() => onLoadMore(category.key)}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? "Loading..." : "Show more"}
+                </Button>
+              )}
+            </div>
+          </DetailRow>
+        );
+      })}
+      {persons.length > 0 && (
+        <DetailRow icon="user-round" label="Persons">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <DetailChips values={shownPersons} />
+            {persons.length > PERSONS_SHOWN && (
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-xs text-muted-foreground"
+                onClick={() => setPersonsExpanded((expanded) => !expanded)}
+              >
+                {personsExpanded ? "Show fewer" : `+${persons.length - PERSONS_SHOWN} more`}
+              </Button>
+            )}
           </div>
-          Tags
-        </h3>
-      </div>
-      <div>
-        {combinedError && (
-          <div className="mb-4 px-1 text-sm text-destructive">
-            {combinedError}
-          </div>
-        )}
-        <Accordion
-          type="multiple"
-          defaultValue={[...categories.map((category) => category.key), "persons"]}
-          className="w-full"
-        >
-          {categories.map((category) =>
-            renderAccordionItem(
-              category.key,
-              category.label,
-              category.icon,
-              category.color,
-              tags[category.key].items.length,
-              renderTagItems(category),
-              tags[category.key].nextCursor !== null
-            )
-          )}
-
-          {renderAccordionItem(
-            "persons",
-            "Persons",
-            "user-round",
-            "violet",
-            persons.length,
-            renderPersonItems(persons, "No persons information available")
-          )}
-        </Accordion>
-      </div>
-    </div>
+        </DetailRow>
+      )}
+    </>
   );
 }

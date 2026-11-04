@@ -132,7 +132,7 @@ edit is recorded under (`user_id` of the request):
   everyone. Studies of the seed data (no `study_added` record) are visible to everyone. Admins (reviewers) see
   every scope's studies (`RequestContext.is_admin`); an MCP client acting for an admin does not.
 - **Projects.** A scope needs access to the project: it is assigned to it (`project_assignee`, any string is a
-  valid assignee), which is also what shows its progress in the project card. Reviewing the edits of the scopes
+  valid assignee), which is also what shows its progress among the assignees of the project (Curation page). Reviewing the edits of the scopes
   finishes the project.
 - **Not scoped.** PDFs and their upload are global: a PDF found for a report is the PDF of the report.
 
