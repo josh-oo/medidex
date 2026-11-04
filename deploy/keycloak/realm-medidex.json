@@ -37,14 +37,14 @@
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": true,
-      "redirectUris": ["${FRONTEND_PUBLIC_URL:http://localhost:3000}/*", "http://localhost:3000/*", "http://localhost:8002/*"],
+      "redirectUris": ["${FRONTEND_PUBLIC_URL:http://localhost:3000}/*", "${FRONTEND_EXTRA_URL:http://localhost:3001}/*", "http://localhost:3000/*", "http://localhost:8002/*"],
       "webOrigins": ["+"],
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "attributes": {
-        "post.logout.redirect.uris": "${FRONTEND_PUBLIC_URL:http://localhost:3000}/*##http://localhost:3000/*",
+        "post.logout.redirect.uris": "${FRONTEND_PUBLIC_URL:http://localhost:3000}/*##${FRONTEND_EXTRA_URL:http://localhost:3001}/*##http://localhost:3000/*",
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
