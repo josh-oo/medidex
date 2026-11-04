@@ -79,6 +79,9 @@ services:
 
   embedding:
     container_name: embedding
+    # The local model; a hosted API (EMBEDDING_MODEL_BASE_URL) needs no container, so it only runs with this profile.
+    profiles:
+      - local-embedding
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9.4
     command: >
       --model-id ${EMBEDDING_MODEL_ID:-BAAI/bge-m3}
@@ -113,6 +116,11 @@ services:
       - DATABASE_VOLUME=/data
       - EMBEDDING_MODEL_BASE_URL=${EMBEDDING_MODEL_BASE_URL:-http://embedding:80/v1}
       - EMBEDDING_MODEL_API_KEY=${EMBEDDING_MODEL_API_KEY:-unused}
+      - EMBEDDING_MODEL_ID=${EMBEDDING_MODEL_ID:-BAAI/bge-m3}
+      # Empty for a hosted API: it is not probed by /readyz then.
+      - EMBEDDING_MODEL_HEALTH_URL=${EMBEDDING_MODEL_HEALTH_URL-http://embedding:80/health}
+      # Embedding requests at once (one text each): the local model takes few, a hosted API many more.
+      - EMBEDDING_MAX_CONCURRENCY=${EMBEDDING_MAX_CONCURRENCY:-4}
       - VECTORSTORE_SERVICE_HOST=${VECTORSTORE_SERVICE_HOST:-qdrant}
       - VECTORSTORE_SERVICE_PORT=${VECTORSTORE_SERVICE_PORT:-6334}
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
@@ -145,6 +153,8 @@ services:
         condition: service_started
       embedding:
         condition: service_started
+        # Absent when the embeddings come from a hosted API (no local-embedding profile).
+        required: false
       keycloak:
         condition: service_started
 
@@ -161,6 +171,9 @@ services:
       - KC_DB_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB_KEYCLOAK:-keycloak}
       - KC_DB_USERNAME=${POSTGRES_USER:-postgres}
       - KC_DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      # Filled into the placeholders of the realm on its first import.
+      - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}
+      - FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL:-http://localhost:3000}
     volumes:
       - ./deploy/keycloak/realm-medidex.json:/opt/keycloak/data/import/realm-medidex.json:ro
       - ./deploy/keycloak/themes/medidex:/opt/keycloak/themes/medidex:ro

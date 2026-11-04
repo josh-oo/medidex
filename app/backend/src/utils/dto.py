@@ -397,6 +397,11 @@ class DatabasePayload(BaseModel):
         min_length=1, description="Which studies belong in the database: its criteria, each in a category of GET /eligibility-schema."
     )
 
+class DatabaseImport(DatabasePayload):
+    """The body of POST /databases/import: the new database and the upload (POST /databases/uploads) of the exported
+    one, a .medidex.zip archive or its database.json alone, once all of it has arrived."""
+    uploadId: str
+
 class DatabaseUpdate(BaseModel):
     """The body of PATCH /databases/{id}: the fields given are changed, the others kept. An empty description removes it;
     name and eligibility criteria cannot be empty."""

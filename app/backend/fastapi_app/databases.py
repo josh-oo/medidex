@@ -3,17 +3,17 @@ import re
 import tempfile
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Path, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Path, Request, Response
+from fastapi.responses import FileResponse
+from sse_starlette import EventSourceResponse
 from starlette.background import BackgroundTask
-
-from pydantic import TypeAdapter, ValidationError
 
 from src.background.wrapper import run_criteria_changed, run_import_database
 from src.context import RequestContext
 from src.services.database import DatabaseImportError, DatabaseNotFoundError
+from src.services.upload import UploadLengthError, UploadNotFoundError, UploadOffsetError
 from src.utils.archive import DatabaseArchive, DatabaseArchiveError
-from src.utils.dto import Database, DatabasePayload, DatabaseStage, DatabaseStorage, DatabaseUpdate, EligibilityCategory, EligibilitySchema
+from src.utils.dto import Database, DatabaseImport, DatabasePayload, DatabaseStage, DatabaseStorage, DatabaseUpdate, EligibilityCategory, EligibilitySchema
 from src.utils.eligibility import ELIGIBILITY_CONFIG, EligibilityCriterion
 
 from .auth import is_admin, is_verified_api_call
@@ -27,6 +27,7 @@ def _file_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:60] or "database"
 
 database_id_path = Path(..., description="The id of the study database")
+upload_id_path = Path(..., description="The id of the upload: the last segment of its URL (POST /databases/uploads)")
 
 
 @router.get("/databases", dependencies=[Depends(is_verified_api_call)], summary="Get the study databases, each with its number of studies and reports.")
@@ -88,33 +89,124 @@ async def get_database_storage(database_id: int = database_id_path, ctx: Request
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+# The uploads of exported databases follow the tus protocol (https://tus.io, version 1.0.0 with its creation and
+# termination extensions), so that a tus client (tus-js-client in the frontend) sends them: in parts, since a proxy in
+# front of the backend may limit the size of a request (a Cloudflare tunnel to 100 MB) while an archive can be many GB,
+# and going on after a part failed or the page was loaded again. A finished upload is imported by its id
+# (POST /databases/import); one that is not is removed after a day.
+TUS_VERSION = "1.0.0"
+TUS_HEADERS = {"Tus-Resumable": TUS_VERSION}
+
+
+def tus_resumable(tus_resumable: Optional[str] = Header(None)) -> None:
+    """Every tus request but OPTIONS names the version of the protocol it speaks."""
+    if tus_resumable != TUS_VERSION:
+        raise HTTPException(status_code=412, detail=f"Only tus {TUS_VERSION} is supported.", headers={"Tus-Version": TUS_VERSION})
+
+
+def _upload_error(exc: Exception) -> HTTPException:
+    status = {UploadNotFoundError: 404, UploadOffsetError: 409, UploadLengthError: 413}[type(exc)]
+    return HTTPException(status_code=status, detail=str(exc), headers=TUS_HEADERS)
+
+
+@router.options("/databases/uploads", summary="What the tus server of the uploads supports.", status_code=204)
+async def describe_uploads() -> Response:
+    return Response(status_code=204, headers={**TUS_HEADERS, "Tus-Version": TUS_VERSION, "Tus-Extension": "creation,termination"})
+
+
+@router.post(
+    "/databases/uploads",
+    dependencies=[Depends(is_admin), Depends(tus_resumable)],
+    summary="Start the upload of an exported database (tus creation); its URL is the Location of the answer.",
+    status_code=201,
+)
+async def start_upload(
+    request: Request,
+    upload_length: int = Header(..., ge=0, description="The size of the file in bytes."),
+    ctx: RequestContext = Depends(get_context),
+) -> Response:
+    upload_id = ctx.upload_service.start(upload_length)
+    # A path, not a URL: behind a TLS-terminating proxy the backend does not know the scheme the client used.
+    return Response(status_code=201, headers={**TUS_HEADERS, "Location": f"{request.url.path.rstrip('/')}/{upload_id}"})
+
+
+@router.head(
+    "/databases/uploads/{upload_id}",
+    dependencies=[Depends(is_admin), Depends(tus_resumable)],
+    summary="How much of an upload has arrived (Upload-Offset): where its next part starts.",
+)
+async def get_upload(upload_id: str = upload_id_path, ctx: RequestContext = Depends(get_context)) -> Response:
+    try:
+        received, length = ctx.upload_service.status(upload_id)
+    except UploadNotFoundError as exc:
+        raise _upload_error(exc) from exc
+    return Response(
+        status_code=200,
+        headers={**TUS_HEADERS, "Upload-Offset": str(received), "Upload-Length": str(length), "Cache-Control": "no-store"},
+    )
+
+
+@router.patch(
+    "/databases/uploads/{upload_id}",
+    dependencies=[Depends(is_admin), Depends(tus_resumable)],
+    summary="Append the next part of an upload, the raw bytes as the body (application/offset+octet-stream).",
+    description="Upload-Offset is where the part starts: what has arrived so far, or the request is rejected (409) and "
+                "nothing appended. A part that broke off is kept as far as it came; HEAD says where to go on from.",
+    status_code=204,
+)
+async def append_upload(
+    request: Request,
+    upload_id: str = upload_id_path,
+    upload_offset: int = Header(..., ge=0),
+    content_type: Optional[str] = Header(None),
+    ctx: RequestContext = Depends(get_context),
+) -> Response:
+    if content_type != "application/offset+octet-stream":
+        raise HTTPException(status_code=415, detail="A part is sent as application/offset+octet-stream.", headers=TUS_HEADERS)
+    try:
+        received = await ctx.upload_service.append(upload_id, upload_offset, request.stream())
+    except (UploadNotFoundError, UploadOffsetError, UploadLengthError) as exc:
+        raise _upload_error(exc) from exc
+    return Response(status_code=204, headers={**TUS_HEADERS, "Upload-Offset": str(received)})
+
+
+@router.delete(
+    "/databases/uploads/{upload_id}",
+    dependencies=[Depends(is_admin), Depends(tus_resumable)],
+    summary="Discard an upload that is not to be imported (tus termination).",
+    status_code=204,
+)
+async def discard_upload(upload_id: str = upload_id_path, ctx: RequestContext = Depends(get_context)) -> Response:
+    try:
+        ctx.upload_service.discard(upload_id)
+    except UploadNotFoundError as exc:
+        raise _upload_error(exc) from exc
+    return Response(status_code=204, headers=TUS_HEADERS)
+
+
 @router.post(
     "/databases/import",
     dependencies=[Depends(is_admin)],
-    summary="Create a study database with the studies, reports and PDFs of an exported one (the archive of GET /databases/{database_id}/export, or its database.json alone, without PDFs).",
-    description="Answers once the file is uploaded, with the database to be (`importing`); it is imported, and then its "
-                "reports are added to the vectorstore, in the background, as GET /databases/{database_id}/status streams. "
-                "Until they are, its studies are found by the study search but not suggested for new reports.",
+    summary="Create a study database with the studies, reports and PDFs of an exported one (the archive of GET /databases/{database_id}/export, or its database.json alone, without PDFs), uploaded with tus to POST /databases/uploads.",
+    description="Answers at once, with the database to be (`importing`); it is imported, and then its reports are "
+                "added to the vectorstore, in the background, as GET /databases/{database_id}/status streams. Until "
+                "they are, its studies are found by the study search but not suggested for new reports. The upload is "
+                "used up, also when the file is rejected.",
     status_code=202,
 )
 async def import_database(
+    body: DatabaseImport,
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(..., description="The exported database: a .medidex.zip archive (database.json and pdfs/), or a database.json without PDFs."),
-    name: str = Form(..., min_length=1, max_length=200),
-    description: Optional[str] = Form(None),
-    eligibilityCriteria: str = Form(..., min_length=1, description="The criteria of the new database, a JSON list as in POST /databases."),
     ctx: RequestContext = Depends(get_context),
 ) -> Database:
+    payload = DatabasePayload(name=body.name, description=body.description, eligibilityCriteria=body.eligibilityCriteria)
     try:
-        criteria = TypeAdapter(List[EligibilityCriterion]).validate_json(eligibilityCriteria)
-        payload = DatabasePayload(name=name, description=description, eligibilityCriteria=criteria)
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid eligibility criteria: {exc}") from exc
-    # The upload is closed with the request, the import runs after it: it reads the same (temporary) file through a
-    # handle of its own.
-    source = os.fdopen(os.dup(file.file.fileno()), "rb")
+        source = ctx.upload_service.take(body.uploadId)
+    except UploadNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except UploadLengthError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
-        source.seek(0)
         archive = DatabaseArchive.open(source)
         database = await ctx.database_service.start_import(payload)
     except (DatabaseArchiveError, ValueError) as exc:
@@ -134,7 +226,7 @@ async def import_database(
     description="An SSE event per change, its data a DatabaseStatus; the first is where it is now. Ends once it is "
                 "ready or its import failed.",
 )
-async def stream_database_status(request: Request, database_id: int = database_id_path, ctx: RequestContext = Depends(get_context)) -> StreamingResponse:
+async def stream_database_status(request: Request, database_id: int = database_id_path, ctx: RequestContext = Depends(get_context)) -> EventSourceResponse:
     status_service = ctx.database_status_service
     # Subscribed before the status is read: a change in between is not missed.
     pubsub = await status_service.subscribe(database_id)
@@ -150,14 +242,14 @@ async def stream_database_status(request: Request, database_id: int = database_i
         status = current
         try:
             while True:
-                yield f"data: {status.model_dump_json()}\n\n"
+                yield status.model_dump_json()
                 if status.stage in (DatabaseStage.ready, DatabaseStage.failed) or await request.is_disconnected():
                     break
                 status = await status_service.get_next_status(pubsub)
         finally:
             await status_service.unsubscribe(database_id, pubsub)
 
-    return StreamingResponse(events(), media_type="text/event-stream")
+    return EventSourceResponse(events())
 
 
 @router.get(

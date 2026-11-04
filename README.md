@@ -60,7 +60,10 @@ Working on an update:
 **Export and import.** The download button on the card of a database exports it as `<name>.medidex.zip` (the studies with their
 reports and PDFs), which another deployment imports as a new database. An import is all or nothing: a file with errors
 is rejected with what is wrong. Imported reports are indexed for matching in the background; until then their studies
-are found by the search but not yet suggested for new reports.
+are found by the search but not yet suggested for new reports. The file is uploaded in parts of 64 MB with the tus protocol,
+so a proxy that limits the size of a request (a Cloudflare tunnel to 100 MB) does not stop large archives, and an
+upload that broke off goes on where it stopped when the same file is imported again. The backend puts the parts
+together in its temporary directory (`TMPDIR`), which needs room for the whole archive.
 
 The REST API is documented at http://localhost:8002/api/v1/docs.
 
@@ -101,6 +104,13 @@ re-indexing: update `EMBEDDING_MODEL_DIM` and use a fresh `VECTORSTORE_COLLECTIO
 because vectors from different models are not comparable. Set `HF_TOKEN` only if you point it at a gated or
 private model. Currently this service runs on CPU; depending on the workload it might make
 sense to move it to a GPU machine later.
+
+The container only runs with the `local-embedding` compose profile (`COMPOSE_PROFILES` in
+`.env`). Any hosted, OpenAI-compatible embedding API can replace it: leave the profile out and
+set `EMBEDDING_MODEL_BASE_URL`, `EMBEDDING_MODEL_API_KEY`, `EMBEDDING_MODEL_ID` (the model name the
+API expects, e.g. `openai/text-embedding-3-small` on OpenRouter), its `EMBEDDING_MODEL_DIM`, a fresh
+`VECTORSTORE_COLLECTION_NAME` and an empty `EMBEDDING_MODEL_HEALTH_URL` (a hosted API is not probed
+by `/readyz`). `.env.example` has a commented example.
 
 ## qdrant / postgres / redis
 Vector store, relational database and task/cache backend. They run
