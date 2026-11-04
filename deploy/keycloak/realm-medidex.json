@@ -37,14 +37,14 @@
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": true,
-      "redirectUris": ["http://localhost:3000/*", "http://localhost:8002/*"],
+      "redirectUris": ["${FRONTEND_PUBLIC_URL:http://localhost:3000}/*", "http://localhost:3000/*", "http://localhost:8002/*"],
       "webOrigins": ["+"],
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "attributes": {
-        "post.logout.redirect.uris": "http://localhost:3000/*",
+        "post.logout.redirect.uris": "${FRONTEND_PUBLIC_URL:http://localhost:3000}/*##http://localhost:3000/*",
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
@@ -122,7 +122,7 @@
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.custom.audience": "http://localhost:8002/api/v1/mcp",
+            "included.custom.audience": "${MCP_RESOURCE_URL:http://localhost:8002/api/v1/mcp}",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
@@ -135,7 +135,7 @@
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,
-      "secret": "dev_only_backoffice_client_secret_change_me",
+      "secret": "${KEYCLOAK_ADMIN_CLIENT_SECRET:dev_only_backoffice_client_secret_change_me}",
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,

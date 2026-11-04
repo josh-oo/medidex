@@ -119,6 +119,8 @@ services:
       - EMBEDDING_MODEL_ID=${EMBEDDING_MODEL_ID:-BAAI/bge-m3}
       # Empty for a hosted API: it is not probed by /readyz then.
       - EMBEDDING_MODEL_HEALTH_URL=${EMBEDDING_MODEL_HEALTH_URL-http://embedding:80/health}
+      # Embedding requests at once (one text each): the local model takes few, a hosted API many more.
+      - EMBEDDING_MAX_CONCURRENCY=${EMBEDDING_MAX_CONCURRENCY:-4}
       - VECTORSTORE_SERVICE_HOST=${VECTORSTORE_SERVICE_HOST:-qdrant}
       - VECTORSTORE_SERVICE_PORT=${VECTORSTORE_SERVICE_PORT:-6334}
       - VECTORSTORE_COLLECTION_NAME=${VECTORSTORE_COLLECTION_NAME:-report_embeddings_medidex}
@@ -169,6 +171,9 @@ services:
       - KC_DB_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB_KEYCLOAK:-keycloak}
       - KC_DB_USERNAME=${POSTGRES_USER:-postgres}
       - KC_DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      # Filled into the placeholders of the realm on its first import.
+      - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}
+      - FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL:-http://localhost:3000}
     volumes:
       - ./deploy/keycloak/realm-medidex.json:/opt/keycloak/data/import/realm-medidex.json:ro
       - ./deploy/keycloak/themes/medidex:/opt/keycloak/themes/medidex:ro
