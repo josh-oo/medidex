@@ -1,4 +1,4 @@
-import type { ArmSuggestion, ComparisonSuggestion } from "@/types/apiDTOs";
+import type { ArmSuggestion, ComparisonSuggestion, DurationUnit, NewStudySuggestion, StudyGraphDto } from "@/types/apiDTOs";
 import type { ArmComparison, ArmDraft, ArmRole, StudyArm } from "@/types/comparisons";
 
 const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -70,20 +70,97 @@ const armDuration = (arm: ArmDraft): string => {
   return value && arm.durationUnit ? `${value} ${arm.durationUnit}` : "";
 };
 
-// The arms and their comparisons as the graph of a study (JSON, see `graph` of the study schema): an entity for every arm
-// in a comparison and a comparison edge per pair. What an arm says about itself is edges to value entities (its
-// interventions, role, dosage, frequency, route and duration), one entity per distinct value however many arms have it,
-// and the participants of an arm are a population entity that took part in it. Comparisons with an arm without
-// interventions are left out; null if none is left. The countries of the study are edges from the study itself.
-export function buildGraph(arms: StudyArm[], comparisons: ArmComparison[], countries: string[] = []): string | null {
+// The graph without what the form edits: its arms (with what they say about themselves, their comparisons and the
+// populations that took part in them) and the countries of the study go, and the values nothing points to any more.
+// Everything else of a graph the form starts from (the population of the study, its outcomes, designs, trial ids, the
+// interventions of no arm) is kept as it is.
+function withoutFormParts(graph: StudyGraphDto): { nodes: { id: string; kind: string; value?: string }[]; edges: { relation: string; source: string; target: string }[] } {
+  const arms = new Set(graph.nodes.filter((node) => node.kind === "arm").map((node) => node.id));
+  const armPopulations = new Set(graph.edges.filter((edge) => edge.relation === "participated" && arms.has(edge.source)).map((edge) => edge.target));
+  const gone = new Set([...arms, ...armPopulations]);
+  const edges = graph.edges
+    .filter((edge) => !gone.has(edge.source) && !gone.has(edge.target) && !(edge.source === "study" && edge.relation === "in_country"))
+    .map(({ relation, source, target }) => ({ relation, source, target }));
+  const used = new Set(edges.flatMap((edge) => [edge.source, edge.target]));
+  const nodes = graph.nodes
+    .filter((node) => !gone.has(node.id) && used.has(node.id))
+    .map((node) => ({ id: node.id, kind: node.kind, ...(node.value === null ? {} : { value: node.value }) }));
+  return { nodes, edges };
+}
+
+const first = (graph: StudyGraphDto, relation: string, source: string): string | undefined => {
+  const edge = graph.edges.find((candidate) => candidate.relation === relation && candidate.source === source);
+  return graph.nodes.find((node) => node.id === edge?.target)?.value ?? undefined;
+};
+const all = (graph: StudyGraphDto, relation: string, source: string): string[] =>
+  graph.edges
+    .filter((edge) => edge.relation === relation && edge.source === source)
+    .map((edge) => graph.nodes.find((node) => node.id === edge.target)?.value)
+    .filter((value): value is string => Boolean(value));
+
+// A duration as the form has it ("12 weeks" is 12 and "weeks"); one in no unit of the form is left out.
+const formDuration = (text: string | undefined): { value: number; unit: DurationUnit } | undefined => {
+  const match = text?.match(/^(\d+(?:\.\d+)?)\s+(\w+?)s?$/);
+  const unit = match ? (`${match[2]}s` as DurationUnit) : undefined;
+  return match && unit && ["hours", "days", "weeks", "months", "years"].includes(unit) ? { value: Number(match[1]), unit } : undefined;
+};
+
+// The form of a new study prefilled from a graph (that of a report): its arms, comparisons, countries and participants,
+// with the graph itself as the base the form is written back onto (see buildGraph).
+export function suggestionFromGraph(graph: StudyGraphDto, shortName: string): NewStudySuggestion {
+  const arms = graph.nodes.filter((node) => node.kind === "arm");
+  const index = new Map(arms.map((arm, position) => [arm.id, position]));
+  const participantsOf = (owner: string): number | undefined => {
+    const population = graph.edges.find((edge) => edge.relation === "participated" && edge.source === owner)?.target;
+    return population ? Number(first(graph, "has_size", population)) || undefined : undefined;
+  };
+  return {
+    short_name: shortName,
+    status_of_study: "" as NewStudySuggestion["status_of_study"],
+    countries: all(graph, "in_country", "study"),
+    number_of_participants: participantsOf("study") ?? 0,
+    arms: arms.map((arm) => ({
+      interventions: all(graph, "receives", arm.id),
+      role: first(graph, "has_role", arm.id) === "control" ? "control" : "intervention",
+      participants: participantsOf(arm.id),
+      dosage: first(graph, "has_dosage", arm.id),
+      frequency: first(graph, "has_frequency", arm.id),
+      route: first(graph, "has_route", arm.id),
+      duration: formDuration(first(graph, "has_duration", arm.id)),
+    })),
+    comparisons: graph.edges
+      .filter((edge) => edge.relation === "compared_with" && index.has(edge.source) && index.has(edge.target))
+      .map((edge) => ({ evaluated: index.get(edge.source)!, comparator: index.get(edge.target)! })),
+    graph,
+  };
+}
+
+// The arms and their comparisons as the graph of a study (JSON, see `graph` of the study schema), written onto `base` (the
+// graph the form was prefilled from, whose other parts it keeps): an entity for every arm in a comparison and a comparison
+// edge per pair. What an arm says about itself is edges to value entities (its interventions, role, dosage, frequency,
+// route and duration), one entity per distinct value however many arms have it, and the participants of an arm are a
+// population entity that took part in it. Comparisons with an arm without interventions are left out; null if none is
+// left. The countries of the study are edges from the study itself. A duration of the study holds for every arm that has
+// none of its own (the study derives its duration from its arms), and its participants are the size of its population.
+export function buildGraph(
+  arms: StudyArm[],
+  comparisons: ArmComparison[],
+  countries: string[] = [],
+  base?: StudyGraphDto,
+  study: { duration?: string; participants?: string } = {},
+): string | null {
+  const studyDuration = study.duration;
   type Node = { id: string; kind: string; value?: string };
   type Edge = { relation: string; source: string; target: string };
-  const nodes: Node[] = [];
-  const edges: Edge[] = [];
+  const kept = base ? withoutFormParts(base) : { nodes: [], edges: [] };
+  const nodes: Node[] = kept.nodes;
+  const edges: Edge[] = kept.edges;
   const find = (kind: string, value?: string) =>
     nodes.find((node) => node.kind === kind && (value === undefined || (node.value ?? "").toLowerCase() === value.toLowerCase()));
   const add = (kind: string, value?: string): string => {
-    const node = { id: `${kind}${nodes.filter((entry) => entry.kind === kind).length + 1}`, kind, ...(value === undefined ? {} : { value }) };
+    let number = nodes.filter((entry) => entry.kind === kind).length + 1;
+    while (nodes.some((entry) => entry.id === `${kind}${number}`)) number += 1;
+    const node = { id: `${kind}${number}`, kind, ...(value === undefined ? {} : { value }) };
     nodes.push(node);
     return node.id;
   };
@@ -99,7 +176,7 @@ export function buildGraph(arms: StudyArm[], comparisons: ArmComparison[], count
     ...cleaned(arm.interventions).map((value): [string, string, string] => ["receives", "intervention", value]),
     ["has_role", "role", arm.role],
     ...(["dosage", "frequency", "route"] as const).flatMap((key): [string, string, string][] => (arm[key].trim() ? [[`has_${key}`, key, arm[key].trim()]] : [])),
-    ...(armDuration(arm) ? ([["has_duration", "duration", armDuration(arm)]] as [string, string, string][]) : []),
+    ...((armDuration(arm) || studyDuration) ? ([["has_duration", "duration", armDuration(arm) || studyDuration!]] as [string, string, string][]) : []),
   ];
   const entities = new Map<string, string>();
   const entityOf = (arm: StudyArm): string => {
@@ -126,5 +203,19 @@ export function buildGraph(arms: StudyArm[], comparisons: ArmComparison[], count
   for (const comparison of valid) link("compared_with", entityOf(byId.get(comparison.source)!), entityOf(byId.get(comparison.target)!));
   // The countries of the study, from the study itself (its id in the graph is `study`).
   for (const country of cleaned(countries)) link("in_country", "study", valueNode("country", country));
-  return JSON.stringify({ nodes, edges });
+  // The participants of the study: the size of its population (made if it has none, gone with its last value).
+  let population = edges.find((edge) => edge.relation === "participated" && edge.source === "study")?.target;
+  if (population) edges.splice(0, edges.length, ...edges.filter((edge) => !(edge.relation === "has_size" && edge.source === population)));
+  if (study.participants?.trim()) {
+    if (!population) {
+      population = add("population");
+      link("participated", "study", population);
+    }
+    link("has_size", population, valueNode("size", study.participants.trim()));
+  } else if (population && !edges.some((edge) => edge.source === population)) {
+    const empty = population;
+    edges.splice(0, edges.length, ...edges.filter((edge) => edge.target !== empty));
+  }
+  const used = new Set(edges.flatMap((edge) => [edge.source, edge.target]));
+  return JSON.stringify({ nodes: nodes.filter((node) => used.has(node.id)), edges });
 }

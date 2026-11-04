@@ -21,6 +21,7 @@ from src.background.wrapper import run_process_report_background
 from src.services.authorization import ProjectAccessDeniedError
 from src.services.database import DatabaseIndexingError, DatabaseNotFoundError
 from src.services.merge import ReportNotMergeableError
+from src.utils.graph import GraphFormatError
 from src.services.project import (
     OpenUpdateExistsError,
     ProjectAssigneeAlreadyExistsError,
@@ -156,7 +157,7 @@ async def merge_report(report_id: int, body: MergeRequest, ctx: RequestContext =
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ProjectAccessDeniedError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ReportNotMergeableError as exc:
+    except (ReportNotMergeableError, GraphFormatError) as exc:  # e.g. a merge hook finding the graph of a study would break the study ontology
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 _search_query = Query(None, description="Filter reports by title, abstract or report id (case-insensitive substring match).")

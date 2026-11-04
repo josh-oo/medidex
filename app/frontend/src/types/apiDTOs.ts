@@ -199,6 +199,8 @@ export interface TagCategorySchemaDto {
   /** Whether the plain free-text search also looks in the tags of the category. */
   freeTextSearch: boolean;
   description: string;
+  /** The field the tags are shown with in the study details, in brackets after its value ("1042 (Adult)"). */
+  detailOf: string | null;
 }
 
 // What an entity that is a value holds: a tag of a category, or a primitive.
@@ -534,6 +536,9 @@ export interface NewStudySuggestion {
   duration?: { value: number; unit: DurationUnit };
   arms: ArmSuggestion[];
   comparisons: ComparisonSuggestion[];
+  // The graph the suggestion was made from (that of the report): the form is written back onto it, keeping what it does not
+  // edit (the population of the study, its outcomes, designs, ...).
+  graph?: StudyGraphDto;
 }
 
 export type StreamEventType = "node" | "complete" | "error" | "unknown";

@@ -36,7 +36,6 @@ import { useReportStore } from "@/hooks/use-report-store";
 import type { StudyDto } from "@/types/apiDTOs";
 import { Calendar, CircleCheckBig, CircleAlert, TriangleAlert, Users, Info, AlertTriangle, Flag, Trash2, GitMerge } from "lucide-react";
 import { Widget } from "@/components/ui/widget";
-import { listUsers } from "@/lib/api/adminApi";
 import { getStudyById } from "@/lib/api/studiesApi";
 import { curationPaths } from "@/lib/curation-steps";
 import { deleteReportById, mergeReport } from "@/lib/api/reportApi";
@@ -67,7 +66,6 @@ export default function ReviewDetailsPage() {
   const navigate = useNavigate();
   const { openWithStudyId } = useDetailsSheet();
 
-  const [userNameById, setUserNameById] = useState<Map<string, string>>(new Map());
   // A study that could not be loaded is null.
   const [studyById, setStudyById] = useState<Record<number, StudyDto | null>>({});
   // The studies to merge the report with: chosen here, sent with the merge (nothing is saved before).
@@ -95,33 +93,6 @@ export default function ReviewDetailsPage() {
     const timestamp = date.getTime();
     return Number.isFinite(timestamp) ? timestamp : null;
   };
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadUsers = async () => {
-      try {
-        const users = await listUsers();
-        const nextMap = new Map<string, string>();
-
-        for (const user of users) {
-          nextMap.set(user.id, user.name);
-        }
-
-        if (isMounted) {
-          setUserNameById(nextMap);
-        }
-      } catch (error) {
-        console.error("Failed to resolve user names:", error);
-      }
-    };
-
-    void loadUsers();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   const reportIdParam =
     typeof params.reportId === "string"
@@ -168,16 +139,17 @@ export default function ReviewDetailsPage() {
         ?.set(annotation.studyId, annotation.studyShortName);
     }
 
+    // The review is blind: the annotators are numbered, not named.
     return Array.from(userToStudies.entries())
-      .map(([userId, studiesMap]) => ({
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([userId, studiesMap], index) => ({
         userId,
-        userName: userNameById.get(userId) ?? "Unknown user",
+        userName: `Annotator ${index + 1}`,
         studies: Array.from(studiesMap.entries())
           .map(([studyId, studyShortName]) => ({ studyId, studyShortName }))
           .sort((a, b) => a.studyShortName.localeCompare(b.studyShortName)),
       }))
-      .sort((a, b) => a.userName.localeCompare(b.userName));
-  }, [annotations, reportIdParam, userNameById]);
+  }, [annotations, reportIdParam]);
 
   const reportFlags = useMemo<string[]>(() => {
     if (!reportIdParam) {

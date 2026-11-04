@@ -202,8 +202,9 @@ class StudyRepository:
 
     @staticmethod
     def _columns(values: Mapping[str, Any]) -> Dict[str, Any]:
-        """The columns of a study from its fields (see add_study), but the graph."""
-        return study_columns({key: values.get(key) for key in STUDY_CONFIG.fields})
+        """The columns of a study from its fields (see add_study), but the graph and the fields derived from it, which the
+        graph holds (see StudyGraphs.document)."""
+        return study_columns({key: values.get(key) for key, field in STUDY_CONFIG.fields.items() if not field.derive})
 
     @staticmethod
     def _raise_duplicate(error: IntegrityError, constraint: str) -> None:
@@ -232,13 +233,44 @@ class StudyRepository:
         await self.db.flush()
 
     async def update_study_fields(self, study_id: int, values: Mapping[str, Any]) -> None:
-        """Sets primitive fields of a study (keys of STUDY_CONFIG.fields, valued as StudyFields has them)."""
+        """Sets primitive fields of a study (keys of STUDY_CONFIG.fields, valued as StudyFields has them); a field derived
+        from the graph is written into the graph."""
         study = await self.db.get(Study, study_id)
         if study is None:
             raise ValueError(f"Study {study_id} not found")
-        for column, value in study_columns(values).items():
+        for column, value in self._columns(values).items():
             setattr(study, column, value)
+        derived = {key: value for key, value in values.items() if STUDY_CONFIG.fields[key].derive}
+        if derived:
+            await self.graphs.store(study, {GRAPH_FIELD: self.graphs.stored.dump(await self.graphs.named(study)), **derived})
         await self.db.flush()
+
+    async def get_study_graph(self, study_id: int) -> Optional[Any]:
+        """The graph of a visible study (of the core database or of an update) with its tags by name, None for no such
+        study."""
+        study = await self._study_row(study_id)
+        return None if study is None else await self.graphs.named(study)
+
+    async def set_study_graph(self, study_id: int, document: Any) -> None:
+        """Replaces the graph of a study (of the core database or of an update) with `document`, its tags by name (see
+        StudyGraphs.store and draft). Raises GraphFormatError if it breaks the study ontology."""
+        study = await self._study_row(study_id)
+        if study is None:
+            raise ValueError(f"Study {study_id} not found")
+        payload = {GRAPH_FIELD: self.graphs.stored.dump(document)}
+        if isinstance(study, Study):
+            await self.graphs.store(study, payload)
+        else:
+            self.graphs.draft(study, payload)
+        await self.db.flush()
+
+    async def _study_row(self, study_id: int) -> Optional[StudyFields]:
+        """The row of a study of the core database, or of an update visible to this scope."""
+        study = await self.db.get(Study, study_id)
+        if study is not None:
+            return study
+        drafts = await self._drafts([study_id])
+        return drafts[0] if drafts else None
 
     async def add_study_graph_entries(self, study_id: int, entries: Mapping[str, Sequence[Mapping[str, Mapping[str, Any]]]]) -> None:
         """Adds edges, given as entries with their tags by name (see StoredGraph.from_entries), to the graph of a study."""

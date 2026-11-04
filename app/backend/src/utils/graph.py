@@ -1,31 +1,8 @@
-"""The graph of a study (the entities and relations of the study ontology, config/medidex-study.yaml) as the study
-keeps it: JSON with nodes and edges. A node is an entity of a kind of the ontology; it has no properties, only edges
-(relations) to other nodes. What looks like a property of an arm, its dosage or its interventions, is an edge to a node
-that is a value:
-
-    {"nodes": [{"id": "arm1", "kind": "arm"},
-               {"id": "arm2", "kind": "arm"},
-               {"id": "intervention1", "kind": "intervention", "value": 3000001},
-               {"id": "dosage1", "kind": "dosage", "value": "10 mg"},
-               {"id": "population1", "kind": "population"},
-               {"id": "size1", "kind": "size", "value": "60"}],
-     "edges": [{"relation": "receives", "source": "arm1", "target": "intervention1"},
-               {"relation": "has_dosage", "source": "arm1", "target": "dosage1"},
-               {"relation": "compared_with", "source": "arm1", "target": "arm2"},
-               {"relation": "participated", "source": "arm1", "target": "population1"},
-               {"relation": "has_size", "source": "population1", "target": "size1"}]}
-
-The value of a node that is a term of the vocabulary is the id of the tag. The study itself is a node too (the root
-entity of the ontology), with the id `study` and no JSON of its own, so that a relation can start at the study as a
-whole: {"relation": "participated", "source": "study", "target": "population1"}. A study has as many arms as it has arm
-nodes, and a comparison connects any two of them; arms without one are fine. A value is one node however many edges
-lead to it (every arm with the dosage "10 mg" points to the same node). A node without edges is fine too.
-
-The study stores it as a JSONB object; creating a study takes the JSON text, also with names instead of ids for the
-tags. Reading converts older graphs: those with the properties of the entities inline ({"nodes": {"arm": [{"id": ...,
-"interventions": [...], "dosage": ...}]}, "relations": {"comparison": [...]}}), and those from before the ontology,
-whose relations had other names (`comparison`, `interventions`, `dosage`, ...), whose outcomes were values of the study
-rather than entities that measure something, and whose populations could be of the sex `mixed`."""
+"""The graph of a study as the study keeps it: JSON with nodes and edges, of the entities and relations the study ontology
+(config/medidex-study.yaml) defines. A node is an entity of a kind of the ontology with no properties, only edges to
+other nodes; what an entity says about itself is an edge to a node that is a value (the id of a tag, or a primitive). The
+study itself is the root node, with the id `study` and no JSON of its own. A value is one node however many edges lead to
+it. Creating a study also takes the tags by name instead of id; reading converts graphs of older formats."""
 
 import json
 import re
@@ -188,7 +165,7 @@ class StoredGraph:
                         continue
                     for item in value if isinstance(value, list) else [value]:
                         if item not in (None, ""):
-                            target = self._value_node(document, relation.target[0], item)
+                            target = self.value_node(document, relation.target[0], item)
                             document.edges.append(GraphEdge(key, str(entry["id"]), target))
         for key, edges in (data.get("relations") or {}).items():
             document.edges.extend(GraphEdge(self.RENAMED.get(key, key), str(edge["source"]), str(edge["target"])) for edge in edges)
@@ -287,7 +264,7 @@ class StoredGraph:
         """Adds values the study itself has by the attribute relation (e.g. its countries by `in_country`): a value it has
         already is not added again."""
         for value in values:
-            edge = GraphEdge(relation, self.config.root_id, self._value_node(document, self.config.relations[relation].target[0], value))
+            edge = GraphEdge(relation, self.config.root_id, self.value_node(document, self.config.relations[relation].target[0], value))
             if edge not in document.edges:
                 document.edges.append(edge)
         return document
@@ -311,32 +288,49 @@ class StoredGraph:
         for node in document.of_kind(kind):
             if node.kind == kind and self._identity(self.profile(document, node)) == identity:
                 return node.id
-        node = GraphNode(self._new_id(document, kind), kind)
+        node = GraphNode(self.new_id(document, kind), kind)
         document.nodes.append(node)
         for key, values in wanted.items():
             for value in values:
-                target = self._value_node(document, attributes[key].target[0], value)
+                target = self.value_node(document, attributes[key].target[0], value)
                 document.edges.append(GraphEdge(key, node.id, target))
         return node.id
 
-    def _value_node(self, document: GraphDocument, kind: str, value: Any) -> str:
+    def value_node(self, document: GraphDocument, kind: str, value: Any) -> str:
         """The id of the node of this kind with this value; a new one if there is none yet."""
         checked = self._value(kind, value)
         for node in document.of_kind(kind):
             if str(node.value).casefold() == str(checked).casefold():
                 return node.id
-        node = GraphNode(self._new_id(document, kind), kind, checked)
+        node = GraphNode(self.new_id(document, kind), kind, checked)
         document.nodes.append(node)
         return node.id
 
     @staticmethod
-    def _new_id(document: GraphDocument, kind: str) -> str:
+    def new_id(document: GraphDocument, kind: str) -> str:
         """An id of the kind no node of the graph has (a stored graph may number its nodes otherwise)."""
         taken = {node.id for node in document.nodes}
         number = len(document.of_kind(kind)) + 1
         while f"{kind}{number}" in taken:
             number += 1
         return f"{kind}{number}"
+
+    def prune(self, document: GraphDocument) -> GraphDocument:
+        """The graph without what says nothing: values no edge leads to, and entities without a value of their own (a
+        population whose size was taken away, an arm without interventions), with their edges."""
+        changed = True
+        while changed:
+            changed = False
+            for node in list(document.nodes):
+                if self.config.entities[node.kind].value is not None:
+                    empty = not any(edge.target == node.id for edge in document.edges)
+                else:
+                    empty = not any(edge.source == node.id and self.config.is_attribute(edge.relation) for edge in document.edges)
+                if empty:
+                    document.nodes.remove(node)
+                    document.edges[:] = [edge for edge in document.edges if node.id not in (edge.source, edge.target)]
+                    changed = True
+        return document
 
     @staticmethod
     def _identity(profile: Mapping[str, Sequence[Item]]) -> Any:

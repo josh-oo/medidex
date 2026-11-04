@@ -30,209 +30,57 @@ Install *docker* if you have not already: [Windows](https://docs.docker.com/desk
    - Qdrant dashboard: http://localhost:6333/dashboard
 
 # Data and databases
-The repository ships a deterministic synthetic study/report dataset for local deployments,
-[`deploy/data/seed/synthetic_database.zip`](deploy/data/seed/synthetic_database.zip) (101 studies with an uneven
-set of 220 linked reports and their PDFs). On startup the backend only creates the tables of the resources database
-when they are absent; it loads no data. Every deployment starts without a study database, and an admin creates one
-or imports one on the Database management page, e.g. the demo database:
+Every deployment starts without data. An admin creates study databases on the **Database management** page, empty
+or imported from the export of another deployment.
 
-- **Postgres.** The services expect three databases — `POSTGRES_DB_RESOURCES` (studies and
-    reports), `POSTGRES_DB_LANGGRAPH` (agent checkpoints) and `POSTGRES_DB_KEYCLOAK` (Keycloak).
-    The databases are created automatically on the first start; see
-    [`ops/app-init/postgres-init.sh`](ops/app-init/postgres-init.sh) for details. Docker-mounted runtime
-    state lives in `deploy/data/runtime/`.
-- **Resource schema.** The models are the schema: on every start the backend creates the tables of
-    `app/backend/src/database/models.py` (and of the models of a downstream build) that do not exist yet
-    (`src/database/schema.py`). There are no migrations; a deployment starts from a clean database, and data from
-    elsewhere comes in through the database import.
-- **PDFs.** The fulltext PDF of a report is the file `resources/report_pdfs/<report id>.pdf` of the data volume
-    (`src/utils/pdfs.py`). Whether a report has one is read from that folder, not stored; a report without one can be
-    marked "Not Available" (`report.no_pdf`), and then counts as having one.
-- **Study databases.** The resource database holds any number of *study databases*
-    (`study_database`: a name, a description and eligibility criteria), e.g. the registers of
-    different review groups, numbered by integer ids. Every study and every project belongs to one. There is
-    no default database: each deployment brings its own, which admins create on the Database management page,
-    empty or imported from the export of another one (see [Study databases](#study-databases)); the demo
-    database is one such import. A project's reports are only matched against, linked to and turn into
-    studies of its own database, and study short names are unique within a database.
-- **Admin account.** Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` to create an
-    approved admin account automatically on frontend startup. The seed is idempotent;
-    an existing account with that email is promoted to admin without changing its
-    password. `ADMIN_NAME` is optional and defaults to `Administrator` (used as the
-    first name; if it has no space, the last name defaults to `User`).
-- **Testing with dummy data.** [`deploy/data/seed/examples/`](deploy/data/seed/examples/) holds new reports (a RIS
-    file and some of their PDFs) to upload into a project of the imported demo database.
-- **Initialization.** On `docker compose up`, the one-shot `app-init` service prepares Qdrant, the
-    logic data volume and Keycloak before `logic` starts; it never touches postgres. Its chain
-    ([`ops/app-init/init.sh`](ops/app-init/init.sh)):
-  1. Creates the Qdrant collection if it doesn't exist yet (with `EMBEDDING_MODEL_DIM`
-     dimensions, cosine distance and the required payload indices). Idempotent: an existing
-     collection is left untouched.
-  2. Creates the data directories inside `deploy/data/runtime/backend/` (logs, PDFs of the reports, fulltexts)
-     that the bind mount hides and hands them to the unprivileged user `logic` runs as. Keep this list in
-     sync when new `DATABASE_VOLUME` paths are added in `app/backend/src/`.
-  3. Grants the Keycloak service account its roles and creates the optional admin account.
-
-  Then `logic` itself, on every start ([`src/background/startup.py`](app/backend/src/background/startup.py)),
-  before it serves: creates the schema (see "Resource schema"). In the background it then syncs the vectorstore:
-  every report and intervention, condition and outcome tag without a point is embedded (in batches) and
-  added, points of deleted rows are removed (`MaintenanceService.sync_vectorstore`). Until that is done,
-  new reports are matched against fewer studies; it continues on the next start if interrupted.
+- **Demo data.** [`deploy/data/seed/synthetic_database.zip`](deploy/data/seed/synthetic_database.zip) is a synthetic
+  study database (101 studies, 220 linked reports with their PDFs) to import on the Database management page.
+  [`deploy/data/seed/examples/`](deploy/data/seed/examples/) holds new reports (a RIS file and some of their PDFs) to
+  upload into a project of that database.
+- **Admin account.** Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` to create an approved admin account on startup
+  (`ADMIN_NAME` is optional). An existing account with that email is made an admin; its password is not changed.
+- **Storage.** Postgres, Qdrant, the embedding model cache and the PDFs of the reports live in
+  `deploy/data/runtime/`. The databases and the vector collection are created on the first start. There are no
+  migrations: start new versions from a clean deployment and bring data over with an export and import.
 
 # Study databases
-A study database is a collection of studies of its own, with a name, an optional description and eligibility
-criteria (which studies belong in it, at least one). A criterion is a text in a category of
-`app/backend/src/config/eligibility.yaml` (population, design, ...; `GET /eligibility-schema`), to include a report
-(it must hold) or to exclude it (it must not hold), with an id that stays when its text is edited. A new category is an
-entry of that file, no code. When the criteria of a database change, the postprocessors are told
-(`ReportPostprocessor.criteria_changed`) and what they mark as pending again runs in the background. The Database management page shows one card per database
-with its projects below it as numbered updates ("Update 7"), newest first; its details dialog shows the eligibility
-criteria, and admins edit name, description and criteria there and create new updates from the card. The REST API:
+A study database is a register of studies of its own (e.g. that of one review group), with a name, a description and
+eligibility criteria: what a study needs to belong in it, by category (population, design, ...; the categories are set
+in `app/backend/src/config/eligibility.yaml`). New reports are uploaded into a *project* of one database, numbered as
+its updates ("Update 7"); they are matched against and linked to the studies of that database only. A database takes
+one open update at a time.
 
-| Endpoint | Who | What |
-| --- | --- | --- |
-| `GET /eligibility-schema` | any user | the categories of the eligibility criteria, in their order |
-| `GET /databases` | any user | the databases with their number of studies and reports |
-| `POST /databases` | admin | a new, empty database (`name`, `description`, `eligibilityCriteria`) |
-| `POST /databases/import` | admin | a new database from an exported one with its PDFs (multipart: `file` (.zip or .json), `name`, `description`, `eligibilityCriteria` as a JSON list) |
-| `PATCH /databases/{id}` | admin | rename a database or change its description or eligibility criteria |
-| `GET /databases/{id}/export` | admin | the database as a zip archive (`database.json` and the PDFs of its reports) |
-| `GET /databases/{id}/storage` | admin | what the database takes in storage (estimates, shown by the (i) next to its name), split into `database` (what stays: its studies, the reports linked to them, their search index and PDFs) and `updates` (what only its updates need: the tables marked `UPDATE_DATA` in `src/database/models.py` - their projects, reports, studies and links - plus what extensions register in `src/utils/storage.py`); every table with a foreign key to its studies, reports or projects is counted |
-| `POST /projects` | admin | requires the `databaseId` of the project |
-| `GET /studies?q=…&databases=…` | any user | the study search, in the given databases (all without) |
-| `GET /{category}?databases=…` | any user | the tags of a category (e.g. `/countries`) used by the studies of the given databases (the whole vocabulary without) |
+Working on an update:
+1. An admin creates the update from the card of the database and assigns curators to it.
+2. Each curator links the reports to their studies (or creates new studies) and commits the reports when done. Curators
+   work independently and do not see each other's links.
+3. Once everyone has committed a report, the admin reviews it on the review page and merges it into the database (or
+   deletes it). Merged reports and the studies created for them become visible to everyone.
 
-**Exchange format.** An export is a zip archive, `<name>.medidex.zip`, that an import reads back unchanged
-(`app/backend/src/utils/archive.py`): `database.json` (`DatabaseExport` in `app/backend/src/utils/dto.py`) and
-the PDFs of its reports under `pdfs/`, each named by the `pdf` of its report. An import also takes the same
-layout unpacked into a directory or a `database.json` alone, without PDFs. Each study has its
-fields of the study ontology, its graph with the tags by name (see "The study ontology"; its countries are `in_country`
-edges of the study), the names of its tags per category, and its reports. Times are ISO 8601, UTC if they name no
-time zone:
+**Export and import.** The download button on the card of a database exports it as `<name>.medidex.zip` (the studies with their
+reports and PDFs), which another deployment imports as a new database. An import is all or nothing: a file with errors
+is rejected with what is wrong. Imported reports are indexed for matching in the background; until then their studies
+are found by the search but not yet suggested for new reports.
 
-```json
-{
-  "format": "medidex-database",
-  "version": 1,
-  "name": "Paediatric asthma trials",
-  "description": "…",
-  "eligibilityCriteria": [{"id": "c1", "category": "population", "kind": "include", "text": "…"}],
-  "studies": [
-    {
-      "shortName": "ASTHMA-KIDS-01",
-      "status": "Closed",
-      "trialId": "ISRCTN12345678",
-      "numberParticipants": 120,
-      "duration": "12 weeks",
-      "graph": {
-        "nodes": [{ "id": "arm1", "kind": "arm", "value": null }, { "id": "country1", "kind": "country", "value": "Germany" }],
-        "edges": [{ "relation": "in_country", "source": "study", "target": "country1" }]
-      },
-      "tags": { "interventions": ["Montelukast"], "conditions": ["Asthma"], "design": ["Randomized Controlled Trial"] },
-      "createdAt": "2021-03-01 00:00:00",
-      "reports": [{ "id": "17", "title": "…", "year": 2021, "authors": ["A. Author"], "abstract": "…", "doi": "10.…", "pdf": "pdfs/17.pdf" }]
-    }
-  ]
-}
-```
-
-An import is all or nothing: a file with an unknown study status, a malformed graph, two studies of the same
-short name, an unknown tag category or a PDF it names but does not contain is rejected with what is wrong. The
-PDFs are stored under the ids the reports get in the importing deployment. Unknown tag names become new tags. A
-report listed under several studies is imported once: the entries of the same `id` (an export writes the id of the
-report; any text identifying it in the file), or, for reports without one, of the same DOI or the same title and
-year. Imported studies are
-visible to every scope, like those of the seed. Their reports are added to the vectorstore in the background, and
-until then the studies are found by the search but not yet suggested for new reports.
-[`deploy/data/seed/synthetic_database.zip`](deploy/data/seed/synthetic_database.zip), the demo database, is one
-to try it with.
+The REST API is documented at http://localhost:8002/api/v1/docs.
 
 # Configuration
 All configuration lives in a single `.env` file in the repository root; every variable is
-documented in [`.env.example`](.env.example).
+documented in [`.env.example`](.env.example). What a study consists of (its fields, tag categories and the structure of
+its arms and comparisons) is defined in [`app/backend/src/config/medidex-study.yaml`](app/backend/src/config/medidex-study.yaml).
 
 # Services
 The application is divided into multiple services to facilitate hosting it on different
 machines later.
 
 ## frontend
-The Vite + React user interface, maintained in the `app/frontend/` directory of this repository.
+The Vite + React user interface, in `app/frontend/`.
 The original frontend code can be found in the [MaxiMittel/medidex repository](https://github.com/MaxiMittel/medidex).
 
 ## logic
-This service manages the incoming requests from the frontend and calls the appropriate
-sub-services in the backend.
-
-### The study ontology
-What a study consists of is defined once, as a [LinkML](https://linkml.io) schema:
-[`app/backend/src/config/medidex-study.yaml`](app/backend/src/config/medidex-study.yaml). The fields of a study,
-its tag categories, the entities and relations of its graph (arms, populations, outcomes and their values), the study
-DTOs, `GET /study-schema` and the frontend views are all derived from it (`src/utils/studyconfig.py`); its header
-explains how the classes and annotations are read. Graphs stored under the names from before the ontology
-(`comparison`, `interventions`, ...) are converted when they are read (`src/utils/graph.py`).
-
-A downstream deployable extends the ontology without editing it: it imports the schema for new classes and slots, and
-keeps annotations of its own (e.g. instructions for an extraction) in a separate file keyed by the names of this one.
-
-OWL for reasoners is generated, not kept in git (`linkml` is a development dependency only):
-
-```bash
-pip install linkml
-gen-owl --no-use-native-uris app/backend/src/config/medidex-study.yaml > medidex-study.owl.ttl
-```
-
-`--no-use-native-uris` uses the `slot_uri` of the tag categories, so e.g. the conditions of a study and those of a
-population are the same property, `mdx:has_condition`.
-
-## Scopes
-
-Everyone who edits works in a **scope** of their own and does not interact with the others. A scope is the id the
-edit is recorded under (`user_id` of the request):
-
-| Scope | Id | Who |
-|---|---|---|
-| user | the Keycloak user id | a person working in the web UI |
-| MediBot | `bot` | the project automation |
-| MCP client | `<client name> (mcp)` | an MCP client acting for the project's administrator (downstream builds) |
-
-- **Links.** The link of a report of an update to a study is recorded per scope (`update_link.created_by`; in the
-  vector store under `temporary.<scope>`), so everyone sees their own links. The reports of a study - in search,
-  its details and the export - are those of the core database only (`link`): a linked report joins them
-  once it is merged. Only the reports of an update are linked; those of the core database are not.
-- **Search.** The study search (free text and advanced) covers the core database only, for every scope, admins
-  included: no study created in an update, no report of an update, no link that is not merged.
-- **Studies.** A study created in a scope (`update_study.created_by`) is only visible to that scope - in candidates,
-  details and for linking - until a report linked to it is merged into the core database, from then on
-  it is a study of the core database (`study`), visible to everyone. Admins (reviewers) see every scope's studies
-  (`RequestContext.is_admin`); an MCP client acting for an admin does not.
-- **Projects.** A scope needs access to the project: it is assigned to it (`project_assignee`, any string is a
-  valid assignee), which is also what shows its progress among the assignees of the project (Curation page). An
-  assignee commits the reports they are done with (`report_commit`), which then leave their list and cannot be changed.
-  Once every assignee has committed a report, the owner merges it (`POST /reports/{id}/merge`): the report, the
-  selected studies created in the update and its links to them move into the core database; or deletes it, so that it
-  never reaches the database. Either way what the project knew of the report goes to `report_archive` (read-only, e.g.
-  for training models) and the report leaves the update with its update data, the extensions' included
-  (`src/utils/storage.py`). A database takes one open update at a time: the next one is uploaded once every report of
-  the last one is merged or deleted.
-- **Not scoped.** PDFs and their upload are global: a PDF found for a report is the PDF of the report.
-
-Implemented in `StudyRepository._visible_drafts()` and `LinkageService` (a study that is not visible cannot be linked).
-
-### The core database and its updates
-
-The two are kept apart by table (`src/database/models.py`). The core tables (`report`, `study`, `link`, the
-tags) hold the core database only; an update has tables of its own: `update_report` for its reports (with what the
-update keeps of them: the PDF search, the embedding, the preliminary trial id), `update_study` for the studies created
-in it and `update_link` for the links of its scopes, each to a study of the core database or of the update. A report
-and a study keep their id when they are merged: both tables of each draw it from one sequence. The tags of a study of
-an update stay names in its graph until it is merged; only then do they become tags of the core database.
-
-Everything that only serves the curation of an update (flags, commits, scores, and the tables of the extensions) is
-marked `UPDATE_DATA` and references the update (`project`, `update_report`, `update_study`) with `ON DELETE CASCADE`:
-deleting a project, or a report of an update when it is merged or deleted, removes it, and never a row of the core
-database. A table with a foreign key to a table of the updates has to be one itself; the backend does not start
-otherwise (`ResourceSchema.check_stages`). What a report keeps in both stages has a table for each, and a merge hook
-(`src/utils/mergehooks.py`) moves its row.
+The REST API (FastAPI, `app/backend/`) that the frontend calls. On startup the one-shot `app-init` service prepares
+Qdrant, the data directories and Keycloak first ([`ops/app-init/init.sh`](ops/app-init/init.sh)); `logic` then creates
+missing tables and indexes new reports and tags for matching in the background.
 
 ## embedding
 This service transforms plain text into vector embeddings. It runs HuggingFace

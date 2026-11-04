@@ -22,20 +22,28 @@
 #                        icons (https://lucide.dev/icons) in kebab-case that the frontend knows (src/lib/icons.ts).
 #   display              Fields: metric (a tile at the top of the details) | text (a paragraph below the tiles) | none.
 #   column               Fields: the column of the study in the database (src/database/models.py), if not the name.
-#   derive_source, derive_path, derive_aggregate
-#                        Fields: calculated from the graph while the study has no value of its own (a value it holds wins,
-#                        e.g. when a report only states the total): for every entity of the kind `derive_source`, follow
-#                        the relations of `derive_path` (separated by `/`) to values, and aggregate them: sum (only if
-#                        every entity has one) | max | min.
+#   derive               Fields: what the field is, read from the graph (src/utils/derive.py). The graph is the only source
+#                        of truth; the column of a derived field is a copy of it, written whenever the graph is. Rules
+#                        separated by `|`, the first that gives a value wins; a rule is `<kind> <path> <aggregate>`: for
+#                        every entity of the kind (`study` is the study itself), follow the relations of the path (separated
+#                        by `/`) to values and aggregate them: first | sum (only if every entity has one) | max | min.
+#                        A field is written by its first rule if that starts at the study (the entities on its path are
+#                        made as needed): setting the participants of a study sets the size of its population.
 #   meta                 Attributes of the study that are metadata of its database record (when it was entered and edited).
 #   search_field         Tag categories: the singular name in the advanced study search (e.g. `intervention==Placebo`).
 #   free_text_search     Tag categories: the plain-text study search also matches their tags.
+#   detail_of            Tag categories: the field after whose value the tags are shown in the study details, in brackets,
+#                        instead of in a row of their own (the participant groups after the participants: "1042 (Adult)").
 #   separator            Relations: between source and target when an edge is shown as a line ("Drug A vs Placebo").
 #   line                 Relations to values: "false" leaves the value out of the line of its entity ("A + B (10 mg)").
 #   card                 Relations: also shown as a line on the study cards.
 #   unordered            Relations: two studies match whichever end is which (A vs B matches B vs A). Not an OWL symmetric
 #                        property: the direction says something (the evaluated arm is compared with its comparator).
 #   seconds              Duration units: the length of the unit.
+#
+# The shape of a graph (checked by src/utils/graph.py when it is read): the kinds and relations of the ontology,
+# `multivalued` and the range (enums included). An entity without a value of its own says nothing and is dropped. Rules
+# beyond the shape are a deployable's (src/utils/graphchecks.py).
 id: https://w3id.org/medidex/study
 name: medidex-study
 title: Medidex study ontology
@@ -101,6 +109,12 @@ slots:
     range: Intervention
     multivalued: true
     required: true
+    annotations: {icon: syringe, color: emerald}
+  has_intervention:
+    title: Interventions without an arm
+    description: An intervention the study gives that the report assigns to no arm (e.g. a registry record that only lists them).
+    range: Intervention
+    multivalued: true
     annotations: {icon: syringe, color: emerald}
   has_role:
     title: Arm type
@@ -182,6 +196,18 @@ slots:
     range: Country
     multivalued: true
     annotations: {icon: map-pin, color: amber}
+  has_design:
+    title: Design
+    description: A property of the design of the study ("randomised controlled trial", "double-blind"), one value per property.
+    range: Design
+    multivalued: true
+    annotations: {icon: activity, color: teal}
+  has_trial_id:
+    title: Trial ID
+    description: A registration id of the study (NCT..., ISRCTN..., DRKS...).
+    range: TrialId
+    multivalued: true
+    annotations: {icon: tag, color: slate}
 
   # What a value node holds.
   concept:
@@ -205,7 +231,7 @@ classes:
     title: Study
     description: The study as a whole.
     annotations: {icon: file-text, color: slate}
-    slots: [participated, has_outcome, has_primary_outcome, has_secondary_outcome, in_country]
+    slots: [participated, has_intervention, has_outcome, has_primary_outcome, has_secondary_outcome, in_country, has_design, has_trial_id]
     attributes:
       short_name:
         title: Name
@@ -213,7 +239,7 @@ classes:
         annotations: {icon: tag, color: slate, display: none}
       trial_id:
         title: Trial ID
-        annotations: {icon: tag, color: slate, display: none, column: trial_registration_id}
+        annotations: {icon: tag, color: slate, display: none, column: trial_registration_id, derive: study has_trial_id first}
       number_participants:
         title: Participants
         range: integer
@@ -221,9 +247,7 @@ classes:
           icon: users
           color: blue
           display: metric
-          derive_source: arm
-          derive_path: participated/has_size
-          derive_aggregate: sum
+          derive: study participated/has_size first | arm participated/has_size sum
       duration:
         title: Duration
         range: duration
@@ -231,9 +255,7 @@ classes:
           icon: clock
           color: emerald
           display: metric
-          derive_source: arm
-          derive_path: has_duration
-          derive_aggregate: max
+          derive: arm has_duration max
       status:
         title: Status
         range: StudyStatus
@@ -277,7 +299,7 @@ classes:
         slot_uri: mdx:has_participant_group
         range: ParticipantGroup
         multivalued: true
-        annotations: {icon: users, color: sky, search_field: participant}
+        annotations: {icon: users, color: sky, search_field: participant, detail_of: number_participants}
       design:
         title: Study Design
         description: "Design of a study (e.g. 'Randomized Controlled Trial', 'Controlled Clinical Trial')"
@@ -390,6 +412,11 @@ classes:
     title: Age
     description: The age of a population, e.g. 18-65 years.
     annotations: {icon: baby, color: sky}
+    slots: [value]
+  TrialId:
+    title: Trial ID
+    description: A registration id of a study in a trial registry, e.g. NCT01234567.
+    annotations: {icon: tag, color: slate}
     slots: [value]
   TimePoint:
     title: Time point

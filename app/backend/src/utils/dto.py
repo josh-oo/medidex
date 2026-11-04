@@ -193,13 +193,12 @@ def study_columns(values: Mapping[str, Any]) -> Dict[str, Any]:
         columns[field.column] = value
     return columns
 
-def study_values(study, derive: bool = True) -> Dict[str, Any]:
-    """The fields of a study of the database (see StudyFields), read as config/medidex-study.yaml says. A field the study has
-    no value for is calculated from its graph if the config says how (`derive`, e.g. the participants of its arms), unless
-    `derive` is false (the fields as the study holds them)."""
+def study_values(study) -> Dict[str, Any]:
+    """The fields of a study of the database (see StudyFields), read as config/medidex-study.yaml says. A field derived from
+    the graph (`derive`, e.g. the participants) is read from it: the graph is its only source, the column a copy."""
     values: Dict[str, Any] = {key: getattr(study, field.column) for key, field in STUDY_CONFIG.fields.items()}
     for key, field in STUDY_CONFIG.fields.items():
-        if derive and field.derive is not None and values[key] is None:
+        if field.derive:
             values[key] = _derived.value(field, getattr(study, GRAPH_FIELD, None))
         if field.type == "duration" and values[key] is not None:
             values[key] = _durations.format(values[key])
@@ -311,6 +310,7 @@ class TagCategorySchema(BaseModel):
     searchField: str
     freeTextSearch: bool
     description: str
+    detailOf: Optional[str] = None  # the field (camelCase) the tags are shown with in the study details, in brackets
 
 class StudySchema(BaseModel):
     """What a study consists of and how it is presented. Returned by GET /study-schema."""

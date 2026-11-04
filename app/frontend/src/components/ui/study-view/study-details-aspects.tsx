@@ -112,7 +112,8 @@ export function StudyAspects({
       {combinedError && <p className="px-4 py-1.5 text-sm text-destructive">{combinedError}</p>}
       {categories.map((category) => {
         const { items, nextCursor, loadingMore } = tags[category.key];
-        if (items.length === 0) return null;
+        // Tags shown with a field (in brackets after its value) have no row of their own.
+        if (items.length === 0 || category.detailOf) return null;
         return (
           <DetailRow key={category.key} icon={category.icon} label={category.label}>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

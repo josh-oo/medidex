@@ -257,7 +257,15 @@ export function StudyDetails({ study, isActive, variant = "sheet" }: StudyDetail
   const body = (
         <div className="space-y-3">
           <dl className="divide-y divide-border/50">
-            <StudyOverview study={study} fields={schema?.fields ?? []} />
+            <StudyOverview
+              study={study}
+              fields={schema?.fields ?? []}
+              details={Object.fromEntries(
+                (schema?.tags ?? [])
+                  .filter((category) => category.detailOf)
+                  .map((category) => [category.detailOf!, (tags[category.key]?.items ?? []).map((item) => item.keyword)]),
+              )}
+            />
             <StudyAspects
               study={study}
               loading={detailsLoading || !schema}
