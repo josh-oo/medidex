@@ -28,12 +28,15 @@ export function initKeycloak(options: KeycloakInitOptions): Promise<boolean> {
 // Returns a token guaranteed to be valid for at least 30s, refreshing first
 // if needed. Every direct browser->backend request goes through this so
 // callers never have to think about expiry themselves. Returns null if
-// there's no session or the refresh token itself has expired.
-export async function getAccessToken(): Promise<string | null> {
+// there's no session or the refresh token itself has expired. `fresh` always
+// refreshes, for a request that takes long to reach the backend (a large
+// upload a proxy buffers before passing it on): its token lives as long as
+// tokens do.
+export async function getAccessToken(fresh = false): Promise<string | null> {
   const keycloak = getKeycloak();
   if (!keycloak.authenticated) return null;
   try {
-    await keycloak.updateToken(30);
+    await keycloak.updateToken(fresh ? -1 : 30);
   } catch {
     return null;
   }

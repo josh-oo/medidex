@@ -46,10 +46,17 @@ const uploadFile = (file: File, onUpload?: (loaded: number, total: number) => vo
       retryDelays: [0, 3000, 10000, 30000, 60000],
       metadata: { filename: file.name },
       removeFingerprintOnSuccess: true,
-      // A fresh token for every part: uploading a large file takes longer than a token lives.
+      // A new token for every part: a proxy may only pass a part on once all of it arrived, and the token has to be
+      // valid still then.
       onBeforeRequest: async (request) => {
-        const token = await getAccessToken();
+        const token = await getAccessToken(true);
         if (token) request.setHeader("Authorization", `Bearer ${token}`);
+      },
+      // tus-js-client's own rule (no answer, a server error, a conflict or a lock), and an expired token too: a part
+      // that took longer than the token lived is sent again with a new one.
+      onShouldRetry: (error) => {
+        const status = error.originalResponse?.getStatus() ?? 0;
+        return status === 0 || status >= 500 || [401, 409, 423].includes(status);
       },
       onProgress: (loaded, total) => onUpload?.(loaded, total),
       onSuccess: () => resolve(upload.url?.split("/").pop() ?? ""),
