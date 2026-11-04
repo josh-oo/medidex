@@ -31,12 +31,18 @@ interface StudySearchBarProps {
   onAddFilter: (filter: StudyFilter) => void;
   /** Closes the search (the button at the end of the bar, or Escape). */
   onClear?: () => void;
+  /** The ids of the databases searched; the suggestions only come from them (all of them if empty). */
+  databases?: number[];
   /** Shown at the start of the bar, e.g. the choice of databases. */
   leading?: ReactNode;
   /** `hero` is the large bar of the start page. */
   size?: "hero" | "compact";
   autoFocus?: boolean;
+  /** Grays the bar out and takes no input, e.g. while there is no database to search. */
+  disabled?: boolean;
 }
+
+const NO_DATABASES: number[] = [];
 
 /** The search field with suggestions from the vocabulary of the tag categories and the names of studies. */
 export function StudySearchBar({
@@ -44,9 +50,11 @@ export function StudySearchBar({
   onSearch,
   onAddFilter,
   onClear,
+  databases = NO_DATABASES,
   leading,
   size = "compact",
   autoFocus,
+  disabled,
 }: StudySearchBarProps) {
   const [value, setValue] = useState(text);
   const [open, setOpen] = useState(false);
@@ -58,7 +66,7 @@ export function StudySearchBar({
   const hero = size === "hero";
 
   // The vocabulary is loaded the first time the field is used.
-  const catalogs = useTagCatalogs(focused);
+  const catalogs = useTagCatalogs(focused, databases);
   const trimmed = value.trim();
   const debounced = useDebouncedValue(trimmed, 250);
 
@@ -70,13 +78,13 @@ export function StudySearchBar({
       return;
     }
     let active = true;
-    searchStudies({ q: debounced, limit: MAX_STUDIES })
+    searchStudies({ q: debounced, limit: MAX_STUDIES, databases })
       .then((page) => active && setStudies(page.items))
       .catch(() => active && setStudies([]));
     return () => {
       active = false;
     };
-  }, [debounced, open]);
+  }, [debounced, open, databases]);
 
   const suggestions = useMemo<Suggestion[]>(() => {
     if (trimmed.length < MIN_TAG_TEXT) return [];
@@ -139,8 +147,10 @@ export function StudySearchBar({
           "flex items-center gap-2 rounded-full border bg-card transition-[box-shadow,padding] duration-500 focus-within:ring-2 focus-within:ring-ring/40",
           hero ? "p-1.5 shadow-md" : "p-1 shadow-xs",
           // With a control at the start the bar is padded evenly on both ends.
-          !leading && (hero ? "pl-4" : "pl-3.5")
+          !leading && (hero ? "pl-4" : "pl-3.5"),
+          disabled && "pointer-events-none opacity-50 shadow-none"
         )}
+        aria-disabled={disabled}
       >
         {leading}
         <Search className={cn("h-4 w-4 shrink-0 text-muted-foreground", leading && "ml-1.5")} aria-hidden />
@@ -155,6 +165,7 @@ export function StudySearchBar({
           aria-activedescendant={showList && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
           value={value}
           autoFocus={autoFocus}
+          disabled={disabled}
           onChange={(event) => {
             setValue(event.target.value);
             setOpen(true);
@@ -192,6 +203,7 @@ export function StudySearchBar({
         <Button
           type="button"
           size={hero ? "default" : "sm"}
+          disabled={disabled}
           className={cn("shrink-0 rounded-full transition-[height,padding] duration-500", hero && "h-10 px-5")}
           onClick={() => trimmed && choose({ kind: "text", text: trimmed })}
         >

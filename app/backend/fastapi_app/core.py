@@ -24,8 +24,7 @@ from src.services.core import ReportNotReadyError
 from src.services.linkage import (
     ReportNotInProjectError,
     StudyNotFoundError,
-    ReportProjectAccessError,
-    ReportStudyLinkNotFoundError,
+    LinksCommittedError,
 )
 
 from src.utils.dto import StudyPayload, Study, StudyCandidate, TagCandidate, Page, studies_to_dto
@@ -58,7 +57,7 @@ async def similar_tags(tag_category: TagCategories =Path(..., description="The t
 
 async def _search_studies_with_relevance(ctx: RequestContext, report_id: int, q: str, limit: int, cursor: Optional[str]) -> Page[StudyCandidate]:
     try:
-        page = await ctx.study_service.search_studies_page(q, limit, cursor)
+        page = await ctx.study_service.search_studies_page(q, limit, cursor, await ctx.study_similarity_service.databases_of_report(report_id))
     except (InvalidCursorError, QuerySyntaxError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
@@ -70,7 +69,7 @@ async def _search_studies_with_relevance(ctx: RequestContext, report_id: int, q:
 @router.get("/reports/{report_id}/similar-studies", dependencies=[Depends(is_verified_api_call)], summary="")
 async def similarity_search_studies_by_id(
     report_id: int,
-    cutoff: str = Query(None),
+    cutoff: Optional[datetime] = cutoff_query,
     limit: int = Query(10, ge=1, description="Maximum number of results to return per page."),
     cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a previous response's nextCursor. Omit for the first page."),
     q: Optional[str] = Query(None, min_length=3, description="If given, searches studies instead of recommending them and returns the matches with their relevance for this report. cutoff only applies to the recommendation. " + SEARCH_QUERY_DESCRIPTION),
@@ -108,7 +107,7 @@ async def referenced_studies_by_report(report_id: int, ctx: RequestContext = Dep
         raise_for_report_access(exc)
 
 @router.get("/reports/{report_id}/similar-studies/tags", dependencies=[Depends(is_verified_api_call)], summary="")
-async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories(TAG_CATEGORIES.first), description="The tag category which you are interested in"), cutoff: str = Query(None), k : int = Query(10, description="The number of related studies considered for retrieving relevant tags."), ctx: RequestContext = Depends(get_context)):
+async def search_related_tags(report_id: int, aspect: TagCategories = Query(TagCategories(TAG_CATEGORIES.first), description="The tag category which you are interested in"), cutoff: Optional[datetime] = cutoff_query, k : int = Query(10, description="The number of related studies considered for retrieving relevant tags."), ctx: RequestContext = Depends(get_context)):
     try:
         return await ctx.related_tag_service.search_related_tags_by_report_id(report_id, aspect, k, cutoff, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
@@ -128,6 +127,8 @@ async def assign_studies(
         raise_for_report_access(exc)
     except StudyNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ReportNotInProjectError, LinksCommittedError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     payload = {"user": ctx.user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
@@ -144,6 +145,8 @@ async def delete_assigned_studies(
         await ctx.linkage_service.unlink_study_from_report(report_id, study_id, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
         raise_for_report_access(exc)
+    except (ReportNotInProjectError, LinksCommittedError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     payload = {"user": ctx.user_id, "event_type": "study::links::changed", "report_id": report_id, "original_timestamp": "-"}
     logger.info("ReportInteraction", extra={"payload": payload})
@@ -160,6 +163,8 @@ async def link_to_new_study(
         new_study = await ctx.linkage_service.create_study_and_link_to_report(report_id, study, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
         raise_for_report_access(exc)
+    except (ReportNotInProjectError, LinksCommittedError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DuplicateShortNameError:
         raise HTTPException(status_code=409, detail="Study shortName already exists")
 
@@ -168,34 +173,3 @@ async def link_to_new_study(
 
     return studies_to_dto([new_study])[0]
 
-@router.put("/reports/{report_id}/studies/{study_id}/confirmation", dependencies=[Depends(is_admin)], summary="After reviewing the annotations the admin uses this endpoint to confirm that the report belongs to the study.", status_code=200)
-async def confirm_report_study_link(report_id : int, study_id: int, ctx: RequestContext = Depends(get_context)):
-    try:
-        await ctx.linkage_service.set_report_study_link_confirmation(report_id, study_id, True)
-    except ReportNotInProjectError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ReportProjectAccessError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ReportStudyLinkNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    payload = {"user": ctx.user_id, "event_type": "study::links::confirmed", "report_id": report_id, "original_timestamp": "-"}
-    logger.info("ReportInteraction", extra={"payload": payload})
-
-    return Response(content=None, status_code=200)
-
-@router.delete("/reports/{report_id}/studies/{study_id}/confirmation", dependencies=[Depends(is_admin)], summary="After reviewing the annotations the admin uses this endpoint to confirm that the report belongs to the study.", status_code=200)
-async def unconfirm_report_study_link(report_id : int, study_id: int, ctx: RequestContext = Depends(get_context)):
-    try:
-        await ctx.linkage_service.set_report_study_link_confirmation(report_id, study_id, False)
-    except ReportNotInProjectError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ReportProjectAccessError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ReportStudyLinkNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    payload = {"user": ctx.user_id, "event_type": "study::links::unconfirmed", "report_id": report_id, "original_timestamp": "-"}
-    logger.info("ReportInteraction", extra={"payload": payload})
-
-    return Response(content=None, status_code=200)

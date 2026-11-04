@@ -9,10 +9,12 @@ Enrichment happens in the route function, after the service has checked access a
 and only for the ids of that page.
 """
 
-from typing import Any, Dict, List, Protocol, Sequence
+from typing import Any, Dict, List, Protocol, Sequence, TypeVar
 
 from src.context import RequestContext
-from src.utils.dto import Page, ReportCuration
+from src.utils.dto import Page, ReportCuration, ReportIntake
+
+ReportPage = TypeVar("ReportPage", Page[ReportCuration], Page[ReportIntake])
 
 
 class ReportEnricher(Protocol):
@@ -30,7 +32,7 @@ class ReportEnrichers:
     def register(self, enricher: ReportEnricher) -> None:
         self._enrichers[enricher.key] = enricher
 
-    async def apply(self, page: Page[ReportCuration], include: List[str], ctx: RequestContext) -> Page[ReportCuration]:
+    async def apply(self, page: ReportPage, include: List[str], ctx: RequestContext) -> ReportPage:
         """Fills `extensions` of the page's reports for the requested keys; unknown keys are ignored."""
         report_ids = [report.reportId for report in page.items]
         for key in dict.fromkeys(include):

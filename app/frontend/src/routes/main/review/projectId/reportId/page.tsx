@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { StudyCardGraph } from "@/components/ui/study-view/study-graph";
 import { useParams, useNavigate } from "react-router-dom";
 import {
@@ -26,22 +27,19 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useDetailsSheet } from "@/context/details-sheet-context";
+import { useExtensionRegistry } from "@/context/extension-registry-context";
 import {
   useReviewAnnotations,
   useReviewAnnotationsActions,
 } from "../components/review-annotations-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import type { StudyDto } from "@/types/apiDTOs";
-import { Calendar, CircleCheckBig, CircleAlert, TriangleAlert, Users, Info, AlertTriangle, Flag, Trash2 } from "lucide-react";
+import { Calendar, CircleCheckBig, CircleAlert, TriangleAlert, Users, Info, AlertTriangle, Flag, Trash2, GitMerge } from "lucide-react";
 import { Widget } from "@/components/ui/widget";
 import { listUsers } from "@/lib/api/adminApi";
 import { getStudyById } from "@/lib/api/studiesApi";
 import { curationPaths } from "@/lib/curation-steps";
-import {
-  confirmStudyForReportByReportId,
-  unconfirmStudyForReportByReportId,
-  deleteReportById,
-} from "@/lib/api/reportApi";
+import { deleteReportById, mergeReport } from "@/lib/api/reportApi";
 
 interface GroupedUserStudy {
   userId: string;
@@ -60,31 +58,11 @@ interface FinalDecisionStudyItem {
   isUnanimous: boolean;
 }
 
-const formatParticipantCount = (value?: string | null) => {
-  if (!value) return "-";
-  const numericValue = Number(value.replace(/,/g, ""));
-  if (Number.isFinite(numericValue)) {
-    return numericValue.toLocaleString();
-  }
-  return value;
-};
-
-const toggleStudyConfirmation = async (
-  reportId: string,
-  studyId: number,
-  shouldConfirm: boolean
-) => {
-  const reportIdNumber = Number(reportId);
-  if (shouldConfirm) {
-    await confirmStudyForReportByReportId(reportIdNumber, studyId);
-  } else {
-    await unconfirmStudyForReportByReportId(reportIdNumber, studyId);
-  }
-};
+const formatParticipantCount = (value?: number | null) => (value == null ? "-" : value.toLocaleString());
 
 export default function ReviewDetailsPage() {
   const annotations = useReviewAnnotations();
-  const { updateConfirmedForReportStudy } = useReviewAnnotationsActions();
+  const { reportFinished } = useReviewAnnotationsActions();
   const params = useParams();
   const navigate = useNavigate();
   const { openWithStudyId } = useDetailsSheet();
@@ -92,11 +70,22 @@ export default function ReviewDetailsPage() {
   const [userNameById, setUserNameById] = useState<Map<string, string>>(new Map());
   // A study that could not be loaded is null.
   const [studyById, setStudyById] = useState<Record<number, StudyDto | null>>({});
+  // The studies to merge the report with: chosen here, sent with the merge (nothing is saved before).
   const [selectedFinalStudyIds, setSelectedFinalStudyIds] = useState<Set<number>>(new Set());
-  const [syncingFinalStudyIds, setSyncingFinalStudyIds] = useState<Set<number>>(new Set());
   const [isDeletingReport, setIsDeletingReport] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [deleteReportError, setDeleteReportError] = useState<string | null>(null);
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+  const { reviewPanels } = useExtensionRegistry();
+  // Why the panels of the extensions hold the merge back, by panel.
+  const [mergeBlocks, setMergeBlocks] = useState<Record<number, string | null>>({});
+  const mergeBlock = Object.values(mergeBlocks).find((reason) => reason) ?? null;
+  const selectedStudyIdList = useMemo(() => [...selectedFinalStudyIds].sort((a, b) => a - b), [selectedFinalStudyIds]);
+  const blockMerge = useMemo(
+    () => reviewPanels.map((_, index) => (reason: string | null) => setMergeBlocks((current) => ({ ...current, [index]: reason }))),
+    [reviewPanels],
+  );
 
   const toTimestamp = (value: Date | string | number | null | undefined): number | null => {
     if (value === null || value === undefined) {
@@ -159,20 +148,8 @@ export default function ReviewDetailsPage() {
   );
 
   useEffect(() => {
-    if (!reportIdParam) {
-      setSelectedFinalStudyIds(new Set());
-      return;
-    }
-
-    const confirmedStudyIds = new Set<number>();
-    for (const annotation of annotations[reportIdParam]?.studies ?? []) {
-      if (annotation.confirmed) {
-        confirmedStudyIds.add(annotation.studyId);
-      }
-    }
-
-    setSelectedFinalStudyIds(confirmedStudyIds);
-  }, [annotations, reportIdParam]);
+    setSelectedFinalStudyIds(new Set());
+  }, [reportIdParam]);
 
   const groupedByUser = useMemo<GroupedUserStudy[]>(() => {
     if (!reportIdParam) {
@@ -299,41 +276,14 @@ export default function ReviewDetailsPage() {
     );
   }, [groupedByUser, studyById, studyIdsToLoad]);
 
-  const toggleFinalStudySelection = async (studyId: number) => {
-    if (!reportIdParam || syncingFinalStudyIds.has(studyId)) {
-      return;
-    }
-
-    const wasSelected = selectedFinalStudyIds.has(studyId);
-    const shouldConfirm = !wasSelected;
-
-    setSyncingFinalStudyIds((prev) => {
+  const toggleFinalStudySelection = (studyId: number) => {
+    setSelectedFinalStudyIds((prev) => {
       const next = new Set(prev);
-      next.add(studyId);
+      if (!next.delete(studyId)) {
+        next.add(studyId);
+      }
       return next;
     });
-
-    try {
-      await toggleStudyConfirmation(reportIdParam, studyId, shouldConfirm);
-      setSelectedFinalStudyIds((prev) => {
-        const next = new Set(prev);
-        if (shouldConfirm) {
-          next.add(studyId);
-        } else {
-          next.delete(studyId);
-        }
-        return next;
-      });
-      updateConfirmedForReportStudy(reportIdParam, studyId, shouldConfirm);
-    } catch (error) {
-      console.error("Failed to sync study confirmation state:", error);
-    } finally {
-      setSyncingFinalStudyIds((prev) => {
-        const next = new Set(prev);
-        next.delete(studyId);
-        return next;
-      });
-    }
   };
 
   const handleDeleteReport = async () => {
@@ -347,6 +297,7 @@ export default function ReviewDetailsPage() {
       await deleteReportById(Number(reportIdParam));
 
       setIsDeleteDialogOpen(false);
+      reportFinished();
 
       if (projectIdParam) {
         navigate(curationPaths.review(projectIdParam));
@@ -361,12 +312,37 @@ export default function ReviewDetailsPage() {
     }
   };
 
+  // The report goes into the core database with the selected studies and leaves the review; the next one opens.
+  const handleMerge = async () => {
+    if (!reportIdParam || isMerging) {
+      return;
+    }
+
+    setIsMerging(true);
+    setMergeError(null);
+    try {
+      await mergeReport(Number(reportIdParam), selectedStudyIdList);
+      reportFinished();
+      navigate(projectIdParam ? curationPaths.review(projectIdParam) : curationPaths.overview);
+    } catch (error) {
+      console.error("Failed to merge report:", error);
+      const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setMergeError(typeof detail === "string" ? detail : "Unable to merge the report. Please try again.");
+    } finally {
+      setIsMerging(false);
+    }
+  };
+
   if (!reportIdParam) {
     return null;
   }
 
+  // Merge shows while a study is selected; what holds it back, or why it failed, is said above it.
+  const canMerge = selectedFinalStudyIds.size > 0;
+  const mergeNote = mergeError ?? mergeBlock;
+
   return (
-    // Room at the bottom for floating actions of extensions, as next to the studies.
+    // Room at the bottom for the floating actions (merge, delete).
     <div className="space-y-4 pb-20">
       {reportFlags.length > 0 ? (
         <Widget title="Report flags" icon={Flag} count={reportFlags.length}>
@@ -405,7 +381,7 @@ export default function ReviewDetailsPage() {
         }
       >
         <p className="-mt-1 mb-4 text-sm text-muted-foreground">
-          Select one or more studies from the annotator suggestions.
+          Select one or more studies from the annotator suggestions, then merge the report into the database.
         </p>
 
         {groupedByUser.length === 0 ? (
@@ -426,7 +402,6 @@ export default function ReviewDetailsPage() {
             {finalDecisionStudies.map((item) => {
               const { study } = item;
               const isSelected = selectedFinalStudyIds.has(item.studyId);
-              const isSyncing = syncingFinalStudyIds.has(item.studyId);
               const studyTimestamp = toTimestamp(study?.createdAt);
               const reportTimestamp = toTimestamp(reportCreatedAt);
               const shouldShowNewHint =
@@ -446,19 +421,14 @@ export default function ReviewDetailsPage() {
                   tabIndex={0}
                   aria-pressed={isSelected}
                   aria-label={isSelected ? `Deselect ${item.shortName}` : `Select ${item.shortName}`}
-                  onClick={() => {
-                    void toggleFinalStudySelection(item.studyId);
-                  }}
+                  onClick={() => toggleFinalStudySelection(item.studyId)}
                   onKeyDown={(event) => {
-                    if (isSyncing) {
-                      return;
-                    }
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      void toggleFinalStudySelection(item.studyId);
+                      toggleFinalStudySelection(item.studyId);
                     }
                   }}
-                  className={`p-4 bg-card rounded-xl relative w-full max-w-full overflow-hidden transition-colors duration-200 border flex items-center gap-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isSyncing ? "cursor-wait opacity-70" : "cursor-pointer"} ${rowClass}`}
+                  className={`p-4 bg-card rounded-xl relative w-full max-w-full overflow-hidden transition-colors duration-200 border flex items-center gap-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer ${rowClass}`}
                 >
                   <div className="flex flex-col gap-3 flex-1 min-w-0">
                     <div className="flex h-6 items-center gap-3">
@@ -568,68 +538,118 @@ export default function ReviewDetailsPage() {
             })}
           </div>
         )}
+
+        {/* What the extensions review before the merge (e.g. the changes proposed to the selected studies). */}
+        {reviewPanels.map((Panel, index) => (
+          <div key={index} className="mt-4">
+            <Panel reportId={Number(reportIdParam)} studyIds={selectedStudyIdList} onMergeBlock={blockMerge[index]} />
+          </div>
+        ))}
+
       </Widget>
 
-      <Widget title="Delete report" icon={Trash2}>
-        <p className="-mt-1 mb-4 text-sm text-muted-foreground">
-          Permanently removes the report and all of its data.
-        </p>
-        <AlertDialog
-          open={isDeleteDialogOpen}
-          onOpenChange={(nextOpen) => {
-            setIsDeleteDialogOpen(nextOpen);
-            if (!nextOpen) {
-              setDeleteReportError(null);
-            }
-          }}
-        >
-          <AlertDialogTrigger asChild>
+      {/* The final actions float at the bottom right, into the body: the column the page is in may clip a fixed
+          element. Delete stays in the corner; merge slides in next to it while a study is selected. */}
+      {createPortal(
+        <div className="fixed right-6 bottom-6 z-40 flex items-end gap-3" data-layout-part="review-actions">
+          <div
+            className={`relative transition-all duration-300 ease-out ${
+              canMerge ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none translate-y-4 scale-95 opacity-0"
+            }`}
+            aria-hidden={!canMerge}
+            inert={!canMerge}
+          >
+            {mergeNote ? (
+              <p
+                className={`absolute right-0 bottom-full mb-2 w-max max-w-xs rounded-full px-3 py-1 text-xs shadow-md ${
+                  mergeError
+                    ? "bg-destructive text-white"
+                    : "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                }`}
+              >
+                {mergeNote}
+              </p>
+            ) : null}
             <Button
               type="button"
-              variant="outline"
-              size="sm"
-              className="border-destructive/30 text-destructive shadow-none hover:bg-destructive/10 hover:text-destructive"
-              disabled={isDeletingReport}
+              size="lg"
+              className="h-12 gap-2 rounded-full px-5 shadow-lg"
+              onClick={() => void handleMerge()}
+              disabled={isMerging || isDeletingReport || mergeBlock !== null}
             >
-              Delete report
+              <GitMerge className="h-4 w-4" />
+              {isMerging
+                ? "Merging..."
+                : `Merge into database${selectedFinalStudyIds.size > 1 ? ` (${selectedFinalStudyIds.size} studies)` : ""}`}
             </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent
-            className="sm:max-w-md"
-            onClick={(event) => event.stopPropagation()}
+          </div>
+
+          <AlertDialog
+            open={isDeleteDialogOpen}
+            onOpenChange={(nextOpen) => {
+              setIsDeleteDialogOpen(nextOpen);
+              if (!nextOpen) {
+                setDeleteReportError(null);
+              }
+            }}
           >
-            <AlertDialogHeader>
-              <div className="mb-2 flex items-center gap-2 text-destructive">
-                <AlertTriangle className="h-4 w-4" aria-hidden />
-                <span className="text-xs font-semibold uppercase tracking-wide">Danger Zone</span>
-              </div>
-              <AlertDialogTitle>Delete this report?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will permanently remove all data for this report.
-              </AlertDialogDescription>
-              <div className="mt-2 rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-sm text-foreground">
-                Report ID: {reportIdParam}
-              </div>
-              {deleteReportError ? (
-                <p className="mt-2 text-sm text-destructive">{deleteReportError}</p>
-              ) : null}
-            </AlertDialogHeader>
-            <AlertDialogFooter className="gap-2 sm:gap-2">
-              <AlertDialogCancel disabled={isDeletingReport}>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={(event) => {
-                  event.preventDefault();
-                  void handleDeleteReport();
-                }}
-                disabled={isDeletingReport}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                {isDeletingReport ? "Deleting..." : "Delete"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </Widget>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label="Delete report"
+                    className="h-12 w-12 rounded-full bg-background text-destructive shadow-lg hover:bg-destructive/10 hover:text-destructive"
+                    disabled={isDeletingReport || isMerging}
+                  >
+                    <Trash2 className="h-5 w-5" />
+                  </Button>
+                </AlertDialogTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Delete report</p>
+              </TooltipContent>
+            </Tooltip>
+            <AlertDialogContent
+              className="sm:max-w-md"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <AlertDialogHeader>
+                <div className="mb-2 flex items-center gap-2 text-destructive">
+                  <AlertTriangle className="h-4 w-4" aria-hidden />
+                  <span className="text-xs font-semibold uppercase tracking-wide">Danger Zone</span>
+                </div>
+                <AlertDialogTitle>Delete this report?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  The report is removed from the update and kept in the archive only; it is not added to the database.
+                </AlertDialogDescription>
+                <div className="mt-2 rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-sm text-foreground">
+                  Report ID: {reportIdParam}
+                </div>
+                {deleteReportError ? (
+                  <p className="mt-2 text-sm text-destructive">{deleteReportError}</p>
+                ) : null}
+              </AlertDialogHeader>
+              <AlertDialogFooter className="gap-2 sm:gap-2">
+                <AlertDialogCancel disabled={isDeletingReport}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void handleDeleteReport();
+                  }}
+                  disabled={isDeletingReport}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  {isDeletingReport ? "Deleting..." : "Delete"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

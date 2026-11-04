@@ -82,6 +82,14 @@ export interface ReportCardSlotProps {
   extensions?: Record<string, unknown>
 }
 
+export interface PdfStatusSlotProps {
+  projectId: string
+  reportId: number
+  hasPdf: boolean
+  /** Marked as having no PDF ("Not available"); hasPdf is true for it too. */
+  pdfUnavailable: boolean
+}
+
 export interface ReportAbstractSlotProps {
   reportId: number
   extensions?: Record<string, unknown>
@@ -102,6 +110,16 @@ export type ProjectStepResolver = (project: ProjectDto) => CurationStep | null
 export interface ProjectUploadOptionsSlotProps {
   options: Record<string, unknown>
   onChange: (options: Record<string, unknown>) => void
+}
+
+/**
+ * Rendered on the review page of a report, below the final selection. `studyIds` are the studies selected for the
+ * report; `onMergeBlock` holds the merge back while it is given a reason (shown next to the button), null releases it.
+ */
+export interface ReviewPanelSlotProps {
+  reportId: number
+  studyIds: number[]
+  onMergeBlock: (reason: string | null) => void
 }
 
 export interface StudyLinkReview {
@@ -131,6 +149,10 @@ export interface ExtensionRegistry {
   projectUploadOptions: ComponentType<ProjectUploadOptionsSlotProps>[]
   /** Extra steps shown in the progress of every project. */
   projectSteps: ProjectStepResolver[]
+  /** Replaces the status dot of a report in the list of the PDF upload (grey: no PDF, green: has one). */
+  pdfStatusDot?: ComponentType<PdfStatusSlotProps>
+  /** Rendered next to the preview in the PDF card of the PDF upload (e.g. how far the PDF has been processed). */
+  pdfStatusPanel?: ComponentType<PdfStatusSlotProps>
   /** Replaces the rendering of a report's abstract in the expanded report card. */
   reportAbstract?: ComponentType<ReportAbstractSlotProps>
   addStudyTrigger?: ComponentType<AddStudyTriggerSlotProps>
@@ -139,6 +161,8 @@ export interface ExtensionRegistry {
    * Must be stable across renders.
    */
   useStudyLinkReview?: () => StudyLinkReview
+  /** Rendered on the review page of a report, below the final selection; each can hold the merge back. */
+  reviewPanels: ComponentType<ReviewPanelSlotProps>[]
   routes?: ReactNode
 }
 
@@ -154,6 +178,7 @@ const emptyExtensions: ExtensionRegistry = {
   reportCardExtras: [],
   projectUploadOptions: [],
   projectSteps: [],
+  reviewPanels: [],
 }
 
 const ExtensionRegistryContext = createContext<ExtensionRegistry>(emptyExtensions)

@@ -30,9 +30,6 @@
 #   meta                 Attributes of the study that are metadata of its database record (when it was entered and edited).
 #   search_field         Tag categories: the singular name in the advanced study search (e.g. `intervention==Placebo`).
 #   free_text_search     Tag categories: the plain-text study search also matches their tags.
-#   inline               Tag categories: the tags are kept in the column of the study with this name, separated by `//`,
-#                        instead of a table of their own (every category needs storage in src/database/tagstorage.py).
-#   text_column          Study: the column with the plain text of studies from before the graph (shown as it is).
 #   separator            Relations: between source and target when an edge is shown as a line ("Drug A vs Placebo").
 #   line                 Relations to values: "false" leaves the value out of the line of its entity ("A + B (10 mg)").
 #   card                 Relations: also shown as a line on the study cards.
@@ -179,6 +176,12 @@ slots:
     description: When an outcome is measured, e.g. at 12 weeks.
     range: TimePoint
     annotations: {icon: clock, color: rose}
+  in_country:
+    title: Countries
+    description: A country where the study takes place, one value per country.
+    range: Country
+    multivalued: true
+    annotations: {icon: map-pin, color: amber}
 
   # What a value node holds.
   concept:
@@ -201,8 +204,8 @@ classes:
     tree_root: true
     title: Study
     description: The study as a whole.
-    annotations: {icon: file-text, color: slate, text_column: comparison}
-    slots: [participated, has_outcome, has_primary_outcome, has_secondary_outcome]
+    annotations: {icon: file-text, color: slate}
+    slots: [participated, has_outcome, has_primary_outcome, has_secondary_outcome, in_country]
     attributes:
       short_name:
         title: Name
@@ -288,7 +291,7 @@ classes:
         slot_uri: mdx:in_country
         range: Country
         multivalued: true
-        annotations: {icon: map-pin, color: amber, search_field: country, inline: "true"}
+        annotations: {icon: map-pin, color: amber, search_field: country}
 
   # Entities.
   Arm:

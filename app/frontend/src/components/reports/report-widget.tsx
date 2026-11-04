@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, Download, ExternalLink, FileText, Flag, FlagOff } from "lucide-react";
 import { toast } from "sonner";
 import { Widget } from "@/components/ui/widget";
@@ -29,10 +29,25 @@ export function ReportWidget({ reportId, editMode }: ReportWidgetProps) {
   const [flagTarget, setFlagTarget] = useState<FlagTarget | null>(null);
   const [isDeletingFlag, setIsDeletingFlag] = useState(false);
   const [abstractOpen, setAbstractOpen] = useState(false);
+  // Whether the closed abstract is cut off: without more to show, there is no "More".
+  const [abstractClamped, setAbstractClamped] = useState(false);
+  const abstractRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setAbstractOpen(false);
   }, [reportId]);
+
+  // Measured while closed (open, nothing is cut off); the abstract of an extension may change its length later.
+  useLayoutEffect(() => {
+    const element = abstractRef.current;
+    if (!element || abstractOpen) return;
+    const measure = () => setAbstractClamped(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    for (const child of element.children) observer.observe(child);
+    return () => observer.disconnect();
+  }, [abstractOpen, reportId, Boolean(report), report?.abstract]);
 
   const reportNumber = <span className="font-mono text-xs text-muted-foreground">#{reportId}</span>;
   // The same widget while the report is not in the store yet, so the card stays put when it arrives.
@@ -87,6 +102,7 @@ export function ReportWidget({ reportId, editMode }: ReportWidgetProps) {
         {hasAbstract && (
           <div className="mt-3">
             <div
+              ref={abstractRef}
               className={cn(
                 "text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap",
                 !abstractOpen && "line-clamp-4"
@@ -99,15 +115,17 @@ export function ReportWidget({ reportId, editMode }: ReportWidgetProps) {
                 text={report.abstract}
               />
             </div>
-            <button
-              type="button"
-              className="mt-1 inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-              aria-expanded={abstractOpen}
-              onClick={() => setAbstractOpen((open) => !open)}
-            >
-              {abstractOpen ? "Less" : "More"}
-              <ChevronDown className={cn("h-3 w-3 transition-transform", abstractOpen && "rotate-180")} />
-            </button>
+            {(abstractClamped || abstractOpen) && (
+              <button
+                type="button"
+                className="mt-1 inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                aria-expanded={abstractOpen}
+                onClick={() => setAbstractOpen((open) => !open)}
+              >
+                {abstractOpen ? "Less" : "More"}
+                <ChevronDown className={cn("h-3 w-3 transition-transform", abstractOpen && "rotate-180")} />
+              </button>
+            )}
           </div>
         )}
 

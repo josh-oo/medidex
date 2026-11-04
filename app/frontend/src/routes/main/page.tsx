@@ -12,6 +12,7 @@ import { useCuration } from "@/hooks/use-curation";
 import { useAuthStore } from "@/hooks/use-auth";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { useTagCatalogs } from "@/hooks/use-tag-catalog";
+import { parseDatabaseIds, useStudyDatabases } from "@/lib/databases";
 import { useStudySchema } from "@/hooks/use-study-schema";
 import { searchStudies } from "@/lib/api/studiesApi";
 import { PageLink } from "@/lib/page-transition";
@@ -37,7 +38,10 @@ function useSearchState() {
   const [params, setParams] = useSearchParams();
   const text = params.get("q") ?? "";
   const databaseParams = params.getAll("db").join("\n");
-  const databases = useMemo(() => (databaseParams ? databaseParams.split("\n") : []), [databaseParams]);
+  const databases = useMemo(
+    () => (databaseParams ? parseDatabaseIds(databaseParams.split("\n")) : []),
+    [databaseParams]
+  );
   const allParams = params.getAll("all").join("\n");
   const allFields = useMemo(() => (allParams ? allParams.split("\n") : []), [allParams]);
   const filterParams = params.getAll("f").join("\n");
@@ -54,7 +58,7 @@ function useSearchState() {
     (
       nextText: string,
       nextFilters: StudyFilter[],
-      nextDatabases: string[] = databases,
+      nextDatabases: number[] = databases,
       nextAllFields: string[] = allFields
     ) => {
       const next = new URLSearchParams();
@@ -64,7 +68,7 @@ function useSearchState() {
       nextAllFields
         .filter((field) => nextFilters.some((filter) => filter.field === field))
         .forEach((field) => next.append("all", field));
-      nextDatabases.forEach((database) => next.append("db", database));
+      nextDatabases.forEach((database) => next.append("db", String(database)));
       setParams(next);
     },
     [setParams, databases, allFields]
@@ -75,7 +79,7 @@ function useSearchState() {
     filters,
     databases,
     allFields,
-    setDatabases: (nextDatabases: string[]) => update(text, filters, nextDatabases),
+    setDatabases: (nextDatabases: number[]) => update(text, filters, nextDatabases),
     toggleAll: (field: string) =>
       update(
         text,
@@ -83,11 +87,12 @@ function useSearchState() {
         databases,
         allFields.includes(field) ? allFields.filter((other) => other !== field) : [...allFields, field]
       ),
-    setText: (nextText: string) => update(nextText, filters),
+    // What is searched from the bar starts a new search; the filter column narrows the current one.
+    searchText: (nextText: string) => update(nextText, []),
+    searchFilter: (filter: StudyFilter) => update("", [filter]),
     addFilter: (filter: StudyFilter) =>
       update(text, filters.some((active) => sameFilter(active, filter)) ? filters : [...filters, filter]),
     removeFilter: (filter: StudyFilter) => update(text, filters.filter((active) => !sameFilter(active, filter))),
-    clearFilters: () => update(text, []),
     clear: () => update("", []),
   };
 }
@@ -100,15 +105,18 @@ export default function Home() {
     allFields,
     setDatabases,
     toggleAll,
-    setText,
+    searchText,
+    searchFilter,
     addFilter,
     removeFilter,
-    clearFilters,
     clear,
   } = useSearchState();
   const { schema } = useStudySchema();
   const textFields = useMemo(() => freeTextFields(schema?.tags ?? []), [schema]);
   const searching = Boolean(text || filters.length);
+  // None created yet, none the user may see, or the list could not be loaded.
+  const { loaded, databases: available } = useStudyDatabases();
+  const noDatabases = loaded && available.every((database) => database.importing);
 
   // One page in two states: the start page with the search in its middle and, once something is searched, the
   // search at the top with the results below. The bar stays the same element and moves between the two.
@@ -144,27 +152,32 @@ export default function Home() {
         >
           <StudySearchBar
             text={text}
-            onSearch={setText}
-            onAddFilter={addFilter}
+            onSearch={searchText}
+            onAddFilter={searchFilter}
             onClear={searching ? clear : undefined}
+            databases={databases}
             leading={
               <DatabasePicker selected={databases} onChange={setDatabases} size={searching ? "compact" : "hero"} />
             }
             size={searching ? "compact" : "hero"}
             autoFocus
+            disabled={noDatabases}
           />
+          {noDatabases && (
+            <p className="mt-3 text-center text-sm text-muted-foreground">No database is accessible right now.</p>
+          )}
         </div>
 
         {searching ? (
           <Results
             query={buildStudyQuery(text, filters, textFields, allFields)}
+            databases={databases}
             text={text}
             filters={filters}
             allFields={allFields}
             onToggleAll={toggleAll}
             onAddFilter={addFilter}
             onRemoveFilter={removeFilter}
-            onClearFilters={clearFilters}
           />
         ) : (
           <CurationHint />
@@ -176,27 +189,28 @@ export default function Home() {
 
 interface ResultsProps {
   query: string;
+  /** The ids of the databases to search; empty means all of them. */
+  databases: number[];
   text: string;
   filters: StudyFilter[];
   allFields: string[];
   onToggleAll: (field: string) => void;
   onAddFilter: (filter: StudyFilter) => void;
   onRemoveFilter: (filter: StudyFilter) => void;
-  onClearFilters: () => void;
 }
 
 // The filters and the results below the search; they fade in when the search starts.
 function Results({
   query,
+  databases,
   text,
   filters,
   allFields,
   onToggleAll,
   onAddFilter,
   onRemoveFilter,
-  onClearFilters,
 }: ResultsProps) {
-  const catalogs = useTagCatalogs();
+  const catalogs = useTagCatalogs(true, databases);
   const [results, setResults] = useState<StudyDto[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -215,7 +229,7 @@ function Results({
 
     let cancelled = false;
     setLoading(true);
-    searchStudies({ q: query, limit: PAGE_SIZE })
+    searchStudies({ q: query, limit: PAGE_SIZE, databases })
       .then((page) => {
         if (cancelled) return;
         setResults(page.items);
@@ -230,12 +244,12 @@ function Results({
     return () => {
       cancelled = true;
     };
-  }, [query, tooShort]);
+  }, [query, databases, tooShort]);
 
   const loadMore = () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
-    searchStudies({ q: query, limit: PAGE_SIZE, cursor: nextCursor })
+    searchStudies({ q: query, limit: PAGE_SIZE, cursor: nextCursor, databases })
       .then((page) => {
         setResults((previous) => [...(previous ?? []), ...page.items]);
         setNextCursor(page.nextCursor);
@@ -265,8 +279,6 @@ function Results({
             <StudyFilterPanel
               catalogs={catalogs}
               filters={filters}
-              allFields={allFields}
-              onToggleAll={onToggleAll}
               onAdd={onAddFilter}
               onRemove={onRemoveFilter}
             />
@@ -278,18 +290,12 @@ function Results({
             <p className="text-sm text-muted-foreground">Type at least three characters.</p>
           ) : (
             <QuerySummary
-              count={
-                results
-                  ? `${results.length}${nextCursor ? "+" : ""} ${results.length === 1 ? "study" : "studies"}`
-                  : "Searching…"
-              }
               text={text}
               filters={filters}
               allFields={allFields}
               catalogs={catalogs}
               onToggleAll={onToggleAll}
               onRemove={onRemoveFilter}
-              onClearFilters={onClearFilters}
             />
           )}
 
@@ -340,8 +346,9 @@ function CurationHint() {
   const userId = useAuthStore((s) => s.user?.id);
   const { projectSteps: stepResolvers } = useExtensionRegistry();
 
+  // Counts the updates with open steps, each once however many of its steps are waiting.
   const openTasks = useMemo(() => {
-    const countOpen = (steps: CurationStep[]) => steps.filter((step) => waitingReports(step) > 0).length;
+    const hasOpen = (steps: CurationStep[]) => steps.some((step) => waitingReports(step) > 0);
     const projectIds = new Set(projects.map((project) => project.projectId));
     return [
       ...projects.map((project) => {
@@ -352,11 +359,11 @@ function CurationHint() {
         const extraSteps = stepResolvers
           .map((resolve) => resolve(project))
           .filter((step): step is CurationStep => step !== null);
-        return countOpen(projectSteps(project, role, extraSteps));
+        return hasOpen(projectSteps(project, role, extraSteps));
       }),
       // An admin's own tasks are among the projects already.
-      ...tasks.filter((task) => !projectIds.has(task.projectId)).map((task) => countOpen(taskSteps(task))),
-    ].reduce((sum, count) => sum + count, 0);
+      ...tasks.filter((task) => !projectIds.has(task.projectId)).map((task) => hasOpen(taskSteps(task))),
+    ].filter(Boolean).length;
   }, [projects, tasks, userId, stepResolvers]);
 
   // Only for the people who take part in the curation; admins can always start a project there.

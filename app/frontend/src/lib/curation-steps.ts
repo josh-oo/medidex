@@ -1,8 +1,9 @@
 // The curation of a project as a chain of steps, from the counts of its ProjectDto (or the TaskDto of an
 // assignee). Preprocessing and the automatic PDF search run side by side; the PDFs the search did not find are
 // uploaded by hand; a report with a PDF and an embedding goes on through the extra steps of extensions (e.g. a
-// postprocessing), is linked to its study by the assignees and reviewed by the owner. A step can only reach as far as
-// the steps before it let it: `ready` is that limit, `done` what the step has finished.
+// postprocessing), is linked to its study by the assignees and, once all of them have committed their links of it,
+// merged into the core database (or deleted) by the owner in the review. A step can only reach as far as the steps before it let it:
+// `ready` is that limit, `done` what the step has finished.
 import {
   ClipboardCheck,
   Cpu,
@@ -71,6 +72,7 @@ export function projectSteps(project: ProjectDto, role: CurationRole, extraSteps
   // The linkage of a report is done once every assignee has linked it.
   const linked = project.assignees.length > 0 ? project.numberReportsReadyForReview : 0;
   const readyToLink = project.numberReportsReadyForProcessing;
+  const finished = project.numberReportsMerged + project.numberReportsDeleted;
 
   return [
     makeStep({
@@ -124,14 +126,15 @@ export function projectSteps(project: ProjectDto, role: CurationRole, extraSteps
       key: "review",
       label: "Review",
       icon: ClipboardCheck,
-      done: project.numberReportsConfirmed,
-      ready: linked,
+      done: finished,
+      // A report is merged once every assignee has committed their links of it.
+      ready: project.numberReportsReadyForMerge,
       total,
-      detail: `${project.numberReportsConfirmed} / ${Math.max(linked, project.numberReportsConfirmed)} reviewed`,
+      detail: `${finished} / ${Math.max(project.numberReportsReadyForMerge, finished)} merged`,
       manual: true,
-      action: "Review",
+      action: "Merge",
       href: role.isOwner ? curationPaths.review(project.projectId) : undefined,
-      hint: role.isOwner ? undefined : "Only the owner of this project reviews its links.",
+      hint: role.isOwner ? undefined : "Only the owner of this update merges its links.",
     }),
   ];
 }

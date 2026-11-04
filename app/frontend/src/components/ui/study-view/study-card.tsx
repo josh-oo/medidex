@@ -38,14 +38,7 @@ interface StudyCardProps extends StudyDto {
   onAssign: (study: StudyDto) => void;
 }
 
-const formatParticipantCount = (value?: string | null) => {
-  if (!value) return "-";
-  const numericValue = Number(value.replace(/,/g, ""));
-  if (Number.isFinite(numericValue)) {
-    return numericValue.toLocaleString();
-  }
-  return value;
-};
+const formatParticipantCount = (value?: number | null) => (value == null ? "-" : value.toLocaleString());
 
 const getRelevanceStroke = (relevance: number) => {
   if (relevance >= 0.9) return "stroke-emerald-500";

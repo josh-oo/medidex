@@ -48,6 +48,8 @@ AdvancedSearchField = Enum(
 # a human typing the string grammar and a model filling in the structured form tend to
 # reach for instead of the exact enum value - accepted as synonyms rather than rejected.
 _FIELD_ALIASES = {
+    # The fields themselves, as the lookup is lowercase (trialId).
+    **{field.value.lower(): field for field in AdvancedSearchField},
     "shortname": AdvancedSearchField.NAME,
     "studyname": AdvancedSearchField.NAME,
     "trial_id": AdvancedSearchField.TRIAL_ID,

@@ -266,7 +266,11 @@ class StoredGraph:
         attribute relation (a list of values, or one value): {"kind": "arm", "interventions": ["Drug A"], "dosage": "10
         mg"}. The study itself is `{"kind": "study"}`. An entity that several entries mention with the same attributes
         (e.g. the placebo arm of two comparisons) is one node, and a value is one node however often it occurs."""
-        document = GraphDocument()
+        return self.add_entries(GraphDocument(), entries)
+
+    def add_entries(self, document: GraphDocument, entries: Mapping[str, Sequence[Mapping[str, Mapping[str, Any]]]]) -> GraphDocument:
+        """Adds entries (see from_entries) to a graph whose tags are named: an entity it has already (the same attributes)
+        is reused, and an edge it has already is not added again."""
         for relation_key, relation_entries in entries.items():
             relation = self.config.relations[relation_key]
             for entry in relation_entries:
@@ -274,7 +278,18 @@ class StoredGraph:
                     end: self._merge(document, relation.source if end == "source" else relation.target, entry.get(end) or {})
                     for end in ("source", "target")
                 }
-                document.edges.append(GraphEdge(relation_key, ids["source"], ids["target"]))
+                edge = GraphEdge(relation_key, ids["source"], ids["target"])
+                if edge not in document.edges:
+                    document.edges.append(edge)
+        return document
+
+    def add_study_values(self, document: GraphDocument, relation: str, values: Sequence[Any]) -> GraphDocument:
+        """Adds values the study itself has by the attribute relation (e.g. its countries by `in_country`): a value it has
+        already is not added again."""
+        for value in values:
+            edge = GraphEdge(relation, self.config.root_id, self._value_node(document, self.config.relations[relation].target[0], value))
+            if edge not in document.edges:
+                document.edges.append(edge)
         return document
 
     def _merge(self, document: GraphDocument, allowed: Sequence[str], end: Mapping[str, Any]) -> str:
@@ -316,7 +331,12 @@ class StoredGraph:
 
     @staticmethod
     def _new_id(document: GraphDocument, kind: str) -> str:
-        return f"{kind}{len(document.of_kind(kind)) + 1}"
+        """An id of the kind no node of the graph has (a stored graph may number its nodes otherwise)."""
+        taken = {node.id for node in document.nodes}
+        number = len(document.of_kind(kind)) + 1
+        while f"{kind}{number}" in taken:
+            number += 1
+        return f"{kind}{number}"
 
     @staticmethod
     def _identity(profile: Mapping[str, Sequence[Item]]) -> Any:

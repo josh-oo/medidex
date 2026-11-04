@@ -17,7 +17,6 @@ POSTGRES_HOST = os.getenv("POSTGRES_HOST")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT")
 
 DATABASE_URL = f"postgresql+psycopg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB_RESOURCES}"
-PDF_PATH = os.path.join(DATABASE_VOLUME,"resources", "pdfs")
 
 engine = create_async_engine(
     DATABASE_URL, 

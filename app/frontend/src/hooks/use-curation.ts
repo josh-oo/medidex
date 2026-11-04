@@ -12,14 +12,15 @@ export interface Curation {
   projects: ProjectDto[];
   /** The projects the user is assigned to. */
   tasks: TaskDto[];
-  ownerNameById: Map<string, string>;
+  /** The names of the owners of the tasks and of the assignees they wait for. */
+  userNameById: Map<string, string>;
   /** The users a project can be assigned to (admins only). */
   assignableUsers: UserDto[];
   refresh: () => void;
   removeProject: (projectId: string) => void;
 }
 
-type CurationData = Pick<Curation, "projects" | "tasks" | "ownerNameById" | "assignableUsers">;
+type CurationData = Pick<Curation, "projects" | "tasks" | "userNameById" | "assignableUsers">;
 
 // The last data loaded, by user: a page that comes back (e.g. the search, or the database management after a project)
 // shows it at once and refreshes it in the background, instead of loading from nothing again.
@@ -35,7 +36,7 @@ export function useCuration(): Curation {
   const [loading, setLoading] = useState(cached === null);
   const [projects, setProjects] = useState<ProjectDto[]>(cached?.projects ?? []);
   const [tasks, setTasks] = useState<TaskDto[]>(cached?.tasks ?? []);
-  const [ownerNameById, setOwnerNameById] = useState<Map<string, string>>(cached?.ownerNameById ?? new Map());
+  const [userNameById, setUserNameById] = useState<Map<string, string>>(cached?.userNameById ?? new Map());
   const [assignableUsers, setAssignableUsers] = useState<UserDto[]>(cached?.assignableUsers ?? []);
 
   const loadData = useCallback(
@@ -59,28 +60,28 @@ export function useCuration(): Curation {
           : Promise.resolve([] as UserDto[]),
       ]);
 
-      const ownerIds = Array.from(
+      const userIds = Array.from(
         new Set(
           tasksResult
-            .map((task) => task.owner)
-            .filter((ownerId): ownerId is string => Boolean(ownerId))
+            .flatMap((task) => [task.owner, ...task.pendingAssignees])
+            .filter((userId): userId is string => Boolean(userId))
         )
       );
-      const ownerNames = ownerIds.length
-        ? await getUserNamesByIds(ownerIds).catch((error) => {
-            console.error("Failed to resolve owner names:", error);
+      const userNames = userIds.length
+        ? await getUserNamesByIds(userIds).catch((error) => {
+            console.error("Failed to resolve user names:", error);
             return new Map<string, string>();
           })
         : new Map<string, string>();
 
       cache = {
         userKey,
-        data: { projects: projectsResult, tasks: tasksResult, ownerNameById: ownerNames, assignableUsers: users },
+        data: { projects: projectsResult, tasks: tasksResult, userNameById: userNames, assignableUsers: users },
       };
       if (cancelledRef?.current) return;
       setProjects(projectsResult);
       setTasks(tasksResult);
-      setOwnerNameById(ownerNames);
+      setUserNameById(userNames);
       setAssignableUsers(users);
       setLoading(false);
     },
@@ -115,5 +116,5 @@ export function useCuration(): Curation {
     }
   }, []);
 
-  return { loading, isAdmin, projects, tasks, ownerNameById, assignableUsers, refresh, removeProject };
+  return { loading, isAdmin, projects, tasks, userNameById, assignableUsers, refresh, removeProject };
 }

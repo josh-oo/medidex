@@ -2,7 +2,8 @@ from ..database.repositories.study import StudyRepository
 from ..utils.postprocessing import normalize_author_names
 
 from collections import Counter
-from typing import List, Dict
+from datetime import datetime
+from typing import List, Dict, Optional
 import math
 
 class AuthorFeatureService:
@@ -40,7 +41,7 @@ class AuthorFeatureService:
 
         return result
     
-    async def get_author_scores(self, report_authors: List[str], study_ids: List[int], cutoff: str):
+    async def get_author_scores(self, report_authors: List[str], study_ids: List[int], cutoff: Optional[datetime]):
         study_persons = await self.study_repo.get_study_persons(study_ids, cutoff, normalize_names=True)
         current_persons = await self.get_author_frequencies(report_authors)
 

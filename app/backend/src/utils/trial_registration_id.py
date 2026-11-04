@@ -102,10 +102,9 @@ def extract_trial_id(title : Optional[str], abstract : Optional[str], authors : 
     return ordered_ids
 
 
-def is_trial_registration(authors : str) -> bool:
-    """True when a report is a bare trial registration: its only "author" is a
-    trial registration id (e.g. an NCT number)."""
-    author_list = authors.split("//")
-    if len(author_list) != 1:
+def is_trial_registration(authors : List[str]) -> bool:
+    """True when the authors of an uploaded entry say it is the record of a trial in a registry: bibliographic
+    databases list a trial registration id (e.g. an NCT number) as its only "author"."""
+    if len(authors) != 1:
         return False
-    return extract_trial_id(None, None, author_list) == author_list
+    return extract_trial_id(None, None, authors) == authors

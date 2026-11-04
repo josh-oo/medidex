@@ -10,16 +10,19 @@ it.
 import asyncio
 import io
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import BinaryIO, Dict, List, Optional, Tuple
 
 import httpx
 
 from ..context import RequestContext
 from ..database.sessions import AsyncSessionLocal
-from ..database.models import Report as DbReport, ReportAdded
+from ..database.models import UpdateReport
 from ..services.crawler import OpenAlexWork, normalize_doi
+from ..services.database import DatabaseImportError
 from .postprocessing import PostprocessingOptions, postprocessor_registry
-from ..utils.trial_registration_id import is_trial_registration
+from ..utils.archive import DatabaseArchive, DatabaseArchiveError
+from ..utils.dto import DatabasePayload
+from ..utils.pdfs import PdfFiles
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +70,7 @@ async def _download_pdf_bytes(client: httpx.AsyncClient, url: str) -> Optional[b
     return None
 
 
-async def _fetch_openalex_works(reports: List[DbReport], open_alex_service) -> Optional[Dict[str, OpenAlexWork]]:
+async def _fetch_openalex_works(reports: List[UpdateReport], open_alex_service) -> Optional[Dict[str, OpenAlexWork]]:
     """One batched OpenAlex lookup (fulltext links + cited DOIs) for every report with a
     DOI, instead of one request per report. None means the lookup failed, which callers
     must tell apart from "OpenAlex doesn't know this DOI" (a missing key) so a transient
@@ -84,20 +87,21 @@ async def _fetch_openalex_works(reports: List[DbReport], open_alex_service) -> O
 
 
 async def _auto_search_report_pdf(
-    client: httpx.AsyncClient, report: DbReport, works: Optional[Dict[str, OpenAlexWork]], crawler_service
+    client: httpx.AsyncClient, report: UpdateReport, works: Optional[Dict[str, OpenAlexWork]], crawler_service
 ) -> Tuple[Optional[_InMemoryPdfUpload], Optional[List[str]], Optional[List[str]]]:
     """Try to download one of a report's OpenAlex fulltext links (from the batched lookup
     in _fetch_openalex_works) as its PDF if it doesn't already have one. Returns
-    (pdf, fulltext links, cited DOIs) for the caller to cache on report_added - see
+    (pdf, fulltext links, cited DOIs) for the caller to cache on update_report - see
     ProjectRepository.set_report_auto_searched_pdf. Links are returned even when a PDF
     already exists, since the report detail view wants them regardless of PDF status;
     both are None if the lookup failed (nothing to cache).
     """
-    if report.report_number <= 0 and is_trial_registration(report.authors):
-        # A bare trial registration has no DOI or published PDF - render its
-        # registry record as the report's PDF instead.
+    has_pdf = PdfFiles.path(report.id).is_file()
+    if not has_pdf and report.is_registry_record():
+        # A registry record has no DOI or published PDF - render its record in the
+        # registry as the report's PDF instead.
         try:
-            return _InMemoryPdfUpload(await crawler_service.get_pdf_for_trial_id(report.authors)), [], []
+            return _InMemoryPdfUpload(await crawler_service.get_pdf_for_trial_id(report.trial_registration_id)), [], []
         except Exception as exc:
             logger.warning("Trial registry PDF failed for report %s: %s", report.id, exc)
             return None, [], []
@@ -110,7 +114,7 @@ async def _auto_search_report_pdf(
     work = works.get(normalize_doi(report.doi), OpenAlexWork())
     links = work.pdf_links
 
-    if report.report_number > 0:  # report already has a pdf, skip the download attempt
+    if has_pdf:  # report already has a pdf, skip the download attempt
         return None, links, work.referenced_dois
 
     for link in links:
@@ -138,7 +142,7 @@ async def _finalize_project_upload(project_id: str, project_repo, vectorstore, m
 
 
 async def process_report(
-    reports: List[DbReport], project_id: str, ctx: RequestContext, options: Optional[PostprocessingOptions] = None
+    reports: List[UpdateReport], project_id: str, ctx: RequestContext, options: Optional[PostprocessingOptions] = None
 ) -> None:
     """Auto-search + download each report's PDF and compute its embedding, then
     finalize the project once every report has settled. Postprocessors enabled by
@@ -169,7 +173,7 @@ async def process_report(
                     report.id, fulltext_links=fulltext_links, referenced_dois=referenced_dois
                 )
                 await write_session.commit()
-                await ctx.pubsub_service.publish_project_update(project_id)
+                await ctx.pubsub_service.publish_report_update(report.id, project_id)
 
     async def prepare_vectorstore(report):
         async with _vectorstore_semaphore:
@@ -179,7 +183,7 @@ async def process_report(
                 if not project:  # project already deleted
                     return
                 await ctx.vectorstore_service.add_report_to_vectorstore(report)
-                # Keep report_added.embedded in sync (see its comment in models.py) -
+                # Keep UpdateReport.embedded in sync (see its comment in models.py) -
                 # written through this call's own session/write_ctx, not the outer
                 # request-scoped ctx, since several of these run concurrently via
                 # asyncio.gather() below and a single AsyncSession isn't safe to share
@@ -201,18 +205,16 @@ async def process_report(
                 except Exception:
                     logger.exception("Postprocessing failed for report %s", report.id)
                     await session.rollback()
-            await ctx.pubsub_service.publish_project_update(project_id)
+            await ctx.pubsub_service.publish_report_update(report.id, project_id)
 
-    async def has_pdf_file(report) -> bool:
-        async with AsyncSessionLocal() as session:
-            current = await RequestContext(db=session, user_id=ctx.user_id).report_repo.get_report_by_id(report.id)
-            return current is not None and (current.report_number or 0) > 0
+    def has_pdf_file(report) -> bool:
+        return PdfFiles.path(report.id).is_file()
 
     async def settle(report, client):
         await asyncio.gather(prepare_vectorstore(report), load_pdf(report, client))
         # Without a PDF the postprocessing waits (stays pending) until one is uploaded manually,
         # which triggers it (see run_pending_postprocessing).
-        if postprocessors and await has_pdf_file(report):
+        if postprocessors and has_pdf_file(report):
             postprocess_tasks.append(asyncio.ensure_future(postprocess(report)))
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
@@ -237,7 +239,7 @@ async def run_process_report_background(
     async with AsyncSessionLocal() as db:
         ctx = RequestContext(db=db, user_id=user_id)
 
-        reports: List[DbReport] = []
+        reports: List[UpdateReport] = []
         for report_id in report_ids:
             report = await ctx.report_repo.get_report_by_id(report_id)
             if report is not None:
@@ -246,24 +248,92 @@ async def run_process_report_background(
         await process_report(reports, project_id, ctx, options)
 
 
+async def _pdf_changed(report_id: int, ctx: RequestContext) -> Optional[str]:
+    """Tells every postprocessor that the PDF of the report changed (ReportPostprocessor.pdf_changed); the project of
+    the report, or None for a report of the core database, which is not postprocessed."""
+    report = await ctx.db.get(UpdateReport, report_id)
+    if report is None:
+        return None
+    for postprocessor in postprocessor_registry.all():
+        await postprocessor.pdf_changed(report_id, report.project_id, ctx)
+    return report.project_id
+
+
+async def reset_pdf_postprocessing(report_id: int, ctx: RequestContext) -> None:
+    """Drops what the postprocessors made of the PDF of a report that was just deleted, or whose mark as not available
+    was undone: the report waits for a PDF again, as before its first one."""
+    project_id = await _pdf_changed(report_id, ctx)
+    if project_id is not None:
+        await ctx.pubsub_service.publish_report_update(report_id, project_id)
+
+
 async def run_pending_postprocessing(report_id: int, user_id: str) -> None:
     """Runs the postprocessors that are still pending for a report whose PDF was just
-    uploaded manually (they wait for the PDF, see process_report)."""
+    uploaded manually or marked as not available (they wait for the PDF, see process_report);
+    a postprocessor that depends on the PDF is pending again after it changed (see
+    ReportPostprocessor.pdf_changed). They run one after the other, in the order they were registered."""
     async with AsyncSessionLocal() as session:
         ctx = RequestContext(db=session, user_id=user_id)
-        report_added = await session.get(ReportAdded, report_id)
-        if report_added is None:
+        project_id = await _pdf_changed(report_id, ctx)
+        if project_id is None:
             return
-        project_id = report_added.project_id
+        await ctx.pubsub_service.publish_report_update(report_id, project_id)
+        await _run_pending(report_id, project_id, ctx)
+
+
+async def _run_pending(report_id: int, project_id: str, ctx: RequestContext) -> None:
+    """Runs the postprocessors that are pending for the report, one after the other, in the order they were registered."""
+    for postprocessor in postprocessor_registry.all():
+        pending_select = postprocessor.pending_report_ids()
+        rows = await ctx.db.execute(pending_select.where(pending_select.selected_columns[0] == report_id))
+        if rows.first() is None:
+            continue
+        try:
+            # The upload options are not stored; postprocessors only rely on their own pending marker here.
+            await postprocessor.process(report_id, project_id, {}, ctx)
+        except Exception:
+            logger.exception("Postprocessing failed for report %s", report_id)
+            await ctx.db.rollback()
+    await ctx.pubsub_service.publish_report_update(report_id, project_id)
+
+
+async def run_criteria_changed(database_id: int, user_id: str) -> None:
+    """Tells every postprocessor that the eligibility criteria of a database changed (ReportPostprocessor.criteria_changed)
+    and runs what is pending again for the reports they name, one report after the other."""
+    async with AsyncSessionLocal() as session:
+        ctx = RequestContext(db=session, user_id=user_id)
+        report_ids: List[int] = []
         for postprocessor in postprocessor_registry.all():
-            pending_select = postprocessor.pending_report_ids()
-            rows = await session.execute(pending_select.where(pending_select.selected_columns[0] == report_id))
-            if rows.first() is None:
-                continue
+            report_ids.extend(await postprocessor.criteria_changed(database_id, ctx))
+        for report_id in dict.fromkeys(report_ids):
+            report = await session.get(UpdateReport, report_id)
+            if report is not None:
+                await _run_pending(report_id, report.project_id, ctx)
+
+
+async def run_import_database(database_id: int, payload: DatabasePayload, archive: DatabaseArchive, source: BinaryIO, user_id: str) -> None:
+    """Imports the database of StudyDatabaseService.start_import from `archive` (read from `source`, closed when it is
+    done) and then adds its reports to the vectorstore; until then its studies are only found by the study search, not
+    suggested for new reports. Its progress, and why it failed, is published (DatabaseStatusService)."""
+    try:
+        async with AsyncSessionLocal() as session:
+            ctx = RequestContext(db=session, user_id=user_id)
             try:
-                # The upload options are not stored; postprocessors only rely on their own pending marker here.
-                await postprocessor.process(report_id, project_id, {}, ctx)
+                report_ids = await ctx.database_service.import_database(database_id, payload, archive)
+            except (DatabaseImportError, DatabaseArchiveError, ValueError) as exc:
+                await ctx.database_service.end_import(database_id, str(exc))
+                return
             except Exception:
-                logger.exception("Postprocessing failed for report %s", report_id)
-                await session.rollback()
-        await ctx.pubsub_service.publish_project_update(project_id)
+                logger.exception("Importing database %s failed", database_id)
+                await ctx.database_service.end_import(database_id, "The import failed; the backend log says why.")
+                return
+            finally:
+                source.close()
+            await ctx.database_service.end_import(database_id)
+            async with _vectorstore_semaphore:
+                try:
+                    await ctx.database_service.index_reports(database_id, report_ids)
+                except Exception:
+                    logger.exception("Adding %s imported reports to the vectorstore failed", len(report_ids))
+    except Exception:
+        logger.exception("Importing database %s failed", database_id)

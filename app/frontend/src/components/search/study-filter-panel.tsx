@@ -15,19 +15,16 @@ const MAX_OPTIONS = 50;
 interface StudyFilterPanelProps {
   catalogs: TagCatalog[];
   filters: StudyFilter[];
-  /** The fields whose values must all match (the others: any of them). */
-  allFields: string[];
-  onToggleAll: (field: string) => void;
   onAdd: (filter: StudyFilter) => void;
   onRemove: (filter: StudyFilter) => void;
 }
 
 /**
- * The filters of the search: one block per tag category of the study schema, plus the status. A block with two values
- * or more can match any or all of them; the blocks must all match. The filters are controls: neutral chips with a dot
- * in the colour of their category, unlike the coloured tags of the results (the content).
+ * The filters of the search: one block per tag category of the study schema, plus the status. Whether a block matches
+ * any or all of its values is switched in the query summary; the blocks must all match. The filters are controls:
+ * neutral chips with a dot in the colour of their category.
  */
-export function StudyFilterPanel({ catalogs, filters, allFields, onToggleAll, onAdd, onRemove }: StudyFilterPanelProps) {
+export function StudyFilterPanel({ catalogs, filters, onAdd, onRemove }: StudyFilterPanelProps) {
   const statuses = useStudyFieldValues("status");
 
   return (
@@ -51,13 +48,7 @@ export function StudyFilterPanel({ catalogs, filters, allFields, onToggleAll, on
             key={category.key}
             icon={<Icon className={cn("h-3.5 w-3.5", colors.accent)} aria-hidden />}
             label={category.label}
-            control={
-              active.length >= 2 ? (
-                <MatchSwitch all={allFields.includes(category.searchField)} onToggle={() => onToggleAll(category.searchField)} />
-              ) : active.length === 0 ? (
-                add
-              ) : null
-            }
+            control={active.length === 0 ? add : null}
           >
             {active.length > 0 && (
               <>
@@ -119,29 +110,6 @@ function FilterBlock({
   );
 }
 
-/** Whether a block matches any or all of its values. */
-export function MatchSwitch({ all, onToggle }: { all: boolean; onToggle: () => void }) {
-  return (
-    <div role="radiogroup" aria-label="Match" className="flex shrink-0 rounded-md bg-muted p-0.5 text-[11px]">
-      {[false, true].map((option) => (
-        <button
-          key={String(option)}
-          type="button"
-          role="radio"
-          aria-checked={all === option}
-          onClick={() => all !== option && onToggle()}
-          className={cn(
-            "rounded px-2 py-0.5 font-medium transition-colors",
-            all === option ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          {option ? "All" : "Any"}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /** A chosen filter; `dotClassName` (a text colour) marks its category. */
 export function FilterChip({
   filter,
@@ -165,7 +133,7 @@ export function FilterChip({
         type="button"
         aria-label={`Remove ${label}`}
         onClick={() => onRemove(filter)}
-        className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-primary/10 hover:text-primary"
+        className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
       >
         <X className="h-3 w-3" />
       </button>

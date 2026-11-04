@@ -4,6 +4,7 @@ from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, Backg
 from fastapi.responses import Response, StreamingResponse
 from typing import Dict, List, Any, Optional
 import json
+from pydantic import BaseModel
 import logging
 
 from src.utils.ris_parser import RisParseError
@@ -18,10 +19,15 @@ from .deps import get_context
 from src.background.wrapper import run_process_report_background
 
 from src.services.authorization import ProjectAccessDeniedError
+from src.services.database import DatabaseIndexingError, DatabaseNotFoundError
+from src.services.merge import ReportNotMergeableError
 from src.services.project import (
+    OpenUpdateExistsError,
     ProjectAssigneeAlreadyExistsError,
     ProjectAssigneeNotFoundError,
+    ProjectFinishedError,
     ProjectNotFoundError,
+    ProjectWorkIncompleteError,
 )
 from src.utils.dto import FilterMode, ReportIntake, Assignee, Project, ReportCuration, Task, Page
 from src.utils.pagination import InvalidCursorError
@@ -38,7 +44,7 @@ async def get_user_tasks(ctx: RequestContext = Depends(get_context)) -> List[Tas
     return await ctx.project_service.get_user_tasks()
 
 @router.post("/projects", dependencies=[Depends(is_admin)], summary="Upload a project (batch of new reports that need to be assigned to studies) (usually in the .ris file format)", status_code=201)
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), options: str = Form("{}", description="JSON object of upload options; each registered report postprocessor reads its own keys (see src/background/postprocessing.py)."), ctx: RequestContext = Depends(get_context)) -> Project:
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), databaseId: int = Form(..., description="The study database whose studies the reports are matched against and added to."), options: str = Form("{}", description="JSON object of upload options; each registered report postprocessor reads its own keys (see src/background/postprocessing.py)."), ctx: RequestContext = Depends(get_context)) -> Project:
 
     # dependencies=[Depends(is_admin)] above is the actual (and only) admin check -
     # who's allowed to create a project is an API-layer permission, not a business
@@ -51,9 +57,14 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
         raise HTTPException(status_code=400, detail="options must be a JSON object")
 
     try:
-        result = await ctx.project_service.create_project(projectName, file)
+        result = await ctx.project_service.create_project(projectName, file, databaseId)
     except RisParseError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except DatabaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (DatabaseIndexingError, OpenUpdateExistsError) as exc:
+        # Not 409, which the upload dialog reads as "already uploaded".
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
     if result is None:
         raise HTTPException(status_code=409, detail="Project already exists")
     project, report_ids = result
@@ -72,6 +83,8 @@ async def delete_project(project_id : str, ctx: RequestContext = Depends(get_con
         await ctx.project_service.delete_project(project_id)
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProjectFinishedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return Response(status_code=204)
 
@@ -85,6 +98,8 @@ async def assign_user_to_project(
         assignee = await ctx.project_service.assign_user_to_project(project_id, assignee_user_id)
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProjectFinishedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ProjectAssigneeAlreadyExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
@@ -104,6 +119,8 @@ async def remove_user_from_project(
         await ctx.project_service.remove_user_from_project(project_id, user_id)
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProjectFinishedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ProjectAssigneeNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -112,6 +129,35 @@ async def remove_user_from_project(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     return Response(status_code=204)
+
+@router.post("/projects/{project_id}/commit", dependencies=[Depends(is_verified_api_call)], summary="Commit the caller's links of the reports of a project they are done with.", description="The caller hands in their links of every report of a project they are assigned to that they have linked (or publicly flagged) and not committed yet: they cannot change them any more and the reports leave their curation view. Once every assignee has committed every report, the project is locked for its owner to merge the links.", status_code=204)
+async def commit_project_work(project_id: str = project_id_path, ctx: RequestContext = Depends(get_context)):
+    try:
+        await ctx.project_service.commit_project_work(project_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProjectAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ProjectWorkIncompleteError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return Response(status_code=204)
+
+class MergeRequest(BaseModel):
+    # The studies to merge the report with, among those the assignees linked it to.
+    studyIds: List[int]
+
+
+@router.post("/reports/{report_id}/merge", dependencies=[Depends(is_admin)], summary="Merge a report of an update into the core database.", description="Once every assignee of its update has committed their links of the report, its owner merges it with the studies they select among those linked: the links become links of the core database, which every scope sees, the report leaves the update, and what the update knew of it is archived. Returns the ids of the studies it was merged into.")
+async def merge_report(report_id: int, body: MergeRequest, ctx: RequestContext = Depends(get_context)) -> List[int]:
+    try:
+        return await ctx.merge_service.merge_report(report_id, body.studyIds)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProjectAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ReportNotMergeableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 _search_query = Query(None, description="Filter reports by title, abstract or report id (case-insensitive substring match).")
 _cursor_query = Query(None, description="Opaque cursor from a previous response's nextCursor; omit to fetch the first page.")
@@ -123,7 +169,8 @@ _include_query = Query([], description="Keys of optional extension data to attac
     "/projects/{project_id}/reports",
     summary="Get all fully-processed reports in a project - the normal curation view.",
     description="Never returns reports that are still being processed (not yet embedded/PDF-ready); "
-                "see /reports/intake for that. Restricted to project assignees.",
+                "see /reports/intake for that - nor those the caller has committed their links of. "
+                "Restricted to project assignees.",
 )
 async def get_project_reports(
     project_id: str,
@@ -167,17 +214,40 @@ async def get_project_reports_intake(
     with_pdf: FilterMode = Query(FilterMode.any, description="Only/exclude reports that have a PDF available."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
+    include: List[str] = _include_query,
 ) -> Page[ReportIntake]:
     try:
-        return await ctx.project_service.get_intake_reports_page(
+        page = await ctx.project_service.get_intake_reports_page(
             project_id,
             search=search,
             with_pdf=with_pdf,
             cursor=cursor,
             limit=limit,
         )
+        return await report_enrichers.apply(page, include, ctx)
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/projects/{project_id}/reports/intake/stream",
+    dependencies=[Depends(is_admin)],
+    summary="Stream the intake row of every report of a project that changes.",
+    description="An SSE event per changed report (an uploaded PDF, a finished postprocessing), its data the row "
+                "as /reports/intake returns it, with the same `include`.",
+)
+async def stream_project_reports_intake(
+    project_id: str,
+    request: Request,
+    ctx: RequestContext = Depends(get_context),
+    include: List[str] = _include_query,
+) -> StreamingResponse:
+    async def rows():
+        async for page in ctx.project_service.stream_intake_report_updates(project_id, request.is_disconnected):
+            page = await report_enrichers.apply(page, include, ctx)
+            yield f"data: {page.items[0].model_dump_json()}\n\n"
+
+    return StreamingResponse(rows(), media_type="text/event-stream")
 
 
 @router.get(
@@ -193,7 +263,6 @@ async def get_project_reports_review(
     ctx: RequestContext = Depends(get_context),
     search: Optional[str] = _search_query,
     consensus: FilterMode = Query(FilterMode.any, description="Only/exclude reports where annotators agree on the linked study."),
-    reviewed: FilterMode = Query(FilterMode.any, description="Only/exclude reports where an annotator has confirmed their annotation."),
     cursor: Optional[str] = _cursor_query,
     limit: int = _limit_query,
     include: List[str] = _include_query,
@@ -203,7 +272,6 @@ async def get_project_reports_review(
             project_id,
             search=search,
             consensus=consensus,
-            reviewed=reviewed,
             cursor=cursor,
             limit=limit,
         )

@@ -12,7 +12,9 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .database.repositories.archive import ArchiveRepository
 from .database.repositories.aspects import AspectRepository
+from .database.repositories.database import DatabaseRepository
 from .database.repositories.project import ProjectRepository
 from .database.repositories.report import ReportRepository
 from .database.repositories.study import StudyRepository
@@ -21,12 +23,14 @@ from .services.aspects import TagScoringService, TagSimilaritySearchService
 from .services.authors import AuthorFeatureService
 from .services.core import RelatedTagSearchService, StudySimilaritySearchService
 from .services.crawler import CrawlerService, OpenAlexService, crawler_service, open_alex_service
+from .services.database import StudyDatabaseService
 from .services.embedding import EmbeddingService, embedding_service
 from .services.linkage import LinkageService
 from .services.maintenance import MaintenanceService
+from .services.merge import UpdateMergeService
 from .services.naming import StudyNamingService
 from .services.project import ProjectResourceService
-from .services.pubsub import ProjectPubSubService
+from .services.pubsub import DatabaseStatusService, ProjectPubSubService
 from .services.report import DocumentService, ReportService
 from .services.study import StudyResourceService
 from .services.vectorstore import VectorstoreService
@@ -58,8 +62,16 @@ class RequestContext:
         return ProjectRepository(db=self.db, user_id=self.user_id)
 
     @cached_property
+    def archive_repo(self) -> ArchiveRepository:
+        return ArchiveRepository(db=self.db, user_id=self.user_id)
+
+    @cached_property
     def study_repo(self) -> StudyRepository:
         return StudyRepository(db=self.db, user_id=self.user_id, see_all=self.is_admin)
+
+    @cached_property
+    def database_repo(self) -> DatabaseRepository:
+        return DatabaseRepository(db=self.db, user_id=self.user_id)
 
     @cached_property
     def aspect_repo(self) -> AspectRepository:
@@ -148,12 +160,44 @@ class RequestContext:
         )
 
     @cached_property
+    def merge_service(self) -> UpdateMergeService:
+        return UpdateMergeService(
+            project_repo=self.project_repo,
+            report_repo=self.report_repo,
+            study_repo=self.study_repo,
+            archive_repo=self.archive_repo,
+            vectorstore=self.vectorstore_service,
+            document_service=self.document_service,
+            pubsub_service=self.pubsub_service,
+        )
+
+    @cached_property
     def pubsub_service(self) -> ProjectPubSubService:
         return ProjectPubSubService(project_repo=self.project_repo)
 
     @cached_property
+    def database_status_service(self) -> DatabaseStatusService:
+        return DatabaseStatusService()
+
+    @cached_property
     def maintenance_service(self) -> MaintenanceService:
-        return MaintenanceService(report_repo=self.report_repo, vectorstore=self.vectorstore_service)
+        return MaintenanceService(
+            report_repo=self.report_repo,
+            vectorstore=self.vectorstore_service,
+            database_repo=self.database_repo,
+            aspect_repo=self.aspect_repo,
+            embedding_service=self.embedding_service,
+            status_service=self.database_status_service,
+        )
+
+    @cached_property
+    def database_service(self) -> StudyDatabaseService:
+        return StudyDatabaseService(
+            database_repo=self.database_repo,
+            study_repo=self.study_repo,
+            vectorstore=self.vectorstore_service,
+            status_service=self.database_status_service,
+        )
 
     @cached_property
     def study_service(self) -> StudyResourceService:
@@ -164,7 +208,9 @@ class RequestContext:
         return ProjectResourceService(
             project_repo=self.project_repo,
             report_repo=self.report_repo,
+            database_service=self.database_service,
             vectorstore_service=self.vectorstore_service,
             pubsub_service=self.pubsub_service,
             document_service=self.document_service,
+            archive_repo=self.archive_repo,
         )

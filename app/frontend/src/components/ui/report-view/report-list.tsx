@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useReportPages } from "@/hooks/use-report-pages";
 import { useClientPages } from "@/hooks/use-client-pages";
@@ -67,6 +67,8 @@ interface ReportListProps {
   initialReports: ReportCurationDto[];
   /** Called after a report was picked (e.g. to close the list on phones). */
   onSelect?: () => void;
+  /** A status of each report in front of its title, outside the edit mode (e.g. its PDF, see PdfStatusDot). */
+  renderStatus?: (report: ReportCurationDto) => ReactNode;
   /** Shows a button that hides the list. */
   onCollapse?: () => void;
   /** The button only shows from the sidebar breakpoint on (e.g. on phones the list is the page itself). */
@@ -81,6 +83,7 @@ export function ReportList({
   fetchReports,
   initialReports,
   onSelect,
+  renderStatus,
   onCollapse,
   collapseOnDesktopOnly = false,
 }: ReportListProps) {
@@ -358,6 +361,7 @@ export function ReportList({
                       }
                     />
                   )}
+                  {!editMode && renderStatus && <span className="mt-1.5 flex shrink-0">{renderStatus(report)}</span>}
                   <span className="min-w-0 flex-1 line-clamp-2">
                     {editMode && <ReportStatusSlot reportId={report.reportId} />}
                     {report.title}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight, FileText, FileX, List, PanelLeftOpen } from "lucide-react";
@@ -19,7 +19,7 @@ import { PanelSkeleton, ReportListSkeleton, ReportWidgetSkeleton } from "./workb
 type ReportListProps = ComponentProps<typeof ReportList>;
 
 interface ReportSplitViewProps
-  extends Pick<ReportListProps, "baseUrl" | "editMode" | "filterDimensions" | "fetchReports"> {
+  extends Pick<ReportListProps, "baseUrl" | "editMode" | "filterDimensions" | "fetchReports" | "renderStatus"> {
   projectId: string;
   reports: ReportCurationDto[];
   /** Rendered next to the panels inside a DetailsSheetProvider (e.g. the study sheet). */
@@ -246,7 +246,8 @@ export function ReportSplitView({
                         data-layout-part="study-column"
                         className={cn("min-w-0", twoColumns && SCROLL_COLUMN)}
                       >
-                        {children}
+                        {/* The report page is a lazy chunk: while it loads only this panel waits, not the list and the report. */}
+                        <Suspense fallback={panelSkeleton ?? <PanelSkeleton />}>{children}</Suspense>
                       </div>
                     </>
                   ) : (

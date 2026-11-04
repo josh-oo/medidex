@@ -1,47 +1,30 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Database, FileText, Plus } from "lucide-react";
+import { toast } from "sonner";
+import { Database, DatabaseZap, Download, ListChecks, Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
+import { DatabaseDetailsDialog } from "@/components/databases/database-details-dialog";
+import { DatabaseStoragePopover } from "@/components/databases/database-storage-popover";
+import { NewDatabaseDialog } from "@/components/databases/new-database-dialog";
 import { CurationList } from "@/components/curation/curation-list";
 import { useCuration, type Curation } from "@/hooks/use-curation";
-import { DEFAULT_DATABASE_ID, projectDatabaseId, useStudyDatabases, type StudyDatabase } from "@/lib/databases";
+import { exportDatabase } from "@/lib/api/databaseApi";
+import { projectDatabaseId, useStudyDatabases, type DatabaseUpload, type StudyDatabase } from "@/lib/databases";
 import { cn } from "@/lib/utils";
 
-// The maintenance of the study databases in the background: per database its projects (batches of new reports), one
-// row each, with what the admin and the assignees have to do next. With more than one database, tabs choose the one
-// shown (kept in the URL as ?db=).
+// The maintenance of the study databases in the background: one card per database, with its updates (batches of new
+// reports, numbered per database) below it, one row each, with what the admin and the assignees have to do next.
+// Admins create databases (empty or imported) here, and the updates on the card of their database.
 export default function DatabaseManagementPage() {
   const curation = useCuration();
-  const { loading, isAdmin, projects, tasks, refresh } = curation;
+  const { loading, isAdmin } = curation;
   // The rows fade in only when they had to be waited for; known from before, they are there with the page.
   const [fadeIn] = useState(loading);
-  const databases = useStudyDatabases();
-  const [params, setParams] = useSearchParams();
-  const database = databases.find((other) => other.id === params.get("db")) ?? databases[0];
-  // New projects go to the database there is today (see projectDatabaseId).
-  const canCreateHere = database.id === DEFAULT_DATABASE_ID;
-
-  // The curation of the shown database only.
-  const shown: Curation = {
-    ...curation,
-    projects: projects.filter((project) => projectDatabaseId(project) === database.id),
-    tasks: tasks.filter((task) => projectDatabaseId(task) === database.id),
-  };
-  const isEmpty = shown.projects.length === 0 && shown.tasks.length === 0;
-
-  const createProjectButton = (
-    <CreateProjectDialog
-      onProjectCreated={refresh}
-      trigger={
-        <Button className="gap-2">
-          <Plus className="h-4 w-4" />
-          New project
-        </Button>
-      }
-    />
-  );
+  const { loaded: databasesLoaded, failed: databasesFailed, databases, uploads } = useStudyDatabases();
+  const [newDatabaseOpen, setNewDatabaseOpen] = useState(false);
 
   return (
     <div className="flex-1 overflow-auto">
@@ -50,102 +33,376 @@ export default function DatabaseManagementPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Database management</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              New batches of reports, linked to their studies to keep the database up to date.
+              New batches of reports, linked to their studies to keep the databases up to date.
             </p>
           </div>
-          {isAdmin && canCreateHere && !loading && !isEmpty && createProjectButton}
+          {isAdmin && (
+            <Button variant="outline" className="gap-2" onClick={() => setNewDatabaseOpen(true)}>
+              <DatabaseZap className="h-4 w-4" />
+              New database
+            </Button>
+          )}
         </div>
 
-        {databases.length > 1 && (
-          <DatabaseTabs
-            databases={databases}
-            selected={database.id}
-            onSelect={(id) => setParams(id === databases[0].id ? {} : { db: id }, { replace: true })}
-          />
-        )}
-
-        <section aria-labelledby="database-heading" className="space-y-3">
-          <div className="flex min-w-0 items-baseline gap-2 px-1">
-            <Database className="h-4 w-4 shrink-0 self-center text-muted-foreground" />
-            <h2 id="database-heading" className="text-sm font-semibold">
-              {database.name}
-            </h2>
-            {database.description && (
-              <p className="min-w-0 truncate text-sm text-muted-foreground">{database.description}</p>
-            )}
-          </div>
-
-          {loading ? (
-            <CurationListSkeleton />
-          ) : !isEmpty ? (
-            <div className={cn(fadeIn && "motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300")}>
-              <CurationList curation={shown} />
-            </div>
-          ) : isAdmin && canCreateHere ? (
-            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed bg-card/50 px-6 py-16 text-center">
-              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
-                <FileText className="h-6 w-6 text-primary" />
-              </div>
-              <h3 className="mb-1 text-lg font-semibold">No projects yet</h3>
-              <p className="mb-6 max-w-sm text-sm text-muted-foreground">
-                A project is a batch of new reports to link to studies. Create one and upload its reports.
-              </p>
-              {createProjectButton}
-            </div>
+        {!databasesLoaded ? (
+          <DatabaseCardSkeleton />
+        ) : databases.length === 0 && uploads.length === 0 ? (
+          databasesFailed ? (
+            <p className="px-1 text-sm text-muted-foreground">The databases could not be loaded.</p>
           ) : (
-            <div className="rounded-2xl border border-dashed px-4 py-4 text-sm text-muted-foreground">
-              {canCreateHere
-                ? "Nothing to curate right now. An admin assigns new batches here."
-                : "No projects in this database yet."}
+            <NoDatabases isAdmin={isAdmin} onCreate={() => setNewDatabaseOpen(true)} />
+          )
+        ) : (
+          <TooltipProvider>
+            <div className="space-y-4">
+              {databases.map((database) => (
+                <DatabaseCard
+                  key={database.id}
+                  database={database}
+                  curation={curation}
+                  fadeIn={fadeIn}
+                />
+              ))}
+              {uploads.map((upload) => (
+                <UploadCard key={upload.key} upload={upload} />
+              ))}
             </div>
+          </TooltipProvider>
+        )}
+      </div>
+
+      {isAdmin && <NewDatabaseDialog open={newDatabaseOpen} onOpenChange={setNewDatabaseOpen} />}
+    </div>
+  );
+}
+
+// Before the first database: every deployment creates (or imports) its own.
+function NoDatabases({ isAdmin, onCreate }: { isAdmin: boolean; onCreate: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed bg-card/50 px-6 py-16 text-center">
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+        <Database className="h-6 w-6 text-primary" />
+      </div>
+      <h3 className="mb-1 text-lg font-semibold">No databases yet</h3>
+      <p className="max-w-sm text-sm text-muted-foreground">
+        {isAdmin
+          ? "A database is a collection of studies, e.g. the register of a review group. Create an empty one or import an exported database to start."
+          : "An admin creates the study databases; their updates show up here."}
+      </p>
+      {isAdmin && (
+        <Button className="mt-6 gap-2" onClick={onCreate}>
+          <DatabaseZap className="h-4 w-4" />
+          New database
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// The number of the next update of a database: one more than the highest so far, deleted updates keep theirs.
+function nextUpdateNumber(names: string[]): number {
+  const numbers = names.map((name) => Number(/^Update (\d+)$/.exec(name)?.[1] ?? 0));
+  return Math.max(names.length, ...numbers) + 1;
+}
+
+// A database: its name (the description shows on hovering it), what it holds and its actions, with its updates below.
+// Its eligibility criteria (they can be long) are in a dialog, where admins also edit them, its name and description.
+function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase; curation: Curation; fadeIn: boolean }) {
+  const { loading, isAdmin, projects, tasks, refresh } = curation;
+  const [details, setDetails] = useState<"view" | "edit" | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  // The curation of this database only.
+  const own: Curation = {
+    ...curation,
+    projects: projects.filter((project) => projectDatabaseId(project) === database.id),
+    tasks: tasks.filter((task) => projectDatabaseId(task) === database.id),
+  };
+  const updateCount = new Set([...own.projects, ...own.tasks].map((update) => update.projectId)).size;
+
+  const download = async () => {
+    setExporting(true);
+    try {
+      const blob = await exportDatabase(database.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${
+        database.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "") || "database"
+      }.medidex.zip`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(`The export of ${database.name} failed.`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const newUpdateLabel = (
+    <>
+      <Plus className="h-4 w-4" />
+      New update
+    </>
+  );
+  // A database that is still being imported or indexed takes no updates: their reports would miss its studies.
+  const newUpdateButton = database.importing || database.indexing ? (
+    <Button
+      size="sm"
+      className="gap-1.5"
+      disabled
+      title={`${database.name} is still being ${database.importing ? "imported" : "indexed"}; updates can be added once it is done.`}
+    >
+      {newUpdateLabel}
+    </Button>
+  ) : (
+    <CreateProjectDialog
+      database={database}
+      number={nextUpdateNumber(own.projects.map((project) => project.name))}
+      onProjectCreated={refresh}
+      trigger={
+        <Button size="sm" className="gap-1.5">
+          {newUpdateLabel}
+        </Button>
+      }
+    />
+  );
+
+  return (
+    <section
+      aria-labelledby={`database-${database.id}`}
+      className="overflow-hidden rounded-2xl border bg-card shadow-xs"
+    >
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10">
+          <Database className="h-5 w-5 text-primary" aria-hidden />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 id={`database-${database.id}`} className="min-w-0 truncate text-base font-semibold">
+              {database.description ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      tabIndex={0}
+                      className="cursor-help rounded-sm underline decoration-muted-foreground/40 decoration-dotted underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                    >
+                      {database.name}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" align="start" sideOffset={6} className="max-w-sm text-left text-sm">
+                    {database.description}
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                database.name
+              )}
+            </h2>
+            {isAdmin && !database.importing && <DatabaseStoragePopover database={database} />}
+            {(database.importing || database.indexing) && <ProgressBadge database={database} />}
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {database.numberStudies} {database.numberStudies === 1 ? "study" : "studies"} · {database.numberReports}{" "}
+            {database.numberReports === 1 ? "report" : "reports"} · {updateCount} {updateCount === 1 ? "update" : "updates"}
+          </span>
+        </div>
+        <div className="ml-auto flex items-center gap-1">
+          <CardAction icon={ListChecks} label="Eligibility criteria" onClick={() => setDetails("view")} dialog />
+          {isAdmin && (
+            <CardAction
+              icon={Pencil}
+              label="Edit the name, description and eligibility criteria"
+              onClick={() => setDetails("edit")}
+              disabled={database.importing}
+              dialog
+            />
           )}
-        </section>
+          {isAdmin && (
+            <CardAction
+              icon={Download}
+              label="Export: the studies and reports as a file another Medidex can import"
+              onClick={() => void download()}
+              disabled={exporting || database.importing}
+            />
+          )}
+          {isAdmin && <div className="ml-2">{newUpdateButton}</div>}
+        </div>
+      </header>
+
+      <div className="border-t">
+        {loading ? (
+          <UpdateRowsSkeleton />
+        ) : (
+          <div className={cn(fadeIn && "motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300")}>
+            <CurationList
+              curation={own}
+              empty={
+                <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  {isAdmin
+                    ? "No updates yet. New update uploads a batch of new reports to link to the studies of this database."
+                    : "Nothing to curate in this database right now."}
+                </p>
+              }
+            />
+          </div>
+        )}
+      </div>
+
+      <DatabaseDetailsDialog
+        database={database}
+        open={details !== null}
+        onOpenChange={(open) => !open && setDetails(null)}
+        canEdit={isAdmin}
+        editing={details === "edit"}
+      />
+    </section>
+  );
+}
+
+// An icon button in the header of a database card, named by its tooltip.
+function CardAction({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+  dialog,
+}: {
+  icon: typeof Database;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  dialog?: boolean;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground"
+          aria-label={label}
+          aria-haspopup={dialog ? "dialog" : undefined}
+          disabled={disabled}
+          onClick={onClick}
+        >
+          <Icon className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+const IMPORT_STEPS = { studies: "studies", reports: "reports", pdfs: "PDFs" } as const;
+
+const count = (done: number, total: number) => `${done.toLocaleString()} of ${total.toLocaleString()}`;
+
+// A number of bytes as people read it, e.g. "6.2 GB".
+function formatBytes(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+// How far the import of a database is (its studies, its reports, then their PDFs), and then how far its reports are in
+// the vectorstore; until all are, its studies are found by the search but not suggested for new reports.
+function ProgressBadge({ database }: { database: StudyDatabase }) {
+  const { status } = database;
+  if (database.importing) {
+    return (
+      <StatusChip
+        label={status?.step ? `Importing ${IMPORT_STEPS[status.step]} ${count(status.done, status.total)}` : "Importing…"}
+        busy="Importing"
+        title="Nothing of it is kept before its studies and reports all are; it takes updates once it is imported and indexed."
+      />
+    );
+  }
+  return (
+    <StatusChip
+      label={`Indexing ${count(database.numberReportsIndexed, database.numberReports)}`}
+      busy="Indexing"
+      title="Its studies are found by the search, but are only suggested for new reports (and take updates) once all its reports are indexed."
+    />
+  );
+}
+
+function StatusChip({ label, busy, title }: { label: string; busy: string; title: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 tabular-nums dark:text-amber-400"
+      title={title}
+    >
+      <Spinner className="h-3 w-3" aria-label={busy} />
+      {label}
+    </span>
+  );
+}
+
+// An imported database while its file is uploaded: it has no id, numbers or updates yet. Once the file is in, the card
+// of the database follows its import.
+function UploadCard({ upload }: { upload: DatabaseUpload }) {
+  const percent = upload.total ? Math.floor((100 * upload.loaded) / upload.total) : 0;
+  return (
+    <section aria-label={upload.name} className="overflow-hidden rounded-2xl border bg-card shadow-xs">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10">
+          <Database className="h-5 w-5 text-primary" aria-hidden />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 className="min-w-0 truncate text-base font-semibold">{upload.name}</h2>
+            <StatusChip
+              label={
+                upload.loaded < upload.total
+                  ? `Uploading ${formatBytes(upload.loaded)} of ${formatBytes(upload.total)} (${percent}%)`
+                  : "Uploaded, the import starts…"
+              }
+              busy="Uploading"
+              title="Leaving or reloading this page ends the upload; once the file is uploaded, the import goes on without it."
+            />
+          </div>
+          <span className="text-xs text-muted-foreground">Its file is being uploaded.</span>
+        </div>
+      </header>
+    </section>
+  );
+}
+
+// A database card while the databases load.
+function DatabaseCardSkeleton() {
+  return (
+    <div className="overflow-hidden rounded-2xl border bg-card shadow-xs" aria-busy="true">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <Skeleton className="h-10 w-10 rounded-full" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-4 w-48" />
+          <Skeleton className="h-3 w-32" />
+        </div>
+      </div>
+      <div className="border-t">
+        <UpdateRowsSkeleton />
       </div>
     </div>
   );
 }
 
-// The databases, one tab each.
-function DatabaseTabs({
-  databases,
-  selected,
-  onSelect,
-}: {
-  databases: StudyDatabase[];
-  selected: string;
-  onSelect: (id: string) => void;
-}) {
+// The update rows while they load, the height of real ones.
+function UpdateRowsSkeleton() {
   return (
-    <div role="tablist" aria-label="Databases" className="flex flex-wrap gap-1">
-      {databases.map((database) => (
-        <button
-          key={database.id}
-          type="button"
-          role="tab"
-          aria-selected={database.id === selected}
-          onClick={() => onSelect(database.id)}
-          className={cn(
-            "rounded-full px-3.5 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            database.id === selected
-              ? "bg-card font-medium text-foreground shadow-xs ring-1 ring-border"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          )}
-        >
-          {database.name}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// The project rows while they load, the height of real ones.
-function CurationListSkeleton() {
-  return (
-    <div className="divide-y overflow-hidden rounded-2xl border bg-card shadow-xs" aria-busy="true">
-      {Array.from({ length: 3 }, (_, index) => (
-        <div key={index} className="flex items-center gap-4 px-4 py-4">
+    <div className="divide-y" aria-busy="true">
+      {Array.from({ length: 2 }, (_, index) => (
+        <div key={index} className="flex items-center gap-4 px-4 py-3">
+          <Skeleton className="h-10 w-10 rounded-lg" />
           <div className="min-w-0 flex-1 space-y-2">
-            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-4 w-1/4" />
             <Skeleton className="h-3 w-1/5" />
           </div>
           <div className="flex gap-3">

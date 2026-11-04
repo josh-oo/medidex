@@ -5,7 +5,7 @@ import type { StudyGraphDto } from "@/types/apiDTOs";
 // The graph of a study (see the study schema) is fetched once per session. The requests of the studies shown
 // at the same time (a list of study cards) are sent together.
 const BATCH_DELAY_MS = 20;
-const EMPTY: StudyGraphDto = { nodes: [], edges: [], text: null };
+const EMPTY: StudyGraphDto = { nodes: [], edges: [] };
 const cache = new Map<number, Promise<StudyGraphDto>>();
 const waiting = new Map<number, { resolve: (graph: StudyGraphDto) => void; reject: (error: unknown) => void }>();
 let timer: ReturnType<typeof setTimeout> | null = null;

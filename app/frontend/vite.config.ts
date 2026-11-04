@@ -8,6 +8,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),
+      // The legacy build of pdf.js (used by react-pdf) also runs on Safari, which lacks the async
+      // iteration of ReadableStream that the modern build needs ("undefined is not a function").
+      "pdfjs-dist$": path.resolve(import.meta.dirname, "node_modules/pdfjs-dist/legacy/build/pdf.mjs"),
     },
   },
   server: {

@@ -91,6 +91,7 @@ export const getProjectReportsIntake = (
       with_pdf: filters?.withPdf,
       cursor: filters?.cursor,
       limit: filters?.limit,
+      include: filters?.include,
     },
   };
 
@@ -113,7 +114,6 @@ export const getProjectReportsReview = (
       ...config?.params,
       search: filters?.search || undefined,
       consensus: filters?.consensus,
-      reviewed: filters?.reviewed,
       cursor: filters?.cursor,
       limit: filters?.limit,
       include: filters?.include,
@@ -170,6 +170,26 @@ export const removeUserFromProject = (
     .then(() => undefined)
     .catch(error => {
       console.error(`Error removing user ${userId} from project ${projectId}:`, error);
+      if (error.response?.data?.detail) {
+        const errorMessage = typeof error.response.data.detail === "string"
+          ? error.response.data.detail
+          : JSON.stringify(error.response.data.detail);
+        throw new Error(errorMessage);
+      }
+      throw error;
+    });
+};
+
+// The caller hands in their links of the project: they cannot change them any more, and once every assignee has, the
+// project is locked for its owner to merge them.
+export const commitProjectWork = (projectId: string, config?: AxiosRequestConfig): Promise<void> => {
+  const path = `/projects/${projectId}/commit`;
+
+  return apiClient
+    .post<void>(path, undefined, config)
+    .then(() => undefined)
+    .catch(error => {
+      console.error(`Error committing the links of project ${projectId}:`, error);
       if (error.response?.data?.detail) {
         const errorMessage = typeof error.response.data.detail === "string"
           ? error.response.data.detail
@@ -304,4 +324,52 @@ export const streamProjectUpdates = (
   return () => {
     abortController.abort();
   };
+};
+
+// The intake row of every report of a project that changes (an uploaded PDF, a finished postprocessing), as
+// /reports/intake returns it with the same `include`. Returns a function that stops the stream.
+export const streamProjectIntakeUpdates = (
+  projectId: string,
+  onReport: (report: ReportIntakeDto) => void,
+  include?: string[]
+): (() => void) => {
+  const abortController = new AbortController();
+  const params = new URLSearchParams();
+  include?.forEach((key) => params.append("include", key));
+  const url = `${apiClient.defaults.baseURL ?? ""}/projects/${projectId}/reports/intake/stream?${params}`;
+
+  const startStream = async () => {
+    try {
+      const headers: Record<string, string> = { Accept: "text/event-stream" };
+      const token = await getAccessToken();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      const response = await fetch(url, { headers, signal: abortController.signal });
+      if (!response.ok || !response.body) {
+        throw new Error(`Intake stream request failed: ${response.status} ${response.statusText}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const data = line.startsWith("data:") ? line.slice(5).trim() : "";
+          if (data) onReport(JSON.parse(data) as ReportIntakeDto);
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      console.error(`Error streaming the reports of project ${projectId}:`, error);
+    }
+  };
+
+  void startStream();
+  return () => abortController.abort();
 };

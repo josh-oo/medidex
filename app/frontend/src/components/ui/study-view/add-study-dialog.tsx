@@ -34,41 +34,49 @@ import { toast } from "sonner";
 import { COUNTRY_OPTIONS } from "./constants";
 import { useStudyFieldValues } from "@/hooks/use-study-schema";
 import {
-  armDraftFromSuggestion,
+  areCompared,
+  armFromSuggestion,
+  armLetter,
   buildGraph,
-  createComparisonGroup,
-  hasValidComparisonGroups,
+  comparisonBetween,
+  comparisonsFromSuggestion,
+  createComparison,
+  createStudyArm,
+  hasValidComparisons,
+  orderArms,
 } from "@/lib/comparisonUtils";
 import { useCallback, useEffect, useState } from "react";
 import { useAbortableEffect } from "@/hooks/use-abortable-effect";
-import { useElementHeight } from "@/hooks/use-element-height";
 import { getSimilarTagsByReportId, getSuggestedStudyName } from "@/lib/api/reportApi";
 import { getInterventions } from "@/lib/api/interventionsApi";
 import type {
-  ComparisonSuggestion,
   DurationUnit,
   NewStudySuggestion,
   StudyBaseDto,
 } from "@/types/apiDTOs";
 import type {
-  ArmDraft,
-  ComparisonGroup,
-  ComparisonSideKey,
+  ArmComparison,
+  ArmRole,
+  StudyArm,
 } from "@/types/comparisons";
+import { ArmComparisonLanes, lanesWidth, useRowCenters } from "./arm-comparison-lanes";
 
 const CATALOG_SEARCH_MIN_CHARS = 2;
-const COMPARISON_CARD_VERTICAL_GAP = 12; // matches space-y-3 spacing to prevent clipping
-const COMPARISON_PANEL_MAX_HEIGHT = "min(110vh, 900px)"; // hard cap so dialog never exceeds viewport
-const buildEmptyComparisonGroups = () => [createComparisonGroup()];
+
+// A new study starts with an intervention arm compared against a control arm.
+const buildEmptyArms = (): { arms: StudyArm[]; comparisons: ArmComparison[] } => {
+  const arms = [createStudyArm("intervention"), createStudyArm("control")];
+  return { arms, comparisons: [createComparison(arms[0].id, arms[1].id)] };
+};
 
 const DURATION_UNITS: DurationUnit[] = ["hours", "days", "weeks", "months", "years"];
 
 const UNIT_HOURS: Record<DurationUnit, number> = { hours: 1, days: 24, weeks: 168, months: 720, years: 8760 };
 
 // The longest duration of the arms as the study will calculate it, e.g. "12 weeks"; empty if no arm has one.
-const longestArmDuration = (groups: ComparisonGroup[]): string => {
+const longestArmDuration = (arms: StudyArm[]): string => {
   let longest: { value: number; unit: DurationUnit; hours: number } | null = null;
-  for (const arm of groups.flatMap((group) => [group.a, group.b])) {
+  for (const arm of arms) {
     const value = Number(arm.durationValue);
     if (!arm.durationUnit || !(value > 0)) continue;
     const hours = value * UNIT_HOURS[arm.durationUnit];
@@ -77,24 +85,15 @@ const longestArmDuration = (groups: ComparisonGroup[]): string => {
   return longest ? `${longest.value} ${longest.unit}` : "";
 };
 
-const buildComparisonGroupsFromSuggestion = (
-  groups?: ComparisonSuggestion[] | null
-): ComparisonGroup[] => {
-  if (!groups || groups.length === 0) {
-    return buildEmptyComparisonGroups();
+const buildArmsFromSuggestion = (
+  suggestion: NewStudySuggestion
+): { arms: StudyArm[]; comparisons: ArmComparison[] } => {
+  if (suggestion.arms.length === 0) {
+    return buildEmptyArms();
   }
 
-  return groups.map((group) =>
-    createComparisonGroup({
-      a: armDraftFromSuggestion(group.a),
-      b: armDraftFromSuggestion(group.b),
-    })
-  );
-};
-
-type SuggestionField = {
-  groupId: string;
-  side: ComparisonSideKey;
+  const arms = suggestion.arms.map(armFromSuggestion);
+  return { arms, comparisons: comparisonsFromSuggestion(arms, suggestion.comparisons) };
 };
 
 export interface AddStudyDialogProps {
@@ -135,15 +134,16 @@ export function AddStudyDialog({
   // any particular look.
   const highlight = Boolean(suggestedValues);
 
-  // The arms (`${group id}-${side}`) whose details beyond the interventions are shown.
-  const [openDetails, setOpenDetails] = useState<Set<string>>(new Set());
-  const [comparisonGroups, setComparisonGroups] = useState<ComparisonGroup[]>(
-    buildEmptyComparisonGroups()
-  );
+  // Every arm once, and the comparisons between them (drawn as brackets beside the arms).
+  const [arms, setArms] = useState<StudyArm[]>([]);
+  const [comparisons, setComparisons] = useState<ArmComparison[]>([]);
+  // The arm a new comparison is being drawn from (its port was clicked), until the port of another arm is.
+  const [linkingFrom, setLinkingFrom] = useState<string | null>(null);
+  const [armsElement, setArmsElement] = useState<HTMLDivElement | null>(null);
+  const rowCenters = useRowCenters(armsElement);
 
-  const [activeSuggestionField, setActiveSuggestionField] = useState<
-    SuggestionField | null
-  >(null);
+  // The arm whose intervention picker is open.
+  const [activeSuggestionField, setActiveSuggestionField] = useState<string | null>(null);
   const [suggestionQuery, setSuggestionQuery] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
@@ -154,9 +154,12 @@ export function AddStudyDialog({
   // An inline form is always shown, so it loads its suggestions right away.
   const isFormShown = inline || addStudyDialogOpen;
   const [creatingStudy, setCreatingStudy] = useState(false);
-  const [firstComparisonElement, setFirstComparisonElement] = useState<HTMLDivElement | null>(null);
 
   const resetLocalFormState = useCallback(() => {
+    const initial = suggestedValues ? buildArmsFromSuggestion(suggestedValues) : buildEmptyArms();
+    setArms(orderArms(initial.arms));
+    setComparisons(initial.comparisons);
+    setLinkingFrom(null);
     if (suggestedValues) {
       setShortName(suggestedValues.short_name ?? "");
       setStatusOfStudy(suggestedValues.status_of_study ?? "");
@@ -168,9 +171,6 @@ export function AddStudyDialog({
       );
       setDurationValue(suggestedValues.duration ? String(suggestedValues.duration.value) : "");
       setDurationUnit(suggestedValues.duration?.unit ?? "");
-      setComparisonGroups(
-        buildComparisonGroupsFromSuggestion(suggestedValues.comparisons)
-      );
     } else {
       setShortName("");
       setStatusOfStudy("");
@@ -178,7 +178,6 @@ export function AddStudyDialog({
       setNumberOfParticipants("");
       setDurationValue("");
       setDurationUnit("");
-      setComparisonGroups(buildEmptyComparisonGroups());
     }
     setActiveSuggestionField(null);
     setSuggestionQuery("");
@@ -261,10 +260,17 @@ export function AddStudyDialog({
     [isFormShown, allInterventions.length]
   );
 
-  // With several comparisons the panel is capped at one card's height and scrolls.
-  const firstCardHeight = useElementHeight(firstComparisonElement, comparisonGroups.length > 1);
-  const comparisonPanelHeight =
-    firstCardHeight === null ? null : firstCardHeight + COMPARISON_CARD_VERTICAL_GAP;
+  // Escape cancels a comparison being drawn, before the dialog would close on it.
+  useEffect(() => {
+    if (linkingFrom === null) return;
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setLinkingFrom(null);
+    };
+    window.addEventListener("keydown", cancel, true);
+    return () => window.removeEventListener("keydown", cancel, true);
+  }, [linkingFrom]);
 
   const handleAddStudySubmit = async (
     event: React.FormEvent<HTMLFormElement>
@@ -284,22 +290,16 @@ export function AddStudyDialog({
     }
     const duration = durationValue.trim() && durationUnit ? `${durationValue.trim()} ${durationUnit}` : null;
 
-    const graph = buildGraph(comparisonGroups);
+    const graph = buildGraph(arms, comparisons, selectedCountries);
     if (graph === null) {
-      toast.error("Add at least one comparison with both sides populated.");
+      toast.error("Compare at least two arms that have interventions.");
       return;
     }
-
-    const normalizedCountries =
-      selectedCountries.length > 0
-        ? selectedCountries.map((country) => country.trim()).filter(Boolean)
-        : ["Unclear"];
 
     const payload: StudyBaseDto = {
       shortName: shortName.trim(),
       status: statusOfStudy.trim(),
-      countries: normalizedCountries,
-      numberParticipants: participantsValue === null ? null : String(participantsValue),
+      numberParticipants: participantsValue,
       duration,
       graph,
       trialId: null, //TODO
@@ -328,100 +328,78 @@ export function AddStudyDialog({
     );
   };
 
-  const removeInterventionField = (
-    groupId: string,
-    side: ComparisonSideKey,
-    index: number
-  ) => {
-    setComparisonGroups((previous) =>
-      previous.map((group) => {
-        if (group.id !== groupId) return group;
-        const interventions = [...group[side].interventions];
-        interventions.splice(index, 1);
-        return {
-          ...group,
-          [side]: { ...group[side], interventions },
-        };
-      })
+  // An arm keeps its place when its type changes; only the arms of a suggestion are ordered by type.
+  const updateArm = (armId: string, changes: Partial<StudyArm>) => {
+    setArms((previous) => previous.map((arm) => (arm.id !== armId ? arm : { ...arm, ...changes })));
+  };
+
+  const removeInterventionField = (armId: string, index: number) => {
+    setArms((previous) =>
+      previous.map((arm) => (arm.id !== armId ? arm : { ...arm, interventions: arm.interventions.filter((_, position) => position !== index) }))
     );
   };
 
-  const addComparisonGroup = () => {
-    setComparisonGroups((previous) => [...previous, createComparisonGroup()]);
-  };
-
-  const removeComparisonGroup = (groupId: string) => {
-    setComparisonGroups((previous) =>
-      previous.length <= 1
-        ? previous
-        : previous.filter((group) => group.id !== groupId)
-    );
-  };
-
-  const appendComparisonValue = (
-    groupId: string,
-    side: ComparisonSideKey,
-    value: string
-  ) => {
+  const appendComparisonValue = (armId: string, value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return;
-
-    setComparisonGroups((previous) =>
-      previous.map((group) =>
-        group.id !== groupId
-          ? group
-          : {
-              ...group,
-              [side]: { ...group[side], interventions: [...group[side].interventions, trimmed] },
-            }
-      )
-    );
+    setArms((previous) => previous.map((arm) => (arm.id !== armId ? arm : { ...arm, interventions: [...arm.interventions, trimmed] })));
   };
 
-  const updateArm = (
-    groupId: string,
-    side: ComparisonSideKey,
-    changes: Partial<ArmDraft>
-  ) => {
-    setComparisonGroups((previous) =>
-      previous.map((group) =>
-        group.id !== groupId ? group : { ...group, [side]: { ...group[side], ...changes } }
-      )
-    );
+  const addArm = () => {
+    setArms((previous) => orderArms([...previous, createStudyArm("intervention")]));
   };
 
-  const isSuggestionFieldActive = (
-    groupId: string,
-    side: ComparisonSideKey
-  ) =>
-    activeSuggestionField?.groupId === groupId &&
-    activeSuggestionField?.side === side;
+  // An arm goes with its comparisons; a study keeps at least two arms.
+  const removeArm = (armId: string) => {
+    setArms((previous) => (previous.length <= 2 ? previous : previous.filter((arm) => arm.id !== armId)));
+    setComparisons((previous) => previous.filter((comparison) => comparison.source !== armId && comparison.target !== armId));
+    setLinkingFrom((current) => (current === armId ? null : current));
+  };
+
+  // The port of an arm starts a comparison from it, the port of another arm ends it there (once per pair of arms), its own
+  // port again cancels it.
+  const handlePort = (armId: string) => {
+    if (linkingFrom === null) {
+      setLinkingFrom(armId);
+      return;
+    }
+    const [from, to] = [arms.find((arm) => arm.id === linkingFrom), arms.find((arm) => arm.id === armId)];
+    if (from && to && from.id !== to.id && !areCompared(comparisons, from.id, to.id)) {
+      setComparisons((previous) => [...previous, comparisonBetween(from, to)]);
+    }
+    setLinkingFrom(null);
+  };
+
+  const removeComparison = (comparisonId: string) => {
+    setComparisons((previous) => previous.filter((comparison) => comparison.id !== comparisonId));
+  };
+
+  const isSuggestionFieldActive = (armId: string) => activeSuggestionField === armId;
 
   const renderSuggestionItem = (
-    group: ComparisonGroup,
-    side: ComparisonSideKey,
+    arm: StudyArm,
     item: string,
     source: "suggestion" | "catalog"
   ) => {
     const normalizedItem = item.toLowerCase();
-    const matchIndex = group[side].interventions.findIndex(
+    const matchIndex = arm.interventions.findIndex(
       (entry) => entry.toLowerCase() === normalizedItem
     );
     const isSelected = matchIndex !== -1;
 
     return (
       <CommandItem
-        key={`${group.id}-${side}-${source}-${item}`}
+        key={`${arm.id}-${source}-${item}`}
         value={item}
         aria-pressed={isSelected}
         onSelect={() => {
           if (isSelected) {
-            removeInterventionField(group.id, side, matchIndex);
+            removeInterventionField(arm.id, matchIndex);
             return;
           }
 
-          appendComparisonValue(group.id, side, item);
-          if (isSuggestionFieldActive(group.id, side)) {
+          appendComparisonValue(arm.id, item);
+          if (isSuggestionFieldActive(arm.id)) {
             setSuggestionQuery("");
           }
         }}
@@ -437,11 +415,8 @@ export function AddStudyDialog({
     );
   };
 
-  const renderComparisonSideInputs = (
-    group: ComparisonGroup,
-    placeholderLabel: string,
-    side: ComparisonSideKey
-  ) => {
+  const renderArmRow = (arm: StudyArm, index: number) => {
+    const letter = armLetter(index);
     const trimmedQuery = suggestionQuery.trim();
     const normalizedQuery = trimmedQuery.toLowerCase();
     const filteredSuggestions = normalizedQuery
@@ -462,23 +437,53 @@ export function AddStudyDialog({
       Boolean(trimmedQuery) &&
       !suggestedSet.has(normalizedQuery) &&
       !allInterventions.some((item) => item.toLowerCase() === normalizedQuery);
-    const selectionSummary =
-      group[side].interventions.length > 0
-        ? `${group[side].interventions.length} ${placeholderLabel}${
-            group[side].interventions.length > 1 ? "s" : ""
-          } added`
-        : `Select ${placeholderLabel.toLowerCase()}`;
+    const detail = (key: "participants" | "dosage" | "frequency" | "route", label: string, placeholder: string) => (
+      <Input
+        aria-label={`${label} of arm ${letter}`}
+        placeholder={placeholder}
+        type={key === "participants" ? "number" : undefined}
+        min={key === "participants" ? "0" : undefined}
+        className="h-8 text-xs"
+        value={arm[key]}
+        onChange={(event) => updateArm(arm.id, { [key]: event.target.value })}
+      />
+    );
 
     return (
-      <div className="space-y-2">
+      <div key={arm.id} data-arm-row className="space-y-2 rounded-lg border border-border/60 bg-background p-2.5">
+        <div className="flex items-start gap-2">
+          <span
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sm font-bold ${
+              arm.role === "control" ? "bg-muted text-muted-foreground" : "bg-foreground/15 text-foreground"
+            }`}
+          >
+            {letter}
+          </span>
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 pt-1">
+            {arm.interventions.map((value, position) => (
+              <span
+                key={`${arm.id}-${position}`}
+                className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/60 bg-muted py-0.5 pl-2.5 pr-1 text-xs"
+              >
+                <span className="truncate">{value}</span>
+                <button
+                  type="button"
+                  className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                  onClick={() => removeInterventionField(arm.id, position)}
+                  aria-label={`Remove ${value} from arm ${letter}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
         <Popover
           modal
-          open={isSuggestionFieldActive(group.id, side)}
+          open={isSuggestionFieldActive(arm.id)}
           onOpenChange={(open) => {
             if (open) {
-              setActiveSuggestionField({ groupId: group.id, side });
+              setActiveSuggestionField(arm.id);
               setSuggestionQuery("");
-            } else if (isSuggestionFieldActive(group.id, side)) {
+            } else if (isSuggestionFieldActive(arm.id)) {
               setActiveSuggestionField(null);
               setSuggestionQuery("");
             }
@@ -488,14 +493,13 @@ export function AddStudyDialog({
             <Button
               type="button"
               variant="outline"
+              size="sm"
               role="combobox"
-              aria-expanded={isSuggestionFieldActive(group.id, side)}
-              aria-label={`Select ${placeholderLabel}`}
-              className="w-full justify-between"
+              aria-expanded={isSuggestionFieldActive(arm.id)}
+              aria-label={`Add an intervention to arm ${letter}`}
+              className="h-6 rounded-full border-dashed px-2.5 text-xs text-muted-foreground"
             >
-              <span className="truncate text-left text-muted-foreground">
-                {selectionSummary}
-              </span>
+              + Intervention
             </Button>
           </PopoverTrigger>
           <PopoverContent
@@ -519,10 +523,10 @@ export function AddStudyDialog({
                     {canAddCustomValue && (
                       <CommandGroup heading="Custom value">
                         <CommandItem
-                          key={`${group.id}-${side}-custom-${trimmedQuery}`}
+                          key={`${arm.id}-custom-${trimmedQuery}`}
                           value={trimmedQuery}
                           onSelect={() => {
-                            appendComparisonValue(group.id, side, trimmedQuery);
+                            appendComparisonValue(arm.id, trimmedQuery);
                             setSuggestionQuery("");
                           }}
                         >
@@ -533,14 +537,14 @@ export function AddStudyDialog({
                     {filteredSuggestions.length > 0 && (
                       <CommandGroup heading="Suggestions">
                         {filteredSuggestions.map((item) =>
-                          renderSuggestionItem(group, side, item, "suggestion")
+                          renderSuggestionItem(arm, item, "suggestion")
                         )}
                       </CommandGroup>
                     )}
                     {catalogMatches.length > 0 && (
                       <CommandGroup heading="All interventions">
                         {catalogMatches.map((item) =>
-                          renderSuggestionItem(group, side, item, "catalog")
+                          renderSuggestionItem(arm, item, "catalog")
                         )}
                       </CommandGroup>
                     )}
@@ -562,130 +566,74 @@ export function AddStudyDialog({
                 <CommandInput
                   value={suggestionQuery}
                   onValueChange={(value) => setSuggestionQuery(value)}
-                  placeholder={`Search ${placeholderLabel.toLowerCase()}...`}
+                  placeholder="Search interventions..."
                   className="h-8"
                 />
               </div>
             </Command>
           </PopoverContent>
         </Popover>
-        <div className="space-y-2 mt-1">
-          {group[side].interventions.map((value, index) => (
-            <div
-              key={`${group.id}-${side}-${index}`}
-              className="flex items-center justify-between gap-2 rounded-md border border-border/20 bg-muted px-3 py-1 text-sm text-muted-foreground"
+          </div>
+          <Select value={arm.role} onValueChange={(value) => updateArm(arm.id, { role: value as ArmRole })}>
+            <SelectTrigger size="sm" className="h-8 w-[124px] shrink-0 text-xs" aria-label={`Type of arm ${letter}`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="intervention">Intervention</SelectItem>
+              <SelectItem value="control">Control</SelectItem>
+            </SelectContent>
+          </Select>
+          {arms.length > 2 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              className="h-8 w-8 shrink-0 p-0"
+              onClick={() => removeArm(arm.id)}
+              aria-label={`Remove arm ${letter}`}
             >
-              <span className="flex-1 truncate">{value}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                type="button"
-                onClick={() => removeInterventionField(group.id, side, index)}
-                aria-label={`Remove ${placeholderLabel.toLowerCase()} ${index + 1}`}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
+              <X className="h-4 w-4" />
+            </Button>
+          )}
         </div>
-        {(() => {
-          const arm = group[side];
-          const detailKey = `${group.id}-${side}`;
-          const open = openDetails.has(detailKey);
-          const summary = [
-            arm.participants && `${arm.participants} participants`,
-            arm.dosage,
-            arm.frequency,
-            arm.route,
-            arm.durationValue && arm.durationUnit && `${arm.durationValue} ${arm.durationUnit}`,
-          ].filter(Boolean).join(" · ");
-          return (
-            <>
-              <button
-                type="button"
-                className="flex w-full items-center gap-1 text-left text-xs text-muted-foreground hover:text-foreground"
-                aria-expanded={open}
-                onClick={() =>
-                  setOpenDetails((previous) => {
-                    const next = new Set(previous);
-                    if (!next.delete(detailKey)) next.add(detailKey);
-                    return next;
-                  })
-                }
-              >
-                <span>{open ? "−" : "+"}</span>
-                <span className="shrink-0">{open ? "Hide arm details" : summary ? "Arm details" : "Add arm details"}</span>
-                {!open && summary && <span className="min-w-0 flex-1 truncate">: {summary}</span>}
-              </button>
-              {open && (
-                <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-1.5 pl-10 sm:grid-cols-[1fr_1fr_1fr_1fr_0.8fr_0.9fr]">
+          {detail("participants", "Participants", "Participants")}
+          {detail("dosage", "Dosage", "Dosage")}
+          {detail("frequency", "Frequency", "Frequency")}
+          {detail("route", "Route", "Route")}
           <Input
-            aria-label={`Participants of the ${placeholderLabel.toLowerCase()} arm`}
-            placeholder="Participants in this arm"
+            aria-label={`Duration of arm ${letter}`}
+            placeholder="Duration"
             type="number"
             min="0"
-            value={group[side].participants}
-            onChange={(event) => updateArm(group.id, side, { participants: event.target.value })}
+            className="h-8 text-xs"
+            value={arm.durationValue}
+            onChange={(event) => updateArm(arm.id, { durationValue: event.target.value })}
           />
-          <div className="grid grid-cols-[1fr_1fr] gap-2">
-            <Input
-              aria-label={`Dosage of the ${placeholderLabel.toLowerCase()} arm`}
-              placeholder="Dosage, e.g. 10 mg"
-              value={group[side].dosage}
-              onChange={(event) => updateArm(group.id, side, { dosage: event.target.value })}
-            />
-            <Input
-              aria-label={`Frequency of the ${placeholderLabel.toLowerCase()} arm`}
-              placeholder="Frequency, e.g. daily"
-              value={group[side].frequency}
-              onChange={(event) => updateArm(group.id, side, { frequency: event.target.value })}
-            />
-          </div>
-          <Input
-            aria-label={`Route of the ${placeholderLabel.toLowerCase()} arm`}
-            placeholder="Route, e.g. oral, injection"
-            value={group[side].route}
-            onChange={(event) => updateArm(group.id, side, { route: event.target.value })}
-          />
-          <div className="grid grid-cols-[1fr_1fr] gap-2">
-            <Input
-              aria-label={`Duration of the ${placeholderLabel.toLowerCase()} arm`}
-              placeholder="Duration"
-              type="number"
-              min="0"
-              value={group[side].durationValue}
-              onChange={(event) => updateArm(group.id, side, { durationValue: event.target.value })}
-            />
-            <Select
-              value={group[side].durationUnit || undefined}
-              onValueChange={(value) => updateArm(group.id, side, { durationUnit: value as DurationUnit })}
-            >
-              <SelectTrigger className="w-full" aria-label={`Unit of the duration of the ${placeholderLabel.toLowerCase()} arm`}>
-                <SelectValue placeholder="Unit" />
-              </SelectTrigger>
-              <SelectContent>
-                {DURATION_UNITS.map((unit) => (
-                  <SelectItem key={unit} value={unit}>
-                    {unit}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-                </div>
-              )}
-            </>
-          );
-        })()}
+          <Select
+            value={arm.durationUnit || undefined}
+            onValueChange={(value) => updateArm(arm.id, { durationUnit: value as DurationUnit })}
+          >
+            <SelectTrigger size="sm" className="h-8 w-full text-xs" aria-label={`Unit of the duration of arm ${letter}`}>
+              <SelectValue placeholder="Unit" />
+            </SelectTrigger>
+            <SelectContent>
+              {DURATION_UNITS.map((unit) => (
+                <SelectItem key={unit} value={unit}>
+                  {unit}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
     );
   };
 
   const normalizedCountry =
     selectedCountries.length > 0 ? selectedCountries.join(", ") : "Unclear";
-  const longestArm = longestArmDuration(comparisonGroups);
-  const hasMultipleComparisonGroups = comparisonGroups.length > 1;
-  const comparisonValid = hasValidComparisonGroups(comparisonGroups);
+  const longestArm = longestArmDuration(arms);
+  const comparisonValid = hasValidComparisons(arms, comparisons);
 
   const isSubmitDisabled =
     creatingStudy ||
@@ -804,65 +752,23 @@ export function AddStudyDialog({
               </div>
             </div>
           </div>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <Label className="text-sm font-semibold">Comparisons</Label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={addComparisonGroup}
-              >
-                + Add comparison
+              <Label className="text-sm font-semibold">Arms and comparisons</Label>
+              <Button type="button" variant="ghost" size="sm" onClick={addArm}>
+                + Add arm
               </Button>
             </div>
-            <div className="rounded-lg border border-border/60 overflow-hidden">
-              <div
-                className={`space-y-3 p-3.5 ${hasMultipleComparisonGroups ? "overflow-y-auto" : ""}`}
-                style={{
-                  height:
-                    hasMultipleComparisonGroups && comparisonPanelHeight
-                      ? `${Math.round(comparisonPanelHeight)}px`
-                      : undefined,
-                  maxHeight: hasMultipleComparisonGroups
-                    ? COMPARISON_PANEL_MAX_HEIGHT
-                    : undefined,
-                }}
-              >
-                {comparisonGroups.map((group, index) => (
-                  <div
-                    ref={index === 0 ? setFirstComparisonElement : undefined}
-                    key={group.id}
-                    className="space-y-3 rounded-lg border border-border/40 p-3.5"
-                  >
-                    <div
-                      className="grid gap-3 items-start"
-                      style={{
-                        gridTemplateColumns:
-                          "minmax(0,45%) minmax(0,10%) minmax(0,45%)",
-                      }}
-                    >
-                      {renderComparisonSideInputs(group, "Intervention", "a")}
-                      <div className="text-xs font-semibold text-muted-foreground flex items-center justify-center mt-2">
-                        vs.
-                      </div>
-                      {renderComparisonSideInputs(group, "Control", "b")}
-                    </div>
-                    <div className="flex justify-end">
-                      {comparisonGroups.length > 1 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          type="button"
-                          onClick={() => removeComparisonGroup(group.id)}
-                        >
-                          Remove
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div ref={setArmsElement} className="relative" style={{ paddingLeft: lanesWidth(arms, comparisons) }}>
+              <ArmComparisonLanes
+                arms={arms}
+                comparisons={comparisons}
+                rowCenters={rowCenters}
+                linkingFrom={linkingFrom}
+                onPort={handlePort}
+                onRemove={removeComparison}
+              />
+              <div className="space-y-2">{arms.map(renderArmRow)}</div>
             </div>
           </div>
     </>

@@ -1,7 +1,5 @@
 import type { DurationUnit } from "@/types/apiDTOs";
 
-export type ComparisonSideKey = "a" | "b";
-
 // An arm of the study being added: the interventions it gives, and its dosage and duration (all optional but
 // the interventions).
 export type ArmDraft = {
@@ -14,9 +12,18 @@ export type ArmDraft = {
   durationUnit: DurationUnit | "";
 };
 
-// Two arms that are compared. The first is the intervention arm, the second its control.
-export type ComparisonGroup = {
+// Whether the arm gets the evaluated intervention or is the control it is compared against.
+export type ArmRole = "intervention" | "control";
+
+// An arm of the form: every arm is entered once, however many comparisons it is in.
+export type StudyArm = ArmDraft & {
   id: string;
-  a: ArmDraft;
-  b: ArmDraft;
+  role: ArmRole;
+};
+
+// Two arms that are compared, by their ids: the evaluated arm (source) and its comparator (target).
+export type ArmComparison = {
+  id: string;
+  source: string;
+  target: string;
 };

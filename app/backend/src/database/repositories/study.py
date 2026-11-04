@@ -5,20 +5,20 @@ import json
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import and_, exists, or_, true
-from sqlmodel import select, func, text
+from sqlalchemy import Table
+from sqlmodel import SQLModel, delete, select, func, text, update
 
 from dotenv import load_dotenv
 
-from datetime import datetime, timezone
-from typing import Any, List, Mapping, Optional, Dict, Tuple
+from datetime import datetime
+from typing import Any, List, Mapping, Optional, Dict, Sequence, Tuple
 
-from ..models import Report, ReportAdded, Study, StudyAdded, StudyReport, StudyReportAdded
-from ..tagstorage import TAG_COLUMNS, TAG_TABLES
+from ..models import Report, Study, StudyFields, Link, StudyTag, Tag as DbTag, UpdateLink, UpdateReport, UpdateStudy
 from .graphs import StudyGraphs
 
 from ...utils.postprocessing import normalize_author_names
-from ...utils.dto import StudyGraph, Tag, study_values
-from ...utils.studyconfig import INLINE_SEPARATOR, STUDY_CONFIG
+from ...utils.dto import StudyGraph, Tag, study_columns
+from ...utils.studyconfig import GRAPH_FIELD, STUDY_CONFIG
 from ...utils.tagconfig import TAG_CATEGORIES
 from ...utils.query_parser import AdvancedSearchField, AndGroup, Comparison, OrGroup, QueryNode
 
@@ -38,26 +38,21 @@ def load_trial_id_mapping():
 
 trial_id_mapping = load_trial_id_mapping()
 
-# Each aspect field is a study_<aspect> join table to an <aspect> table with an
-# id + description column (see models.py) - maps an advanced-search field to the
-# (join table's study_id column, its fk-to-aspect column, aspect table's pk, aspect
-# table's description column) needed to build an EXISTS clause for it. Keyed by the
+# The tag category of each advanced-search field of a tag category (its `search_field`). Keyed by the
 # AdvancedSearchField enum (not a raw string) - field-name validity, including
 # alias/plural normalization, is already enforced by Comparison's own pydantic
 # validation (src/utils/query_parser.py) before a Comparison ever reaches here, so
 # there's no "unknown field" case left to check or raise for at this layer.
-_ASPECT_FIELDS = {
-    AdvancedSearchField(TAG_CATEGORIES[name].search_field): (storage.link_study, storage.link_tag, storage.tag.id, storage.tag.description)
-    for name, storage in TAG_TABLES.items()
-}
+_TAG_FIELDS = {AdvancedSearchField(TAG_CATEGORIES[name].search_field): name for name in TAG_CATEGORIES}
 
-# Tags kept in a column of the study itself (e.g. countries) are matched with an ilike on the column.
-_COLUMN_FIELDS = {AdvancedSearchField(TAG_CATEGORIES[name].search_field): storage.column for name, storage in TAG_COLUMNS.items()}
+def _authors_text(model):
+    """The authors of the reports (of `model`, Report or UpdateReport) as one text, to match a part of a name in."""
+    return func.array_to_string(model.authors, " ")
 
-def _aspect_exists(join_study_id, join_fk_col, aspect_pk_col, aspect_desc_col, pattern):
+def _tag_exists(category: str, pattern: str):
     return (
         select(1)
-        .where(join_study_id == Study.id, join_fk_col == aspect_pk_col, aspect_desc_col.ilike(pattern))
+        .where(StudyTag.study_id == Study.id, StudyTag.tag_id == DbTag.id, DbTag.category == category, DbTag.description.ilike(pattern))
         .exists()
     )
 
@@ -65,14 +60,13 @@ def _comparison_to_condition(comparison: Comparison):
     field = comparison.field
     pattern = f"%{comparison.value}%"
 
-    if field in _ASPECT_FIELDS:
-        join_study_id, join_fk_col, aspect_pk_col, aspect_desc_col = _ASPECT_FIELDS[field]
-        return _aspect_exists(join_study_id, join_fk_col, aspect_pk_col, aspect_desc_col, pattern)
+    if field in _TAG_FIELDS:
+        return _tag_exists(_TAG_FIELDS[field], pattern)
 
     if field == AdvancedSearchField.AUTHOR:
         return (
             select(1)
-            .where(StudyReport.study_id == Study.id, StudyReport.report_id == Report.id, Report.authors.ilike(pattern))
+            .where(Link.study_id == Study.id, Link.report_id == Report.id, _authors_text(Report).ilike(pattern))
             .exists()
         )
 
@@ -82,15 +76,11 @@ def _comparison_to_condition(comparison: Comparison):
     if field == AdvancedSearchField.TRIAL_ID:
         return or_(
             Study.trial_registration_id.ilike(pattern),
-            select(1).where(StudyReport.study_id == Study.id, StudyReport.report_id == Report.id, Report.trial_registration_id.ilike(pattern)).exists(),
-            select(1).where(StudyReport.study_id == Study.id, StudyReport.report_id == ReportAdded.report_id, ReportAdded.trial_registration_id.ilike(pattern)).exists(),
+            select(1).where(Link.study_id == Study.id, Link.report_id == Report.id, Report.trial_registration_id.ilike(pattern)).exists(),
         )
 
     if field == AdvancedSearchField.STATUS:
         return Study.status.ilike(pattern)
-
-    if field in _COLUMN_FIELDS:
-        return _COLUMN_FIELDS[field].ilike(pattern)
 
     # Unreachable: AdvancedSearchField is a closed enum and every member is handled
     # above - this only trips if a new enum member is added without a case here.
@@ -110,22 +100,25 @@ class StudyRepository:
         self.see_all = see_all
         self.graphs = StudyGraphs(db)
 
-    def _visible(self):
-        """The studies this scope may see (see README, "Scopes"): those of the seed data (no study_added
-        record), those it created itself, and those with a link a reviewer confirmed. Studies another scope
-        created and nobody confirmed yet stay invisible, so that users, MediBot and MCP clients work without
-        interfering. A reviewer (see_all) sees every study."""
-        if self.see_all:
-            return true()
-        created_elsewhere = exists().where(
-            StudyAdded.study_id == Study.id, StudyAdded.created_by.isnot(None), StudyAdded.created_by != self.user_id
-        )
-        confirmed = exists().where(
-            StudyReport.study_id == Study.id,
-            StudyReportAdded.study_report_id == StudyReport.id,
-            StudyReportAdded.confirmed.is_(True),
-        )
-        return or_(~created_elsewhere, confirmed)
+    def _visible_drafts(self):
+        """The studies of the updates this scope may see (see README, "Scopes"): those it created itself, besides every
+        study of the core database. Studies another scope created stay invisible until a report linked to them is
+        merged, so that users, MediBot and MCP clients work without interfering. A reviewer (see_all) sees every
+        study."""
+        return true() if self.see_all else UpdateStudy.created_by == self.user_id
+
+    @staticmethod
+    def _in_databases(model, databases: Optional[Sequence[int]]):
+        """The studies (of `model`, Study or UpdateStudy) of the given study databases; no databases means all of
+        them."""
+        return model.database_id.in_(list(databases)) if databases else true()
+
+    async def _drafts(self, study_ids: Optional[Sequence[int]] = None, databases: Optional[Sequence[int]] = None) -> List[UpdateStudy]:
+        """The studies of the updates this scope sees (see _visible_drafts), of the given ids (all without)."""
+        stmt = select(UpdateStudy).where(self._visible_drafts()).where(self._in_databases(UpdateStudy, databases))
+        if study_ids:
+            stmt = stmt.where(UpdateStudy.id.in_(list(study_ids)))
+        return list((await self.db.execute(stmt.order_by(UpdateStudy.id))).scalars().all())
 
     async def commit(self):
         await self.db.commit()
@@ -133,73 +126,167 @@ class StudyRepository:
     async def rollback(self):
         await self.db.rollback()
 
-    async def add_study(self, values: Mapping[str, Any]) -> Study:
-        """Adds a study from its fields (see StudyFields in utils/dto.py): the primitive fields, the tags kept in a
-        column (e.g. countries) and the graph, whose tags are resolved and become tags of the study. Raises
-        GraphFormatError if the graph is no graph of config/medidex-study.yaml."""
-        #TODO add more sophisticated checks
-
+    async def add_study(self, values: Mapping[str, Any], project_id: str, database_id: int) -> UpdateStudy:
+        """Adds a study to the update `project_id` of a study database from its fields (see StudyFields in utils/dto.py):
+        the primitive fields and the graph, whose tags stay names until the study is merged (see promote). It is the study of this scope until then (see _visible_drafts). Raises
+        GraphFormatError if the graph is no graph of config/medidex-study.yaml, DuplicateShortNameError if the database
+        or one of its updates has a study of that name."""
+        columns = self._columns(values)
+        taken = exists().where(Study.database_id == database_id, Study.short_name == columns["short_name"])
+        if (await self.db.execute(select(taken))).scalar():
+            raise DuplicateShortNameError("short_name already exists")
+        new_study = UpdateStudy(**columns, database_id=database_id, project_id=project_id, created_by=self.user_id)
+        self.graphs.draft(new_study, values)
+        self.db.add(new_study)
         try:
-            columns: Dict[str, Any] = {field.column: values.get(key) for key, field in STUDY_CONFIG.fields.items()}
-            for key in STUDY_CONFIG.inline_categories:
-                columns[key] = INLINE_SEPARATOR.join(values.get(key) or [])
-            new_study = Study(**columns)
-
-            self.db.add(new_study)
             await self.db.flush()
-            await self.graphs.store(new_study, values)
-
-            study_added_entry = StudyAdded(
-                study_id=new_study.id,
-                created_by=self.user_id,
-            )
-            self.db.add(study_added_entry)
-
-            await self.db.flush()
-            await self.db.refresh(new_study)
-
-            return new_study
-
         except IntegrityError as e:
-            diag = getattr(getattr(e.orig, "__cause__", None), "diag", None)
-            if getattr(diag, "constraint_name", None) == "uq_study_short_name":
-                raise DuplicateShortNameError("short_name already exists")
-            raise
+            self._raise_duplicate(e, "uq_update_study_short_name")
+        await self.db.refresh(new_study)
+        return new_study
 
-    async def get_graphs(self, studies: List[Study]) -> Dict[int, StudyGraph]:
+    async def promote(self, study_id: int) -> Optional[Study]:
+        """Makes the study of an update a study of the core database of the same id (when a report linked to it is
+        merged, see UpdateMergeService): its tags become tags of the core database (see StudyGraphs.store), and what of
+        the update refers to it (its links, and the rows of every table that refers to a study by the pair `study_id`
+        and `update_study_id`, e.g. proposals of extensions) refers to that study. None if it is no study of an update. Raises DuplicateShortNameError if
+        the database got a study of its name in the meantime."""
+        draft = await self.db.get(UpdateStudy, study_id)
+        if draft is None:
+            return None
+        columns = {name: getattr(draft, name) for name in StudyFields.model_fields if name != GRAPH_FIELD}
+        study = Study(id=draft.id, **columns)
+        self.db.add(study)
+        try:
+            await self.db.flush()
+        except IntegrityError as e:
+            self._raise_duplicate(e, "uq_study_short_name")
+        await self.graphs.store(study, {GRAPH_FIELD: getattr(draft, GRAPH_FIELD)})
+        for table in self._study_referencing_tables():
+            await self.db.execute(
+                update(table).where(table.c.update_study_id == study_id).values(study_id=study_id, update_study_id=None)
+            )
+        await self.db.execute(delete(UpdateStudy).where(UpdateStudy.id == study_id))
+        await self.db.flush()
+        return study
+
+    @staticmethod
+    def _study_referencing_tables() -> List[Table]:
+        """The tables that refer to a study of the core database or of an update by the pair `study_id` -> study and
+        `update_study_id` -> update_study (one of them set, like UpdateLink)."""
+        def references(table: Table, column: str, target: str) -> bool:
+            return column in table.c and any(key.column.table.name == target for key in table.c[column].foreign_keys)
+        return [
+            table for table in SQLModel.metadata.sorted_tables
+            if references(table, "study_id", Study.__tablename__) and references(table, "update_study_id", UpdateStudy.__tablename__)
+        ]
+
+    async def import_study(self, values: Mapping[str, Any], database_id: int, created_at: Optional[datetime] = None) -> Study:
+        """Adds a study of an imported database to the core database from its fields (see add_study), entered when the
+        database it comes from says (now without)."""
+        new_study = await self._insert(values, database_id, created_at)
+        await self.db.refresh(new_study)
+        return new_study
+
+    async def _insert(self, values: Mapping[str, Any], database_id: int, created_at: Optional[datetime] = None) -> Study:
+        new_study = Study(**self._columns(values), database_id=database_id)
+        if created_at:
+            new_study.created_at = created_at
+        self.db.add(new_study)
+        try:
+            await self.db.flush()
+        except IntegrityError as e:
+            self._raise_duplicate(e, "uq_study_short_name")
+        await self.graphs.store(new_study, values)
+        return new_study
+
+    @staticmethod
+    def _columns(values: Mapping[str, Any]) -> Dict[str, Any]:
+        """The columns of a study from its fields (see add_study), but the graph."""
+        return study_columns({key: values.get(key) for key in STUDY_CONFIG.fields})
+
+    @staticmethod
+    def _raise_duplicate(error: IntegrityError, constraint: str) -> None:
+        """Raises DuplicateShortNameError if `error` broke the unique short names `constraint`, else `error`."""
+        names = {getattr(getattr(cause, "diag", None), "constraint_name", None) for cause in (error.orig, getattr(error.orig, "__cause__", None))}
+        if constraint in names:
+            raise DuplicateShortNameError("short_name already exists") from error
+        raise error
+
+    async def add_study_tags(self, study_id: int, category: str, names: List[str]) -> None:
+        """Makes tags of a category (e.g. interventions) tags of the study, by name; an unknown name becomes a new tag
+        (see StudyGraphs.resolve). The tags of a category the study holds in its graph itself (its countries, see
+        GraphConfig.study_relation) are added to its graph."""
+        relation = STUDY_CONFIG.graph.study_relation(category)
+        if relation is not None:
+            study = await self.db.get(Study, study_id)
+            if study is None:
+                raise ValueError(f"Study {study_id} not found")
+            await self.graphs.add_study_values(study, relation, names)
+            return
+        existing = set((await self.db.execute(select(StudyTag.tag_id).where(StudyTag.study_id == study_id))).scalars())
+        for tag_id in await self.graphs.resolve(category, names):
+            if tag_id not in existing:
+                self.db.add(StudyTag(study_id=study_id, tag_id=tag_id))
+                existing.add(tag_id)
+        await self.db.flush()
+
+    async def update_study_fields(self, study_id: int, values: Mapping[str, Any]) -> None:
+        """Sets primitive fields of a study (keys of STUDY_CONFIG.fields, valued as StudyFields has them)."""
+        study = await self.db.get(Study, study_id)
+        if study is None:
+            raise ValueError(f"Study {study_id} not found")
+        for column, value in study_columns(values).items():
+            setattr(study, column, value)
+        await self.db.flush()
+
+    async def add_study_graph_entries(self, study_id: int, entries: Mapping[str, Sequence[Mapping[str, Mapping[str, Any]]]]) -> None:
+        """Adds edges, given as entries with their tags by name (see StoredGraph.from_entries), to the graph of a study."""
+        study = await self.db.get(Study, study_id)
+        if study is None:
+            raise ValueError(f"Study {study_id} not found")
+        await self.graphs.add_entries(study, entries)
+
+    async def get_database_studies(self, database_id: int) -> List[Study]:
+        """The studies of the core database of a study database, by name."""
+        stmt = select(Study).where(Study.database_id == database_id).order_by(Study.short_name, Study.id)
+        return list((await self.db.execute(stmt)).scalars().all())
+
+    async def get_graphs(self, studies: Sequence[StudyFields]) -> Dict[int, StudyGraph]:
         """The graphs (config/medidex-study.yaml) of the studies, by study, with their tags named."""
         return await self.graphs.get(studies)
 
-    async def search_studies(self, query: str, limit: int, offset: int) -> Tuple[List[Study], bool]:
-        """Free-text search across a study's own name/trial ID plus its linked reports'
-        authors/trial ID - both the confirmed Report.trial_registration_id and the
-        unconfirmed report_added.trial_registration_id guess (see their comments in
-        models.py) - and the tags of the categories with free_text_search (config/medidex-study.yaml). Returns (page, has_more) - one extra id beyond
-        the page is fetched so has_more can be determined without a separate count
-        query, same convention as StudySimilaritySearchService.get_similar_studies_by_id.
+    async def search_studies(self, query: str, limit: int, offset: int, databases: Optional[Sequence[int]] = None) -> Tuple[List[Study], bool]:
+        """Free-text search of the core database across a study's own name/trial ID
+        plus its reports' authors/trial ID and the tags of the categories with free_text_search
+        (config/medidex-study.yaml), in the given study databases (all without). Returns (page, has_more) - one extra
+        id beyond the page is fetched so has_more can be determined without a separate count query, same convention
+        as StudySimilaritySearchService.get_similar_studies_by_id.
         """
         pattern = f"%{query}%"
         id_stmt = (
             select(Study.id, Study.short_name)
-            .outerjoin(StudyReport, StudyReport.study_id == Study.id)
-            .outerjoin(Report, Report.id == StudyReport.report_id)
-            .outerjoin(ReportAdded, ReportAdded.report_id == StudyReport.report_id)
+            .outerjoin(Link, Link.study_id == Study.id)
+            .outerjoin(Report, Report.id == Link.report_id)
         )
         matches = [
             Study.short_name.ilike(pattern),
             Study.trial_registration_id.ilike(pattern),
-            Report.authors.ilike(pattern),
+            _authors_text(Report).ilike(pattern),
             Report.trial_registration_id.ilike(pattern),
-            ReportAdded.trial_registration_id.ilike(pattern),
         ]
-        for category in TAG_CATEGORIES.where(free_text_search=True):
-            storage = TAG_TABLES[category]
-            id_stmt = id_stmt.outerjoin(storage.link, storage.link_study == Study.id).outerjoin(storage.tag, storage.tag.id == storage.link_tag)
-            matches.append(storage.tag.description.ilike(pattern))
+        searched = list(TAG_CATEGORIES.where(free_text_search=True))
+        if searched:
+            id_stmt = (
+                id_stmt
+                .outerjoin(StudyTag, StudyTag.study_id == Study.id)
+                .outerjoin(DbTag, and_(DbTag.id == StudyTag.tag_id, DbTag.category.in_(searched)))
+            )
+            matches.append(DbTag.description.ilike(pattern))
         id_stmt = (
             id_stmt
             .where(or_(*matches))
-            .where(self._visible())
+            .where(self._in_databases(Study, databases))
             .distinct()
             .order_by(Study.short_name, Study.id)
             .offset(offset)
@@ -212,12 +299,12 @@ class StudyRepository:
         if not study_ids:
             return [], has_more
 
-        studies_by_id = {study.id: study for study in await self.get_studies(study_ids)}
+        studies_by_id = {study.id: study for study in await self._core_studies(study_ids)}
         page = [studies_by_id[study_id] for study_id in study_ids if study_id in studies_by_id]
         return page, has_more
 
-    async def search_studies_advanced(self, query: QueryNode, limit: int, offset: int) -> Tuple[List[Study], bool]:
-        """Boolean AND/OR search across studies by field==value comparisons (see
+    async def search_studies_advanced(self, query: QueryNode, limit: int, offset: int, databases: Optional[Sequence[int]] = None) -> Tuple[List[Study], bool]:
+        """Boolean AND/OR search of the core database (see search_studies) by field==value comparisons (see
         src/utils/query_parser.py for the grammar and QueryNode shape). Supported fields:
         name/shortName, trialId, author, status and the search field of each tag category
         (config/medidex-study.yaml) - each translated into an ilike match,
@@ -228,7 +315,7 @@ class StudyRepository:
         id_stmt = (
             select(Study.id, Study.short_name)
             .where(condition)
-            .where(self._visible())
+            .where(self._in_databases(Study, databases))
             .distinct()
             .order_by(Study.short_name, Study.id)
             .offset(offset)
@@ -241,66 +328,77 @@ class StudyRepository:
         if not study_ids:
             return [], has_more
 
-        studies_by_id = {study.id: study for study in await self.get_studies(study_ids)}
+        studies_by_id = {study.id: study for study in await self._core_studies(study_ids)}
         page = [studies_by_id[study_id] for study_id in study_ids if study_id in studies_by_id]
         return page, has_more
 
-    async def get_studies(self, study_ids: Optional[List[int]] = None) -> List[Study]:
-        stmt = select(Study).where(self._visible())
+    async def get_studies(self, study_ids: Optional[List[int]] = None, databases: Optional[Sequence[int]] = None) -> List[StudyFields]:
+        """The studies of the core database and those of the updates this scope sees (see _visible_drafts), of the
+        given ids (all without), in the given study databases (all without)."""
+        return [*await self._core_studies(study_ids, databases), *await self._drafts(study_ids, databases)]
+
+    async def _core_studies(self, study_ids: Optional[Sequence[int]] = None, databases: Optional[Sequence[int]] = None) -> List[Study]:
+        stmt = select(Study).where(self._in_databases(Study, databases))
         if study_ids:
-            stmt = stmt.where(Study.id.in_(study_ids))
-        result = (await self.db.execute(stmt)).scalars().all()
+            stmt = stmt.where(Study.id.in_(list(study_ids)))
+        return list((await self.db.execute(stmt)).scalars().all())
 
-        #await asyncio.gather(*[log_event(-1, Event(event_type=f"study::{study_id}::visited", timestamp=datetime.now(timezone.utc).isoformat()), self.user_id) for study_id in study_ids])
-        return result
-
-    async def get_studies_by_report_dois(self, dois: List[str]) -> List[Study]:
+    async def get_studies_by_report_dois(self, dois: List[str], databases: Optional[Sequence[int]] = None) -> List[StudyFields]:
         """Studies linked to any report whose DOI is in `dois` (normalized: lowercase, no
         resolver prefix - see crawler.normalize_doi). Report DOIs are stored as uploaded,
         so the bare and https://doi.org/-prefixed spellings are both matched. Link scoping
-        mirrors ReportRepository.get_linked_studies: links created by this user or
-        unattributed ones, not other users' pending links.
+        mirrors ReportRepository.get_linked_studies: the links of the core database and those
+        this scope made in an update, not other scopes' links.
         """
         if not dois:
             return []
 
         spellings = set(dois) | {f"https://doi.org/{doi}" for doi in dois}
-        stmt = (
-            select(Study)
-            .join(StudyReport, StudyReport.study_id == Study.id)
-            .join(Report, Report.id == StudyReport.report_id)
-            .outerjoin(StudyReportAdded, StudyReportAdded.study_report_id == StudyReport.id)
+        core = (await self.db.execute(
+            select(Link.study_id)
+            .join(Report, Report.id == Link.report_id)
             .where(func.lower(Report.doi).in_(spellings))
-            .where(self._visible())
-            .where(or_(StudyReportAdded.created_by == self.user_id, StudyReportAdded.created_by.is_(None)))
-            .distinct()
-            .order_by(Study.id)
-        )
-        return (await self.db.execute(stmt)).scalars().all()
+        )).scalars().all()
+        in_updates = (await self.db.execute(
+            select(func.coalesce(UpdateLink.study_id, UpdateLink.update_study_id))
+            .join(UpdateReport, UpdateReport.id == UpdateLink.report_id)
+            .where(func.lower(UpdateReport.doi).in_(spellings))
+            .where(UpdateLink.created_by == self.user_id)
+        )).scalars().all()
+        study_ids = sorted(set(core) | set(in_updates))
+        return sorted(await self.get_studies(study_ids, databases), key=lambda study: study.id) if study_ids else []
 
-    async def get_study_by_id(self, study_id: int) -> Optional[Study]:
-        """None if there is no such study, or it is not visible to this scope."""
-        stmt = select(Study).where(Study.id == study_id).where(self._visible())
-        return (await self.db.execute(stmt)).scalar_one_or_none()
+    async def get_study_by_id(self, study_id: int, databases: Optional[Sequence[int]] = None) -> Optional[StudyFields]:
+        """The study of the core database or of an update of the id; None if there is no such study, it is not visible
+        to this scope or not in the given study databases."""
+        studies = await self.get_studies([study_id], databases)
+        return studies[0] if studies else None
 
-    async def search_study_by_shortname(self, shortname: str, cutoff: Optional[str] = None) -> Study:
-        stmt = select(Study).where(Study.short_name.ilike(f"%{shortname}%")).where(self._visible())
-        if cutoff:
-            stmt = stmt.where(Study.date_entered < cutoff)
-        result = (await self.db.execute(stmt)).scalar_one_or_none()
-        return result
+    async def is_draft(self, study_id: int) -> bool:
+        """Whether the study is one of an update (UpdateStudy), not yet of the core database."""
+        return await self.db.get(UpdateStudy, study_id) is not None
 
-    async def get_study_reports_by_study_ids(self, study_ids: Optional[List[int]], cutoff: Optional[str] = None) -> Dict[int, List[Report]]:
+    async def search_study_by_shortname(self, shortname: str, cutoff: Optional[datetime] = None) -> Optional[StudyFields]:
+        for model, visible in ((Study, true()), (UpdateStudy, self._visible_drafts())):
+            stmt = select(model).where(model.short_name.ilike(f"%{shortname}%")).where(visible)
+            if cutoff:
+                stmt = stmt.where(model.created_at < cutoff)
+            result = (await self.db.execute(stmt)).scalar_one_or_none()
+            if result is not None:
+                return result
+        return None
+
+    async def get_study_reports_by_study_ids(self, study_ids: Optional[List[int]], cutoff: Optional[datetime] = None) -> Dict[int, List[Report]]:
         stmt = (
-            select(StudyReport.study_id, Report)
-            .join(Report, Report.id == StudyReport.report_id)
+            select(Link.study_id, Report)
+            .join(Report, Report.id == Link.report_id)
         )
 
         if study_ids:
-            stmt = stmt.where(StudyReport.study_id.in_(study_ids))
+            stmt = stmt.where(Link.study_id.in_(study_ids))
 
         if cutoff:
-            stmt = stmt.where(Report.date_entered < cutoff)
+            stmt = stmt.where(Report.created_at < cutoff)
 
         rows = (await self.db.execute(stmt)).all()
 
@@ -309,22 +407,22 @@ class StudyRepository:
             grouped.setdefault(study_id, []).append(report)
         return grouped
 
-    async def get_study_reports_by_study_id(self, study_id: int, cutoff: Optional[str] = None) -> List[Report]:
+    async def get_study_reports_by_study_id(self, study_id: int, cutoff: Optional[datetime] = None) -> List[Report]:
         result = await self.get_study_reports_by_study_ids(study_ids=[study_id], cutoff=cutoff)
         return result.get(study_id, [])
 
-    async def get_study_reports_by_study_id_page(self, study_id: int, limit: int, offset: int, cutoff: Optional[str] = None) -> Tuple[List[Report], bool]:
+    async def get_study_reports_by_study_id_page(self, study_id: int, limit: int, offset: int, cutoff: Optional[datetime] = None) -> Tuple[List[Report], bool]:
         """Paginated version of get_study_reports_by_study_id() above - one extra row
         beyond the page is fetched so has_more can be determined without a separate
         count query, same convention as search_studies()."""
         stmt = (
             select(Report)
-            .join(StudyReport, StudyReport.report_id == Report.id)
-            .where(StudyReport.study_id == study_id)
+            .join(Link, Link.report_id == Report.id)
+            .where(Link.study_id == study_id)
         )
 
         if cutoff:
-            stmt = stmt.where(Report.date_entered < cutoff)
+            stmt = stmt.where(Report.created_at < cutoff)
 
         stmt = stmt.order_by(Report.id).offset(offset).limit(limit + 1)
 
@@ -332,17 +430,17 @@ class StudyRepository:
         has_more = len(reports) > limit
         return reports[:limit], has_more
 
-    async def get_study_persons(self, study_ids: Optional[List[int]] = None, cutoff: Optional[str] = None, normalize_names: bool = True) -> Dict[int, List[str]]:
+    async def get_study_persons(self, study_ids: Optional[List[int]] = None, cutoff: Optional[datetime] = None, normalize_names: bool = True) -> Dict[int, List[str]]:
         stmt = (
-            select(StudyReport.study_id.label("study_id"), Report.authors)
-            .join(Report, Report.id == StudyReport.report_id)
+            select(Link.study_id.label("study_id"), Report.authors)
+            .join(Report, Report.id == Link.report_id)
         )
 
         if cutoff:
-            stmt = stmt.where(Report.date_entered < cutoff)
+            stmt = stmt.where(Report.created_at < cutoff)
 
         if study_ids is not None:
-            stmt = stmt.where(StudyReport.study_id.in_(study_ids))
+            stmt = stmt.where(Link.study_id.in_(study_ids))
 
         rows = (await self.db.execute(stmt)).all()
 
@@ -350,8 +448,7 @@ class StudyRepository:
 
         for item in rows:
             key = item[0]
-            value = item[1]
-            authors = [author.strip() for author in value.split("//")]
+            authors = [author.strip() for author in item[1]]
             if normalize_names:
                 authors = normalize_author_names(authors=authors)
 
@@ -360,16 +457,16 @@ class StudyRepository:
 
         return final_result
 
-    async def get_study_persons_single(self, study_id : int, cutoff: Optional[str] = None, normalize_names: bool = True) -> List[str]:
+    async def get_study_persons_single(self, study_id : int, cutoff: Optional[datetime] = None, normalize_names: bool = True) -> List[str]:
         result = await self.get_study_persons(study_ids=[study_id], cutoff=cutoff, normalize_names=normalize_names)
         if study_id in result:
             return result[study_id]
         return []
 
 
-    async def get_study_date_by_id(self, study_id: int) -> str:
-        stmt = select(Study.date_entered).where(Study.id == study_id)
-        return (await self.db.execute(stmt)).scalar_one_or_none()
+    async def get_study_date_by_id(self, study_id: int) -> Optional[datetime]:
+        study = await self.get_study_by_id(study_id)
+        return study.created_at if study is not None else None
 
     # Study Aspects
 
@@ -399,23 +496,38 @@ class StudyRepository:
         return items, has_more
 
     async def get_study_tags(self, category: str, study_ids: List[int]) -> Dict[int, List[Tag]]:
-        """The tags of a category (a key of config/medidex-study.yaml) of each of the studies."""
+        """The tags of a category (a key of config/medidex-study.yaml) of each of the studies, of the core database
+        and of the updates."""
         if not study_ids:
             return {}
-        if category in TAG_COLUMNS:
-            storage = TAG_COLUMNS[category]
-            rows = (await self.db.execute(select(Study.id, storage.column).where(Study.id.in_(study_ids)))).all()
-            tags = {study_id: [Tag(id=name, keyword=name) for name in storage.split(value)] for study_id, value in rows}
-            return {study_id: items for study_id, items in tags.items() if items}
-        storage = TAG_TABLES[category]
+        drafts = await self._drafts(study_ids)
+        draft_ids = {draft.id for draft in drafts}
+        tags = await self._core_study_tags(category, [study_id for study_id in study_ids if study_id not in draft_ids])
+        for draft in drafts:
+            items = await self._draft_tags(category, draft)
+            if items:
+                tags[draft.id] = items
+        return tags
+
+    async def _draft_tags(self, category: str, study: UpdateStudy) -> List[Tag]:
+        """The tags of a category of a study of an update: those of its graph, by name (see StudyGraphs.draft)."""
+        named = []
+        tag_ids = self.graphs.tag_ids(study, category)
+        if tag_ids:
+            rows = (await self.db.execute(
+                select(DbTag.id, DbTag.description).where(DbTag.category == category, DbTag.id.in_(tag_ids)).order_by(DbTag.id)
+            )).all()
+            named = [Tag(id=str(tag_id), keyword=description) for tag_id, description in rows]
+        return named + [Tag(id=name, keyword=name) for name in self.graphs.tag_names(study, category)]
+
+    async def _core_study_tags(self, category: str, study_ids: List[int]) -> Dict[int, List[Tag]]:
+        if not study_ids:
+            return {}
         stmt = (
-            select(
-                storage.link_study.label("study_id"),
-                storage.link_tag.label("id"),
-                storage.tag.description.label("description"),
-            )
-            .join(storage.tag, storage.tag.id == storage.link_tag)
-            .where(storage.link_study.in_(study_ids))
+            select(StudyTag.study_id, DbTag.id, DbTag.description)
+            .join(DbTag, DbTag.id == StudyTag.tag_id)
+            .where(StudyTag.study_id.in_(study_ids), DbTag.category == category)
+            .order_by(DbTag.id)
         )
 
         return await self._get_study_aspect(stmt)
@@ -425,18 +537,14 @@ class StudyRepository:
         return result.get(study_id, [])
 
     async def get_study_tags_single_page(self, category: str, study_id: int, limit: int, offset: int) -> Tuple[List[Tag], bool]:
-        if category in TAG_COLUMNS:
+        if await self.is_draft(study_id):
             tags = await self.get_study_tags_single(category, study_id)
             return tags[offset:offset + limit], len(tags) > offset + limit
-        storage = TAG_TABLES[category]
         stmt = (
-            select(
-                storage.link_tag.label("id"),
-                storage.tag.description.label("description"),
-            )
-            .join(storage.tag, storage.tag.id == storage.link_tag)
-            .where(storage.link_study == study_id)
-            .order_by(storage.link_tag)
+            select(DbTag.id, DbTag.description)
+            .join(StudyTag, StudyTag.tag_id == DbTag.id)
+            .where(StudyTag.study_id == study_id, DbTag.category == category)
+            .order_by(DbTag.id)
         )
         return await self._get_study_aspect_page(stmt, limit, offset)
 
@@ -485,19 +593,19 @@ class StudyRepository:
         result_studies = (await self.db.execute(query_studies)).fetchall()
         all_studies = [row[0] for row in result_studies]
 
-        # --- Query 2: reports with single-trial studies in authors field ---
+        # --- Query 2: the studies of the registry records linked to one study only ---
         query_reports = text(f"""
-            SELECT sr."study_id"
+            SELECT l."study_id"
             FROM "report" r
-            JOIN "study_report" sr ON r."id" = sr."report_id"
-            WHERE r."authors" NOT LIKE '%//%'
-            AND sr."report_id" IN (
+            JOIN "link" l ON r."id" = l."report_id"
+            WHERE cardinality(r."authors") = 0
+            AND l."report_id" IN (
                 SELECT "report_id"
-                FROM "study_report"
+                FROM "link"
                 GROUP BY "report_id"
                 HAVING COUNT(DISTINCT "study_id") = 1
             )
-            AND {build_regex_block('r."authors"')}
+            AND {build_regex_block('r."trial_registration_id"')}
         """)
         result_reports = (await self.db.execute(query_reports)).fetchall()
         all_reports = [row[0] for row in result_reports]

@@ -57,11 +57,13 @@ export interface ReportCurationDto extends ReportDto {
   hasPdf: boolean | undefined;
   flag?: string;
   assignedStudies?: StudyPreviewDto[];
-  // The unconfirmed .ris-upload/fulltext guess (report_added.trial_registration_id) -
+  // The unconfirmed .ris-upload guess (UpdateReport.preliminary_trial_id) -
   // distinct from trialId above, which only ever holds a reviewer-confirmed value.
   // Optional for the same reason flag/assignedStudies are: ReportIntakeDto doesn't carry
   // it either, but still needs to satisfy this shape (see this interface's comment).
   preliminaryTrialId?: string | null;
+  // Only the intake rows carry it (see ReportIntakeDto); optional so useReportStore can keep it.
+  pdfUnavailable?: boolean;
   // Optional data a downstream deployable attached on request (see `include` in
   // GetProjectReportsParams), keyed by extension. Empty unless requested.
   extensions?: Record<string, unknown>;
@@ -77,6 +79,10 @@ export interface ReportIntakeDto extends ReportDto {
   doi: string | null;
   fulltextLinks: string[];
   hasPdf: boolean | undefined;
+  // Marked as having no PDF ("Not available"); hasPdf is true for it too.
+  pdfUnavailable: boolean;
+  // Optional data a downstream deployable attached on request, as on ReportCurationDto.
+  extensions?: Record<string, unknown>;
 }
 
 export type ReportChatDto = JsonValue;
@@ -96,7 +102,6 @@ export interface ReportFiltersState {
   flagged?: FilterMode;
   newStudy?: FilterMode;
   consensus?: FilterMode;
-  reviewed?: FilterMode;
 }
 
 // One filter dimension in the report list's filter bar, rendered as a single dropdown button
@@ -123,12 +128,11 @@ export interface GetProjectReportsParams extends ReportFiltersState {
 // ---------------------------------------------------------------------------
 
 // The fields needed to create a study - everything else (studyId, timestamps) is
-// server-generated, so this also doubles as the addStudy request payload.
+// server-generated, so this also doubles as the request payload of POST /reports/{id}/studies.
 export interface StudyBaseDto {
   status: string;
   shortName: string;
-  countries: string[];
-  numberParticipants: string | null;
+  numberParticipants: number | null;
   // Overall duration, e.g. "12 weeks". Null: the study schema calculates it from the arms (`derive` of the field).
   duration: string | null;
   trialId: string | null;
@@ -272,7 +276,6 @@ export interface StudyGraphEdgeDto {
 export interface StudyGraphDto {
   nodes: StudyGraphNodeDto[];
   edges: StudyGraphEdgeDto[];
-  text: string | null;
 }
 
 // Bare-bones Study identity for ReportCurationDto.assignedStudies - the UI only ever
@@ -289,6 +292,8 @@ export interface GetStudySearchParams {
   q: string;
   limit?: number;
   cursor?: string;
+  // The ids of the study databases to search in; all of them if left out.
+  databases?: number[];
 }
 
 // A study suggested as a possible match for a report by the similarity search
@@ -327,21 +332,37 @@ export interface ProjectDto{
   name: string;
   createdAt: string;
   owner: string;
+  // The study database its reports are matched against and added to.
+  databaseId: number;
   numberReportsReadyForProcessing: number;
   numberReportsTotal: number;
   numberReportsPreProcessed: number;
   numberReportsWithPdf: number;
   numberReportsAutoSearchedPdf: number,
   numberReportsReadyForReview: number;
-  numberReportsConfirmed: number;
+  // Reports every assignee has committed their links of: the owner can merge them (finished ones included).
+  numberReportsReadyForMerge: number;
+  // Reports finished with: merged into the core database or deleted; both are archived.
+  numberReportsMerged: number;
+  numberReportsDeleted: number;
   numberReportsPostprocessing: number;
   numberReportsPostprocessed: number;
   assignees : AssigneeDto[]
+  // Every assignee has committed their links of every report still in the project: nothing is left to link.
+  locked: boolean;
+  // When its last report was merged or deleted; null while reports are left.
+  completedAt?: string | null;
 }
 
 export interface AssigneeDto {
   userId : string;
   numberReportsLinked: number;
+  // Reports the assignee is done with: linked to a study or flagged publicly.
+  numberReportsCompleted: number;
+  // Reports the assignee has handed in their links of; they cannot change them any more.
+  numberReportsCommitted: number;
+  // Has handed in their links of every report.
+  committed: boolean;
 }
 
 export interface TaskDto {
@@ -349,9 +370,104 @@ export interface TaskDto {
   name: string;
   createdAt: string;
   owner: string;
+  databaseId: number;
   numberReportsTotal: number;
   numberReportsReadyForProcessing: number;
   numberReportsProcessed: number;
+  // Reports the user is done with: linked to a study or flagged publicly; those not committed yet they can commit.
+  numberReportsCompleted: number;
+  // Reports the user has handed in their links of; they are left out of their curation view.
+  numberReportsCommitted: number;
+  // Has handed in their links of every report.
+  committed: boolean;
+  // The assignees (user ids) who have not committed their links yet: whom the update waits for.
+  pendingAssignees: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Study databases
+// ---------------------------------------------------------------------------
+
+// A criterion of a database: a text in a category of the eligibility schema, to include (it must hold) or to exclude
+// (it must not hold) a report. Its id stays when the text is edited.
+export interface EligibilityCriterion {
+  id: string;
+  category: string;
+  kind: "include" | "exclude";
+  text: string;
+}
+
+// A category of the eligibility criteria (config/eligibility.yaml of the backend).
+export interface EligibilityCategoryDto {
+  key: string;
+  label: string;
+  description: string;
+}
+
+// GET /eligibility-schema: the categories in their order.
+export interface EligibilitySchemaDto {
+  categories: EligibilityCategoryDto[];
+}
+
+export interface DatabasePayload {
+  name: string;
+  description?: string | null;
+  // Which studies belong in the database: at least one criterion.
+  eligibilityCriteria: EligibilityCriterion[];
+}
+
+// The fields given are changed; an empty description removes it.
+export type DatabaseUpdate = Partial<DatabasePayload>;
+
+export interface DatabaseDto {
+  databaseId: number;
+  name: string;
+  description?: string | null;
+  eligibilityCriteria: EligibilityCriterion[];
+  createdAt: string;
+  // Not all its reports are in the vectorstore yet (e.g. right after an import): its studies are found by the search
+  // but not yet suggested for new reports, and no projects can be uploaded into it.
+  indexing: boolean;
+  numberReportsIndexed: number;
+  // It is still being imported: nothing of it is committed yet, and no projects can be uploaded into it. Its progress
+  // is streamed by GET /databases/{id}/status (DatabaseStatusDto).
+  importing: boolean;
+  numberStudies: number;
+  numberReports: number;
+}
+
+// Where a database is on its way to being usable, an event of GET /databases/{id}/status: imported (`step` studies,
+// reports or pdfs, `done` of `total` of them), indexed (`done` of `total` reports), ready, or failed (its import,
+// `message` says why).
+export interface DatabaseStatusDto {
+  databaseId: number;
+  stage: "importing" | "indexing" | "ready" | "failed";
+  step?: "studies" | "reports" | "pdfs" | null;
+  done: number;
+  total: number;
+  message?: string | null;
+}
+
+// What one part of a database takes in storage; extras are what the extensions keep elsewhere (e.g. chat histories).
+export interface StorageUsageDto {
+  dataBytes: number;
+  searchIndexBytes: number;
+  pdfBytes: number;
+  pdfFiles: number;
+  extras: { label: string; bytes: number }[];
+}
+
+// What a database takes in storage (estimates): `database` is what stays (its studies, the reports linked to them),
+// `updates` only serves the curation of its updates and goes once they are done.
+export interface DatabaseStorageDto {
+  databaseId: number;
+  // The reports linked to its studies (numberReports of the database).
+  numberReports: number;
+  numberUpdates: number;
+  // The reports its updates brought in, linked or not.
+  numberReportsInUpdates: number;
+  database: StorageUsageDto;
+  updates: StorageUsageDto;
 }
 
 // ---------------------------------------------------------------------------
@@ -373,7 +489,6 @@ export interface AnnotationDto {
   user: string;
   studyId: number;
   studyShortName: string;
-  confirmed: boolean,
 }
 
 export interface AnnotationFlagDto {
@@ -397,6 +512,7 @@ export type DurationUnit = "hours" | "days" | "weeks" | "months" | "years";
 // An arm as suggested for a new study: its interventions (names), and its dosage and duration if the report has them.
 export interface ArmSuggestion {
   interventions: string[];
+  role?: "intervention" | "control";
   participants?: number;
   dosage?: string;
   frequency?: string;
@@ -404,10 +520,10 @@ export interface ArmSuggestion {
   duration?: { value: number; unit: DurationUnit };
 }
 
-// Two arms that are compared.
+// Two arms that are compared, by their index in the arms of the suggestion: the evaluated arm and its comparator.
 export interface ComparisonSuggestion {
-  a: ArmSuggestion;
-  b: ArmSuggestion;
+  evaluated: number;
+  comparator: number;
 }
 
 export interface NewStudySuggestion {
@@ -416,6 +532,7 @@ export interface NewStudySuggestion {
   countries: string[];
   number_of_participants: number;
   duration?: { value: number; unit: DurationUnit };
+  arms: ArmSuggestion[];
   comparisons: ComparisonSuggestion[];
 }
 

@@ -18,8 +18,9 @@ class DerivedFields:
         self.stored = StoredGraph(STUDY_CONFIG.graph)
         self.durations = Durations()
 
-    def value(self, field: StudyFieldConfig, graph: Optional[Mapping[str, Any] | str]) -> Optional[str]:
-        """What the field is, as the study would hold it, according to the graph; None if the graph cannot tell."""
+    def value(self, field: StudyFieldConfig, graph: Optional[Mapping[str, Any] | str]) -> Optional[int]:
+        """What the field is, as the study would hold it (a number, a duration in seconds), according to the graph; None
+        if the graph cannot tell."""
         derive = field.derive
         if derive is None:
             return None
@@ -44,8 +45,8 @@ class DerivedFields:
             numbers = [int(digits) for text in found if (digits := re.sub(r"[^\d]", "", text))]
             if len(numbers) != len(found):
                 return None
-            return str({"sum": sum, "max": max, "min": min}[derive.aggregate](numbers))
+            return {"sum": sum, "max": max, "min": min}[derive.aggregate](numbers)
         seconds = [value for text in found if (value := self.durations.seconds(text)) is not None]
         if len(seconds) != len(found):
             return None
-        return self.durations.format({"max": max, "min": min}[derive.aggregate](seconds))
+        return int({"max": max, "min": min}[derive.aggregate](seconds))

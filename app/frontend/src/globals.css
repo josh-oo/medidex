@@ -190,8 +190,9 @@
 /* The layout change of the report workbench when its sidebar folds away or out (report-split-view.tsx): the
    sidebar and the two columns move from where they were to where they are now. Their snapshots keep their size
    (no stretched text) and are clipped to the moving boxes. The parts are named only while it runs - a name changes
-   how an element is drawn (a stacking context of its own) - and a floating button of an extension on top of them
-   (data-layout-part="report-chat-button") gets a layer of its own, so the moving columns do not cover it. */
+   how an element is drawn (a stacking context of its own) - and the floating buttons on top of them (an
+   extension's, data-layout-part="report-chat-button", and the review's merge and delete, "review-actions") get a
+   layer of their own, so the moving columns do not cover them. */
 :root[data-layout-transition] [data-layout-part="report-sidebar"] {
   view-transition-name: report-sidebar;
 }
@@ -206,6 +207,10 @@
 
 :root[data-layout-transition] [data-layout-part="report-chat-button"] {
   view-transition-name: report-chat-button;
+}
+
+:root[data-layout-transition] [data-layout-part="review-actions"] {
+  view-transition-name: review-actions;
 }
 
 ::view-transition-group(report-sidebar),
