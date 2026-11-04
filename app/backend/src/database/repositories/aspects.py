@@ -11,7 +11,7 @@ class AspectRepository:
         self.db = db
 
     async def get_all_tags(self, category: str, ids: List[int]):
-        """All tags of a category (a key of config/study.yaml), or only those with the given ids."""
+        """All tags of a category (a key of config/medidex-study.yaml), or only those with the given ids."""
         tag = TAG_TABLES[category].tag
         stmt = select(tag)
         if ids:

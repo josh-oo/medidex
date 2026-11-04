@@ -1,0 +1,395 @@
+# The Medidex study ontology (LinkML): what a study consists of. It is the single source of truth for the study DTOs, the
+# study details view (served as GET /study-schema), the tag endpoints, the tag and study search and the graph a study
+# keeps (src/utils/graph.py). The application reads it with src/utils/studyconfig.py; OWL is generated from it with
+# `gen-owl` (see the README). A downstream deployable extends it by importing it, and adds annotations of its own (e.g.
+# instructions for an extraction) in a file of its own; it never edits this one.
+#
+# How the application reads the classes:
+#   Study            The study itself (`tree_root`), the root of its graph (its id in a graph is `study`). Its attributes are
+#                    its fields (a primitive range), its database metadata (`meta`) and its tags by category (a range that
+#                    is a concept class); the slots it lists are the relations of the graph that start at the study.
+#   Entity classes   Arm, Population, Outcome: the entities of the graph of a study. An entity has no properties, only
+#                    relations (the slots it lists) to other entities.
+#   Value classes    Classes with the slot `concept` (a term of the vocabulary, today the id of a tag of a category) or
+#                    `value` (a primitive). One node per distinct value in a graph, however many entities point to it.
+#   Concept          A term of the vocabulary.
+# The graph is made of the classes the relations reach from the study. The key of a class in the application is its name
+# in snake_case (TimePoint -> time_point), the key of a field or meta attribute its name in camelCase (short_name ->
+# shortName); relations and tag categories keep their names.
+#
+# Presentation and storage are annotations (flat values; LinkML annotations do not nest):
+#   icon, color          How it is drawn. Colors: blue, emerald, rose, amber, slate, sky, violet, teal. Icons are lucide
+#                        icons (https://lucide.dev/icons) in kebab-case that the frontend knows (src/lib/icons.ts).
+#   display              Fields: metric (a tile at the top of the details) | text (a paragraph below the tiles) | none.
+#   column               Fields: the column of the study in the database (src/database/models.py), if not the name.
+#   derive_source, derive_path, derive_aggregate
+#                        Fields: calculated from the graph while the study has no value of its own (a value it holds wins,
+#                        e.g. when a report only states the total): for every entity of the kind `derive_source`, follow
+#                        the relations of `derive_path` (separated by `/`) to values, and aggregate them: sum (only if
+#                        every entity has one) | max | min.
+#   meta                 Attributes of the study that are metadata of its database record (when it was entered and edited).
+#   search_field         Tag categories: the singular name in the advanced study search (e.g. `intervention==Placebo`).
+#   free_text_search     Tag categories: the plain-text study search also matches their tags.
+#   inline               Tag categories: the tags are kept in the column of the study with this name, separated by `//`,
+#                        instead of a table of their own (every category needs storage in src/database/tagstorage.py).
+#   text_column          Study: the column with the plain text of studies from before the graph (shown as it is).
+#   separator            Relations: between source and target when an edge is shown as a line ("Drug A vs Placebo").
+#   line                 Relations to values: "false" leaves the value out of the line of its entity ("A + B (10 mg)").
+#   card                 Relations: also shown as a line on the study cards.
+#   unordered            Relations: two studies match whichever end is which (A vs B matches B vs A). Not an OWL symmetric
+#                        property: the direction says something (the evaluated arm is compared with its comparator).
+#   seconds              Duration units: the length of the unit.
+id: https://w3id.org/medidex/study
+name: medidex-study
+title: Medidex study ontology
+description: What a clinical study is made of, as entities (arms, populations, outcomes) and the relations between them.
+version: 1.0.0
+prefixes:
+  linkml: https://w3id.org/linkml/
+  mdx: https://w3id.org/medidex/study/
+default_prefix: mdx
+default_range: string
+imports:
+  - linkml:types
+
+types:
+  duration:
+    typeof: string
+    uri: xsd:string
+    description: A length of time in a unit of DurationUnit, written in the largest unit that divides it evenly ("12 weeks").
+
+enums:
+  StudyStatus:
+    permissible_values:
+      Closed: {}
+      Stopped early: {}
+      Open/Ongoing: {}
+      Planned: {}
+  ArmRole:
+    description: What an arm is in its study.
+    permissible_values:
+      intervention: {description: The arm gets the evaluated intervention.}
+      control: {description: "A control: placebo, sham, usual care, standard treatment, waiting list, no treatment."}
+      other: {}
+  SexValue:
+    permissible_values:
+      female: {}
+      male: {}
+      other: {}
+  DurationUnit:
+    description: The units of durations, largest first.
+    permissible_values:
+      year: {annotations: {seconds: 31536000}}
+      month: {annotations: {seconds: 2592000}}
+      week: {annotations: {seconds: 604800}}
+      day: {annotations: {seconds: 86400}}
+      hour: {annotations: {seconds: 3600}}
+
+slots:
+  # The relations of the graph, in the order they are shown.
+  compared_with:
+    title: Comparison
+    description: An arm compared with another one, from the evaluated arm to its comparator ("Drug A vs Placebo"). An arm that takes part in several comparisons is one entity.
+    range: Arm
+    multivalued: true
+    annotations: {icon: scale, color: violet, separator: " vs ", card: "true", unordered: "true"}
+  participated:
+    title: Participants
+    description: The population that took part in the study as a whole, or in one of its arms.
+    range: Population
+    annotations: {icon: users, color: sky, separator: ": "}
+  receives:
+    title: Interventions
+    description: What an arm receives. A combination is several interventions of the same arm.
+    range: Intervention
+    multivalued: true
+    required: true
+    annotations: {icon: syringe, color: emerald}
+  has_role:
+    title: Arm type
+    description: Whether the arm gets the evaluated intervention, is a control, or is something else.
+    range: Role
+    annotations: {icon: flag, color: slate, line: "false"}
+  has_dosage:
+    title: Dosage
+    range: Dosage
+    annotations: {icon: pill, color: emerald}
+  has_frequency:
+    title: Frequency
+    range: Frequency
+    annotations: {icon: timer, color: emerald}
+  has_route:
+    title: Route
+    range: Route
+    annotations: {icon: syringe, color: emerald}
+  has_duration:
+    title: Duration
+    description: How long the arm gets the intervention.
+    range: Duration
+    annotations: {icon: clock, color: emerald}
+  has_size:
+    title: Participants
+    description: The number of participants (enrolled, analysed or, for a study not yet carried out, planned).
+    range: Size
+    annotations: {icon: users, color: sky}
+  has_sex:
+    title: Sex
+    description: Each sex of the participants, one value per sex.
+    range: Sex
+    multivalued: true
+    annotations: {icon: user, color: sky}
+  has_age:
+    title: Age
+    range: Age
+    annotations: {icon: baby, color: sky}
+  has_condition:
+    title: Conditions
+    description: A health condition the participants have.
+    range: Condition
+    multivalued: true
+    annotations: {icon: stethoscope, color: blue}
+  has_outcome:
+    title: Outcomes
+    description: An outcome (endpoint) of the study, whatever its role.
+    range: Outcome
+    multivalued: true
+    annotations: {icon: target, color: rose}
+  has_primary_outcome:
+    is_a: has_outcome
+    title: Primary outcomes
+    description: An outcome the study calls primary or main.
+    range: Outcome
+    multivalued: true
+    annotations: {icon: target, color: rose}
+  has_secondary_outcome:
+    is_a: has_outcome
+    title: Secondary outcomes
+    description: An outcome the study lists as secondary, exploratory or additional.
+    range: Outcome
+    multivalued: true
+    annotations: {icon: target, color: rose}
+  measures:
+    title: Measure
+    description: What an outcome measures.
+    range: Measure
+    required: true
+    annotations: {icon: target, color: rose}
+  has_time_point:
+    title: Time point
+    description: When an outcome is measured, e.g. at 12 weeks.
+    range: TimePoint
+    annotations: {icon: clock, color: rose}
+
+  # What a value node holds.
+  concept:
+    description: The term of the vocabulary the node stands for (the id of a tag).
+    range: Concept
+  value:
+    description: The primitive value of the node.
+
+classes:
+  Concept:
+    description: A term of the vocabulary (a tag). What it is in a study is told by the class of the node that points to it.
+    attributes:
+      id:
+        identifier: true
+        range: integer
+      label:
+        required: true
+
+  Study:
+    tree_root: true
+    title: Study
+    description: The study as a whole.
+    annotations: {icon: file-text, color: slate, text_column: comparison}
+    slots: [participated, has_outcome, has_primary_outcome, has_secondary_outcome]
+    attributes:
+      short_name:
+        title: Name
+        required: true
+        annotations: {icon: tag, color: slate, display: none}
+      trial_id:
+        title: Trial ID
+        annotations: {icon: tag, color: slate, display: none, column: trial_registration_id}
+      number_participants:
+        title: Participants
+        range: integer
+        annotations:
+          icon: users
+          color: blue
+          display: metric
+          derive_source: arm
+          derive_path: participated/has_size
+          derive_aggregate: sum
+      duration:
+        title: Duration
+        range: duration
+        annotations:
+          icon: clock
+          color: emerald
+          display: metric
+          derive_source: arm
+          derive_path: has_duration
+          derive_aggregate: max
+      status:
+        title: Status
+        range: StudyStatus
+        required: true
+        annotations: {icon: flag, color: amber, display: metric}
+      created_at:
+        title: Entered
+        range: datetime
+        annotations: {meta: "true"}
+      updated_at:
+        title: Edited
+        range: datetime
+        annotations: {meta: "true"}
+      # The tags of the study by category. They name the tag lists of the database, the categories of the tag search
+      # and the fields of the advanced study search; the REST endpoints (/<category> and /studies/{id}/<category>) are
+      # generated from them. The tags of every category are embedded.
+      interventions:
+        title: Interventions
+        description: "Interventions of a study (e.g. 'Placebo', 'Group Therapy', ...)"
+        slot_uri: mdx:has_intervention
+        range: Intervention
+        multivalued: true
+        annotations: {icon: syringe, color: emerald, search_field: intervention, free_text_search: "true"}
+      conditions:
+        title: Conditions
+        description: "Health conditions of the participants of a study (e.g. 'COVID-19', 'Diabetes', ...)"
+        slot_uri: mdx:has_condition
+        range: Condition
+        multivalued: true
+        annotations: {icon: stethoscope, color: blue, search_field: condition}
+      outcomes:
+        title: Outcomes
+        description: "Outcomes of a study (e.g. 'Mortality', 'Quality of Life', ...)"
+        slot_uri: mdx:has_outcome_measure
+        range: Measure
+        multivalued: true
+        annotations: {icon: target, color: rose, search_field: outcome}
+      participants:
+        title: Participants
+        description: "Participant attributes of a study (e.g. Male, Female, Adult, Child, ...)"
+        slot_uri: mdx:has_participant_group
+        range: ParticipantGroup
+        multivalued: true
+        annotations: {icon: users, color: sky, search_field: participant}
+      design:
+        title: Study Design
+        description: "Design of a study (e.g. 'Randomized Controlled Trial', 'Controlled Clinical Trial')"
+        slot_uri: mdx:has_design
+        range: Design
+        multivalued: true
+        annotations: {icon: activity, color: teal, search_field: design}
+      countries:
+        title: Countries
+        description: Countries where a study takes place
+        slot_uri: mdx:in_country
+        range: Country
+        multivalued: true
+        annotations: {icon: map-pin, color: amber, search_field: country, inline: "true"}
+
+  # Entities.
+  Arm:
+    title: Arm
+    description: An intervention as it is delivered to a group of participants. The control arm of a study is an arm too.
+    annotations: {icon: pill, color: emerald}
+    slots: [compared_with, participated, receives, has_role, has_dosage, has_frequency, has_route, has_duration]
+  Population:
+    title: Population
+    description: A group of participants, of the whole study or of an arm.
+    annotations: {icon: users, color: sky}
+    slots: [has_size, has_sex, has_age, has_condition]
+  Outcome:
+    title: Outcome
+    description: An outcome measure (endpoint) of the study, what it measures and when.
+    annotations: {icon: target, color: rose}
+    slots: [measures, has_time_point]
+
+  # Values that are terms of the vocabulary.
+  Intervention:
+    title: Intervention
+    description: An intervention, as a term of the vocabulary.
+    annotations: {icon: syringe, color: emerald}
+    slots: [concept]
+  Condition:
+    title: Condition
+    description: A health condition, as a term of the vocabulary.
+    annotations: {icon: stethoscope, color: blue}
+    slots: [concept]
+  Measure:
+    title: Measure
+    description: What an outcome measures, as a term of the vocabulary.
+    annotations: {icon: target, color: rose}
+    slots: [concept]
+  ParticipantGroup:
+    title: Participant group
+    description: An attribute of the participants (e.g. Adult, Child), as a term of the vocabulary.
+    annotations: {icon: users, color: sky}
+    slots: [concept]
+  Design:
+    title: Study design
+    description: The design of a study, as a term of the vocabulary.
+    annotations: {icon: activity, color: teal}
+    slots: [concept]
+  Country:
+    title: Country
+    description: A country.
+    annotations: {icon: map-pin, color: amber}
+    slots: [concept]
+
+  # Primitive values.
+  Role:
+    title: Arm type
+    description: What an arm is in the study, the evaluated intervention or the control (placebo, sham, usual care, no treatment).
+    annotations: {icon: flag, color: slate}
+    slots: [value]
+    slot_usage:
+      value: {range: ArmRole}
+  Dosage:
+    title: Dosage
+    description: The dose of an intervention per administration, e.g. 10 mg.
+    annotations: {icon: pill, color: emerald}
+    slots: [value]
+  Frequency:
+    title: Frequency
+    description: How often an intervention is given, e.g. twice daily.
+    annotations: {icon: timer, color: emerald}
+    slots: [value]
+  Route:
+    title: Route
+    description: How an intervention is given, e.g. oral or injection.
+    annotations: {icon: syringe, color: emerald}
+    slots: [value]
+  Duration:
+    title: Duration
+    description: How long an intervention is given, e.g. 12 weeks.
+    annotations: {icon: clock, color: emerald}
+    slots: [value]
+    slot_usage:
+      value: {range: duration}
+  Size:
+    title: Participants
+    description: The number of participants of a population.
+    annotations: {icon: users, color: sky}
+    slots: [value]
+    slot_usage:
+      value: {range: integer}
+  Sex:
+    title: Sex
+    description: A sex of the participants of a population.
+    annotations: {icon: user, color: sky}
+    slots: [value]
+    slot_usage:
+      value: {range: SexValue}
+  Age:
+    title: Age
+    description: The age of a population, e.g. 18-65 years.
+    annotations: {icon: baby, color: sky}
+    slots: [value]
+  TimePoint:
+    title: Time point
+    description: When an outcome is measured, e.g. at 12 weeks.
+    annotations: {icon: clock, color: rose}
+    slots: [value]

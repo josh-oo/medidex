@@ -21,7 +21,7 @@ from src.utils.query_parser import QuerySyntaxError, SEARCH_QUERY_DESCRIPTION
 from src.context import RequestContext
 from .deps import get_context
 
-from src.utils.dto import Study, StudyFull, StudySchema, StudyFieldSchema, StudyMetaSchema, TagCategorySchema, StudyPayload, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
+from src.utils.dto import Study, StudyFull, StudySchema, StudyFieldSchema, StudyMetaSchema, StudyGraph, GraphSchema, GraphEntitySchema, GraphRelationSchema, TagCategorySchema, StudyPayload, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
 from src.database.tagstorage import TAG_TABLES
 from src.utils.studyconfig import STUDY_CONFIG
 from src.utils.tagconfig import TAG_CATEGORIES
@@ -89,6 +89,13 @@ async def search_studies(
 ) -> Page[Study]:
     return await _search_studies_or_400(ctx, q, limit, cursor)
 
+@router.get("/studies/graphs", summary="The graph of config/medidex-study.yaml (the arms of a study and their comparisons) of the specified studies, with their tags named.")
+async def get_study_graphs(study_ids: List[int] = study_ids_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, StudyGraph]:
+    if not study_ids:
+        return {}
+    studies = await ctx.study_repo.get_studies(study_ids)
+    return await ctx.study_repo.get_graphs(studies)
+
 @router.get("/studies/reports", include_in_schema=False)
 async def get_study_reports_by_study_ids(study_ids: List[int] = study_ids_query, cutoff: str = cutoff_query, ctx: RequestContext = Depends(get_context)) -> Dict[int, List[DbReport]]:
     return await ctx.study_repo.get_study_reports_by_study_ids(study_ids, cutoff)
@@ -140,13 +147,20 @@ async def get_study_persons_single(study_id : int = study_id_path, cutoff: str =
 
 _unknown = [key for key in (*STUDY_CONFIG.fields, *STUDY_CONFIG.meta) if key not in Study.model_fields]
 if _unknown:
-    raise RuntimeError(f"config/study.yaml names fields that a study does not have: {_unknown}")
+    raise RuntimeError(f"config/medidex-study.yaml names fields that a study does not have: {_unknown}")
 
-@router.get("/study-schema", summary="What a study consists of and how it is presented: its primitive fields, its tag categories (with icons and colors) and its database metadata, as configured in config/study.yaml.")
+@router.get("/study-schema", summary="What a study consists of and how it is presented: its primitive fields, its graph (entities such as arms and populations, and the relations between them), its tag categories (with icons and colors) and its database metadata, as configured in config/medidex-study.yaml.")
 async def get_study_schema() -> StudySchema:
     return StudySchema(
         fields=[StudyFieldSchema(key=key, **field.model_dump()) for key, field in STUDY_CONFIG.fields.items()],
         meta=[StudyMetaSchema(key=key, **meta.model_dump()) for key, meta in STUDY_CONFIG.meta.items()],
+        graph=GraphSchema(
+            entities=[GraphEntitySchema(key=key, **entity.model_dump(exclude={"description"})) for key, entity in STUDY_CONFIG.graph.entities.items()],
+            relations=[
+                GraphRelationSchema(key=key, attribute=STUDY_CONFIG.graph.is_attribute(key), **relation.model_dump(exclude={"description"}))
+                for key, relation in STUDY_CONFIG.graph.relations.items()
+            ],
+        ),
         tags=[
             TagCategorySchema(key=name, label=config.label, icon=config.icon, color=config.color, searchField=config.search_field, description=config.description)
             for name, config in TAG_CATEGORIES.categories.items()
@@ -169,8 +183,10 @@ async def get_study_by_id(
 
     next_cursor = encode_cursor(limit)
     study_dto = studies_to_dto([study])[0]
+    graph = (await ctx.study_repo.get_graphs([study]))[study.id]
     return StudyFull(
         **study_dto.model_dump(),
+        graph=graph,
         reports=Page[ReportPreview](items=reports_to_base_dto(reports), nextCursor=next_cursor if reports_more else None),
         tags={
             category: Page[Tag](items=items, nextCursor=next_cursor if has_more else None)
@@ -344,7 +360,7 @@ Aspect Endpoints
 """
 
 def _register_tag_routes(category: str) -> None:
-    """The endpoints of one tag category of config/study.yaml: all its tags and the tags of one study."""
+    """The endpoints of one tag category of config/medidex-study.yaml: all its tags and the tags of one study."""
     config = TAG_CATEGORIES[category]
 
     async def get_study_tags_single(

@@ -24,7 +24,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-// The icons the study schema (config/study.yaml of the backend) can name, by their lucide
+// The icons the study schema (config/medidex-study.yaml of the backend) can name, by their lucide
 // name in kebab-case. To use another lucide icon in the schema, add it here.
 const ICONS: Record<string, LucideIcon> = {
   activity: Activity,

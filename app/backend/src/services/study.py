@@ -11,14 +11,7 @@ class StudyResourceService:
 
     async def add_study(self, study : StudyPayload):
         try:
-            new_study = await self.study_repo.add_study(
-                    short_name=study.shortName,
-                    study_status=study.status,
-                    countries=study.countries,
-                    duration=study.duration,
-                    number_of_participants=study.numberParticipants,
-                    comparison=study.comparison,
-            )
+            new_study = await self.study_repo.add_study(study.model_dump())
             await self.study_repo.commit()
             return studies_to_dto([new_study])[0]
         except:

@@ -30,7 +30,7 @@ class QuerySyntaxError(ValueError):
     pass
 
 
-# The study fields of the search: fixed ones, and one per tag category of config/study.yaml.
+# The study fields of the search: fixed ones, and one per tag category of config/medidex-study.yaml.
 AdvancedSearchField = Enum(
     "AdvancedSearchField",
     {

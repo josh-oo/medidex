@@ -1,4 +1,4 @@
-"""The tag categories of the application (the `categories` of config/study.yaml)."""
+"""The tag categories of the application (the tag categories of config/medidex-study.yaml)."""
 
 from .studyconfig import STUDY_CONFIG, TagCategoryConfig, TagCategoryRegistry
 

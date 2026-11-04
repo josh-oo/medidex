@@ -21,3 +21,4 @@ openai>=1.0.0
 weasyprint==70.0
 pypdf==6.19.0
 PyYAML==6.0.2
+linkml-runtime==1.12.0

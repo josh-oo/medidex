@@ -129,12 +129,14 @@ export interface StudyBaseDto {
   shortName: string;
   countries: string[];
   numberParticipants: string | null;
+  // Overall duration, e.g. "12 weeks". Null: the study schema calculates it from the arms (`derive` of the field).
   duration: string | null;
-  comparison: string | null;
   trialId: string | null;
+  // The arms of the study and their comparisons as JSON (the graph of the study schema; tags by name or id).
+  graph?: string | null;
 }
 
-export interface StudyDto extends StudyBaseDto {
+export interface StudyDto extends Omit<StudyBaseDto, "graph"> {
   studyId: number;
   createdAt: string | undefined;
   updatedAt: string | undefined;
@@ -149,9 +151,11 @@ export interface StudyDto extends StudyBaseDto {
 export interface StudyFullDto extends StudyDto {
   reports: Page<ReportPreviewDto>;
   tags: Record<string, Page<TagDto>>;
+  // The graph of the study schema, with its tags named.
+  graph: StudyGraphDto;
 }
 
-// GET /study-schema: what a study consists of and how it is presented (config/study.yaml
+// GET /study-schema: what a study consists of and how it is presented (config/medidex-study.yaml
 // of the backend). Colors and icons are names; see lib/colors.ts and lib/icons.ts.
 export type StudyColor =
   | "blue"
@@ -170,7 +174,7 @@ export interface StudyFieldSchemaDto {
   type: "integer" | "duration" | "enum" | "text";
   icon: string;
   color: StudyColor;
-  display: "metric" | "text";
+  display: "metric" | "text" | "none";
   // The allowed values of an enum field (empty for the other types).
   values: string[];
 }
@@ -191,10 +195,82 @@ export interface TagCategorySchemaDto {
   description: string;
 }
 
+// What an entity that is a value holds: a tag of a category, or a primitive.
+export interface GraphValueSchemaDto {
+  category: string | null;
+  type: "integer" | "duration" | "enum" | "text" | null;
+  // The allowed values of an enum (empty for the other types).
+  values: string[];
+}
+
+// A kind of entity of the graph of a study (the classes of the study ontology, config/medidex-study.yaml): an arm (an intervention as it is
+// delivered), a population, or a value such as a dosage. An entity has no properties, only relations.
+export interface GraphEntitySchemaDto {
+  key: string;
+  label: string;
+  icon: string;
+  color: StudyColor;
+  // The study itself ("study" is its id in the graph).
+  root: boolean;
+  // Set for an entity that is a value (a dosage, an intervention).
+  value: GraphValueSchemaDto | null;
+}
+
+// A kind of relation between two entities (`graph.relations`), e.g. the comparison of two arms, or the dosage of an arm.
+export interface GraphRelationSchemaDto {
+  key: string;
+  label: string;
+  icon: string;
+  color: StudyColor;
+  // The kinds of entity an edge can start and end at.
+  source: string[];
+  target: string[];
+  symmetric: boolean;
+  many: boolean;
+  required: boolean;
+  // An attribute is part of its source when that is shown as a line.
+  line: boolean;
+  // Between source and target when shown as a line ("Drug A vs Placebo").
+  separator: string;
+  // Also a line on the study cards.
+  card: boolean;
+  // Leads to values: it describes its source (the dosage of an arm) instead of connecting two entities.
+  attribute: boolean;
+  // The relation it specialises (a primary outcome is an outcome), if any.
+  parent: string | null;
+}
+
+export interface GraphSchemaDto {
+  entities: GraphEntitySchemaDto[];
+  relations: GraphRelationSchemaDto[];
+}
+
 export interface StudySchemaDto {
   fields: StudyFieldSchemaDto[];
   meta: StudyMetaSchemaDto[];
   tags: TagCategorySchemaDto[];
+  graph: GraphSchemaDto;
+}
+
+// A node of the graph of one study: an entity of a kind. A node that is a value holds it (the name of a tag, or text).
+export interface StudyGraphNodeDto {
+  id: string;
+  kind: string;
+  value: string | null;
+  tagId: string | null;
+}
+
+export interface StudyGraphEdgeDto {
+  relation: string;
+  source: string;
+  target: string;
+}
+
+// The graph of one study. An older study holds a plain text instead.
+export interface StudyGraphDto {
+  nodes: StudyGraphNodeDto[];
+  edges: StudyGraphEdgeDto[];
+  text: string | null;
 }
 
 // Bare-bones Study identity for ReportCurationDto.assignedStudies - the UI only ever
@@ -315,19 +391,29 @@ export type StudyStatus = string;
 
 export type DurationUnit = "hours" | "days" | "weeks" | "months" | "years";
 
-export interface ComparisonGroup {
-  intervention: string[];
-  control: string[];
+// An arm as suggested for a new study: its interventions (names), and its dosage and duration if the report has them.
+export interface ArmSuggestion {
+  interventions: string[];
+  participants?: number;
+  dosage?: string;
+  frequency?: string;
+  route?: string;
+  duration?: { value: number; unit: DurationUnit };
+}
+
+// Two arms that are compared.
+export interface ComparisonSuggestion {
+  a: ArmSuggestion;
+  b: ArmSuggestion;
 }
 
 export interface NewStudySuggestion {
   short_name: string;
   status_of_study: StudyStatus;
   countries: string[];
-  duration_value: number;
-  duration_unit: DurationUnit;
   number_of_participants: number;
-  comparison: ComparisonGroup[];
+  duration?: { value: number; unit: DurationUnit };
+  comparisons: ComparisonSuggestion[];
 }
 
 export type StreamEventType = "node" | "complete" | "error" | "unknown";

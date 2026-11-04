@@ -1,5 +1,7 @@
-from pydantic import BaseModel, Field, model_validator
-from .studyconfig import STUDY_CONFIG
+from pydantic import BaseModel, Field, create_model, model_validator
+from .derive import DerivedFields
+from .graph import GraphFormatError, StoredGraph
+from .studyconfig import GRAPH_FIELD, INLINE_SEPARATOR, STUDY_CONFIG
 from typing import Any, Dict, Mapping, Optional, List, TypeVar, Generic
 from datetime import datetime
 from enum import Enum
@@ -122,30 +124,81 @@ class Tag(BaseModel):
     id: str
     keyword: str
 
+class StudyGraphNode(BaseModel):
+    """A node of the graph of a study: an entity of a kind of config/medidex-study.yaml. A node that is a value holds it: the name
+    of the tag (with its id) or the text."""
+    id: str
+    kind: str
+    value: Optional[str] = None
+    tagId: Optional[str] = None
+
+class StudyGraphEdge(BaseModel):
+    """A relation between two nodes of a study's graph, by their ids (`study` is the study itself)."""
+    relation: str
+    source: str
+    target: str
+
+class StudyGraph(BaseModel):
+    """The graph of a study (the study ontology, config/medidex-study.yaml), the tags named. `text` is the plain text an older study holds
+    instead of a structure (then there are no nodes)."""
+    nodes: List[StudyGraphNode] = Field(default_factory=list)
+    edges: List[StudyGraphEdge] = Field(default_factory=list)
+    text: Optional[str] = None
+
 class TagCandidate(Tag):
     relevance: float
 
-class StudyFields(BaseModel):
-    """The primitive fields of a study."""
-    shortName: str
-    status: str
-    countries: List[str]
-    numberParticipants: Optional[str]
-    duration: Optional[str]
-    comparison: Optional[str]
-    trialId: Optional[str] = None
+def _study_fields_model():
+    """The fields of a study, made from config/medidex-study.yaml: the attributes of its Study, the tag categories kept in a column of
+    the study (as lists of names, e.g. countries). The graph of a study is read with `StudyRepository.get_graphs`."""
+    attributes: Dict[str, Any] = {}
+    for key, field in STUDY_CONFIG.fields.items():
+        if field.required or field.type == "enum":
+            attributes[key] = (str, Field(description=field.label))
+        else:
+            attributes[key] = (Optional[str], Field(default=None, description=field.label))
+    for key in STUDY_CONFIG.inline_categories:
+        attributes[key] = (List[str], Field(default_factory=list, description=STUDY_CONFIG.categories[key].description))
+    return create_model("StudyFields", __doc__="The fields of a study, as configured in config/medidex-study.yaml.", **attributes)
+
+StudyFields = _study_fields_model()
+
+_derived = DerivedFields()
+
+def study_values(study) -> Dict[str, Any]:
+    """The fields of a study of the database (see StudyFields), read as config/medidex-study.yaml says. A field the study has
+    no value for is calculated from its graph if the config says how (`derive`, e.g. the participants of its arms)."""
+    values: Dict[str, Any] = {key: getattr(study, field.column) for key, field in STUDY_CONFIG.fields.items()}
+    for key, field in STUDY_CONFIG.fields.items():
+        if field.derive is not None and not (values[key] or "").strip():
+            values[key] = _derived.value(field, getattr(study, GRAPH_FIELD, None)) or values[key]
+    for key in STUDY_CONFIG.inline_categories:
+        column = getattr(study, key)
+        values[key] = [part.strip() for part in column.split(INLINE_SEPARATOR) if part.strip()] if column else []
+    return values
 
 class StudyPayload(StudyFields):
     """The fields needed to create a study - everything else (studyId, timestamps) is
-    server-generated, so this also doubles as the PUT /studies request body. The values of
-    enum fields (config/study.yaml) must be allowed ones; only checked here, not for the
-    studies already in the database."""
+    server-generated, so this also doubles as the PUT /studies request body. Besides the fields it takes the
+    graph of the study (its arms and their comparisons) as JSON (see utils/graph.py), with the tags by name or id. The values of
+    enum fields (config/medidex-study.yaml) must be allowed ones and the graph must be a graph of it; only checked
+    here, not for the studies already in the database."""
+
+    graph: Optional[str] = Field(default=None, description="The graph of the study (its arms and their comparisons) as JSON, see utils/graph.py")
 
     @model_validator(mode="after")
     def _check_enums(self) -> "StudyPayload":
         for key, values in STUDY_CONFIG.enums.items():
             if getattr(self, key) not in values:
                 raise ValueError(f"{key} must be one of: {', '.join(values)}")
+        return self
+
+    @model_validator(mode="after")
+    def _check_graph(self) -> "StudyPayload":
+        try:
+            StoredGraph(STUDY_CONFIG.graph).loads(getattr(self, GRAPH_FIELD))
+        except GraphFormatError as exc:
+            raise ValueError(f"{GRAPH_FIELD}: {exc}") from exc
         return self
 
 class Study(StudyFields):
@@ -155,16 +208,58 @@ class Study(StudyFields):
 
 class StudyFull(Study):
     """A Study plus everything the study details view fetches per-study: its linked
-    reports and its tags per category of config/study.yaml (interventions, conditions,
+    reports and its tags per category of config/medidex-study.yaml (interventions, conditions,
     countries, ...). Returned by GET /studies/{study_id}. Each nested list is only its
     first page (see that endpoint's `limit` param, default 10) - page further through any
     one of them with the matching /studies/{study_id}/* endpoint and its nextCursor, same
     as fastapi_app/resources.py's standalone aspect endpoints."""
     reports: Page[ReportPreview] = Field(default_factory=lambda: Page[ReportPreview](items=[]))
     tags: Dict[str, Page[Tag]] = Field(default_factory=dict)
+    # The graph of config/medidex-study.yaml, with its tags named.
+    graph: StudyGraph = Field(default_factory=StudyGraph)
+
+class GraphValueSchema(BaseModel):
+    """What an entity that is a value holds: a tag of a category, or a primitive."""
+    category: Optional[str] = None
+    type: Optional[str] = None
+    values: List[str] = []
+
+class GraphEntitySchema(BaseModel):
+    """A kind of entity of the graph of a study, e.g. an arm, a population or a dosage (see the study ontology, config/medidex-study.yaml)."""
+    key: str
+    label: str
+    icon: str
+    color: str
+    # The study itself.
+    root: bool = False
+    value: Optional[GraphValueSchema] = None
+
+class GraphRelationSchema(BaseModel):
+    """A kind of relation between two entities, e.g. the comparison of two arms or the dosage of an arm."""
+    key: str
+    label: str
+    icon: str
+    color: str
+    # The kinds of entity an edge can start and end at.
+    source: List[str]
+    target: List[str]
+    symmetric: bool
+    many: bool
+    required: bool
+    line: bool
+    separator: str
+    card: bool
+    # Leads to values: it describes its source (the dosage of an arm) instead of connecting two entities.
+    attribute: bool
+    # The relation it specialises (a primary outcome is an outcome), if any.
+    parent: Optional[str] = None
+
+class GraphSchema(BaseModel):
+    entities: List[GraphEntitySchema] = []
+    relations: List[GraphRelationSchema] = []
 
 class StudyFieldSchema(BaseModel):
-    """A primitive value of a study (see `fields` in config/study.yaml)."""
+    """A primitive value of a study (see the attributes of Study in config/medidex-study.yaml)."""
     key: str
     label: str
     type: str
@@ -174,13 +269,13 @@ class StudyFieldSchema(BaseModel):
     values: List[str] = []
 
 class StudyMetaSchema(BaseModel):
-    """A metadata field of the database record of a study (see `meta` in config/study.yaml)."""
+    """A metadata field of the database record of a study (see the attributes of Study annotated `meta` in config/medidex-study.yaml)."""
     key: str
     label: str
     type: str
 
 class TagCategorySchema(BaseModel):
-    """A tag category (see `categories` in config/study.yaml)."""
+    """A tag category (see the tag categories of config/medidex-study.yaml)."""
     key: str
     label: str
     icon: str
@@ -193,6 +288,7 @@ class StudySchema(BaseModel):
     fields: List[StudyFieldSchema]
     meta: List[StudyMetaSchema]
     tags: List[TagCategorySchema]
+    graph: GraphSchema = GraphSchema()
 
 class StudyCandidate(Study):
     """A study suggested as a possible match for a report by the similarity search
@@ -280,22 +376,10 @@ def reports_to_base_dto(reports) -> List[ReportPreview]:
     return [ReportPreview(reportId=report.id, title=report.title) for report in reports]
 
 def studies_to_dto(studies):
-    result = []
-    for study in studies:
-        output_study = Study(
-            studyId=study.id,
-            shortName=study.short_name,
-            numberParticipants=study.number_participants,
-            duration=study.duration,
-            comparison=study.comparison,
-            countries=study.countries.split("//") if study.countries else [],
-            createdAt=study.date_entered,
-            updatedAt=study.date_edited,
-            status=study.status,
-            trialId=study.trial_registration_id,
-        )
-        result.append(output_study)
-    return result
+    return [
+        Study(studyId=study.id, createdAt=study.date_entered, updatedAt=study.date_edited, **study_values(study))
+        for study in studies
+    ]
 
 def studies_to_preview_dto(studies) -> List[StudyPreview]:
     return [
@@ -304,19 +388,9 @@ def studies_to_preview_dto(studies) -> List[StudyPreview]:
     ]
 
 def candidate_studies_to_dto(studies) -> List[StudyCandidate]:
-    results = []
-    for study in studies:
-        results.append(StudyCandidate(
-            studyId=study.id,
-            shortName=study.short_name,
-            numberParticipants=study.number_participants,
-            duration=study.duration,
-            comparison=study.comparison,
-            countries=study.countries.split("//") if study.countries else [],
-            createdAt=study.date_entered,
-            updatedAt=study.date_edited,
-            status=study.status,
-            trialId=study.trial_registration_id,
-            relevance=study.relevance,
-        ))
-    return results
+    return [
+        StudyCandidate(
+            studyId=study.id, createdAt=study.date_entered, updatedAt=study.date_edited, relevance=study.relevance, **study_values(study)
+        )
+        for study in studies
+    ]

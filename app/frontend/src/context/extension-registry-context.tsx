@@ -101,6 +101,13 @@ export interface ProjectUploadOptionsSlotProps {
   onChange: (options: Record<string, unknown>) => void
 }
 
+export interface StudyLinkReview {
+  /** Called before a report is linked to an existing study; resolves false to cancel the link. */
+  confirmLink: (reportId: number, study: StudyDto) => Promise<boolean>
+  /** Rendered next to the study list (e.g. the dialog `confirmLink` opens). */
+  dialog: ReactNode
+}
+
 export interface ExtensionRegistry {
   userMenuItems: ComponentType<UserMenuItemProps>[]
   reportActions: ComponentType<ReportActionsSlotProps>[]
@@ -124,6 +131,11 @@ export interface ExtensionRegistry {
   /** Replaces the rendering of a report's abstract in the expanded report card. */
   reportAbstract?: ComponentType<ReportAbstractSlotProps>
   addStudyTrigger?: ComponentType<AddStudyTriggerSlotProps>
+  /**
+   * Called as a React hook by the study list; lets the extension review a link before it is made.
+   * Must be stable across renders.
+   */
+  useStudyLinkReview?: () => StudyLinkReview
   routes?: ReactNode
 }
 

@@ -92,14 +92,7 @@ class LinkageService:
         project_id = await get_authorized_project_id(report_id, self.report_repo, self.project_repo, user_id)
 
         try:
-            new_study = await self.study_repo.add_study(
-                short_name=study.shortName,
-                study_status=study.status,
-                countries=study.countries,
-                duration=study.duration,
-                number_of_participants=study.numberParticipants,
-                comparison=study.comparison,
-            )
+            new_study = await self.study_repo.add_study(study.model_dump())
             await self.report_repo.link_study(report_id, new_study.id, user_id=user_id)
             await self.vectorstore.link_report_to_study_id(report_id, new_study.id, user_id)
             await self.report_repo.commit()

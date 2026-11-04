@@ -7,7 +7,7 @@ from src.utils.dto import TagCandidate
 from src.utils.tagconfig import TAG_CATEGORIES
 
 
-# The categories of config/study.yaml, plus the default embedding.
+# The categories of config/medidex-study.yaml, plus the default embedding.
 TagCategories = enum.Enum(
     "TagCategories",
     {name: name for name in ("default", *TAG_CATEGORIES)},

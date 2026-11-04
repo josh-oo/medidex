@@ -20,6 +20,7 @@ import type { StudyCandidateDto, StudyDto, StudyBaseDto, Page } from "@/types/ap
 import { ReportBannerSlot, StudyBadgeSlot } from "@/context/study-report-slots-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import { useDetailsSheet } from "@/context/details-sheet-context";
+import { useExtensionRegistry, type StudyLinkReview } from "@/context/extension-registry-context";
 import { assignNewStudyToReportByReportId } from "@/lib/api/reportApi";
 import { searchStudies } from "@/lib/api/studiesApi";
 import { onStudySearchRequest } from "@/lib/study-search-request";
@@ -40,6 +41,9 @@ interface CandidateStudyTableProps {
 const MIN_SEARCH_QUERY_LENGTH = 3;
 // Page size for both the explicit search and its "Load more" pagination.
 const SEARCH_PAGE_SIZE = 10;
+
+// Without an extension reviewing links, every link goes ahead.
+const useNoLinkReview = (): StudyLinkReview => ({ confirmLink: async () => true, dialog: null });
 
 // Only searches within a report carry a relevance.
 type SearchResult = StudyDto | StudyCandidateDto;
@@ -80,6 +84,8 @@ export function CandidateStudyTable({
   );
 
   const {openWithStudyItem } = useDetailsSheet()
+  const { useStudyLinkReview = useNoLinkReview } = useExtensionRegistry();
+  const linkReview = useStudyLinkReview();
 
   const handleAssignStudy = useCallback(
     async (study: StudyDto) => {
@@ -88,6 +94,9 @@ export function CandidateStudyTable({
       }
 
       try {
+        if (!(await linkReview.confirmLink(reportId, study))) {
+          return;
+        }
         await addAssignedStudy(reportId, study);
         toast.success("Report assigned to study");
       } catch (error) {
@@ -99,7 +108,7 @@ export function CandidateStudyTable({
         throw error;
       }
     },
-    [reportId, addAssignedStudy]
+    [reportId, addAssignedStudy, linkReview]
   );
 
   const handleSaveNewStudy = useCallback(
@@ -445,7 +454,7 @@ export function CandidateStudyTable({
           </div>
         </div>
       </div>
-
+      {linkReview.dialog}
     </div>
   );
 }

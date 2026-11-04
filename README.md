@@ -93,6 +93,27 @@ The original frontend code can be found in the [MaxiMittel/medidex repository](h
 This service manages the incoming requests from the frontend and calls the appropriate
 sub-services in the backend.
 
+### The study ontology
+What a study consists of is defined once, as a [LinkML](https://linkml.io) schema:
+[`app/backend/src/config/medidex-study.yaml`](app/backend/src/config/medidex-study.yaml). The fields of a study,
+its tag categories, the entities and relations of its graph (arms, populations, outcomes and their values), the study
+DTOs, `GET /study-schema` and the frontend views are all derived from it (`src/utils/studyconfig.py`); its header
+explains how the classes and annotations are read. Graphs stored under the names from before the ontology
+(`comparison`, `interventions`, ...) are converted when they are read (`src/utils/graph.py`).
+
+A downstream deployable extends the ontology without editing it: it imports the schema for new classes and slots, and
+keeps annotations of its own (e.g. instructions for an extraction) in a separate file keyed by the names of this one.
+
+OWL for reasoners is generated, not kept in git (`linkml` is a development dependency only):
+
+```bash
+pip install linkml
+gen-owl --no-use-native-uris app/backend/src/config/medidex-study.yaml > medidex-study.owl.ttl
+```
+
+`--no-use-native-uris` uses the `slot_uri` of the tag categories, so e.g. the conditions of a study and those of a
+population are the same property, `mdx:has_condition`.
+
 ## Scopes
 
 Everyone who edits works in a **scope** of their own and does not interact with the others. A scope is the id the
