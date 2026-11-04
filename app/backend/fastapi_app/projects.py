@@ -1,7 +1,8 @@
 
 from fastapi import APIRouter, Request
 from fastapi import Query, Path, UploadFile, File, HTTPException, Depends, BackgroundTasks, Body, Form
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
+from sse_starlette import EventSourceResponse
 from typing import Dict, List, Any, Optional
 import json
 from pydantic import BaseModel
@@ -242,13 +243,13 @@ async def stream_project_reports_intake(
     request: Request,
     ctx: RequestContext = Depends(get_context),
     include: List[str] = _include_query,
-) -> StreamingResponse:
+) -> EventSourceResponse:
     async def rows():
         async for page in ctx.project_service.stream_intake_report_updates(project_id, request.is_disconnected):
             page = await report_enrichers.apply(page, include, ctx)
-            yield f"data: {page.items[0].model_dump_json()}\n\n"
+            yield page.items[0].model_dump_json()
 
-    return StreamingResponse(rows(), media_type="text/event-stream")
+    return EventSourceResponse(rows())
 
 
 @router.get(
@@ -289,13 +290,10 @@ async def stream_project_updates(
     project_id: str,
     request: Request,
     ctx: RequestContext = Depends(get_context),
-) -> StreamingResponse:
+) -> EventSourceResponse:
     try:
         await ctx.project_service.ensure_project_access(project_id)
     except ProjectAccessDeniedError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    return StreamingResponse(
-        ctx.project_service.stream_project_updates(project_id, request.is_disconnected),
-        media_type="text/event-stream",
-    )
+    return EventSourceResponse(ctx.project_service.stream_project_updates(project_id, request.is_disconnected))

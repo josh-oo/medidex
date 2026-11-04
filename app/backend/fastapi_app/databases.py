@@ -4,7 +4,8 @@ import tempfile
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Path, Request, Response
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
+from sse_starlette import EventSourceResponse
 from starlette.background import BackgroundTask
 
 from src.background.wrapper import run_criteria_changed, run_import_database
@@ -225,7 +226,7 @@ async def import_database(
     description="An SSE event per change, its data a DatabaseStatus; the first is where it is now. Ends once it is "
                 "ready or its import failed.",
 )
-async def stream_database_status(request: Request, database_id: int = database_id_path, ctx: RequestContext = Depends(get_context)) -> StreamingResponse:
+async def stream_database_status(request: Request, database_id: int = database_id_path, ctx: RequestContext = Depends(get_context)) -> EventSourceResponse:
     status_service = ctx.database_status_service
     # Subscribed before the status is read: a change in between is not missed.
     pubsub = await status_service.subscribe(database_id)
@@ -241,14 +242,14 @@ async def stream_database_status(request: Request, database_id: int = database_i
         status = current
         try:
             while True:
-                yield f"data: {status.model_dump_json()}\n\n"
+                yield status.model_dump_json()
                 if status.stage in (DatabaseStage.ready, DatabaseStage.failed) or await request.is_disconnected():
                     break
                 status = await status_service.get_next_status(pubsub)
         finally:
             await status_service.unsubscribe(database_id, pubsub)
 
-    return StreamingResponse(events(), media_type="text/event-stream")
+    return EventSourceResponse(events())
 
 
 @router.get(

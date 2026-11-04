@@ -439,7 +439,7 @@ class ProjectResourceService:
     async def stream_project_updates(
         self, project_id: str, is_disconnected: Callable[[], Awaitable[bool]]
     ) -> AsyncIterator[str]:
-        """SSE frames ('data: ...\\n\\n') of a project's pubsub updates, until
+        """The data of an SSE event per pubsub update of a project, until
         `is_disconnected` reports the caller has gone away. `is_disconnected`
         abstracts over the one framework-specific bit here (Starlette's
         Request.is_disconnected()), so the polling loop itself doesn't need
@@ -458,7 +458,7 @@ class ProjectResourceService:
                 if await is_disconnected():
                     break
                 data = await self.pubsub_service.get_next_project_update(pubsub)
-                yield f"data: {data}\n\n"
+                yield data
         finally:
             await self.pubsub_service.unsubscribe_from_project(project_id, pubsub)
 
