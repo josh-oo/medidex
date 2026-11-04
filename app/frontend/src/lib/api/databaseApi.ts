@@ -1,3 +1,4 @@
+import { Upload } from "tus-js-client";
 import apiClient from "./apiClient";
 import { unwrap, logAndRethrow } from "./requests";
 import { getAccessToken } from "@/lib/client/keycloak";
@@ -31,25 +32,49 @@ export const updateDatabase = (databaseId: number, update: DatabaseUpdate): Prom
     .then(unwrap)
     .catch(logAndRethrow(`Error updating database ${databaseId}:`));
 
+// The parts an upload is sent in stay below what a proxy in front of the backend lets through in one request (a
+// Cloudflare tunnel: 100 MB).
+const UPLOAD_PART_BYTES = 64 * 1024 * 1024;
+
+// Uploads a file with tus (POST /databases/uploads) and resolves to the id of the upload. A part that failed is sent
+// again; an upload of the same file that broke off (e.g. the page was loaded again) goes on where it stopped.
+const uploadFile = (file: File, onUpload?: (loaded: number, total: number) => void): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const upload = new Upload(file, {
+      endpoint: `${apiClient.defaults.baseURL ?? ""}/databases/uploads`,
+      chunkSize: UPLOAD_PART_BYTES,
+      retryDelays: [0, 3000, 10000, 30000, 60000],
+      metadata: { filename: file.name },
+      removeFingerprintOnSuccess: true,
+      // A fresh token for every part: uploading a large file takes longer than a token lives.
+      onBeforeRequest: async (request) => {
+        const token = await getAccessToken();
+        if (token) request.setHeader("Authorization", `Bearer ${token}`);
+      },
+      onProgress: (loaded, total) => onUpload?.(loaded, total),
+      onSuccess: () => resolve(upload.url?.split("/").pop() ?? ""),
+      onError: reject,
+    });
+    upload.findPreviousUploads().then((previous) => {
+      if (previous.length > 0) upload.resumeFromPreviousUpload(previous[0]);
+      upload.start();
+    }, reject);
+  });
+
 // A new database with the studies, reports and PDFs of an exported one (a .medidex.zip archive, or its database.json).
-// Answers once the file is uploaded (`onUpload` gets how many of its bytes are), with the database to be (`importing`);
-// streamDatabaseStatus follows its import.
-export const importDatabase = (
+// The file is uploaded first (`onUpload` gets how many of its bytes are), then it answers with the database to be
+// (`importing`); streamDatabaseStatus follows its import.
+export const importDatabase = async (
   file: File,
   payload: DatabasePayload,
   onUpload?: (loaded: number, total: number) => void,
 ): Promise<DatabaseDto> => {
-  const formData = new FormData();
-  formData.append("file", file, file.name);
-  formData.append("name", payload.name);
-  if (payload.description) formData.append("description", payload.description);
-  formData.append("eligibilityCriteria", JSON.stringify(payload.eligibilityCriteria));
-  return apiClient
-    .post<DatabaseDto>("/databases/import", formData, {
-      onUploadProgress: (event) => onUpload?.(event.loaded, event.total ?? file.size),
-    })
-    .then(unwrap)
-    .catch(logAndRethrow("Error importing database:"));
+  try {
+    const uploadId = await uploadFile(file, onUpload);
+    return unwrap(await apiClient.post<DatabaseDto>("/databases/import", { ...payload, uploadId }));
+  } catch (error) {
+    return logAndRethrow("Error importing database:")(error);
+  }
 };
 
 // Where a database is on its way to being usable (its import, then the indexing of its reports), as it changes: the

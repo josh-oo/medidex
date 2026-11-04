@@ -33,6 +33,7 @@ from .services.project import ProjectResourceService
 from .services.pubsub import DatabaseStatusService, ProjectPubSubService
 from .services.report import DocumentService, ReportService
 from .services.study import StudyResourceService
+from .services.upload import UploadService, upload_service
 from .services.vectorstore import VectorstoreService
 
 
@@ -91,6 +92,10 @@ class RequestContext:
     @property
     def open_alex_service(self) -> OpenAlexService:
         return open_alex_service
+
+    @property
+    def upload_service(self) -> UploadService:
+        return upload_service
 
     # Services
 

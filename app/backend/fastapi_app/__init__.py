@@ -51,6 +51,8 @@ def create_app(extra_routers: Iterable[APIRouter] = ()) -> FastAPI:
         allow_credentials=False,  # must be False if allow_origins="*"
         allow_methods=["*"],      # GET, POST, PUT, DELETE, OPTIONS, etc.
         allow_headers=["*"],      # all headers allowed
+        # Read by the tus client of the uploads of exported databases (databases.py).
+        expose_headers=["Location", "Tus-Resumable", "Tus-Version", "Tus-Extension", "Upload-Offset", "Upload-Length"],
     )
 
     app.include_router(auth.router)

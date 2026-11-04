@@ -60,7 +60,10 @@ Working on an update:
 **Export and import.** The download button on the card of a database exports it as `<name>.medidex.zip` (the studies with their
 reports and PDFs), which another deployment imports as a new database. An import is all or nothing: a file with errors
 is rejected with what is wrong. Imported reports are indexed for matching in the background; until then their studies
-are found by the search but not yet suggested for new reports.
+are found by the search but not yet suggested for new reports. The file is uploaded in parts of 64 MB with the tus protocol,
+so a proxy that limits the size of a request (a Cloudflare tunnel to 100 MB) does not stop large archives, and an
+upload that broke off goes on where it stopped when the same file is imported again. The backend puts the parts
+together in its temporary directory (`TMPDIR`), which needs room for the whole archive.
 
 The REST API is documented at http://localhost:8002/api/v1/docs.
 
