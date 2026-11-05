@@ -13,7 +13,7 @@ import { Widget } from "@/components/ui/widget";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useReportStore } from "@/hooks/use-report-store";
 import { cn } from "@/lib/utils";
-import type { ReportCurationDto } from "@/types/apiDTOs";
+import type { Page, ReportCurationDto } from "@/types/apiDTOs";
 import { PanelSkeleton, ReportListSkeleton, ReportWidgetSkeleton } from "./workbench-skeleton";
 
 type ReportListProps = ComponentProps<typeof ReportList>;
@@ -21,7 +21,8 @@ type ReportListProps = ComponentProps<typeof ReportList>;
 interface ReportSplitViewProps
   extends Pick<ReportListProps, "baseUrl" | "editMode" | "filterDimensions" | "fetchReports" | "renderStatus"> {
   projectId: string;
-  reports: ReportCurationDto[];
+  /** The first page of the project's reports; its cursor lets the list load the rest. */
+  firstPage: Page<ReportCurationDto>;
   /** Rendered next to the panels inside a DetailsSheetProvider (e.g. the study sheet). */
   sheet?: ReactNode;
   /** The panel next to the report while it loads (see workbench-skeleton.tsx); a generic outline by default. */
@@ -91,7 +92,7 @@ const isTypingTarget = (target: EventTarget | null) =>
  */
 export function ReportSplitView({
   projectId,
-  reports,
+  firstPage,
   sheet,
   panelSkeleton,
   children,
@@ -112,8 +113,8 @@ export function ReportSplitView({
 
   // Before paint, so that the report widget never shows the first frame without its report.
   useLayoutEffect(() => {
-    setReports(reports);
-  }, [reports, setReports]);
+    setReports(firstPage.items);
+  }, [firstPage, setReports]);
 
   // The next report starts at its top, in whichever of the page or the columns scrolls.
   const mainRef = useRef<HTMLElement>(null);
@@ -174,7 +175,7 @@ export function ReportSplitView({
             <div className="flex h-full min-h-0 w-full flex-col md:w-72 lg:w-80 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
               <ReportList
                 {...listProps}
-                initialReports={reports}
+                initialPage={firstPage}
                 onSelect={() => setDrawerOpen(false)}
                 onCollapse={hideList}
                 collapseOnDesktopOnly={!hasReport}

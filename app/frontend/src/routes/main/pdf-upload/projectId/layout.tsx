@@ -12,7 +12,9 @@ import { PdfStatusDot } from "@/components/reports/pdf-status";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Widget } from "@/components/ui/widget";
 import { FileText, Link2 } from "lucide-react";
-import type { GetProjectReportsParams, ReportFilterDimension } from "@/types/apiDTOs";
+import type { GetProjectReportsParams, Page, ReportFilterDimension, ReportIntakeDto } from "@/types/apiDTOs";
+
+const emptyPage: Page<ReportIntakeDto> = { items: [], nextCursor: null };
 
 const reportFilterDimensions: ReportFilterDimension[] = [
   { field: "withPdf", label: "PDF", onlyLabel: "Has PDF", excludeLabel: "No PDF" },
@@ -27,16 +29,16 @@ export default function PdfUploadPage() {
     (id: string, filters?: GetProjectReportsParams) => getProjectReportsIntake(id, { ...filters, include: reportIncludes }),
     [reportIncludes]
   );
-  const { data: reports, notFound } = useProjectResource(
-    () => fetchReports(projectId).then((result) => result?.items ?? []),
-    [],
+  const { data: firstPage, notFound } = useProjectResource(
+    () => fetchReports(projectId).then((result) => result ?? emptyPage),
+    emptyPage,
     [projectId],
     isAdmin
   );
 
   // A report that changes (its PDF arrives, its postprocessing moves on) comes in again as a whole; started once the list has
   // filled the store (the split view does that), so it is not reset over the newer rows.
-  const loaded = reports !== null;
+  const loaded = firstPage !== null;
   useEffect(() => {
     if (!isAdmin || !loaded) return;
     return streamProjectIntakeUpdates(projectId, updateReport, reportIncludes);
@@ -46,14 +48,14 @@ export default function PdfUploadPage() {
     <AdminGuard>
       {notFound ? (
         <ProjectNotFound />
-      ) : reports === null ? (
+      ) : firstPage === null ? (
         <ReportSplitViewSkeleton panelSkeleton={<PdfPanelSkeleton />} />
       ) : (
         <div className="h-full flex flex-col overflow-hidden">
           <div className="flex-1 min-h-0 bg-background">
             <ReportSplitView
               projectId={projectId}
-              reports={reports}
+              firstPage={firstPage}
               baseUrl="curation/pdf-upload"
               editMode={false}
               filterDimensions={reportFilterDimensions}

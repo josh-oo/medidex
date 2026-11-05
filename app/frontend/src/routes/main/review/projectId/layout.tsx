@@ -4,7 +4,7 @@ import { refreshStudyDatabases } from "@/lib/databases";
 import { curationPaths } from "@/lib/curation-steps";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { AdminGuard } from "@/components/auth/admin-guard";
-import type { GetProjectReportsParams, ProjectAnnotationsDto, ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
+import type { GetProjectReportsParams, Page, ProjectAnnotationsDto, ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
 import { getAnnotations, getProjectReportsReview } from "@/lib/api/projectApi";
 import { ReviewAnnotationsProvider } from "./components/review-annotations-context";
 import { useAuthStore } from "@/hooks/use-auth";
@@ -17,7 +17,7 @@ import { CircleCheckBig, Trash2 } from "lucide-react";
 import StudySheet from "../../projects/projectId/study-sheet";
 
 interface ProjectReviewData {
-  reports: ReportCurationDto[];
+  reportsPage: Page<ReportCurationDto>;
   annotations: ProjectAnnotationsDto;
 }
 
@@ -25,7 +25,7 @@ const reportFilterDimensions: ReportFilterDimension[] = [
   { field: "consensus", label: "Agreement", onlyLabel: "Consensus", excludeLabel: "Conflict" },
 ];
 
-const emptyReviewData: ProjectReviewData = { reports: [], annotations: {} };
+const emptyReviewData: ProjectReviewData = { reportsPage: { items: [], nextCursor: null }, annotations: {} };
 
 export default function AnnotationsReviewPage() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
@@ -50,7 +50,7 @@ export default function AnnotationsReviewPage() {
         fetchReports(projectId),
         getAnnotations(projectId),
       ]);
-      return { reports: reportsPage?.items ?? [], annotations: annotations ?? {} };
+      return { reportsPage: reportsPage ?? emptyReviewData.reportsPage, annotations: annotations ?? {} };
     },
     emptyReviewData,
     [projectId, version],
@@ -59,7 +59,7 @@ export default function AnnotationsReviewPage() {
 
   // The last report is merged or deleted: there is nothing left to review, back to the updates.
   useEffect(() => {
-    if (version > 0 && data !== null && data.reports.length === 0) {
+    if (version > 0 && data !== null && data.reportsPage.items.length === 0) {
       navigate(curationPaths.overview, { replace: true });
     }
   }, [version, data, navigate]);
@@ -76,7 +76,7 @@ export default function AnnotationsReviewPage() {
             <ReviewAnnotationsProvider annotations={data.annotations} onReportFinished={reportFinished}>
               <ReportSplitView
                 projectId={projectId}
-                reports={data.reports}
+                firstPage={data.reportsPage}
                 baseUrl="curation/review"
                 editMode={false}
                 filterDimensions={reportFilterDimensions}

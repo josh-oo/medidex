@@ -6,8 +6,10 @@ import { useProjectResource } from "@/hooks/use-project-resource";
 import { ProjectNotFound } from "@/components/reports/project-not-found";
 import { ReportSplitView, ReportSplitViewSkeleton } from "@/components/reports/report-split-view";
 import { StudyColumnSkeleton } from "@/components/reports/workbench-skeleton";
-import type { GetProjectReportsParams, ReportFilterDimension } from "@/types/apiDTOs";
+import type { GetProjectReportsParams, Page, ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
 import StudySheet from "./study-sheet";
+
+const emptyPage: Page<ReportCurationDto> = { items: [], nextCursor: null };
 
 const reportFilterDimensions: ReportFilterDimension[] = [
   { field: "processed", label: "Status", onlyLabel: "Processed", excludeLabel: "Unprocessed" },
@@ -22,19 +24,19 @@ export default function ReportColumn() {
     (id: string, filters?: GetProjectReportsParams) => getProjectReports(id, { ...filters, include: reportIncludes }),
     [reportIncludes]
   );
-  const { data: reports, notFound } = useProjectResource(
-    () => fetchReports(projectId).then((result) => result?.items ?? []),
-    [],
+  const { data: firstPage, notFound } = useProjectResource(
+    () => fetchReports(projectId).then((result) => result ?? emptyPage),
+    emptyPage,
     [projectId]
   );
 
   if (notFound) return <ProjectNotFound />;
-  if (reports === null) return <ReportSplitViewSkeleton panelSkeleton={<StudyColumnSkeleton />} />;
+  if (firstPage === null) return <ReportSplitViewSkeleton panelSkeleton={<StudyColumnSkeleton />} />;
 
   return (
     <ReportSplitView
       projectId={projectId}
-      reports={reports}
+      firstPage={firstPage}
       baseUrl="curation/projects"
       editMode={true}
       filterDimensions={reportFilterDimensions}

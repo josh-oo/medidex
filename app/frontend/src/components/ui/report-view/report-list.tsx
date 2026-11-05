@@ -64,7 +64,7 @@ interface ReportListProps {
   // filters/search) - used only to seed the very first render so the list doesn't flash empty
   // while that same data is re-fetched below; every filter/search change after that always goes
   // through fetchReports, never falls back to a cached snapshot.
-  initialReports: ReportCurationDto[];
+  initialPage: Page<ReportCurationDto>;
   /** Called after a report was picked (e.g. to close the list on phones). */
   onSelect?: () => void;
   /** A status of each report in front of its title, outside the edit mode (e.g. its PDF, see PdfStatusDot). */
@@ -81,7 +81,7 @@ export function ReportList({
   editMode,
   filterDimensions = [],
   fetchReports,
-  initialReports,
+  initialPage,
   onSelect,
   renderStatus,
   onCollapse,
@@ -135,7 +135,7 @@ export function ReportList({
   } = useReportPages({
     projectId,
     fetchReports,
-    initialReports,
+    initialPage,
     search: debouncedSearch,
     filters,
     onFirstPage: (page, filtersActive) => {

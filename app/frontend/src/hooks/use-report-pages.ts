@@ -11,8 +11,8 @@ import type {
 interface UseReportPagesOptions {
   projectId: string | undefined;
   fetchReports: (projectId: string, filters: GetProjectReportsParams) => Promise<Page<ReportCurationDto>>;
-  /** The parent's own unfiltered first page for this project; seeds the list and skips the first fetch. */
-  initialReports: ReportCurationDto[];
+  /** The parent's own unfiltered first page for this project; seeds the list and its cursor and skips the first fetch. */
+  initialPage: Page<ReportCurationDto>;
   search: string;
   filters: ReportFiltersState;
   /** Called after every fresh first-page load (not for "load more"). */
@@ -27,18 +27,18 @@ interface UseReportPagesOptions {
 export function useReportPages({
   projectId,
   fetchReports,
-  initialReports,
+  initialPage,
   search,
   filters,
   onFirstPage,
 }: UseReportPagesOptions) {
   const addReports = useReportStore((state) => state.addReports);
-  const [reports, setReports] = useState<ReportCurationDto[]>(initialReports);
+  const [reports, setReports] = useState<ReportCurationDto[]>(initialPage.items);
   const [isLoading, setIsLoading] = useState(false);
   // Cursor for the next page of the *current* search/filter combination - reset to null
   // whenever that combination changes, since a cursor from one filter set is meaningless
   // against another.
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(initialPage.nextCursor);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // Every effect/handler that starts a fetch bumps this first and checks it's still current
@@ -58,9 +58,9 @@ export function useReportPages({
   // showing the previous project's reports until the fetch below resolves.
   useEffect(() => {
     requestIdRef.current += 1;
-    setReports(initialReports);
-    setNextCursor(null);
-  }, [projectId, initialReports]);
+    setReports(initialPage.items);
+    setNextCursor(initialPage.nextCursor);
+  }, [projectId, initialPage]);
 
   useEffect(() => {
     if (!projectId) return;
