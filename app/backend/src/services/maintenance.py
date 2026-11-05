@@ -21,8 +21,7 @@ class MaintenanceService:
     TAG_POINT_KINDS = {"interventions": "0001", "conditions": "0002", "outcomes": "0003", "participants": "0004", "design": "0005"}
     # The points the sync owns; others (e.g. MeSH tags, "1000") are left alone.
     MANAGED_POINT = re.compile(r"^00000000-000[0-5]-4000-a000-")
-    # Texts per request to the embedding service, and how long to wait for it while it starts.
-    EMBEDDING_BATCH = EmbeddingService.BATCH
+    # How long to wait for the embedding service while it starts.
     EMBEDDING_ATTEMPTS = 90
     EMBEDDING_RETRY_SECONDS = 2.0
 
@@ -41,6 +40,8 @@ class MaintenanceService:
         self.database_repo = database_repo
         self.aspect_repo = aspect_repo
         self.embedding_service = embedding_service
+        # Whether the wait for the embedding service was logged: once, not for every text that waits.
+        self._embedding_wait_logged = False
 
     async def sync_vectorstore(self) -> Dict[str, int]:
         """Brings the vectorstore in line with postgres: every report and every tag of the categories with vectors
@@ -58,15 +59,20 @@ class MaintenanceService:
         logger.info("vectorstore sync: %d missing, %d stale of %d points", len(missing), len(stale), len(wanted))
         report_databases = await self._report_databases(study_databases)
         progress = await self._indexing_progress(report_databases, set(missing))
-        for start in range(0, len(missing), self.EMBEDDING_BATCH):
-            batch = missing[start:start + self.EMBEDDING_BATCH]
-            vectors = await self._embed([wanted[point_id][0] for point_id in batch])
-            await self.vectorstore.upsert_points(
-                [(point_id, vector, wanted[point_id][1]) for point_id, vector in zip(batch, vectors)]
-            )
-            for point_id in batch:
-                for database_id in report_databases.get(point_id, ()):
-                    await progress[database_id].advance()
+
+        async def add(point_id):
+            text, payload = wanted[point_id]
+            await self.vectorstore.upsert_points([(point_id, await self._embed(text), payload)])
+            for database_id in report_databases.get(point_id, ()):
+                await progress[database_id].advance()
+
+        try:
+            await EmbeddingService.for_each(missing, add)
+        except Exception as exc:
+            # The databases it was indexing say why it stopped, instead of waiting at where it was.
+            for database_id in progress:
+                await self.status_service.fail_indexing(database_id, exc)
+            raise
         for database_id in progress:
             await self.status_service.publish(DatabaseStatus(databaseId=database_id, stage=DatabaseStage.ready))
         return {"points": len(wanted), "added": len(missing), "removed": len(stale)}
@@ -121,14 +127,22 @@ class MaintenanceService:
                 )
         return points
 
-    async def _embed(self, texts: List[str]) -> List[List[float]]:
-        """The vectors of the texts; waits for the embedding service while it is still starting."""
+    async def _embed(self, text: str) -> List[float]:
+        """The vector of the text; waits for the embedding service while it is still starting. An error that waiting
+        does not mend (e.g. a missing API key or an unknown model) is raised at once."""
         for attempt in range(self.EMBEDDING_ATTEMPTS):
             try:
-                return await self.embedding_service.embed_many(texts)
-            except Exception:
-                if attempt == self.EMBEDDING_ATTEMPTS - 1:
+                return await self.embedding_service.embed(text)
+            except Exception as exc:
+                if attempt == self.EMBEDDING_ATTEMPTS - 1 or not EmbeddingService.is_transient(exc):
                     raise
+                if not self._embedding_wait_logged:
+                    self._embedding_wait_logged = True
+                    logger.warning(
+                        "embedding service not usable yet, retrying for up to %ds: %s",
+                        self.EMBEDDING_ATTEMPTS * self.EMBEDDING_RETRY_SECONDS,
+                        DatabaseStatusService.describe(exc),
+                    )
                 await asyncio.sleep(self.EMBEDDING_RETRY_SECONDS)
         return []
 

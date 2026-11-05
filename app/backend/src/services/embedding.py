@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import Awaitable, Callable, Optional, Sequence, TypeVar
 import httpx
 
 import asyncio
@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 
 from dotenv import load_dotenv
 
-from openai import AsyncOpenAI
+from openai import APIStatusError, AsyncOpenAI
 
 load_dotenv()
 
@@ -21,14 +21,14 @@ API_KEY = os.getenv("EMBEDDING_MODEL_API_KEY")
 MODEL = os.getenv("EMBEDDING_MODEL_ID")
 # Probed by readyz; empty for a hosted API, which has no health endpoint of its own.
 HEALTH_URL = os.getenv("EMBEDDING_MODEL_HEALTH_URL")
+T = TypeVar("T")
+# Requests to the embedding backend at once, process-wide: the local model takes few, a hosted API many more.
+MAX_CONCURRENCY = int(os.getenv("EMBEDDING_MAX_CONCURRENCY") or "4")
 
 class EmbeddingService:
-    # Texts per request of embed_many in bulk work (the vectorstore sync, the indexing of an imported database).
-    BATCH = 16
-
     def __init__(self):
         #self.channel = CHANNEL
-        self.sem = asyncio.Semaphore(4) #max number of concurrent requests
+        self.sem = asyncio.Semaphore(MAX_CONCURRENCY)
 
         #IMPORTANT: do not use langchain since it applies tokenization before sending it to TEI
         #MORE INFORMATION: https://github.com/huggingface/text-embeddings-inference/issues/273    
@@ -60,13 +60,29 @@ class EmbeddingService:
             )
             vector = response.data[0].embedding
             return vector
-        
-    async def embed_many(self, texts: List[str]) -> List[List[float]]:
-        """The vectors of several texts in one request, in their order (for bulk work such as the vectorstore sync)."""
-        async with self.sem:
-            texts = [await self.preprocess(text) for text in texts]
-            response = await self.model.embeddings.create(input=texts, model=MODEL)
-            return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
+
+    @staticmethod
+    async def for_each(items: Sequence[T], handle: Callable[[T], Awaitable[None]]) -> None:
+        """Awaits `handle` for every item, all at once: as many embed at the same time (one request per text) as the
+        semaphore lets (MAX_CONCURRENCY). The first error is raised, once the others are cancelled."""
+        error: Optional[BaseException] = None
+        try:
+            async with asyncio.TaskGroup() as group:
+                for item in items:
+                    group.create_task(handle(item))
+        except ExceptionGroup as errors:
+            error = errors.exceptions[0]
+        # Raised outside the except block, so that it does not seem to come from the group.
+        if error is not None:
+            raise error
+
+    @staticmethod
+    def is_transient(exc: BaseException) -> bool:
+        """Whether a request may succeed if tried again: the service is not reachable or overloaded (e.g. the local
+        model still starting), not a request it refuses (a missing API key, an unknown model)."""
+        if isinstance(exc, APIStatusError):
+            return exc.status_code in (408, 409, 429) or exc.status_code >= 500
+        return True
 
     def readyz(self):
         if not HEALTH_URL:

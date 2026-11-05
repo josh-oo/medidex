@@ -165,6 +165,30 @@ class DatabaseStatusService:
                 message="The backend stopped during the import.",
             ))
 
+    async def fail_indexing(self, database_id: int, exc: BaseException) -> None:
+        """The indexing of the reports of the database stopped with `exc`: published as failed, with why, and kept
+        until it is started again (the database would look as if it was still being indexed otherwise)."""
+        await self.publish(DatabaseStatus(
+            databaseId=database_id,
+            stage=DatabaseStage.failed,
+            message=f"Indexing its reports failed: {self.describe(exc)}",
+        ))
+        await self._redis.persist(self._channel_name(database_id))
+
+    async def indexing_error(self, database_id: int) -> Optional[str]:
+        """Why the indexing of the database last failed, unless it was started again since."""
+        status = await self.current(database_id)
+        return status.message if status is not None and status.stage == DatabaseStage.failed else None
+
+    @staticmethod
+    def describe(exc: BaseException) -> str:
+        """The error and the one it came from, if any: the API clients wrap the reason (e.g. openai's "Connection
+        error." around a failed name lookup)."""
+        text = f"{type(exc).__name__}: {exc}"
+        # Not the one a `raise ... from None` hides on purpose.
+        cause = exc.__cause__ or (None if exc.__suppress_context__ else exc.__context__)
+        return f"{text} ({type(cause).__name__}: {cause})" if cause is not None else text
+
     async def subscribe(self, database_id: int) -> PubSub:
         pubsub = self._redis.pubsub(ignore_subscribe_messages=True)
         await pubsub.subscribe(self._channel_name(database_id))

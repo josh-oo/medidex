@@ -17,6 +17,8 @@ export interface StudyDatabase {
   /** Its reports are still being added to the vectorstore (see DatabaseDto.indexing). */
   indexing: boolean;
   numberReportsIndexed: number;
+  /** Why its indexing stopped (see DatabaseDto.indexingError). */
+  indexingError?: string;
   /** It is still being imported (see DatabaseDto.importing). */
   importing: boolean;
   /** How far its import or indexing is, as its status stream last said; none before it said anything. */
@@ -62,11 +64,13 @@ const toStudyDatabase = (dto: DatabaseDto): StudyDatabase => ({
   numberReports: dto.numberReports,
   indexing: dto.indexing,
   numberReportsIndexed: dto.numberReportsIndexed,
+  indexingError: dto.indexingError || undefined,
   importing: dto.importing,
 });
 
-// The status stream of every database that is being imported or indexed, as long as a view shows the databases. A
-// stream that broke off is started again after a while, by loading the list again.
+// The status stream of every database that is being imported or indexed, as long as a view shows the databases (not
+// of one whose indexing failed: it is tried again only on the next start of the backend). A stream that broke off is
+// started again after a while, by loading the list again.
 const RECONNECT_MS = 5000;
 const streams = new Map<number, () => void>();
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -77,7 +81,9 @@ const syncStreams = () => {
   const wanted = new Set(
     listeners.size === 0
       ? []
-      : state.databases.filter((database) => database.importing || database.indexing).map((database) => database.id),
+      : state.databases
+          .filter((database) => database.importing || (database.indexing && !database.indexingError))
+          .map((database) => database.id),
   );
   streams.forEach((stop, databaseId) => {
     if (wanted.has(databaseId)) return;
@@ -107,12 +113,13 @@ const syncStreams = () => {
   });
 };
 
-// A status of a database: its numbers change with it; once it is ready, or its import failed, the list is loaded
-// again (a database whose import failed is no longer in it).
+// A status of a database: its numbers change with it; once it is ready, or its import or indexing failed, the list is
+// loaded again (a database whose import failed is no longer in it, one whose indexing failed says why).
 const onStatus = (status: DatabaseStatusDto) => {
   const database = state.databases.find((candidate) => candidate.id === status.databaseId);
   if (status.stage === "failed") {
-    toast.error(`The import of "${database?.name ?? `database ${status.databaseId}`}" failed`, {
+    const step = database && !database.importing ? "indexing" : "import";
+    toast.error(`The ${step} of "${database?.name ?? `database ${status.databaseId}`}" failed`, {
       description: status.message ?? undefined,
     });
   }

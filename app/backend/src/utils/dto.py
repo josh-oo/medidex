@@ -424,6 +424,9 @@ class Database(BaseModel):
     # search, but not yet suggested for new reports. Seen in the vectorstore on every request, not stored.
     indexing: bool = False
     numberReportsIndexed: int = 0
+    # Why the indexing of its reports stopped (e.g. the embedding API refused them), while it is `indexing`; the sync
+    # on the next start of the backend tries again.
+    indexingError: Optional[str] = None
     # It is still being imported (POST /databases/import): nothing of it is committed before its studies and reports
     # all are, and it takes no projects. Its progress is streamed by GET /databases/{database_id}/status.
     importing: bool = False
@@ -443,8 +446,9 @@ class DatabaseStage(str, Enum):
 class DatabaseStatus(BaseModel):
     """Where a database is on its way to being usable, an event of GET /databases/{database_id}/status: imported
     (`step` studies, reports or pdfs, `done` of `total` of them), indexed (`done` of `total` reports in the
-    vectorstore), ready, or failed (the import, `message` says why; nothing of it is kept unless its studies and
-    reports were already committed, while its PDFs were stored)."""
+    vectorstore), ready, or failed (`message` says why: of the import, nothing of it is kept unless its studies and
+    reports were already committed, while its PDFs were stored; of the indexing, the database is kept and still
+    `indexing`, see Database.indexingError)."""
     databaseId: int
     stage: DatabaseStage
     step: Optional[str] = None

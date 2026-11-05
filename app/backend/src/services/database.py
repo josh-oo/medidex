@@ -73,13 +73,16 @@ class StudyDatabaseService:
 
     async def get_databases(self) -> List[Database]:
         """The databases with their numbers of studies and reports, and how many of the reports the vectorstore has
-        (a database is still `indexing` while it lacks some), and then those being imported (`importing`)."""
+        (a database is still `indexing` while it lacks some, with why if that stopped), and then those being imported
+        (`importing`)."""
         databases = await self.database_repo.get_databases()
         counts = await self.database_repo.get_counts()
         indexed = await self._indexed(await self.database_repo.get_report_ids_by_database())
         imports = {database.databaseId: database for database in await self.status_service.imports()}
         return [
-            imports.pop(database.id, None) or self._to_dto(database, *counts.get(database.id, (0, 0)), indexed.get(database.id, 0))
+            imports.pop(database.id, None) or await self._with_indexing_error(
+                self._to_dto(database, *counts.get(database.id, (0, 0)), indexed.get(database.id, 0))
+            )
             for database in databases
         ] + sorted(imports.values(), key=lambda database: database.databaseId)
 
@@ -187,8 +190,9 @@ class StudyDatabaseService:
             await self.status_service.publish(DatabaseStatus(databaseId=database_id, stage=DatabaseStage.failed, message=error))
 
     async def get_status(self, database_id: int) -> DatabaseStatus:
-        """Where the database is now: imported (the last status published for it), indexed, ready, or not there
-        because its import failed (lately). Raises DatabaseNotFoundError."""
+        """Where the database is now: imported (the last status published for it), indexed, ready, failed while it was
+        indexed (lately, and not started again), or not there because its import failed (lately). Raises
+        DatabaseNotFoundError."""
         status = await self.status_service.current(database_id)
         if status is not None and status.stage == DatabaseStage.importing:
             return status
@@ -198,6 +202,8 @@ class StudyDatabaseService:
             if status is not None and status.stage == DatabaseStage.failed:
                 return status
             raise
+        if database.indexing and database.indexingError is not None:
+            return DatabaseStatus(databaseId=database_id, stage=DatabaseStage.failed, message=database.indexingError)
         if database.indexing:
             return DatabaseStatus(databaseId=database_id, stage=DatabaseStage.indexing, done=database.numberReportsIndexed, total=database.numberReports)
         return DatabaseStatus(databaseId=database_id, stage=DatabaseStage.ready)
@@ -254,15 +260,22 @@ class StudyDatabaseService:
     async def index_reports(self, database_id: int, report_ids: List[int]) -> None:
         """Adds the reports of an imported database to the vectorstore, so its studies are found for new reports, and
         publishes how far it is (DatabaseStatusService). If this is interrupted, the sync on the next start
-        (MaintenanceService.sync_vectorstore) adds the rest."""
-        study_ids = await self.database_repo.get_report_study_ids(report_ids)
-        study_databases = await self.database_repo.get_study_database_ids()
-        progress = await self.status_service.progress(database_id, DatabaseStage.indexing, None, len(report_ids)).start()
-        reports = await self.database_repo.get_reports(report_ids)
-        for start in range(0, len(reports), EmbeddingService.BATCH):
-            batch = reports[start:start + EmbeddingService.BATCH]
-            await self.vectorstore.add_study_reports_to_vectorstore(batch, study_ids, study_databases)
-            await progress.advance(len(batch))
+        (MaintenanceService.sync_vectorstore) adds the rest. If it fails (e.g. the embedding API is not reachable), that
+        is published with why and the error raised."""
+        try:
+            study_ids = await self.database_repo.get_report_study_ids(report_ids)
+            study_databases = await self.database_repo.get_study_database_ids()
+            progress = await self.status_service.progress(database_id, DatabaseStage.indexing, None, len(report_ids)).start()
+            reports = await self.database_repo.get_reports(report_ids)
+
+            async def index(report):
+                await self.vectorstore.add_study_report_to_vectorstore(report, study_ids, study_databases)
+                await progress.advance()
+
+            await EmbeddingService.for_each(reports, index)
+        except Exception as exc:
+            await self.status_service.fail_indexing(database_id, exc)
+            raise
         await self.status_service.publish(DatabaseStatus(databaseId=database_id, stage=DatabaseStage.ready))
 
     async def get_database(self, database_id: int) -> Database:
@@ -322,7 +335,13 @@ class StudyDatabaseService:
         report_ids = await self.database_repo.get_report_ids_by_database(database.id)
         indexed = await self._indexed(report_ids)
         studies, reports = counts.get(database.id, (0, 0))
-        return self._to_dto(database, studies, reports, indexed.get(database.id, 0))
+        return await self._with_indexing_error(self._to_dto(database, studies, reports, indexed.get(database.id, 0)))
+
+    async def _with_indexing_error(self, database: Database) -> Database:
+        """The database with why its indexing stopped, if it is still `indexing` (its status is only asked then)."""
+        if database.indexing:
+            database.indexingError = await self.status_service.indexing_error(database.databaseId)
+        return database
 
     @classmethod
     def parse(cls, content: bytes) -> DatabaseExport:

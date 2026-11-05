@@ -154,7 +154,11 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
       size="sm"
       className="gap-1.5"
       disabled
-      title={`${database.name} is still being ${database.importing ? "imported" : "indexed"}; updates can be added once it is done.`}
+      title={
+        database.indexingError
+          ? `The indexing of ${database.name} failed; updates can be added once it is indexed.`
+          : `${database.name} is still being ${database.importing ? "imported" : "indexed"}; updates can be added once it is done.`
+      }
     >
       {newUpdateLabel}
     </Button>
@@ -325,6 +329,15 @@ function ProgressBadge({ database }: { database: StudyDatabase }) {
       />
     );
   }
+  if (database.indexingError) {
+    return (
+      <StatusChip
+        label={`Indexing failed at ${count(database.numberReportsIndexed, database.numberReports)}`}
+        title={`${database.indexingError} It is tried again when the backend starts again.`}
+        failed
+      />
+    );
+  }
   return (
     <StatusChip
       label={`Indexing ${count(database.numberReportsIndexed, database.numberReports)}`}
@@ -334,13 +347,16 @@ function ProgressBadge({ database }: { database: StudyDatabase }) {
   );
 }
 
-function StatusChip({ label, busy, title }: { label: string; busy: string; title: string }) {
+function StatusChip({ label, busy, title, failed }: { label: string; busy?: string; title: string; failed?: boolean }) {
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 tabular-nums dark:text-amber-400"
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums",
+        failed ? "bg-destructive/10 text-destructive" : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+      )}
       title={title}
     >
-      <Spinner className="h-3 w-3" aria-label={busy} />
+      {!failed && <Spinner className="h-3 w-3" aria-label={busy} />}
       {label}
     </span>
   );

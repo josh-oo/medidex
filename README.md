@@ -116,6 +116,11 @@ API expects, e.g. `openai/text-embedding-3-small` on OpenRouter), its `EMBEDDING
 `VECTORSTORE_COLLECTION_NAME` and an empty `EMBEDDING_MODEL_HEALTH_URL` (a hosted API is not probed
 by `/readyz`). `.env.example` has a commented example.
 
+Each text is embedded in a request of its own; `EMBEDDING_MAX_CONCURRENCY` (default 4) is how many
+run at once. Keep it low for the local container; a hosted API takes far more (e.g. 32), which makes
+indexing an imported database that much faster. If indexing fails (e.g. a wrong API key), the
+database shows why and the reason is in the backend log; it is tried again on the next start.
+
 ## qdrant / postgres / redis
 Vector store, relational database and task/cache backend. They run
 from upstream images and need no configuration beyond the variables above.

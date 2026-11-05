@@ -431,6 +431,9 @@ export interface DatabaseDto {
   // but not yet suggested for new reports, and no projects can be uploaded into it.
   indexing: boolean;
   numberReportsIndexed: number;
+  // Why its indexing stopped (e.g. the embedding API refused the reports), while it is `indexing`; the backend tries
+  // again on its next start.
+  indexingError?: string | null;
   // It is still being imported: nothing of it is committed yet, and no projects can be uploaded into it. Its progress
   // is streamed by GET /databases/{id}/status (DatabaseStatusDto).
   importing: boolean;
@@ -439,8 +442,8 @@ export interface DatabaseDto {
 }
 
 // Where a database is on its way to being usable, an event of GET /databases/{id}/status: imported (`step` studies,
-// reports or pdfs, `done` of `total` of them), indexed (`done` of `total` reports), ready, or failed (its import,
-// `message` says why).
+// reports or pdfs, `done` of `total` of them), indexed (`done` of `total` reports), ready, or failed (its import, or
+// the indexing of its reports, `message` says why).
 export interface DatabaseStatusDto {
   databaseId: number;
   stage: "importing" | "indexing" | "ready" | "failed";
