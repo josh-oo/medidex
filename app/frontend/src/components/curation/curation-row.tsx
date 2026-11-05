@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { parseDate } from "@/components/ui/relative-time";
 import type { CurationStep } from "@/lib/curation-steps";
+import { ProgressBar } from "./progress-bar";
 import { StepChain } from "./step-chain";
 
 interface CurationRowProps {
@@ -23,6 +24,9 @@ interface CurationRowProps {
   people?: ReactNode;
   /** The menu of the project, at the end. */
   menu?: ReactNode;
+  /** A row with one step (an assignee's) shows it as a wide bar across the columns of the people, the rings and the
+   * menu instead, where a single ring would get lost. */
+  bar?: boolean;
 }
 
 /**
@@ -30,7 +34,18 @@ interface CurationRowProps {
  * (which are also its actions) and its menu. The columns have the same widths in every row, so the rings line up;
  * on a narrow screen the row wraps.
  */
-export function CurationRow({ title, createdAt, subtitle, steps, action, locked, outcome, people, menu }: CurationRowProps) {
+export function CurationRow({
+  title,
+  createdAt,
+  subtitle,
+  steps,
+  action,
+  locked,
+  outcome,
+  people,
+  menu,
+  bar,
+}: CurationRowProps) {
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 md:grid md:grid-cols-[minmax(0,1fr)_8rem_auto_2rem]">
       <div className="flex min-w-0 basis-full items-center gap-3 md:basis-auto">
@@ -41,17 +56,25 @@ export function CurationRow({ title, createdAt, subtitle, steps, action, locked,
         </div>
         {action && <div className="ml-3 flex min-w-0 items-center">{action}</div>}
       </div>
-      <div className="flex min-w-0 justify-end">{people}</div>
-      {outcome ? (
-        // The rings stay, invisible, to give the outcome their width.
-        <div className="grid">
-          <StepChain steps={steps} className="invisible col-start-1 row-start-1" />
-          <div className="col-start-1 row-start-1 flex items-center">{outcome}</div>
+      {bar && steps.length === 1 ? (
+        <div className="flex basis-full md:col-span-3 md:col-start-2 md:min-w-[18rem]">
+          <ProgressBar step={steps[0]} locked={locked} />
         </div>
       ) : (
-        <StepChain steps={steps} locked={locked} />
+        <>
+          <div className="flex min-w-0 justify-end">{people}</div>
+          {outcome ? (
+            // The rings stay, invisible, to give the outcome their width.
+            <div className="grid">
+              <StepChain steps={steps} className="invisible col-start-1 row-start-1" />
+              <div className="col-start-1 row-start-1 flex items-center">{outcome}</div>
+            </div>
+          ) : (
+            <StepChain steps={steps} locked={locked} />
+          )}
+          <div className="ml-auto flex justify-end md:ml-0">{menu}</div>
+        </>
       )}
-      <div className="ml-auto flex justify-end md:ml-0">{menu}</div>
     </div>
   );
 }

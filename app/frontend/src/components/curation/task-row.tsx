@@ -12,7 +12,7 @@ interface TaskRowProps {
 }
 
 /**
- * A project as one of its assignees sees it: the reports they link, behind the ring of their linkage, and the commit
+ * A project as one of its assignees sees it: the reports they link, behind the bar of their linkage, and the commit
  * of their links of the reports they are done with.
  */
 export function TaskRow({ task, userNameById, onCommitted }: TaskRowProps) {
@@ -30,6 +30,7 @@ export function TaskRow({ task, userNameById, onCommitted }: TaskRowProps) {
       }
       steps={taskSteps(task)}
       locked={task.committed}
+      bar
       action={
         <CommitAction
           projectId={task.projectId}
