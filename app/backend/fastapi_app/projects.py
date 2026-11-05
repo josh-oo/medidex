@@ -8,6 +8,7 @@ import json
 from pydantic import BaseModel
 import logging
 
+from src.utils.archive import DatabaseArchiveError, UpdateArchive
 from src.utils.ris_parser import RisParseError
 from src.utils.logger import setup_logging
 
@@ -21,6 +22,7 @@ from src.background.wrapper import run_process_report_background
 
 from src.services.authorization import ProjectAccessDeniedError
 from src.services.database import DatabaseIndexingError, DatabaseNotFoundError
+from src.services.upload import UploadLengthError, UploadNotFoundError
 from src.services.merge import ReportNotMergeableError
 from src.utils.graph import GraphFormatError
 from src.services.project import (
@@ -30,6 +32,7 @@ from src.services.project import (
     ProjectFinishedError,
     ProjectNotFoundError,
     ProjectWorkIncompleteError,
+    UpdateBundleError,
 )
 from src.utils.dto import FilterMode, ReportIntake, Assignee, Project, ReportCuration, Task, Page
 from src.utils.pagination import InvalidCursorError
@@ -45,8 +48,21 @@ project_id_path = Path(..., description="The projects's id")
 async def get_user_tasks(ctx: RequestContext = Depends(get_context)) -> List[Task]:
     return await ctx.project_service.get_user_tasks()
 
-@router.post("/projects", dependencies=[Depends(is_admin)], summary="Upload a project (batch of new reports that need to be assigned to studies) (usually in the .ris file format)", status_code=201)
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(..., description="The .ris file containing all the articles you want to process."), projectName: str = Form(...), databaseId: int = Form(..., description="The study database whose studies the reports are matched against and added to."), options: str = Form("{}", description="JSON object of upload options; each registered report postprocessor reads its own keys (see src/background/postprocessing.py)."), ctx: RequestContext = Depends(get_context)) -> Project:
+# A bundle of an update: its reports with their PDFs (utils/archive.py), or its update.json alone.
+BUNDLE_EXTENSIONS = (".zip", ".json")
+
+
+@router.post(
+    "/projects",
+    dependencies=[Depends(is_admin)],
+    summary="Upload a project (batch of new reports that need to be assigned to studies): a bibliography file (.ris, .nbib) or the bundle of an update with the PDFs of its reports (.zip with update.json and pdfs/).",
+    description="The file is sent as `file`, or, if it is too large for one request, uploaded with tus to "
+                "POST /databases/uploads and named by `uploadId` (a bundle only; the upload is used up, also when "
+                "the file is rejected). The PDFs of a bundle are stored with its reports; the others are searched in "
+                "the background.",
+    status_code=201,
+)
+async def upload_file(background_tasks: BackgroundTasks, file: Optional[UploadFile] = File(None, description="The .ris/.nbib file with the reports, or the .zip bundle of the update (update.json and the PDFs of its reports)."), uploadId: Optional[str] = Form(None, description="Instead of `file`: the id of a bundle uploaded with tus (POST /databases/uploads)."), projectName: str = Form(...), databaseId: int = Form(..., description="The study database whose studies the reports are matched against and added to."), options: str = Form("{}", description="JSON object of upload options; each registered report postprocessor reads its own keys (see src/background/postprocessing.py)."), ctx: RequestContext = Depends(get_context)) -> Project:
 
     # dependencies=[Depends(is_admin)] above is the actual (and only) admin check -
     # who's allowed to create a project is an API-layer permission, not a business
@@ -57,16 +73,35 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
         raise HTTPException(status_code=400, detail="options must be a JSON object") from exc
     if not isinstance(parsed_options, dict):
         raise HTTPException(status_code=400, detail="options must be a JSON object")
+    if (file is None) == (uploadId is None):
+        raise HTTPException(status_code=400, detail="Send either file or uploadId")
 
+    source = None
     try:
-        result = await ctx.project_service.create_project(projectName, file, databaseId)
+        if uploadId is not None:
+            source = ctx.upload_service.take(uploadId)
+            result = await ctx.project_service.create_project_from_bundle(projectName, UpdateArchive.open(source), databaseId)
+        elif file.filename and file.filename.lower().endswith(BUNDLE_EXTENSIONS):
+            result = await ctx.project_service.create_project_from_bundle(projectName, UpdateArchive.open(file.file), databaseId)
+        else:
+            result = await ctx.project_service.create_project(projectName, file, databaseId)
     except RisParseError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except (UpdateBundleError, DatabaseArchiveError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UploadNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except UploadLengthError as exc:
+        # Not 409, which the upload dialog reads as "already uploaded".
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DatabaseNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (DatabaseIndexingError, OpenUpdateExistsError) as exc:
         # Not 409, which the upload dialog reads as "already uploaded".
         raise HTTPException(status_code=423, detail=str(exc)) from exc
+    finally:
+        if source is not None:
+            source.close()
     if result is None:
         raise HTTPException(status_code=409, detail="Project already exists")
     project, report_ids = result

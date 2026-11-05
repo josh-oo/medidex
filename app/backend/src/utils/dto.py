@@ -525,6 +525,15 @@ class DatabaseExport(BaseModel):
     eligibilityCriteria: List[EligibilityCriterion] = Field(default_factory=list)
     studies: List[DatabaseStudy] = Field(default_factory=list)
 
+class UpdateBundle(BaseModel):
+    """The new reports of an update as one JSON document, `update.json` of its archive (utils/archive.py) with their
+    PDFs: what POST /projects reads besides a bibliography file. Each report is one of the update, in the shape of a
+    report of a database export (its `id` and `createdAt` are not read): a report with a `trialId` and no authors is the
+    record of that trial in a registry, the `trialId` of any other is the unconfirmed guess of the upload."""
+    format: str = "medidex-update"
+    version: int = 1
+    reports: List[DatabaseReport] = Field(default_factory=list)
+
 def tags_to_dto(tags) -> List[Tag]:
     """Converts tag rows (src/database/models.py's Tag, or mappings with its "id"/"description") into Tag - used by the
     "all tags of a category" endpoints (/interventions, /conditions, ...). StudyRepository's own study-scoped tag lookups

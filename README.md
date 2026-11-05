@@ -35,8 +35,8 @@ or imported from the export of another deployment.
 
 - **Demo data.** [`deploy/data/seed/synthetic_database.zip`](deploy/data/seed/synthetic_database.zip) is a synthetic
   study database (101 studies, 220 linked reports with their PDFs) to import on the Database management page.
-  [`deploy/data/seed/examples/`](deploy/data/seed/examples/) holds new reports (a RIS file and some of their PDFs) to
-  upload into a project of that database.
+  [`deploy/data/seed/examples/`](deploy/data/seed/examples/) holds new reports to upload into a project of that
+  database: a RIS file with some of their PDFs next to it, and the same reports as a bundle with those PDFs inside.
 - **Admin account.** Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` to create an approved admin account on startup
   (`ADMIN_NAME` is optional). An existing account with that email is made an admin; its password is not changed.
 - **Storage.** Postgres, Qdrant, the embedding model cache and the PDFs of the reports live in
@@ -51,7 +51,11 @@ its updates ("Update 7"); they are matched against and linked to the studies of 
 one open update at a time.
 
 Working on an update:
-1. An admin creates the update from the card of the database and assigns curators to it.
+1. An admin creates the update from the card of the database and assigns curators to it. The new reports come as a
+   RIS or NBIB file, or as a bundle that brings their PDFs along (`<name>.medidex-update.zip`, laid out like an export:
+   `update.json` with the reports and `pdfs/`). Medidex searches the PDFs a bundle does not bring, as for a RIS file.
+   A bundle is uploaded in parts with tus, like an import (see below). The format of a bundle is specified in
+   [`docs/update-bundle.md`](docs/update-bundle.md).
 2. Each curator links the reports to their studies (or creates new studies) and commits the reports when done. Curators
    work independently and do not see each other's links.
 3. Once everyone has committed a report, the admin reviews it on the review page and merges it into the database (or
