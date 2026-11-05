@@ -88,7 +88,9 @@ The original frontend code can be found in the [MaxiMittel/medidex repository](h
 ## logic
 The REST API (FastAPI, `app/backend/`) that the frontend calls. On startup the one-shot `app-init` service prepares
 Qdrant, the data directories and Keycloak first ([`ops/app-init/init.sh`](ops/app-init/init.sh)); `logic` then creates
-missing tables and indexes new reports and tags for matching in the background.
+missing tables and indexes new reports and tags for matching in the background. It needs outbound internet access to
+public APIs: OpenAlex (fulltext PDFs and references), the trial registers (registry records), and PubMed, Europe PMC
+and ClinicalTrials.gov (the external records shown next to the studies of a report).
 
 ## embedding
 This service transforms plain text into vector embeddings. It runs HuggingFace

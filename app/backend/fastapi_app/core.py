@@ -27,7 +27,7 @@ from src.services.linkage import (
     LinksCommittedError,
 )
 
-from src.utils.dto import StudyPayload, Study, StudyCandidate, TagCandidate, Page, studies_to_dto
+from src.utils.dto import ExternalRecords, StudyPayload, Study, StudyCandidate, TagCandidate, Page, studies_to_dto
 from src.utils.graph import GraphFormatError
 from src.utils.pagination import InvalidCursorError
 from src.utils.tagconfig import TAG_CATEGORIES
@@ -104,6 +104,13 @@ async def study_name_by_report(report_id: int, trial_id: Optional[str] = Query(N
 async def referenced_studies_by_report(report_id: int, ctx: RequestContext = Depends(get_context)) -> List[StudyCandidate]:
     try:
         return await ctx.study_similarity_service.get_referenced_studies(report_id, ctx.user_id)
+    except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
+        raise_for_report_access(exc)
+
+@router.get("/reports/{report_id}/external-records", dependencies=[Depends(is_verified_api_call)], summary="Get what PubMed, Europe PMC, ClinicalTrials.gov and OpenAlex know of the trial of a report: the searches for its registry ids and for its first author and title, the records they found (merged across sources) and the studies of the database those records belong to. Searched on first use and cached for a report of an update.")
+async def external_records_by_report(report_id: int, refresh: bool = Query(False, description="Search again instead of returning the cached searches."), ctx: RequestContext = Depends(get_context)) -> ExternalRecords:
+    try:
+        return await ctx.external_record_service.get_external_records(report_id, ctx.user_id, refresh)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
         raise_for_report_access(exc)
 

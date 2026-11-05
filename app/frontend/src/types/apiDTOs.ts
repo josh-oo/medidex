@@ -311,6 +311,44 @@ export interface StudyCandidateDto extends StudyDto {
   relevance: number;
 }
 
+// One query sent to one source by the external search (GET /reports/{id}/external-records): "id" searches a
+// registry id of the report, "terms" its first author and the words of its title.
+export interface ExternalSearchDto {
+  kind: "id" | "terms";
+  source: string;
+  query: string;
+  hits: number | null;
+  url: string;
+  error: string | null;
+  found: string[];
+}
+
+// A publication or registry record the external search found, merged across sources; what it is to the report
+// are facts (ids, authors, title words), nothing judged by a model.
+export interface ExternalRecordDto {
+  key: string;
+  ids: Record<string, string>;
+  title: string;
+  firstAuthor: string;
+  year: number | null;
+  venue: string;
+  url: string;
+  thisReport: boolean;
+  carriesTrialId: boolean;
+  studyIds: number[];
+  sameFirstAuthor: boolean;
+  titleOverlap: number;
+}
+
+export interface ExternalRecordsDto {
+  searchedAt: string;
+  trialIds: string[];
+  trialIdStudies: Record<string, number[]>;
+  searches: ExternalSearchDto[];
+  records: ExternalRecordDto[];
+  studies: StudyCandidateDto[];
+}
+
 export interface GetSimilarStudiesParams {
   aspect?: string;
   // Search studies (same syntax as GetStudySearchParams) instead of recommending them;

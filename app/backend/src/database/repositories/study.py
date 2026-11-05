@@ -438,23 +438,51 @@ class StudyRepository:
         mirrors ReportRepository.get_linked_studies: the links of the core database and those
         this scope made in an update, not other scopes' links.
         """
+        study_ids = sorted({study_id for ids in (await self.get_study_ids_by_report_dois(dois)).values() for study_id in ids})
+        return sorted(await self.get_studies(study_ids, databases), key=lambda study: study.id) if study_ids else []
+
+    async def get_study_ids_by_report_dois(self, dois: List[str]) -> Dict[str, List[int]]:
+        """The ids of the studies linked to a report of each DOI (normalized, see get_studies_by_report_dois), by DOI;
+        DOIs of no linked report are left out. Visibility and databases are left to get_studies."""
         if not dois:
-            return []
+            return {}
 
         spellings = set(dois) | {f"https://doi.org/{doi}" for doi in dois}
-        core = (await self.db.execute(
-            select(Link.study_id)
+        doi = func.regexp_replace(func.lower(Report.doi), "^https://doi.org/", "")
+        update_doi = func.regexp_replace(func.lower(UpdateReport.doi), "^https://doi.org/", "")
+        rows = [*(await self.db.execute(
+            select(doi, Link.study_id)
             .join(Report, Report.id == Link.report_id)
             .where(func.lower(Report.doi).in_(spellings))
-        )).scalars().all()
-        in_updates = (await self.db.execute(
-            select(func.coalesce(UpdateLink.study_id, UpdateLink.update_study_id))
+        )).all(), *(await self.db.execute(
+            select(update_doi, func.coalesce(UpdateLink.study_id, UpdateLink.update_study_id))
             .join(UpdateReport, UpdateReport.id == UpdateLink.report_id)
             .where(func.lower(UpdateReport.doi).in_(spellings))
             .where(UpdateLink.created_by == self.user_id)
-        )).scalars().all()
-        study_ids = sorted(set(core) | set(in_updates))
-        return sorted(await self.get_studies(study_ids, databases), key=lambda study: study.id) if study_ids else []
+        )).all()]
+        by_doi: Dict[str, List[int]] = {}
+        for found, study_id in rows:
+            if study_id not in by_doi.setdefault(found, []):
+                by_doi[found].append(study_id)
+        return by_doi
+
+    async def get_study_ids_by_trial_ids(self, trial_ids: List[str], databases: Optional[Sequence[int]] = None) -> Dict[str, List[int]]:
+        """The ids of the studies of each trial registration id, by the id compared without case and separators
+        ("CTRI/2025/04/083875" is "CTRI202504083875"); ids of no study are left out. Studies of the updates count
+        for the scope that sees them (see _visible_drafts)."""
+        wanted = {re.sub(r"[^A-Z0-9]", "", trial_id.upper()) for trial_id in trial_ids if trial_id}
+        if not wanted:
+            return {}
+
+        by_id: Dict[str, List[int]] = {}
+        for model, visible in ((Study, true()), (UpdateStudy, self._visible_drafts())):
+            key = func.regexp_replace(func.upper(model.trial_registration_id), "[^A-Z0-9]", "", "g")
+            rows = (await self.db.execute(
+                select(key, model.id).where(key.in_(wanted)).where(visible).where(self._in_databases(model, databases))
+            )).all()
+            for found, study_id in rows:
+                by_id.setdefault(found, []).append(study_id)
+        return by_id
 
     async def get_study_by_id(self, study_id: int, databases: Optional[Sequence[int]] = None) -> Optional[StudyFields]:
         """The study of the core database or of an update of the id; None if there is no such study, it is not visible

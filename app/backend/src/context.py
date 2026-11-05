@@ -25,6 +25,7 @@ from .services.core import RelatedTagSearchService, StudySimilaritySearchService
 from .services.crawler import CrawlerService, OpenAlexService, crawler_service, open_alex_service
 from .services.database import StudyDatabaseService
 from .services.embedding import EmbeddingService, embedding_service
+from .services.external import ExternalRecordService
 from .services.linkage import LinkageService
 from .services.maintenance import MaintenanceService
 from .services.merge import UpdateMergeService
@@ -141,6 +142,16 @@ class RequestContext:
             project_repo=self.project_repo,
             author_feature_service=self.author_feature_service,
             report_service=self.report_service,
+        )
+
+    @cached_property
+    def external_record_service(self) -> ExternalRecordService:
+        return ExternalRecordService(
+            report_repo=self.report_repo,
+            study_repo=self.study_repo,
+            project_repo=self.project_repo,
+            study_similarity_service=self.study_similarity_service,
+            open_alex_service=self.open_alex_service,
         )
 
     @cached_property

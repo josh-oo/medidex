@@ -334,6 +334,53 @@ class StudyCandidate(Study):
     relevant this particular suggestion is, for the researcher to accept or reject."""
     relevance: float
 
+class ExternalSearch(BaseModel):
+    """One query sent to one source by the external search (src/services/external.py): `kind` is "id" (a registry id
+    of the trial, in one spelling) or "terms" (the first author and words of the title)."""
+    kind: str
+    source: str
+    query: str
+    # The total the source reports; None if unknown or the source failed (then `error` says why).
+    hits: Optional[int] = None
+    url: str = ""
+    error: Optional[str] = None
+    # The keys of the records it returned (ExternalRecord.key).
+    found: List[str] = Field(default_factory=list)
+
+class ExternalRecord(BaseModel):
+    """A publication or registry record returned by the external search, the same one found by several sources merged
+    into one. The facts after `url` say how it relates to the report; nothing is judged by a model."""
+    key: str
+    # pmid, pmcid, doi, nct, openalex - whichever the sources gave.
+    ids: Dict[str, str] = Field(default_factory=dict)
+    title: str = ""
+    firstAuthor: str = ""
+    year: Optional[int] = None
+    venue: str = ""
+    url: str = ""
+    # The report itself (its DOI, or its title and year).
+    thisReport: bool = False
+    # Found by a search for a registry id of the report, or a registry record of one.
+    carriesTrialId: bool = False
+    # The studies of the report's database it belongs to: by a linked report of its DOI, or a study of its registry id.
+    studyIds: List[int] = Field(default_factory=list)
+    sameFirstAuthor: bool = False
+    # How much of the words of its title are those of the report's (0..1).
+    titleOverlap: float = 0.0
+
+class ExternalRecords(BaseModel):
+    """What other sources know of the trial of a report (GET /reports/{report_id}/external-records)."""
+    searchedAt: datetime
+    # The registry ids of the report that were searched.
+    trialIds: List[str]
+    # The studies of the database that carry each of them, by the id as in trialIds.
+    trialIdStudies: Dict[str, List[int]] = Field(default_factory=dict)
+    searches: List[ExternalSearch]
+    # Ordered: records carrying the trial's id outside the database first, the report itself last.
+    records: List[ExternalRecord]
+    # Every study of studyIds and trialIdStudies, with its relevance for the report.
+    studies: List[StudyCandidate]
+
 class FlagPayload(BaseModel):
     message: str
     public: bool = False

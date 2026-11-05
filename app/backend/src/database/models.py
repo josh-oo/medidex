@@ -220,6 +220,10 @@ class UpdateReport(ReportFields, table=True):
     fulltext_links: Optional[List[str]] = Field(default=None, sa_type=ARRAY(Text), nullable=True)
     # Matched against Report.doi when read, so it stays correct as reports are added.
     referenced_dois: Optional[List[str]] = Field(default=None, sa_type=ARRAY(Text), nullable=True)
+    # The searches of other sources for the trial of the report (src/services/external.py), run in the background after
+    # the upload: None means not searched yet. Only what the sources returned; which studies the records belong to is
+    # matched when read.
+    external_records: Optional[Dict[str, Any]] = Field(default=None, sa_type=JSONB, nullable=True)
     # Unconfirmed guess from the upload; never copied to trial_registration_id without a reviewer.
     preliminary_trial_id: Optional[str] = Field(default=None)
 

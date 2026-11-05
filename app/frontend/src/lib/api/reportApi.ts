@@ -1,7 +1,7 @@
 import apiClient from "./apiClient";
 import { unwrap, logAndRethrow } from "./requests";
 import { AxiosRequestConfig } from "axios";
-import { ReportChatDto, TagCandidateDto, StudyCandidateDto, Page, GetSimilarStudiesParams, GetSimilarTagsParams, StudyDto} from "../../types/apiDTOs";
+import { ExternalRecordsDto, ReportChatDto, TagCandidateDto, StudyCandidateDto, Page, GetSimilarStudiesParams, GetSimilarTagsParams, StudyDto} from "../../types/apiDTOs";
 
 export interface ReportFlagDto {
   message: string;
@@ -40,6 +40,18 @@ export const getReferencedStudiesByReportId = (
   return apiClient.get<StudyCandidateDto[]>(`/reports/${reportId}/referenced-studies`, config)
     .then(unwrap)
     .catch(logAndRethrow(`Error fetching referenced studies for report ${reportId}:`));
+}
+
+// what PubMed, Europe PMC, ClinicalTrials.gov and OpenAlex know of the report's trial; searched on first use,
+// `refresh` searches again
+export const getExternalRecordsByReportId = (
+  reportId: number,
+  refresh = false,
+  config?: AxiosRequestConfig
+): Promise<ExternalRecordsDto> => {
+  return apiClient.get<ExternalRecordsDto>(`/reports/${reportId}/external-records`, { ...config, params: { refresh } })
+    .then(unwrap)
+    .catch(logAndRethrow(`Error fetching external records for report ${reportId}:`));
 }
 
 // the short name proposed for a new study created from the report

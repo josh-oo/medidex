@@ -14,6 +14,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StudyCard } from "./study-card";
 import { StudyDetails } from "./study-details";
+import { ExternalRecords } from "./external-records";
 import { Widget } from "@/components/ui/widget";
 import { STUDY_ROWS_PER_PAGE, StudyRowSkeleton } from "@/components/reports/workbench-skeleton";
 import { AddStudyTriggerSlot } from "@/context/add-study-trigger-context";
@@ -424,6 +425,11 @@ export function CandidateStudyTable({
             {referencedStudies.map((study) => renderStudyCard("referenced", study))}
           </div>
         </Widget>
+      )}
+
+      {/* What other sources know of the report's trial */}
+      {reportId !== undefined && (
+        <ExternalRecords reportId={reportId} renderStudy={(study) => renderStudyCard("external", study)} />
       )}
 
       {/* Similar studies */}
