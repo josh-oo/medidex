@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { ProjectUploadOptionsSlot } from "@/context/study-report-slots-context";
 import { UploadSection, type UploadSectionHandle, type UploadSectionSnapshot } from "@/components/ui/upload/upload-section";
 import type { StudyDatabase } from "@/lib/databases";
+import { createProject } from "@/lib/api/projectApi";
 
 interface CreateProjectDialogProps {
   /** Opens the dialog; leave it out to open the dialog from elsewhere (`open`, `onOpenChange`). */
@@ -46,14 +47,9 @@ export function CreateProjectDialog({ trigger, open: openProp, onOpenChange, onP
     [resetState, onProjectCreated, setOpen],
   );
 
-  const buildFormData = useCallback(
-    (file: File) => {
-      const formData = new FormData();
-      formData.append("projectName", `Update ${number}`);
-      formData.append("databaseId", String(database.id));
-      formData.append("file", file, file.name);
-      formData.append("options", JSON.stringify(options));
-      return formData;
+  const uploadProject = useCallback(
+    async (file: File) => {
+      await createProject(file, { projectName: `Update ${number}`, databaseId: database.id, options });
     },
     [number, options, database.id],
   );
@@ -79,17 +75,20 @@ export function CreateProjectDialog({ trigger, open: openProp, onOpenChange, onP
         <DialogHeader>
           <DialogTitle>New update #{number}</DialogTitle>
           <DialogDescription>
-            Upload a RIS file with the new reports. They are matched against the studies of{" "}
+            Upload a RIS or NBIB file with the new reports, or a .medidex-update.zip bundle that brings their PDFs along. They are
+            matched against the studies of{" "}
             <span className="font-medium text-foreground">{database.name}</span>.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>RIS file</Label>
+            <Label>Reports</Label>
             <UploadSection
               ref={uploadSectionRef}
               onUploadSuccess={handleUploadSuccess}
-              buildFormData={buildFormData}
+              onUpload={uploadProject}
+              allowedFileExtension=".ris,.nbib,.zip"
+              hint="RIS or NBIB file, or a .medidex-update.zip bundle with PDFs"
               autoStart={false}
               onStateChange={setUploadSnapshot}
             />

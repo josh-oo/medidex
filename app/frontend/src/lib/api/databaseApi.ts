@@ -36,9 +36,10 @@ export const updateDatabase = (databaseId: number, update: DatabaseUpdate): Prom
 // Cloudflare tunnel: 100 MB).
 const UPLOAD_PART_BYTES = 64 * 1024 * 1024;
 
-// Uploads a file with tus (POST /databases/uploads) and resolves to the id of the upload. A part that failed is sent
-// again; an upload of the same file that broke off (e.g. the page was loaded again) goes on where it stopped.
-const uploadFile = (file: File, onUpload?: (loaded: number, total: number) => void): Promise<string> =>
+// Uploads a file with tus (POST /databases/uploads) and resolves to the id of the upload, which the endpoint that reads
+// the file is given (POST /databases/import, POST /projects). A part that failed is sent again; an upload of the same file
+// that broke off (e.g. the page was loaded again) goes on where it stopped.
+export const uploadFile = (file: File, onUpload?: (loaded: number, total: number) => void): Promise<string> =>
   new Promise((resolve, reject) => {
     const upload = new Upload(file, {
       endpoint: `${apiClient.defaults.baseURL ?? ""}/databases/uploads`,

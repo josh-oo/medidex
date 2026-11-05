@@ -1,12 +1,17 @@
 import asyncio
 import hashlib
+import json
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set, Tuple
+
+from pydantic import ValidationError
 
 from ..database.models import Project as DbProject, UpdateReport
 from ..database.repositories.archive import DELETED, MERGED, ArchiveRepository
 from ..database.repositories.project import ProjectRepository
 from ..database.repositories.report import ReportRepository
+from ..utils.archive import UpdateArchive
 from ..utils.dto import (
+    DatabaseReport,
     FilterMode,
     Page,
     ReportIntake,
@@ -14,6 +19,7 @@ from ..utils.dto import (
     Project,
     ReportCuration,
     Task,
+    UpdateBundle,
     filter_mode_to_bool,
     matches_filter,
     reports_to_dto,
@@ -47,6 +53,10 @@ class ProjectWorkIncompleteError(Exception):
 
 class OpenUpdateExistsError(Exception):
     """The database has an update whose reports are not all merged yet: it takes one update at a time."""
+
+
+class UpdateBundleError(ValueError):
+    """The bundle of an update is no such bundle (see UpdateBundle in dto.py), has no reports or misses a PDF it names."""
 
 
 class ProjectFinishedError(Exception):
@@ -308,6 +318,97 @@ class ProjectResourceService:
         build_reports_from_entries's deterministic project_id), otherwise the new
         project's full stats (via get_project_stats) plus its report ids.
         """
+        await self._ensure_upload_allowed(database_id)
+        entries = await parse_file(upload)
+        project_id, reports = self.build_reports_from_entries(entries)
+        saved_reports = await self.project_repo.add_new_project(project_id, project_name, reports, database_id)
+        if saved_reports is None:
+            return None
+        return await self._project_created(project_id, saved_reports)
+
+    async def create_project_from_bundle(
+        self,
+        project_name: str,
+        archive: UpdateArchive,
+        database_id: int,
+    ) -> Optional[Tuple[Project, List[int]]]:
+        """Like create_project, from the bundle of an update (`update.json` and the PDFs of its reports, see
+        utils/archive.py) instead of a bibliography file. The PDFs are stored under the ids the reports get, before
+        the background pass, so it only searches the PDFs the bundle does not bring. The same reports make the same
+        project as in a bibliography file. Raises UpdateBundleError if the bundle is no such bundle or misses a PDF it
+        names, before anything is stored.
+        """
+        await self._ensure_upload_allowed(database_id)
+        bundle = self.parse_bundle(archive.document)
+        missing = sorted({report.pdf for report in bundle.reports if report.pdf and not archive.has_pdf(report.pdf)})
+        if missing:
+            more = f" (and {len(missing) - 5} more)" if len(missing) > 5 else ""
+            raise UpdateBundleError(f"The bundle misses the PDFs {', '.join(missing[:5])}{more}")
+
+        project_id, reports = self.build_reports_from_bundle(bundle)
+        saved_reports = await self.project_repo.add_new_project(project_id, project_name, reports, database_id)
+        if saved_reports is None:
+            return None
+        for report, entry in zip(saved_reports, bundle.reports):
+            content = archive.pdf(entry.pdf) if entry.pdf else None
+            if content is not None:
+                await asyncio.to_thread(DocumentService.write_pdf, report.id, content)
+        return await self._project_created(project_id, saved_reports)
+
+    @staticmethod
+    def parse_bundle(content: bytes) -> UpdateBundle:
+        """The bundle of an update from its `update.json`; raises UpdateBundleError with what is wrong."""
+        try:
+            data = json.loads(content)
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise UpdateBundleError(f"The file is no JSON: {exc}") from exc
+        if not isinstance(data, dict) or data.get("format") != "medidex-update":
+            raise UpdateBundleError('The file is no Medidex update (a JSON object with "format": "medidex-update").')
+        if data.get("version", 1) != 1:
+            raise UpdateBundleError(f"Version {data.get('version')} of the update format is not supported (only 1).")
+        try:
+            bundle = UpdateBundle.model_validate(data)
+        except ValidationError as exc:
+            raise UpdateBundleError(StudyDatabaseService.describe(exc)) from exc
+        if not bundle.reports:
+            raise UpdateBundleError("The update has no reports.")
+        return bundle
+
+    @classmethod
+    def build_reports_from_bundle(cls, bundle: UpdateBundle) -> Tuple[str, List[UpdateReport]]:
+        """build_reports_from_entries for the reports of a bundle, in their order: the same reports as those of a
+        bibliography file that holds them, with the same project id. A report with a `trialId` and no authors is a
+        registry record (whatever registry its id is of); the `trialId` of any other is its preliminary trial id."""
+        project_id, reports = cls.build_reports_from_entries([cls._bundle_entry(report) for report in bundle.reports])
+        for report, entry in zip(reports, bundle.reports):
+            if entry.trialId and not entry.authors:
+                report.authors, report.trial_registration_id = [], entry.trialId
+            elif entry.trialId:
+                report.preliminary_trial_id = entry.trialId
+        return project_id, reports
+
+    @staticmethod
+    def _bundle_entry(report: DatabaseReport) -> Dict[str, Any]:
+        """A report of a bundle as the entry of a bibliography file (parse_file) that holds it, for
+        build_reports_from_entries: a registry record lists its trial id as its only author there."""
+        return {
+            "primary_title": report.title,
+            "authors": [report.trialId] if report.trialId and not report.authors else report.authors,
+            "abstract": report.abstract,
+            "secondary_title": report.journal,
+            "year": report.year,
+            "volume": report.volume,
+            "note": report.issue,
+            "start_page": report.pages,
+            "language": report.language,
+            "publisher": report.publisher,
+            "place_published": report.city,
+            "doi": report.doi,
+        }
+
+    async def _ensure_upload_allowed(self, database_id: int) -> None:
+        """Raises DatabaseNotFoundError, DatabaseIndexingError or OpenUpdateExistsError if the database takes no new
+        update now."""
         database = await self.database_service.get_database(database_id)
         if database.importing or database.indexing:
             # Its reports would be matched against studies the vectorstore does not know yet.
@@ -318,12 +419,9 @@ class ProjectResourceService:
             raise OpenUpdateExistsError(
                 f"Database {database.name} has an update that is not merged yet; merge it before uploading the next one"
             )
-        entries = await parse_file(upload)
-        project_id, reports = self.build_reports_from_entries(entries)
-        saved_reports = await self.project_repo.add_new_project(project_id, project_name, reports, database_id)
-        if saved_reports is None:
-            return None
 
+    async def _project_created(self, project_id: str, saved_reports: List[UpdateReport]) -> Tuple[Project, List[int]]:
+        """Tells the subscribers about the new project; its full stats and the ids of its reports."""
         await self.pubsub_service.publish_project_update(project_id)
 
         project = await self.project_repo.get_project_by_id(project_id)

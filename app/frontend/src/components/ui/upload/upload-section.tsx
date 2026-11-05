@@ -62,6 +62,7 @@ interface UploadSectionProps {
   showUploadButton?: boolean;
   autoStart?: boolean;
   onStateChange?: (snapshot: UploadSectionSnapshot) => void;
+  // One extension or several, separated by commas (as the accept attribute of a file input takes them).
   allowedFileExtension?: string;
   hint?: string;
   uploadUrl?: string;
@@ -231,12 +232,13 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
     const droppedFiles = event.dataTransfer.files;
     if (!droppedFiles.length) return;
 
+    const extensions = allowedFileExtension.split(",").map((extension) => extension.trim().toLowerCase());
     const risFile = Array.from(droppedFiles).find((file) =>
-      file.name.toLowerCase().endsWith(allowedFileExtension),
+      extensions.some((extension) => file.name.toLowerCase().endsWith(extension)),
     );
     if (!risFile) {
       setCurrentFile(null);
-      setRejection(`Unsupported file type. Please upload a ${allowedFileExtension} file.`);
+      setRejection(`Unsupported file type. Please upload a ${extensions.join(" or ")} file.`);
       return;
     }
     setRejection(null);

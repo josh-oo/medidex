@@ -32,4 +32,7 @@ The import is all or nothing. Importing it twice gives two separate databases.
 
 [`examples/`](examples) holds new reports for upload testing, none of them in the database:
 [`sample_reports.ris`](examples/sample_reports.ris) with nine reports, and the fulltext PDFs of seven of them
-(`Article - ….pdf`).
+(`Article - ….pdf`). [`sample_reports.medidex-update.zip`](examples/sample_reports.medidex-update.zip) is the same update as a
+bundle: the nine reports in `update.json` and the seven PDFs under `pdfs/`, so that they are there as soon as the update
+is created (see [`docs/update-bundle.md`](../../../docs/update-bundle.md)). Both make the same project: once one is
+uploaded, the other is refused as already uploaded.

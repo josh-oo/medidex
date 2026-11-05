@@ -337,7 +337,7 @@ class StudyDatabaseService:
         try:
             document = DatabaseExport.model_validate(data)
         except ValidationError as exc:
-            raise DatabaseImportError(cls._describe(exc)) from exc
+            raise DatabaseImportError(cls.describe(exc)) from exc
         problems = []
         names = [study.shortName for study in document.studies]
         duplicates = sorted({name for name in names if names.count(name) > 1})
@@ -359,10 +359,11 @@ class StudyDatabaseService:
         try:
             return StudyPayload(**fields, **{GRAPH_FIELD: graph}).model_dump()
         except ValidationError as exc:
-            raise DatabaseImportError(f"studies[{index}] ({study.shortName}): {cls._describe(exc)}") from exc
+            raise DatabaseImportError(f"studies[{index}] ({study.shortName}): {cls.describe(exc)}") from exc
 
     @classmethod
-    def _describe(cls, exc: ValidationError) -> str:
+    def describe(cls, exc: ValidationError) -> str:
+        """What is wrong with a file that is not as its format says, the first few problems."""
         errors = exc.errors()
         described = [
             f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}" if error["loc"] else error["msg"]

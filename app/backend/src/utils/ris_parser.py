@@ -68,6 +68,6 @@ async def parse_file(file: UploadedFile):
             raise RisParseError(f"Failed to parse .nbib: {str(e)}", status_code=500) from e
 
     else:
-        raise RisParseError("Only .ris and .nbib files are accepted", status_code=400)
+        raise RisParseError("Only .ris and .nbib files and .zip bundles of an update are accepted", status_code=400)
 
     return entries

@@ -1,7 +1,8 @@
 """An exported study database as a file: a zip archive with the database (`database.json`, see DatabaseExport in
 dto.py) and the PDFs of its reports (`pdfs/...`, named by the `pdf` of a report). The demo database
 (deploy/data/seed/synthetic_database.zip) is one. The same layout unpacked into a directory and a bare `database.json`
-without PDFs are read as well."""
+without PDFs are read as well. An update (new reports uploaded into a project) comes in the same layout, with `update.json`
+(see UpdateBundle in dto.py) instead of `database.json`."""
 
 import zipfile
 from pathlib import Path
@@ -79,3 +80,9 @@ class DatabaseArchive:
             for name, path in pdfs:
                 # PDFs are compressed already.
                 archive.write(path, name, compress_type=zipfile.ZIP_STORED)
+
+
+class UpdateArchive(DatabaseArchive):
+    """The new reports of an update with their PDFs (POST /projects): `update.json` and `pdfs/`, read like the archive
+    of a database (deploy/data/seed/examples/sample_reports.medidex-update.zip is one)."""
+    DOCUMENT = "update.json"

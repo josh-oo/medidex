@@ -2,6 +2,7 @@ import apiClient from "./apiClient";
 import { unwrap, logAndRethrow } from "./requests";
 import { AxiosRequestConfig } from "axios";
 import { getAccessToken } from "@/lib/client/keycloak";
+import { uploadFile } from "./databaseApi";
 import {
   GetProjectReportsParams,
   ReportIntakeDto,
@@ -14,6 +15,32 @@ import {
   StreamCallbacks,
   StreamEvent,
 } from "../../types/apiDTOs";
+
+// The bundle of an update: a .zip with update.json and the PDFs of its reports.
+export const isUpdateBundle = (file: File): boolean => file.name.toLowerCase().endsWith(".zip");
+
+// A new project (an update of a database) with the reports of a bibliography file (.ris, .nbib) or of the bundle of an
+// update. A bundle holds PDFs and may be larger than a proxy lets through in one request, so it is uploaded with tus
+// first and named by its upload.
+export const createProject = async (
+  file: File,
+  fields: { projectName: string; databaseId: number; options: Record<string, unknown> },
+): Promise<ProjectDto> => {
+  try {
+    const formData = new FormData();
+    formData.append("projectName", fields.projectName);
+    formData.append("databaseId", String(fields.databaseId));
+    formData.append("options", JSON.stringify(fields.options));
+    if (isUpdateBundle(file)) {
+      formData.append("uploadId", await uploadFile(file));
+    } else {
+      formData.append("file", file, file.name);
+    }
+    return unwrap(await apiClient.post<ProjectDto>("/projects", formData));
+  } catch (error) {
+    return logAndRethrow("Error creating project:")(error);
+  }
+};
 
 //get all projects
 export const getProjects = (config?: AxiosRequestConfig): Promise<ProjectDto[]> => {
