@@ -116,12 +116,12 @@ class MaintenanceService:
         for category, kind in self.TAG_POINT_KINDS.items():
             for tag in await self.aspect_repo.get_all_tags(category, []):
                 points[transform_to_uuid(tag.id, kind)] = (
-                    tag.description or "",
+                    tag.embedded_text,
                     {
                         "tree_ids": [category],
                         "source": "internal",
                         "source_id": str(tag.id),
-                        "display_name": tag.description,
+                        "display_name": tag.name,
                         "is_report": False,
                     },
                 )

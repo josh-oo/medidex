@@ -123,10 +123,10 @@ class StudyGraphs:
         for item in items:
             if isinstance(item, str):
                 found = (await self.db.execute(
-                    select(Tag.id).where(Tag.category == category, func.lower(Tag.description) == item.lower())
+                    select(Tag.id).where(Tag.category == category, func.lower(Tag.name) == item.lower())
                 )).scalar_one_or_none()
                 if found is None:
-                    tag = Tag(category=category, description=item)
+                    tag = Tag(category=category, name=item)
                     self.db.add(tag)
                     await self.db.flush()
                     found = tag.id
@@ -207,7 +207,7 @@ class StudyGraphs:
             names[category] = {}
             if ids:
                 rows = (await self.db.execute(
-                    select(Tag.id, Tag.description).where(Tag.category == category, Tag.id.in_(set(ids)))
+                    select(Tag.id, Tag.name).where(Tag.category == category, Tag.id.in_(set(ids)))
                 )).all()
                 names[category] = dict(rows)
         return names

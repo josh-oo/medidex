@@ -17,7 +17,7 @@ from ..models import Report, Study, StudyFields, Link, StudyTag, Tag as DbTag, U
 from .graphs import StudyGraphs
 
 from ...utils.postprocessing import normalize_author_names
-from ...utils.dto import StudyGraph, Tag, study_columns
+from ...utils.dto import DatabaseTag, StudyGraph, Tag, study_columns
 from ...utils.studyconfig import GRAPH_FIELD, STUDY_CONFIG
 from ...utils.tagconfig import TAG_CATEGORIES
 from ...utils.query_parser import AdvancedSearchField, AndGroup, Comparison, OrGroup, QueryNode
@@ -49,10 +49,14 @@ def _authors_text(model):
     """The authors of the reports (of `model`, Report or UpdateReport) as one text, to match a part of a name in."""
     return func.array_to_string(model.authors, " ")
 
+def _tag_matches(pattern: str):
+    """A tag whose name or acronym matches the pattern ("CBT" finds Cognitive Behavior Therapy)."""
+    return or_(DbTag.name.ilike(pattern), DbTag.acronym.ilike(pattern))
+
 def _tag_exists(category: str, pattern: str):
     return (
         select(1)
-        .where(StudyTag.study_id == Study.id, StudyTag.tag_id == DbTag.id, DbTag.category == category, DbTag.description.ilike(pattern))
+        .where(StudyTag.study_id == Study.id, StudyTag.tag_id == DbTag.id, DbTag.category == category, _tag_matches(pattern))
         .exists()
     )
 
@@ -232,6 +236,52 @@ class StudyRepository:
                 existing.add(tag_id)
         await self.db.flush()
 
+    async def import_tags(self, tags: Sequence[DatabaseTag]) -> None:
+        """Adds the vocabulary of an imported database. A tag of the same name in its category (ignoring case) is the same
+        tag: it gets the labels, synonyms and source names listed for it besides its own, and the acronym and parent if it
+        has none. A parent that is no tag yet becomes one."""
+        if not tags:
+            return
+        rows = (await self.db.execute(select(DbTag).where(DbTag.category.in_({tag.category for tag in tags})))).scalars().all()
+        known = {(row.category, row.name.lower()): row for row in rows}
+
+        def row_of(category: str, name: str) -> DbTag:
+            if (category, name.lower()) not in known:
+                known[(category, name.lower())] = DbTag(category=category, name=name)
+                self.db.add(known[(category, name.lower())])
+            return known[(category, name.lower())]
+
+        for tag in tags:
+            row = row_of(tag.category, tag.name)
+            row.acronym = row.acronym or tag.acronym
+            row.synonyms = list(dict.fromkeys([*row.synonyms, *tag.synonyms]))
+            row.labels = list(dict.fromkeys([*row.labels, *tag.labels]))
+            row.source_names = list(dict.fromkeys([*row.source_names, *tag.sourceNames]))
+        parents = [(row_of(tag.category, tag.name), row_of(tag.category, tag.parent)) for tag in tags if tag.parent]
+        await self.db.flush()
+        for row, parent in parents:
+            if row.parent_id is None and parent is not row:
+                row.parent_id = parent.id
+        await self.db.flush()
+
+    async def get_tag_vocabulary(self, study_ids: List[int]) -> List[DatabaseTag]:
+        """The tags of the studies and their parents, as an export lists them (see import_tags)."""
+        if not study_ids:
+            return []
+        used = select(StudyTag.tag_id).where(StudyTag.study_id.in_(study_ids))
+        found = {row.id: row for row in (await self.db.execute(select(DbTag).where(DbTag.id.in_(used)))).scalars()}
+        missing = {row.parent_id for row in found.values() if row.parent_id is not None} - set(found)
+        while missing:
+            found.update({row.id: row for row in (await self.db.execute(select(DbTag).where(DbTag.id.in_(missing)))).scalars()})
+            missing = {row.parent_id for row in found.values() if row.parent_id is not None} - set(found)
+        return [
+            DatabaseTag(
+                category=row.category, name=row.name, acronym=row.acronym, synonyms=row.synonyms, labels=row.labels,
+                parent=found[row.parent_id].name if row.parent_id in found else None, sourceNames=row.source_names,
+            )
+            for row in sorted(found.values(), key=lambda row: row.id)  # type: ignore[arg-type, return-value]
+        ]
+
     async def update_study_fields(self, study_id: int, values: Mapping[str, Any]) -> None:
         """Sets primitive fields of a study (keys of STUDY_CONFIG.fields, valued as StudyFields has them); a field derived
         from the graph is written into the graph."""
@@ -314,7 +364,7 @@ class StudyRepository:
                 .outerjoin(StudyTag, StudyTag.study_id == Study.id)
                 .outerjoin(DbTag, and_(DbTag.id == StudyTag.tag_id, DbTag.category.in_(searched)))
             )
-            matches.append(DbTag.description.ilike(pattern))
+            matches.append(_tag_matches(pattern))
         id_stmt = (
             id_stmt
             .where(or_(*matches))
@@ -547,7 +597,7 @@ class StudyRepository:
         tag_ids = self.graphs.tag_ids(study, category)
         if tag_ids:
             rows = (await self.db.execute(
-                select(DbTag.id, DbTag.description).where(DbTag.category == category, DbTag.id.in_(tag_ids)).order_by(DbTag.id)
+                select(DbTag.id, DbTag.name).where(DbTag.category == category, DbTag.id.in_(tag_ids)).order_by(DbTag.id)
             )).all()
             named = [Tag(id=str(tag_id), keyword=description) for tag_id, description in rows]
         return named + [Tag(id=name, keyword=name) for name in self.graphs.tag_names(study, category)]
@@ -556,7 +606,7 @@ class StudyRepository:
         if not study_ids:
             return {}
         stmt = (
-            select(StudyTag.study_id, DbTag.id, DbTag.description)
+            select(StudyTag.study_id, DbTag.id, DbTag.name)
             .join(DbTag, DbTag.id == StudyTag.tag_id)
             .where(StudyTag.study_id.in_(study_ids), DbTag.category == category)
             .order_by(DbTag.id)
@@ -573,7 +623,7 @@ class StudyRepository:
             tags = await self.get_study_tags_single(category, study_id)
             return tags[offset:offset + limit], len(tags) > offset + limit
         stmt = (
-            select(DbTag.id, DbTag.description)
+            select(DbTag.id, DbTag.name)
             .join(StudyTag, StudyTag.tag_id == DbTag.id)
             .where(StudyTag.study_id == study_id, DbTag.category == category)
             .order_by(DbTag.id)
