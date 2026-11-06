@@ -6,7 +6,7 @@ a deployable checks (src/utils/graphchecks.py) is not stored."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from sqlmodel import delete, func, select
 
@@ -26,6 +26,8 @@ class StudyGraphs:
         self.stored = StoredGraph(self.config)
         self.checks = checks
         self.derived = DerivedFields()
+        # The ids of the tags by category and name (lower case), once remember_tags loaded them.
+        self._tags: Optional[Dict[Tuple[str, str], int]] = None
 
     def _category(self, kind: str) -> Optional[str]:
         value = self.config.entities[kind].value
@@ -114,6 +116,12 @@ class StudyGraphs:
                 node.value = names[category].get(node.value, node.value)
         return document
 
+    async def remember_tags(self) -> None:
+        """Loads every tag at once, so that resolve finds a name without a query each (an import names thousands); the
+        tags resolve makes from then on are remembered too. A name it does not know is still looked up."""
+        rows = await self.db.execute(select(Tag.id, Tag.category, Tag.name))
+        self._tags = {(category, name.lower()): tag_id for tag_id, category, name in rows}
+
     async def resolve(self, category: str, items: List[Item]) -> List[int]:
         """The ids of tags of a category given by id or name. A name is matched to an existing tag (ignoring
         case); an unknown one becomes a new tag."""
@@ -122,14 +130,18 @@ class StudyGraphs:
         ids: List[int] = []
         for item in items:
             if isinstance(item, str):
-                found = (await self.db.execute(
-                    select(Tag.id).where(Tag.category == category, func.lower(Tag.name) == item.lower())
-                )).scalar_one_or_none()
+                found = self._tags.get((category, item.lower())) if self._tags is not None else None
+                if found is None:
+                    found = (await self.db.execute(
+                        select(Tag.id).where(Tag.category == category, func.lower(Tag.name) == item.lower())
+                    )).scalar_one_or_none()
                 if found is None:
                     tag = Tag(category=category, name=item)
                     self.db.add(tag)
                     await self.db.flush()
                     found = tag.id
+                if self._tags is not None:
+                    self._tags[(category, item.lower())] = found
                 item = found
             if item not in ids:
                 ids.append(item)

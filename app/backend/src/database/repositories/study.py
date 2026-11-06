@@ -18,6 +18,7 @@ from .graphs import StudyGraphs
 
 from ...utils.postprocessing import normalize_author_names
 from ...utils.dto import DatabaseTag, StudyGraph, Tag, study_columns
+from ...utils.graph import GraphDocument
 from ...utils.studyconfig import GRAPH_FIELD, STUDY_CONFIG
 from ...utils.tagconfig import TAG_CATEGORIES
 from ...utils.query_parser import AdvancedSearchField, AndGroup, Comparison, OrGroup, QueryNode
@@ -185,11 +186,28 @@ class StudyRepository:
             if references(table, "study_id", Study.__tablename__) and references(table, "update_study_id", UpdateStudy.__tablename__)
         ]
 
-    async def import_study(self, values: Mapping[str, Any], database_id: int, created_at: Optional[datetime] = None) -> Study:
-        """Adds a study of an imported database to the core database from its fields (see add_study), entered when the
-        database it comes from says (now without)."""
+    async def import_study(self, values: Mapping[str, Any], tags: Mapping[str, List[str]], database_id: int, created_at: Optional[datetime] = None) -> Study:
+        """Adds a study of an imported database to the core database from its fields (see add_study) and its tags by
+        category (e.g. interventions), by name; an unknown name becomes a new tag (see StudyGraphs.resolve). It is
+        entered when the database it comes from says (now without). The tags of a category the study holds in its graph
+        itself (its countries, see GraphConfig.study_relation) are added to its graph before it is stored, so that the
+        graph is stored and checked once."""
+        relations = {category: STUDY_CONFIG.graph.study_relation(category) for category in tags}
+        held = {category: names for category, names in tags.items() if relations[category] is not None}
+        if held:
+            document = self.graphs.stored.loads(values.get(GRAPH_FIELD)) or GraphDocument()
+            for category, names in held.items():
+                self.graphs.stored.add_study_values(document, relations[category], names)  # type: ignore[arg-type]
+            values = {**values, GRAPH_FIELD: self.graphs.stored.dumps(document)}
         new_study = await self._insert(values, database_id, created_at)
-        await self.db.refresh(new_study)
+        others = {category: names for category, names in tags.items() if category not in held and names}
+        if others:
+            existing = set((await self.db.execute(select(StudyTag.tag_id).where(StudyTag.study_id == new_study.id))).scalars())
+            for category, names in others.items():
+                for tag_id in await self.graphs.resolve(category, names):
+                    if tag_id not in existing:
+                        self.db.add(StudyTag(study_id=new_study.id, tag_id=tag_id))
+                        existing.add(tag_id)
         return new_study
 
     async def _insert(self, values: Mapping[str, Any], database_id: int, created_at: Optional[datetime] = None) -> Study:
@@ -218,30 +236,16 @@ class StudyRepository:
             raise DuplicateShortNameError("short_name already exists") from error
         raise error
 
-    async def add_study_tags(self, study_id: int, category: str, names: List[str]) -> None:
-        """Makes tags of a category (e.g. interventions) tags of the study, by name; an unknown name becomes a new tag
-        (see StudyGraphs.resolve). The tags of a category the study holds in its graph itself (its countries, see
-        GraphConfig.study_relation) are added to its graph."""
-        relation = STUDY_CONFIG.graph.study_relation(category)
-        if relation is not None:
-            study = await self.db.get(Study, study_id)
-            if study is None:
-                raise ValueError(f"Study {study_id} not found")
-            await self.graphs.add_study_values(study, relation, names)
-            return
-        existing = set((await self.db.execute(select(StudyTag.tag_id).where(StudyTag.study_id == study_id))).scalars())
-        for tag_id in await self.graphs.resolve(category, names):
-            if tag_id not in existing:
-                self.db.add(StudyTag(study_id=study_id, tag_id=tag_id))
-                existing.add(tag_id)
-        await self.db.flush()
-
     async def import_tags(self, tags: Sequence[DatabaseTag]) -> None:
         """Adds the vocabulary of an imported database. A tag of the same name in its category (ignoring case) is the same
         tag: it gets the labels, synonyms and source names listed for it besides its own, and the acronym and parent if it
-        has none. A parent that is no tag yet becomes one."""
-        if not tags:
-            return
+        has none. A parent that is no tag yet becomes one. The studies imported next find their tags in it without a
+        query each (see StudyGraphs.remember_tags)."""
+        if tags:
+            await self._merge_tags(tags)
+        await self.graphs.remember_tags()
+
+    async def _merge_tags(self, tags: Sequence[DatabaseTag]) -> None:
         rows = (await self.db.execute(select(DbTag).where(DbTag.category.in_({tag.category for tag in tags})))).scalars().all()
         known = {(row.category, row.name.lower()): row for row in rows}
 

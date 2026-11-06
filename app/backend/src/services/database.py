@@ -153,9 +153,7 @@ class StudyDatabaseService:
             await self.study_repo.import_tags(document.tags)
             progress = await self.status_service.progress(database_id, DatabaseStage.importing, "studies", len(studies)).start()
             for study, values in zip(document.studies, studies):
-                new_study = await self.study_repo.import_study(values, database_id, self._utc(study.createdAt))
-                for category, names in study.tags.items():
-                    await self.study_repo.add_study_tags(new_study.id, category, names)
+                new_study = await self.study_repo.import_study(values, study.tags, database_id, self._utc(study.createdAt))
                 for report in study.reports:
                     study_ids = reports[self._report_key(report)][1]
                     # A study lists a report once, however many of its entries are that report.
