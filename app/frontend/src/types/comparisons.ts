@@ -1,10 +1,11 @@
 import type { DurationUnit } from "@/types/apiDTOs";
 
-// An arm of the study being added: the interventions it gives, and its dosage and duration (all optional but
-// the interventions).
+// An arm of the study being added: the interventions it gives, and its features, dosage and duration (all optional but
+// the interventions). The features are one text, comma-separated ("group, nurse-led").
 export type ArmDraft = {
   interventions: string[];
   participants: string;
+  features: string;
   dosage: string;
   frequency: string;
   route: string;

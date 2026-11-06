@@ -519,6 +519,7 @@ export interface ArmSuggestion {
   interventions: string[];
   role?: "intervention" | "control";
   participants?: number;
+  features?: string[];
   dosage?: string;
   frequency?: string;
   route?: string;

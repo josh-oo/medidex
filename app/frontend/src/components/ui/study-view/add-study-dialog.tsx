@@ -449,7 +449,7 @@ export function AddStudyDialog({
       Boolean(trimmedQuery) &&
       !suggestedSet.has(normalizedQuery) &&
       !allInterventions.some((item) => item.toLowerCase() === normalizedQuery);
-    const detail = (key: "participants" | "dosage" | "frequency" | "route", label: string, placeholder: string) => (
+    const detail = (key: "participants" | "features" | "dosage" | "frequency" | "route", label: string, placeholder: string) => (
       <Input
         aria-label={`${label} of arm ${letter}`}
         placeholder={placeholder}
@@ -608,8 +608,9 @@ export function AddStudyDialog({
             </Button>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-1.5 pl-10 sm:grid-cols-[1fr_1fr_1fr_1fr_0.8fr_0.9fr]">
+        <div className="grid grid-cols-2 gap-1.5 pl-10 sm:grid-cols-[1fr_1fr_1fr_1fr_1fr_0.8fr_0.9fr]">
           {detail("participants", "Participants", "Participants")}
+          {detail("features", "Features", "Features (group, ...)")}
           {detail("dosage", "Dosage", "Dosage")}
           {detail("frequency", "Frequency", "Frequency")}
           {detail("route", "Route", "Route")}

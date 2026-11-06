@@ -121,6 +121,12 @@ slots:
     description: Whether the arm gets the evaluated intervention, is a control, or is something else.
     range: Role
     annotations: {icon: flag, color: slate, line: "false"}
+  has_feature:
+    title: Features
+    description: How the arm gets its interventions where dosage, frequency, route and duration do not say it (group, individual, brief, nurse-led, computerised), one value per feature.
+    range: Feature
+    multivalued: true
+    annotations: {icon: tag, color: emerald}
   has_dosage:
     title: Dosage
     range: Dosage
@@ -320,7 +326,7 @@ classes:
     title: Arm
     description: An intervention as it is delivered to a group of participants. The control arm of a study is an arm too.
     annotations: {icon: pill, color: emerald}
-    slots: [compared_with, participated, receives, has_role, has_dosage, has_frequency, has_route, has_duration]
+    slots: [compared_with, participated, receives, has_role, has_feature, has_dosage, has_frequency, has_route, has_duration]
   Population:
     title: Population
     description: A group of participants, of the whole study or of an arm.
@@ -372,6 +378,11 @@ classes:
     slots: [value]
     slot_usage:
       value: {range: ArmRole}
+  Feature:
+    title: Feature
+    description: A way an intervention is delivered that no dosage, frequency, route or duration says, e.g. group or nurse-led.
+    annotations: {icon: tag, color: emerald}
+    slots: [value]
   Dosage:
     title: Dosage
     description: The dose of an intervention per administration, e.g. 10 mg.

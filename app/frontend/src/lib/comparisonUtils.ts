@@ -8,6 +8,7 @@ const cleaned = (items?: string[]) => (items ?? []).map((value) => value.trim())
 export const createArmDraft = (overrides?: Partial<ArmDraft>): ArmDraft => ({
   interventions: cleaned(overrides?.interventions),
   participants: overrides?.participants ?? "",
+  features: overrides?.features ?? "",
   dosage: overrides?.dosage ?? "",
   frequency: overrides?.frequency ?? "",
   route: overrides?.route ?? "",
@@ -25,6 +26,7 @@ export const armFromSuggestion = (arm: ArmSuggestion): StudyArm =>
   createStudyArm(arm.role ?? "intervention", {
     interventions: arm.interventions,
     participants: arm.participants ? String(arm.participants) : "",
+    features: (arm.features ?? []).join(", "),
     dosage: arm.dosage,
     frequency: arm.frequency,
     route: arm.route,
@@ -123,6 +125,7 @@ export function suggestionFromGraph(graph: StudyGraphDto, shortName: string): Ne
       interventions: all(graph, "receives", arm.id),
       role: first(graph, "has_role", arm.id) === "control" ? "control" : "intervention",
       participants: participantsOf(arm.id),
+      features: all(graph, "has_feature", arm.id),
       dosage: first(graph, "has_dosage", arm.id),
       frequency: first(graph, "has_frequency", arm.id),
       route: first(graph, "has_route", arm.id),
@@ -137,8 +140,8 @@ export function suggestionFromGraph(graph: StudyGraphDto, shortName: string): Ne
 
 // The arms and their comparisons as the graph of a study (JSON, see `graph` of the study schema), written onto `base` (the
 // graph the form was prefilled from, whose other parts it keeps): an entity for every arm in a comparison and a comparison
-// edge per pair. What an arm says about itself is edges to value entities (its interventions, role, dosage, frequency,
-// route and duration), one entity per distinct value however many arms have it, and the participants of an arm are a
+// edge per pair. What an arm says about itself is edges to value entities (its interventions, role, features, dosage,
+// frequency, route and duration), one entity per distinct value however many arms have it, and the participants of an arm are a
 // population entity that took part in it. Comparisons with an arm without interventions are left out; null if none is
 // left. The countries of the study are edges from the study itself. A duration of the study holds for every arm that has
 // none of its own (the study derives its duration from its arms), and its participants are the size of its population.
@@ -175,6 +178,7 @@ export function buildGraph(
   const attributes = (arm: StudyArm): [string, string, string][] => [
     ...cleaned(arm.interventions).map((value): [string, string, string] => ["receives", "intervention", value]),
     ["has_role", "role", arm.role],
+    ...cleaned(arm.features.split(",")).map((value): [string, string, string] => ["has_feature", "feature", value]),
     ...(["dosage", "frequency", "route"] as const).flatMap((key): [string, string, string][] => (arm[key].trim() ? [[`has_${key}`, key, arm[key].trim()]] : [])),
     ...((armDuration(arm) || studyDuration) ? ([["has_duration", "duration", armDuration(arm) || studyDuration!]] as [string, string, string][]) : []),
   ];
