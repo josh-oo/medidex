@@ -20,7 +20,9 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -311,7 +313,7 @@ export function ProjectRow({
             onClick={() => setIsAssignOpen(true)}
             disabled={finished}
             aria-label={resolvedAssignees.length > 0 ? `Assigned: ${assigneeNames}. Change` : "Assign people"}
-            className="flex h-11 items-center rounded-full px-1.5 transition-colors enabled:hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            className="flex h-11 min-w-11 items-center justify-center rounded-full px-0.5 transition-colors enabled:hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
             {resolvedAssignees.length > 0 ? (
               <span className="flex -space-x-1">
@@ -336,7 +338,7 @@ export function ProjectRow({
             ) : (
               <span className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground">
                 <UserPlus className="h-4 w-4" aria-hidden />
-                Assign
+                <span className="hidden sm:inline">Assign</span>
               </span>
             )}
           </button>
@@ -364,7 +366,24 @@ export function ProjectRow({
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuContent align="end" className="w-48 max-md:w-60">
+          {/* On a narrow screen the row leaves the assignees out; they are listed here. */}
+          <DropdownMenuGroup className="md:hidden">
+            <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Assignees</DropdownMenuLabel>
+            {resolvedAssignees.length > 0 ? (
+              resolvedAssignees.map(({ userId: id, name, completedReports, committed }) => (
+                <div key={id} className="flex items-center justify-between gap-3 px-2 py-1 text-sm">
+                  <span className="truncate">{name}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                    {committed ? "committed" : `${completedReports} / ${project.numberReportsTotal}`}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="px-2 py-1 text-sm text-muted-foreground">Nobody is assigned yet</p>
+            )}
+            <DropdownMenuSeparator />
+          </DropdownMenuGroup>
           <DropdownMenuItem onSelect={() => setIsAssignOpen(true)}>
             <UserPlus className="h-4 w-4" />
             Assign people…

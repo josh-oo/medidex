@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 import { BookOpen, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { matchValues, useTagCatalogs } from "@/hooks/use-tag-catalog";
 import { searchStudies } from "@/lib/api/studiesApi";
 import { colorClasses } from "@/lib/colors";
@@ -64,6 +65,8 @@ export function StudySearchBar({
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
   const hero = size === "hero";
+  // On a phone the bar is too narrow for the long hint.
+  const wide = useMediaQuery("(min-width: 640px)");
 
   // The vocabulary is loaded the first time the field is used.
   const catalogs = useTagCatalogs(focused, databases);
@@ -177,7 +180,7 @@ export function StudySearchBar({
           }}
           onBlur={() => setOpen(false)}
           onKeyDown={handleKeyDown}
-          placeholder="Search by intervention, condition, trial ID, author…"
+          placeholder={wide ? "Search by intervention, condition, trial ID, author…" : "Search studies…"}
           className={cn(
             "min-w-0 flex-1 bg-transparent text-[15px] outline-none transition-[height] duration-500 placeholder:text-muted-foreground",
             hero ? "h-10" : "h-8"
