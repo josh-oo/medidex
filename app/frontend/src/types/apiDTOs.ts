@@ -405,14 +405,17 @@ export interface EligibilityCriterion {
   text: string;
 }
 
-// A category of the eligibility criteria (config/eligibility.yaml of the backend).
+// A category of the eligibility criteria: an element of PICO (or the study) as a whole, or a relation of the study
+// ontology (config/medidex-study.yaml of the backend) in it.
 export interface EligibilityCategoryDto {
   key: string;
-  label: string;
+  // The labels from the element to what the criterion is about: ["Population"], ["Population", "Conditions"].
+  path: string[];
   description: string;
+  color: StudyColor;
 }
 
-// GET /eligibility-schema: the categories in their order.
+// GET /eligibility-schema: the categories in their order, an element of PICO followed by its relations.
 export interface EligibilitySchemaDto {
   categories: EligibilityCategoryDto[];
 }

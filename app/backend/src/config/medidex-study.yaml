@@ -40,6 +40,11 @@
 #   unordered            Relations: two studies match whichever end is which (A vs B matches B vs A). Not an OWL symmetric
 #                        property: the direction says something (the evaluated arm is compared with its comparator).
 #   seconds              Duration units: the length of the unit.
+#   criterion            Relations: an eligibility criterion of a study database can be about it, in this element of
+#                        PICO (population | intervention | outcome) or of the study (study). These are the categories of
+#                        the criteria (src/utils/eligibility.py, GET /eligibility-schema): every element a tree of its
+#                        relations, a criterion about the element as a whole or about one relation of it.
+#   criterion_label      Relations: their name in that tree, if not their title (the interventions of an arm: Treatment).
 #
 # The shape of a graph (checked by src/utils/graph.py when it is read): the kinds and relations of the ontology,
 # `multivalued` and the range (enums included). An entity without a value of its own says nothing and is dropped. Rules
@@ -102,14 +107,14 @@ slots:
     title: Participants
     description: The population that took part in the study as a whole, or in one of its arms.
     range: Population
-    annotations: {icon: users, color: sky, separator: ": "}
+    annotations: {icon: users, color: blue, separator: ": "}
   receives:
     title: Interventions
     description: What an arm receives. A combination is several interventions of the same arm.
     range: Intervention
     multivalued: true
     required: true
-    annotations: {icon: syringe, color: emerald}
+    annotations: {icon: syringe, color: emerald, criterion: intervention, criterion_label: Treatment}
   has_intervention:
     title: Interventions without an arm
     description: An intervention the study gives that the report assigns to no arm (e.g. a registry record that only lists them).
@@ -130,41 +135,41 @@ slots:
   has_dosage:
     title: Dosage
     range: Dosage
-    annotations: {icon: pill, color: emerald}
+    annotations: {icon: pill, color: emerald, criterion: intervention}
   has_frequency:
     title: Frequency
     range: Frequency
-    annotations: {icon: timer, color: emerald}
+    annotations: {icon: timer, color: emerald, criterion: intervention}
   has_route:
     title: Route
     range: Route
-    annotations: {icon: syringe, color: emerald}
+    annotations: {icon: syringe, color: emerald, criterion: intervention}
   has_duration:
     title: Duration
     description: How long the arm gets the intervention.
     range: Duration
-    annotations: {icon: clock, color: emerald}
+    annotations: {icon: clock, color: emerald, criterion: intervention}
   has_size:
     title: Participants
     description: The number of participants (enrolled, analysed or, for a study not yet carried out, planned).
     range: Size
-    annotations: {icon: users, color: sky}
+    annotations: {icon: users, color: blue, criterion: population}
   has_sex:
     title: Sex
     description: Each sex of the participants, one value per sex.
     range: Sex
     multivalued: true
-    annotations: {icon: user, color: sky}
+    annotations: {icon: user, color: blue, criterion: population}
   has_age:
     title: Age
     range: Age
-    annotations: {icon: baby, color: sky}
+    annotations: {icon: baby, color: blue, criterion: population}
   has_condition:
     title: Conditions
     description: A health condition the participants have.
     range: Condition
     multivalued: true
-    annotations: {icon: stethoscope, color: blue}
+    annotations: {icon: stethoscope, color: blue, criterion: population}
   has_outcome:
     title: Outcomes
     description: An outcome (endpoint) of the study, whatever its role.
@@ -190,25 +195,25 @@ slots:
     description: What an outcome measures.
     range: Measure
     required: true
-    annotations: {icon: target, color: rose}
+    annotations: {icon: target, color: rose, criterion: outcome}
   has_time_point:
     title: Time points
     description: When an outcome is measured, e.g. at 12 weeks; one value per time point.
     range: TimePoint
     multivalued: true
-    annotations: {icon: clock, color: rose}
+    annotations: {icon: clock, color: rose, criterion: outcome}
   in_country:
     title: Countries
     description: A country where the study takes place, one value per country.
     range: Country
     multivalued: true
-    annotations: {icon: map-pin, color: amber}
+    annotations: {icon: map-pin, color: amber, criterion: study}
   has_design:
     title: Design
     description: A property of the design of the study ("randomised controlled trial", "double-blind"), one value per property.
     range: Design
     multivalued: true
-    annotations: {icon: activity, color: teal}
+    annotations: {icon: activity, color: amber, criterion: study}
   has_trial_id:
     title: Trial ID
     description: A registration id of the study (NCT..., ISRCTN..., DRKS...).
@@ -312,14 +317,14 @@ classes:
         slot_uri: mdx:has_participant_group
         range: ParticipantGroup
         multivalued: true
-        annotations: {icon: users, color: sky, search_field: participant, detail_of: number_participants}
+        annotations: {icon: users, color: blue, search_field: participant, detail_of: number_participants}
       design:
         title: Study Design
         description: "Design of a study (e.g. 'Randomized Controlled Trial', 'Controlled Clinical Trial')"
         slot_uri: mdx:has_design
         range: Design
         multivalued: true
-        annotations: {icon: activity, color: teal, search_field: design}
+        annotations: {icon: activity, color: amber, search_field: design}
       countries:
         title: Countries
         description: Countries where a study takes place
@@ -337,7 +342,7 @@ classes:
   Population:
     title: Population
     description: A group of participants, of the whole study or of an arm.
-    annotations: {icon: users, color: sky}
+    annotations: {icon: users, color: blue}
     slots: [has_size, has_sex, has_age, has_condition]
   Outcome:
     title: Outcome
@@ -364,12 +369,12 @@ classes:
   ParticipantGroup:
     title: Participant group
     description: An attribute of the participants (e.g. Adult, Child), as a term of the vocabulary.
-    annotations: {icon: users, color: sky}
+    annotations: {icon: users, color: blue}
     slots: [concept]
   Design:
     title: Study design
     description: The design of a study, as a term of the vocabulary.
-    annotations: {icon: activity, color: teal}
+    annotations: {icon: activity, color: amber}
     slots: [concept]
   Country:
     title: Country
@@ -415,21 +420,21 @@ classes:
   Size:
     title: Participants
     description: The number of participants of a population.
-    annotations: {icon: users, color: sky}
+    annotations: {icon: users, color: blue}
     slots: [value]
     slot_usage:
       value: {range: integer}
   Sex:
     title: Sex
     description: A sex of the participants of a population.
-    annotations: {icon: user, color: sky}
+    annotations: {icon: user, color: blue}
     slots: [value]
     slot_usage:
       value: {range: SexValue}
   Age:
     title: Age
     description: The age of a population, e.g. 18-65 years.
-    annotations: {icon: baby, color: sky}
+    annotations: {icon: baby, color: blue}
     slots: [value]
   TrialId:
     title: Trial ID

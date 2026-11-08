@@ -1,11 +1,13 @@
-import { Plus, X } from "lucide-react";
+import { Ban, Check, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useEligibilityCategories } from "@/hooks/use-eligibility-schema";
+import { colorClasses } from "@/lib/colors";
 import { cn } from "@/lib/utils";
-import type { EligibilityCriterion } from "@/types/apiDTOs";
+import type { EligibilityCategoryDto, EligibilityCriterion } from "@/types/apiDTOs";
 
 const KIND_LABELS: Record<EligibilityCriterion["kind"], string> = { include: "Include", exclude: "Exclude" };
+const KIND_ICONS: Record<EligibilityCriterion["kind"], typeof Check> = { include: Check, exclude: Ban };
 const KIND_CLASSES: Record<EligibilityCriterion["kind"], string> = {
   include: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300",
   exclude: "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300",
@@ -29,7 +31,56 @@ export function trimCriteria(criteria: EligibilityCriterion[]): EligibilityCrite
   return criteria.map((criterion) => ({ ...criterion, text: criterion.text.trim() }));
 }
 
-/** The criteria of a database to edit: one row each (include or exclude, its category, its text), one "Add criterion". */
+/** The categories by their element of PICO (or the study), in their order: the element first, then its relations. */
+function groupsOf(categories: EligibilityCategoryDto[]): [string, EligibilityCategoryDto[]][] {
+  const groups = new Map<string, EligibilityCategoryDto[]>();
+  for (const category of categories) groups.set(category.path[0], [...(groups.get(category.path[0]) ?? []), category]);
+  return [...groups];
+}
+
+/** The path of a category in the ontology ("Population → Conditions"), what it is about in its color. */
+function CategoryPath({ category, fallback }: { category: EligibilityCategoryDto | undefined; fallback: string }) {
+  if (!category) return <span>{fallback}</span>;
+  return (
+    <span className="truncate">
+      {category.path.map((part, index) => (
+        <span key={index} className={cn(index === category.path.length - 1 && colorClasses(category.color).accent)}>
+          {index > 0 && <span className="px-1 text-muted-foreground/70">→</span>}
+          {part}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** Whether a criterion includes or excludes, as a square; a button that switches it while it is edited. */
+function KindBadge({ kind, onToggle, label }: { kind: EligibilityCriterion["kind"]; onToggle?: () => void; label?: string }) {
+  const Icon = KIND_ICONS[kind];
+  const className = cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-md border", KIND_CLASSES[kind]);
+  if (!onToggle) {
+    return (
+      <span title={KIND_LABELS[kind]} className={className}>
+        <Icon className="h-3.5 w-3.5" />
+        <span className="sr-only">{KIND_LABELS[kind]}</span>
+      </span>
+    );
+  }
+  const other = kind === "include" ? "exclude" : "include";
+  return (
+    <button
+      type="button"
+      aria-label={`${label}: ${KIND_LABELS[kind]}, switch to ${KIND_LABELS[other].toLowerCase()}`}
+      title={`${KIND_LABELS[kind]} (click to ${KIND_LABELS[other].toLowerCase()})`}
+      onClick={onToggle}
+      className={cn(className, "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+    >
+      <Icon className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
+/** The criteria of a database to edit: one row each (whether it includes or excludes; what it is about, as its path from
+ * its element of PICO, above its text), one "Add criterion". */
 export function EligibilityCriteriaEditor({
   criteria,
   onChange,
@@ -38,62 +89,74 @@ export function EligibilityCriteriaEditor({
   onChange: (criteria: EligibilityCriterion[]) => void;
 }) {
   const categories = useEligibilityCategories();
+  const groups = groupsOf(categories);
   const update = (id: string, change: Partial<EligibilityCriterion>) =>
     onChange(criteria.map((criterion) => (criterion.id === id ? { ...criterion, ...change } : criterion)));
-  const fallback = categories.at(-1)?.key ?? "other";
+  // A new criterion is about what the last one is about, until another is chosen.
+  const fallback = criteria.at(-1)?.category ?? categories[0]?.key ?? "population";
 
   return (
     <div className="rounded-lg border">
-      {criteria.map((criterion, index) => (
-        <div key={criterion.id} className={cn("flex items-start gap-1.5 px-2 py-1.5", index > 0 && "border-t")}>
-          <Select value={criterion.kind} onValueChange={(kind) => update(criterion.id, { kind: kind as EligibilityCriterion["kind"] })}>
-            <SelectTrigger
-              size="sm"
-              aria-label={`Criterion ${index + 1}: include or exclude`}
-              className={cn("h-7 w-[5.5rem] shrink-0 gap-1 px-2 text-xs font-medium shadow-none", KIND_CLASSES[criterion.kind])}
+      {criteria.map((criterion, index) => {
+        const category = categories.find((candidate) => candidate.key === criterion.category);
+        return (
+          <div key={criterion.id} className={cn("flex items-start gap-2 px-2 py-2", index > 0 && "border-t")}>
+            <KindBadge
+              kind={criterion.kind}
+              label={`Criterion ${index + 1}`}
+              onToggle={() => update(criterion.id, { kind: criterion.kind === "include" ? "exclude" : "include" })}
+            />
+            <div className="min-w-0 flex-1">
+              <Select value={criterion.category} onValueChange={(key) => update(criterion.id, { category: key })}>
+                <SelectTrigger
+                  size="sm"
+                  aria-label={`Criterion ${index + 1}: what it is about`}
+                  title={category?.description}
+                  className="h-5 max-w-full gap-1 border-0 bg-transparent px-1 py-0 text-xs font-medium shadow-none hover:bg-muted data-[size=sm]:h-5 dark:bg-transparent [&_svg]:size-3"
+                >
+                  <SelectValue>
+                    <CategoryPath category={category} fallback={criterion.category} />
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {groups.map(([element, members]) => (
+                    <SelectGroup key={element}>
+                      {members.map((member) => (
+                        <SelectItem
+                          key={member.key}
+                          value={member.key}
+                          title={member.description}
+                          className={cn(member.path.length === 1 ? "font-medium" : "pl-6")}
+                        >
+                          {member.path.at(-1)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+              <textarea
+                aria-label={`Criterion ${index + 1}`}
+                value={criterion.text}
+                onChange={(event) => update(criterion.id, { text: event.target.value })}
+                placeholder="Criterion"
+                rows={1}
+                className="field-sizing-content block min-h-6 w-full resize-none bg-transparent px-1 text-sm leading-snug outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0 text-muted-foreground"
+              aria-label={`Remove criterion ${index + 1}`}
+              onClick={() => onChange(criteria.filter((candidate) => candidate.id !== criterion.id))}
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(["include", "exclude"] as const).map((kind) => (
-                <SelectItem key={kind} value={kind}>
-                  {KIND_LABELS[kind]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={criterion.category} onValueChange={(category) => update(criterion.id, { category })}>
-            <SelectTrigger size="sm" aria-label={`Criterion ${index + 1}: category`} className="h-7 w-[7.5rem] shrink-0 gap-1 px-2 text-xs shadow-none">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {categories.map((category) => (
-                <SelectItem key={category.key} value={category.key} title={category.description}>
-                  {category.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <textarea
-            aria-label={`Criterion ${index + 1}`}
-            value={criterion.text}
-            onChange={(event) => update(criterion.id, { text: event.target.value })}
-            placeholder="Criterion"
-            rows={1}
-            className="field-sizing-content min-h-7 min-w-0 flex-1 resize-none bg-transparent px-1 py-1 text-sm leading-snug outline-none placeholder:text-muted-foreground"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0 text-muted-foreground"
-            aria-label={`Remove criterion ${index + 1}`}
-            onClick={() => onChange(criteria.filter((other) => other.id !== criterion.id))}
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      ))}
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        );
+      })}
       <button
         type="button"
         onClick={() => onChange([...criteria, newCriterion(criteria, fallback)])}
@@ -109,22 +172,26 @@ export function EligibilityCriteriaEditor({
   );
 }
 
-/** The criteria of a database to read: one line each, with whether it includes or excludes and its category. */
+/** The criteria of a database to read: one line each, with whether it includes or excludes and what it is about. */
 export function EligibilityCriteriaList({ criteria }: { criteria: EligibilityCriterion[] }) {
   const categories = useEligibilityCategories();
-  const label = (key: string) => categories.find((category) => category.key === key)?.label ?? key;
 
   return (
     <ul className="divide-y rounded-xl border">
-      {criteria.map((criterion) => (
-        <li key={criterion.id} className="flex items-start gap-2 px-3 py-2 text-sm">
-          <span className={cn("mt-0.5 w-16 shrink-0 rounded border px-1.5 text-center text-xs font-medium leading-5", KIND_CLASSES[criterion.kind])}>
-            {KIND_LABELS[criterion.kind]}
-          </span>
-          <span className="mt-0.5 w-20 shrink-0 text-xs leading-5 text-muted-foreground">{label(criterion.category)}</span>
-          <span className="min-w-0 whitespace-pre-line">{criterion.text}</span>
-        </li>
-      ))}
+      {criteria.map((criterion) => {
+        const category = categories.find((candidate) => candidate.key === criterion.category);
+        return (
+          <li key={criterion.id} className="flex items-start gap-2 px-3 py-2 text-sm">
+            <KindBadge kind={criterion.kind} />
+            <div className="min-w-0">
+              <div className="flex text-xs font-medium leading-5" title={category?.description}>
+                <CategoryPath category={category} fallback={criterion.category} />
+              </div>
+              <p className="whitespace-pre-line">{criterion.text}</p>
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 }

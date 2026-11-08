@@ -127,6 +127,9 @@ class GraphRelationConfig(BaseModel):
     line: bool = True  # an attribute is part of its source when that is shown as a line ("A + B (10 mg, 5 weeks)")
     separator: str = " · "  # between source and target when the edge is shown as a line ("A vs B")
     card: bool = False  # also shown as a line on the study cards
+    # The element of PICO (or `study`) an eligibility criterion of a database about it is in (src/utils/eligibility.py).
+    criterion: Optional[str] = None
+    criterion_label: Optional[str] = None  # its name there, if not `label`
     # The relation this one specialises (`is_a` of the ontology): an edge of a primary outcome is an edge of an outcome too.
     parent: Optional[str] = None
 
@@ -434,6 +437,8 @@ class StudyOntology:
                 "line": self._flag(notes.get("line", True)),
                 "separator": notes.get("separator", " · "),
                 "card": self._flag(notes.get("card")),
+                "criterion": notes.get("criterion"),
+                "criterion_label": notes.get("criterion_label"),
                 "parent": slot.is_a,
             }
         used = {self.root} | {

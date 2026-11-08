@@ -45,8 +45,9 @@ or imported from the export of another deployment.
 
 # Study databases
 A study database is a register of studies of its own (e.g. that of one review group), with a name, a description and
-eligibility criteria: what a study needs to belong in it, by category (population, design, ...; the categories are set
-in `app/backend/src/config/eligibility.yaml`). New reports are uploaded into a *project* of one database, numbered as
+eligibility criteria: what a study needs to belong in it, each about an element of PICO or the study as a whole (the
+population) or a part of it (the conditions of the population, the route of the intervention, the design of the study;
+the parts are the relations annotated `criterion` in `app/backend/src/config/medidex-study.yaml`). New reports are uploaded into a *project* of one database, numbered as
 its updates ("Update 7"); they are matched against and linked to the studies of that database only. A database takes
 one open update at a time.
 

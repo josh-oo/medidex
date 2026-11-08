@@ -419,10 +419,13 @@ class DatabaseUpdate(BaseModel):
     eligibilityCriteria: Optional[List[EligibilityCriterion]] = Field(default=None, min_length=1)
 
 class EligibilityCategory(BaseModel):
-    """A category of the eligibility criteria (config/eligibility.yaml), an entry of GET /eligibility-schema."""
+    """A category of the eligibility criteria, an entry of GET /eligibility-schema: an element of PICO (or the study) as a
+    whole, or a relation of the study ontology (config/medidex-study.yaml) in it (annotation `criterion`)."""
     key: str
-    label: str
+    # The labels from the element to what the criterion is about: ["Population"], ["Population", "Conditions"].
+    path: List[str]
     description: str
+    color: str
 
 class EligibilitySchema(BaseModel):
     categories: List[EligibilityCategory]

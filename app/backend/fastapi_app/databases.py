@@ -38,11 +38,11 @@ async def get_databases(ctx: RequestContext = Depends(get_context)) -> List[Data
 @router.get(
     "/eligibility-schema",
     dependencies=[Depends(is_verified_api_call)],
-    summary="The categories of the eligibility criteria of the study databases, in their order, as configured in config/eligibility.yaml.",
+    summary="The categories of the eligibility criteria of the study databases, in their order: the elements of PICO and the study, each followed by the relations of the study ontology in it (config/medidex-study.yaml).",
 )
 async def get_eligibility_schema() -> EligibilitySchema:
     return EligibilitySchema(
-        categories=[EligibilityCategory(key=key, **category.model_dump()) for key, category in ELIGIBILITY_CONFIG.categories.items()]
+        categories=[EligibilityCategory(key=key, **category.model_dump(include={"path", "description", "color"})) for key, category in ELIGIBILITY_CONFIG.categories.items()]
     )
 
 
