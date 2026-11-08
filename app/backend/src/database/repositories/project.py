@@ -137,6 +137,14 @@ class ProjectRepository:
             report.referenced_dois = referenced_dois
         await self.db.flush()
 
+    async def readable_project_ids(self) -> Set[str]:
+        """The projects whose reports the caller may read: those they uploaded and those they are assigned to."""
+        if not self.user_id:
+            return set()
+        owned = select(Project.id).where(Project.created_by == self.user_id)
+        assigned = select(ProjectAssignees.project_id).where(ProjectAssignees.assignee == self.user_id)
+        return set((await self.db.execute(owned.union(assigned))).scalars().all())
+
     async def is_project_assignee(self, project_id: str) -> bool:
         if not self.user_id:
             return False

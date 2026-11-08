@@ -20,7 +20,7 @@ from src.utils.query_parser import QuerySyntaxError, SEARCH_QUERY_DESCRIPTION
 from src.context import RequestContext
 from src.services.authorization import ProjectAccessDeniedError
 from src.services.project import ProjectNotFoundError
-from .deps import get_context
+from .deps import check_report_read, get_context
 
 from src.utils.dto import Study, StudyFull, StudySchema, StudyFieldSchema, StudyMetaSchema, StudyGraph, GraphSchema, GraphEntitySchema, GraphRelationSchema, TagCategorySchema, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
 from src.utils.studyconfig import STUDY_CONFIG
@@ -202,9 +202,12 @@ async def get_all_reports(
     date_to: Optional[datetime] = Query(None, description="Filter reports entered at or before this ISO datetime (e.g. '2025-01-31 23:59:59', UTC)"),
     ctx: RequestContext = Depends(get_context),
 ) -> List[DbReport]:
-    return await ctx.report_repo.get_all_reports(report_ids, date_from, date_to)
+    reports = await ctx.report_repo.get_all_reports(report_ids, date_from, date_to)
+    # Every report of the core database; a report of an update only for its owner and assignees (require_report_read).
+    readable = await ctx.project_repo.readable_project_ids()
+    return [report for report in reports if getattr(report, "project_id", None) is None or report.project_id in readable]
 
-@router.get("/reports/{report_id}", summary="Get full details for a specific report, including its DOI and OpenAlex fulltext links.")
+@router.get("/reports/{report_id}", dependencies=[Depends(check_report_read)], summary="Get full details for a specific report, including its DOI and OpenAlex fulltext links.")
 async def get_report_by_id(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> ReportSources:
     report = await ctx.report_repo.get_report_by_id(report_id)
     if report is None:
@@ -213,7 +216,7 @@ async def get_report_by_id(report_id: int = report_id_path, ctx: RequestContext 
     links = await ctx.report_service.get_fulltext_links(report_id)
     return ReportSources(**base.model_dump(), doi=report.doi, fulltextLinks=links)
 
-@router.delete("/reports/{report_id}", status_code=204, summary="Delete a report of an update. Only the owner of the update can delete it.", description="The report goes to the archive of the update only, never to the core database (see POST /reports/{report_id}/merge).")
+@router.delete("/reports/{report_id}", dependencies=[Depends(check_report_read)], status_code=204, summary="Delete a report of an update. Only the owner of the update can delete it.", description="The report goes to the archive of the update only, never to the core database (see POST /reports/{report_id}/merge).")
 async def delete_report(
     report_id: int = report_id_path,
     ctx: RequestContext = Depends(get_context),
@@ -229,7 +232,7 @@ async def delete_report(
     return Response(status_code=204)
 
 
-@router.get("/reports/{report_id}/studies", summary="Get the studies linked to this specific report.")
+@router.get("/reports/{report_id}/studies", dependencies=[Depends(check_report_read)], summary="Get the studies linked to this specific report.")
 async def get_report_studies_by_id(
     report_id: int = report_id_path,
     date_from: Optional[datetime] = Query(None, description="Filter studies entered at or after this ISO datetime (e.g. '2025-01-13 00:00:00', UTC)"),
@@ -239,7 +242,7 @@ async def get_report_studies_by_id(
     result = await ctx.report_repo.get_linked_studies(report_id, date_from, date_to)
     return studies_to_dto(result)
 
-@router.put("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
+@router.put("/reports/{report_id}/pdf", dependencies=[Depends(is_admin), Depends(check_report_read)], summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
 async def uploaed_pdf(background_tasks: BackgroundTasks, report_id: int = report_id_path, file: UploadFile = File(None, description="PDF file to upload"), ctx: RequestContext = Depends(get_context)) -> Dict[str, Any]:
     # Validate file is a PDF
     if file:
@@ -259,7 +262,7 @@ async def uploaed_pdf(background_tasks: BackgroundTasks, report_id: int = report
         await ctx.report_repo.db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to save PDF.")
 
-@router.get("/reports/{report_id}/pdf", summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
+@router.get("/reports/{report_id}/pdf", dependencies=[Depends(check_report_read)], summary="Get the fulltext pdf for a given report", responses={200: {"description": "The PDF file of the report.","content": {"application/pdf": {"schema": {"type": "string","format": "binary"}}}}})
 async def get_pdf(report_id : int, ctx: RequestContext = Depends(get_context)) -> FileResponse:
     try:
         pdf_path = await ctx.document_service.get_path(report_id)
@@ -268,7 +271,7 @@ async def get_pdf(report_id : int, ctx: RequestContext = Depends(get_context)) -
     except:
         raise HTTPException(status_code=404, detail="PDF file not found.")
 
-@router.delete("/reports/{report_id}/pdf", dependencies=[Depends(is_admin)], summary="Delete the fulltext pdf for a given report")
+@router.delete("/reports/{report_id}/pdf", dependencies=[Depends(is_admin), Depends(check_report_read)], summary="Delete the fulltext pdf for a given report")
 async def delete_pdf(report_id : int, ctx: RequestContext = Depends(get_context)) -> Dict[str, Any]:
     try:
         result = await ctx.document_service.delete_pdf(report_id)
@@ -288,7 +291,7 @@ async def delete_pdf(report_id : int, ctx: RequestContext = Depends(get_context)
         raise HTTPException(status_code=500, detail="The PDF was deleted, but not what was extracted from it.")
     return result
 
-@router.get("/reports/{report_id}/flag", summary="Get your report flag for a specific report.")
+@router.get("/reports/{report_id}/flag", dependencies=[Depends(check_report_read)], summary="Get your report flag for a specific report.")
 async def get_report_flag(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)) -> Optional[Flag]:
     report = await ctx.report_repo.get_report_by_id(report_id)
     if report is None:
@@ -300,7 +303,7 @@ async def get_report_flag(report_id: int = report_id_path, ctx: RequestContext =
 
     return report_flag_to_dto(flag)
 
-@router.put("/reports/{report_id}/flag", summary="Create or edit your report flag for a specific report.")
+@router.put("/reports/{report_id}/flag", dependencies=[Depends(check_report_read)], summary="Create or edit your report flag for a specific report.")
 async def upsert_report_flag(
     payload: FlagPayload,
     report_id: int = report_id_path,
@@ -318,7 +321,7 @@ async def upsert_report_flag(
         await ctx.report_repo.rollback()
         raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
-@router.delete("/reports/{report_id}/flag", status_code=204, summary="Delete your report flag for a specific report.")
+@router.delete("/reports/{report_id}/flag", dependencies=[Depends(check_report_read)], status_code=204, summary="Delete your report flag for a specific report.")
 async def delete_report_flag(report_id: int = report_id_path, ctx: RequestContext = Depends(get_context)):
     report = await ctx.report_repo.get_report_by_id(report_id)
     if report is None:

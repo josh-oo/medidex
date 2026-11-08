@@ -196,6 +196,15 @@ async def merge_report(report_id: int, body: MergeRequest, ctx: RequestContext =
     except (ReportNotMergeableError, GraphFormatError) as exc:  # e.g. a merge hook finding the graph of a study would break the study ontology
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+async def check_project_access(project_id: str, ctx: RequestContext = Depends(get_context)) -> None:
+    """403 unless the caller uploaded the project or is assigned to it: an admin sees only their own projects
+    (GET /projects), and neither their reports."""
+    try:
+        await ctx.project_service.ensure_project_access(project_id)
+    except ProjectAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 _search_query = Query(None, description="Filter reports by title, abstract or report id (case-insensitive substring match).")
 _cursor_query = Query(None, description="Opaque cursor from a previous response's nextCursor; omit to fetch the first page.")
 _limit_query = Query(50, ge=1, le=200, description="Maximum number of reports to return in this page.")
@@ -239,7 +248,7 @@ async def get_project_reports(
 
 @router.get(
     "/projects/{project_id}/reports/intake",
-    dependencies=[Depends(is_admin)],
+    dependencies=[Depends(is_admin), Depends(check_project_access)],
     summary="Get incoming reports for a project, including still-processing ones - the admin intake view.",
     description="Unlike /reports, always includes reports that have been auto-searched for a PDF but "
                 "aren't fully processed yet, so an admin can watch reports as they arrive.",
@@ -268,7 +277,7 @@ async def get_project_reports_intake(
 
 @router.get(
     "/projects/{project_id}/reports/intake/stream",
-    dependencies=[Depends(is_admin)],
+    dependencies=[Depends(is_admin), Depends(check_project_access)],
     summary="Stream the intake row of every report of a project that changes.",
     description="An SSE event per changed report (an uploaded PDF, a finished postprocessing), its data the row "
                 "as /reports/intake returns it, with the same `include`.",
@@ -289,7 +298,7 @@ async def stream_project_reports_intake(
 
 @router.get(
     "/projects/{project_id}/reports/review",
-    dependencies=[Depends(is_admin)],
+    dependencies=[Depends(is_admin), Depends(check_project_access)],
     summary="Get fully-annotated reports for a project - the admin annotator-review view.",
     description="Always restricted to reports every project assignee has completed annotating, "
                 "regardless of search/filter - this used to be a client-side pre-filter that only "
@@ -316,7 +325,7 @@ async def get_project_reports_review(
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-@router.get( "/projects/{project_id}/annotations",dependencies=[Depends(is_admin)],summary="Get reports annotated by all assigned users in a project.")
+@router.get( "/projects/{project_id}/annotations",dependencies=[Depends(is_admin), Depends(check_project_access)],summary="Get reports annotated by all assigned users in a project.")
 async def get_project_annotations(project_id: str, ctx: RequestContext = Depends(get_context)) -> Dict[int, Dict[str, List[Dict[str, Any]]]]:
     return await ctx.project_service.get_project_annotations(project_id)
 

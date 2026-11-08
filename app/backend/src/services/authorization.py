@@ -55,6 +55,31 @@ def require_resource_audience(claims: dict, resource_url: str) -> None:
         raise ResourceMismatchError(f"Token not bound to resource {resource_url}")
 
 
+async def require_report_read(
+    report_id: int,
+    report_repo: ReportRepository,
+    project_repo: ProjectRepository,
+    user_id: Optional[str],
+) -> None:
+    """Check the caller may read the report: a report of the core database every caller, a report of an update only
+    the owner of the update and its assignees. Unlike get_authorized_project_id (for working on a report: assignees
+    only), the owner reads the reports of their update without being assigned to it.
+    """
+    report = await report_repo.get_report_by_id(report_id)
+    if not report:
+        raise ReportNotFoundError(f"Report {report_id} not found")
+
+    project_id = await project_repo.get_project_id_by_report_id(report_id)
+    if not project_id:
+        return
+
+    if not user_id:
+        raise AuthenticationRequiredError("Authenticated user required")
+
+    if project_id not in await project_repo.readable_project_ids():
+        raise ReportAccessDeniedError("You can only access reports of projects you uploaded or are assigned to")
+
+
 async def get_authorized_project_id(
     report_id: int,
     report_repo: ReportRepository,

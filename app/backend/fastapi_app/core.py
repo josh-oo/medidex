@@ -9,7 +9,7 @@ from src.utils.logger import setup_logging
 from .auth import is_verified_api_call, is_admin
 
 from src.context import RequestContext
-from .deps import get_context
+from .deps import check_report_read, get_context
 from .errors import raise_for_report_access
 
 from src.database.repositories.study import DuplicateShortNameError
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 cutoff_query : Optional[datetime] = Query(None, description="Cutoff date: for example '2025-01-13 00:00:00' (do not retrieve items entered after that date). Usually only used for testing")
 k_query : int = Query(10, description="Maximum number of returned results.")
 
-@router.get("/reports/{report_id}/similar-tags", dependencies=[Depends(is_verified_api_call)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a project based on its embedding vectors.")
+@router.get("/reports/{report_id}/similar-tags", dependencies=[Depends(is_verified_api_call), Depends(check_report_read)], summary="Get related tags (interventions, outcomes, ...) for a specific report in a project based on its embedding vectors.")
 async def similar_tags_by_report(report_id: int, tag_category: TagCategories =Query(TagCategories.default), sources: List[str] = Query(..., description="Which source of tags do you want to search ('mesh', 'internal' or both)"), k : int = k_query, ctx: RequestContext = Depends(get_context)) -> List[TagCandidate]:
     try:
         return await ctx.tag_similarity_service.get_similar_tags_by_id(report_id, tag_category, sources, k)
@@ -93,7 +93,7 @@ async def similarity_search_studies_by_id(
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-@router.get("/reports/{report_id}/study-name", dependencies=[Depends(is_verified_api_call)], summary="Get the short name proposed for a new study created from the report: its trial registration id (given or taken from the report), otherwise first author + year, with a letter appended if a study of that name exists.")
+@router.get("/reports/{report_id}/study-name", dependencies=[Depends(is_verified_api_call), Depends(check_report_read)], summary="Get the short name proposed for a new study created from the report: its trial registration id (given or taken from the report), otherwise first author + year, with a letter appended if a study of that name exists.")
 async def study_name_by_report(report_id: int, trial_id: Optional[str] = Query(None, description="A trial registration id of the study, if known."), ctx: RequestContext = Depends(get_context)) -> str:
     try:
         return await ctx.study_naming_service.suggest(report_id, trial_id)
