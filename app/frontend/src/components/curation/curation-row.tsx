@@ -1,7 +1,12 @@
 import type { ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { parseDate } from "@/components/ui/relative-time";
 import type { CurationStep } from "@/lib/curation-steps";
+import { PageLink } from "@/lib/page-transition";
 import { ProgressBar } from "./progress-bar";
+import { ProgressRing } from "./progress-ring";
 import { StepChain } from "./step-chain";
 
 interface CurationRowProps {
@@ -32,7 +37,7 @@ interface CurationRowProps {
 /**
  * A project in one row of the curation panel: the day it was created, its name, its assignees, the rings of the steps a person works on
  * (which are also its actions) and its menu. The columns have the same widths in every row, so the rings line up;
- * on a narrow screen the row wraps.
+ * on a narrow screen the row stays one line: the rings open from an Actions button and the people are left to the menu.
  */
 export function CurationRow({
   title,
@@ -47,8 +52,8 @@ export function CurationRow({
   bar,
 }: CurationRowProps) {
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 md:grid md:grid-cols-[minmax(0,1fr)_8rem_auto_2rem]">
-      <div className="flex min-w-0 basis-full items-center gap-3 md:basis-auto">
+    <div className="flex items-center gap-3 px-4 py-3 md:grid md:grid-cols-[minmax(0,1fr)_8rem_auto_2rem] md:gap-6">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         <CalendarSheet date={createdAt} />
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-semibold tabular-nums">{updateLabel(title)}</span>
@@ -57,25 +62,75 @@ export function CurationRow({
         {action && <div className="ml-3 flex min-w-0 items-center">{action}</div>}
       </div>
       {bar && steps.length === 1 ? (
-        <div className="flex basis-full md:col-span-3 md:col-start-2 md:min-w-[18rem]">
+        <div className="flex min-w-24 flex-1 md:col-span-3 md:col-start-2 md:min-w-[18rem]">
           <ProgressBar step={steps[0]} locked={locked} />
         </div>
       ) : (
         <>
-          <div className="flex min-w-0 justify-end">{people}</div>
+          <div className="hidden min-w-0 justify-end md:flex">{people}</div>
           {outcome ? (
             // The rings stay, invisible, to give the outcome their width.
-            <div className="grid">
+            <div className="hidden md:grid">
               <StepChain steps={steps} className="invisible col-start-1 row-start-1" />
               <div className="col-start-1 row-start-1 flex items-center">{outcome}</div>
             </div>
           ) : (
-            <StepChain steps={steps} locked={locked} />
+            <StepChain steps={steps} locked={locked} className="hidden md:flex" />
           )}
-          <div className="ml-auto flex justify-end md:ml-0">{menu}</div>
+          {steps.length > 0 && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="shrink-0 gap-1 rounded-full md:hidden">
+                  Actions
+                  <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                className="w-64 rounded-2xl border bg-popover p-2 text-popover-foreground shadow-lg"
+              >
+                {outcome ? <div className="p-1">{outcome}</div> : <StepList steps={steps} locked={locked} />}
+              </PopoverContent>
+            </Popover>
+          )}
+          <div className="flex shrink-0 justify-end">{menu}</div>
         </>
       )}
     </div>
+  );
+}
+
+// The steps one below the other, each ring with its name and progress; the name of a step the user may do leads to it,
+// as its ring does.
+function StepList({ steps, locked }: { steps: CurationStep[]; locked?: boolean }) {
+  return (
+    <ul className="flex flex-col gap-1">
+      {steps.map((step) => {
+        const text = (
+          <>
+            <span className="block truncate text-sm font-medium">
+              {step.href && !locked ? (step.action ?? step.label) : step.label}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">{step.detail}</span>
+          </>
+        );
+        return (
+          <li key={step.key} className="flex items-center gap-3 rounded-xl px-1.5 py-1">
+            <ProgressRing step={step} locked={locked} />
+            {step.href && !locked ? (
+              <PageLink
+                to={step.href}
+                className="min-w-0 flex-1 rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+              >
+                {text}
+              </PageLink>
+            ) : (
+              <span className="min-w-0 flex-1">{text}</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

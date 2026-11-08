@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Database, DatabaseZap, Download, ListChecks, Pencil, Plus } from "lucide-react";
+import { Database, DatabaseZap, Download, ListChecks, MoreHorizontal, Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -11,6 +18,7 @@ import { DatabaseStoragePopover } from "@/components/databases/database-storage-
 import { NewDatabaseDialog } from "@/components/databases/new-database-dialog";
 import { CurationList } from "@/components/curation/curation-list";
 import { useCuration, type Curation } from "@/hooks/use-curation";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { exportDatabase } from "@/lib/api/databaseApi";
 import { projectDatabaseId, useStudyDatabases, type DatabaseUpload, type StudyDatabase } from "@/lib/databases";
 import { cn } from "@/lib/utils";
@@ -111,6 +119,9 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
   const { loading, isAdmin, projects, tasks, refresh } = curation;
   const [details, setDetails] = useState<"view" | "edit" | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [newUpdateOpen, setNewUpdateOpen] = useState(false);
+  // On a phone the actions are in a menu, where they leave the name its room.
+  const wide = useMediaQuery("(min-width: 640px)");
 
   // The curation of this database only.
   const own: Curation = {
@@ -142,37 +153,86 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
     }
   };
 
-  const newUpdateLabel = (
-    <>
-      <Plus className="h-4 w-4" />
-      New update
-    </>
-  );
   // A database that is still being imported or indexed takes no updates: their reports would miss its studies.
-  const newUpdateButton = database.importing || database.indexing ? (
-    <Button
-      size="sm"
-      className="gap-1.5"
-      disabled
-      title={
-        database.indexingError
-          ? `The indexing of ${database.name} failed; updates can be added once it is indexed.`
-          : `${database.name} is still being ${database.importing ? "imported" : "indexed"}; updates can be added once it is done.`
-      }
-    >
-      {newUpdateLabel}
-    </Button>
-  ) : (
-    <CreateProjectDialog
-      database={database}
-      number={nextUpdateNumber(own.projects.map((project) => project.name))}
-      onProjectCreated={refresh}
-      trigger={
-        <Button size="sm" className="gap-1.5">
-          {newUpdateLabel}
+  const busy = database.importing || database.indexing;
+  const busyTitle = database.indexingError
+    ? `The indexing of ${database.name} failed; updates can be added once it is indexed.`
+    : `${database.name} is still being ${database.importing ? "imported" : "indexed"}; updates can be added once it is done.`;
+
+  const actions = wide ? (
+    <div className="ml-auto flex shrink-0 items-center gap-1">
+      {/* Admins see the eligibility criteria in the edit dialog. */}
+      {!isAdmin && (
+        <CardAction icon={ListChecks} label="Eligibility criteria" onClick={() => setDetails("view")} dialog />
+      )}
+      {isAdmin && (
+        <CardAction
+          icon={Pencil}
+          label="Edit the name, description and eligibility criteria"
+          onClick={() => setDetails("edit")}
+          disabled={database.importing}
+          dialog
+        />
+      )}
+      {isAdmin && (
+        <CardAction
+          icon={Download}
+          label="Export: the studies and reports as a file another Medidex can import"
+          onClick={() => void download()}
+          disabled={exporting || database.importing}
+        />
+      )}
+      {isAdmin && (
+        <Button
+          size="sm"
+          className="ml-2 gap-1.5"
+          disabled={busy}
+          title={busy ? busyTitle : undefined}
+          aria-haspopup="dialog"
+          onClick={() => setNewUpdateOpen(true)}
+        >
+          <Plus className="h-4 w-4" />
+          New update
         </Button>
-      }
-    />
+      )}
+    </div>
+  ) : (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon-sm" className="ml-auto shrink-0" aria-label={`Actions for ${database.name}`}>
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        {isAdmin && (
+          <>
+            <DropdownMenuItem disabled={busy} onSelect={() => setNewUpdateOpen(true)}>
+              <Plus className="h-4 w-4" />
+              New update…
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        {!isAdmin && (
+          <DropdownMenuItem onSelect={() => setDetails("view")}>
+            <ListChecks className="h-4 w-4" />
+            Eligibility criteria…
+          </DropdownMenuItem>
+        )}
+        {isAdmin && (
+          <DropdownMenuItem disabled={database.importing} onSelect={() => setDetails("edit")}>
+            <Pencil className="h-4 w-4" />
+            Edit…
+          </DropdownMenuItem>
+        )}
+        {isAdmin && (
+          <DropdownMenuItem disabled={exporting || database.importing} onSelect={() => void download()}>
+            <Download className="h-4 w-4" />
+            Export
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 
   return (
@@ -180,60 +240,43 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
       aria-labelledby={`database-${database.id}`}
       className="overflow-hidden rounded-2xl border bg-card shadow-xs"
     >
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+      <header className="flex items-center gap-3 px-4 py-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10">
           <Database className="h-5 w-5 text-primary" aria-hidden />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h2 id={`database-${database.id}`} className="min-w-0 truncate text-base font-semibold">
-              {database.description ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span
-                      tabIndex={0}
-                      className="cursor-help rounded-sm underline decoration-muted-foreground/40 decoration-dotted underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                    >
-                      {database.name}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" align="start" sideOffset={6} className="max-w-sm text-left text-sm">
-                    {database.description}
-                  </TooltipContent>
-                </Tooltip>
-              ) : (
-                database.name
-              )}
-            </h2>
-            {isAdmin && !database.importing && <DatabaseStoragePopover database={database} />}
+          {/* The (i) stays right after the name, which gives way; the progress of an import wraps below them. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <div className="flex min-w-0 max-w-full items-center gap-1">
+              <h2 id={`database-${database.id}`} className="min-w-0 truncate text-base font-semibold">
+                {database.description ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        tabIndex={0}
+                        className="cursor-help rounded-sm underline decoration-muted-foreground/40 decoration-dotted underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                      >
+                        {database.name}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" align="start" sideOffset={6} className="max-w-sm text-left text-sm">
+                      {database.description}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  database.name
+                )}
+              </h2>
+              {isAdmin && !database.importing && <DatabaseStoragePopover database={database} />}
+            </div>
             {(database.importing || database.indexing) && <ProgressBadge database={database} />}
           </div>
-          <span className="text-xs text-muted-foreground">
+          <span className="truncate text-xs text-muted-foreground">
             {database.numberStudies} {database.numberStudies === 1 ? "study" : "studies"} · {database.numberReports}{" "}
             {database.numberReports === 1 ? "report" : "reports"} · {updateCount} {updateCount === 1 ? "update" : "updates"}
           </span>
         </div>
-        <div className="ml-auto flex items-center gap-1">
-          <CardAction icon={ListChecks} label="Eligibility criteria" onClick={() => setDetails("view")} dialog />
-          {isAdmin && (
-            <CardAction
-              icon={Pencil}
-              label="Edit the name, description and eligibility criteria"
-              onClick={() => setDetails("edit")}
-              disabled={database.importing}
-              dialog
-            />
-          )}
-          {isAdmin && (
-            <CardAction
-              icon={Download}
-              label="Export: the studies and reports as a file another Medidex can import"
-              onClick={() => void download()}
-              disabled={exporting || database.importing}
-            />
-          )}
-          {isAdmin && <div className="ml-2">{newUpdateButton}</div>}
-        </div>
+        {actions}
       </header>
 
       <div className="border-t">
@@ -255,6 +298,15 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
         )}
       </div>
 
+      {isAdmin && !busy && (
+        <CreateProjectDialog
+          database={database}
+          number={nextUpdateNumber(own.projects.map((project) => project.name))}
+          onProjectCreated={refresh}
+          open={newUpdateOpen}
+          onOpenChange={setNewUpdateOpen}
+        />
+      )}
       <DatabaseDetailsDialog
         database={database}
         open={details !== null}
