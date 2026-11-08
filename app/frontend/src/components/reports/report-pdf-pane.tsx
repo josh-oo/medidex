@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ComponentType } from "react";
-import { Download, FileX, X } from "lucide-react";
+import { Download, FileText, FileX, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useExtensionRegistry, type ReportPdfSlotProps } from "@/context/extension-registry-context";
-import { REPORT_PDF_PANE_WIDTH, useReportPdfPane, type ComparedStudy, type PdfFocus } from "@/context/report-pdf-pane-context";
+import { PDF_PANE_TAB, REPORT_PDF_PANE_WIDTH, useReportPdfPane, type ComparedStudy, type PdfFocus } from "@/context/report-pdf-pane-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import { getReportPdf } from "@/lib/api/reportApi";
 import { getReportsByStudyId } from "@/lib/api/studiesApi";
@@ -26,15 +26,22 @@ interface ReportPdfPaneProps {
   onClose: () => void;
 }
 
-/** The PDF of the open report next to the workbench: the extension's viewer if there is one, else the browser's. */
+/**
+ * The PDF of the open report next to the workbench: the extension's viewer if there is one, else the browser's; with the
+ * extensions' tabs (see ExtensionRegistry.reportPaneTabs), a tab next to theirs.
+ */
 export function ReportPdfPane({ reportId, focus, docked, onClose }: ReportPdfPaneProps) {
   const report = useReportStore((state) => state.reports[reportId]);
-  const { reportPdf: Viewer = BrowserPdfViewer } = useExtensionRegistry();
+  const { reportPdf: Viewer = BrowserPdfViewer, reportPaneTabs: tabs } = useExtensionRegistry();
   const title = report?.title ?? null;
   const ref = useRef<HTMLElement>(null);
   // The study whose reports' PDFs are shown under the open report's (see ReportPdfPaneState.compared).
   const pane = useReportPdfPane();
   const compared = pane?.compared ?? null;
+  // An extension's tab, or none for the PDF.
+  const extensionTab = tabs.find((tab) => tab.id === pane?.tab) ?? null;
+  const TabContent = extensionTab?.component;
+  const TabActions = extensionTab?.actions;
 
   useEffect(() => {
     const element = ref.current;
@@ -53,17 +60,37 @@ export function ReportPdfPane({ reportId, focus, docked, onClose }: ReportPdfPan
   return (
     <section
       ref={ref}
-      aria-label="PDF"
+      aria-label={extensionTab?.label ?? "PDF"}
       data-report-pdf-pane=""
       data-layout-part={docked ? "report-pdf" : undefined}
-      className="flex h-full min-h-0 flex-col bg-card"
+      // Docked, a frame like the workbench next to it (see ReportSplitView).
+      className={cn("flex h-full min-h-0 flex-col bg-card", docked && "overflow-hidden rounded-2xl border shadow-xs")}
     >
-      <header className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
-        <h2 className="min-w-0 flex-1 truncate text-sm font-medium" title={title ?? undefined}>
+      <header className="flex h-12 shrink-0 items-center gap-1 border-b px-2 sm:px-3">
+        {pane && tabs.length > 0 && (
+          <div role="tablist" aria-label="Pane" className="mr-2 flex shrink-0 items-center gap-0.5 rounded-full bg-muted p-0.5">
+            <PaneTabButton label="PDF" icon={FileText} selected={!extensionTab} onSelect={() => pane.showTab(PDF_PANE_TAB)} />
+            {tabs.map((tab) => (
+              <PaneTabButton
+                key={tab.id}
+                label={tab.label}
+                icon={tab.icon}
+                selected={tab === extensionTab}
+                onSelect={() => pane.showTab(tab.id)}
+              />
+            ))}
+          </div>
+        )}
+        {/* Next to the tabs the report they are about. */}
+        <h2
+          className={cn("min-w-0 flex-1 truncate text-sm", tabs.length > 0 ? "text-muted-foreground" : "font-medium")}
+          title={title ?? undefined}
+        >
           {title ?? `Report #${reportId}`}
         </h2>
-        {pane && <ReportPdfComparePicker reportId={reportId} onPick={pane.compare} />}
-        {report?.hasPdf && (
+        {TabActions && <TabActions reportId={reportId} />}
+        {pane && !extensionTab && <ReportPdfComparePicker reportId={reportId} onPick={pane.compare} />}
+        {report?.hasPdf && !extensionTab && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -81,15 +108,22 @@ export function ReportPdfPane({ reportId, focus, docked, onClose }: ReportPdfPan
         )}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button type="button" variant="ghost" size="icon-sm" aria-label="Close PDF" onClick={onClose}>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label={tabs.length > 0 ? "Close pane" : "Close PDF"} onClick={onClose}>
               <X />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Close PDF</TooltipContent>
+          <TooltipContent>{tabs.length > 0 ? "Close pane" : "Close PDF"}</TooltipContent>
         </Tooltip>
       </header>
-      {/* Always a panel group, so that comparing does not remount the open report's PDF (and lose its place). */}
-      <ResizablePanelGroup direction="vertical" autoSaveId={COMPARE_SPLIT_STORAGE_KEY} className="min-h-0 flex-1">
+      {TabContent && (
+        <div className="min-h-0 flex-1">
+          <TabContent reportId={reportId} />
+        </div>
+      )}
+      {/* Always a panel group, so that comparing does not remount the open report's PDF (and lose its place); kept
+          while another tab is shown, for the same reason. */}
+      <div className={cn("min-h-0 flex-1", extensionTab && "hidden")}>
+      <ResizablePanelGroup direction="vertical" autoSaveId={COMPARE_SPLIT_STORAGE_KEY} className="h-full">
         <ResizablePanel id="report" order={1} minSize={20}>
           {!report ? null : report.hasPdf ? (
             // Remounted per report, so nothing of the previous report's PDF is shown for the next one.
@@ -110,7 +144,33 @@ export function ReportPdfPane({ reportId, focus, docked, onClose }: ReportPdfPan
           </>
         )}
       </ResizablePanelGroup>
+      </div>
     </section>
+  );
+}
+
+interface PaneTabButtonProps {
+  label: string;
+  icon?: ComponentType<{ className?: string }>;
+  selected: boolean;
+  onSelect: () => void;
+}
+
+function PaneTabButton({ label, icon: Icon, selected, onSelect }: PaneTabButtonProps) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      onClick={onSelect}
+      className={cn(
+        "inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+        selected ? "bg-card font-medium text-primary shadow-xs" : "text-muted-foreground hover:text-foreground"
+      )}
+    >
+      {Icon && <Icon className="h-3.5 w-3.5" />}
+      {label}
+    </button>
   );
 }
 

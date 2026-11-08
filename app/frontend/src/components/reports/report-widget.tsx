@@ -7,7 +7,7 @@ import { ButtonGroup } from "@/components/ui/button-group";
 import { FlagReportDialog, type FlagTarget } from "@/components/ui/report-view/flag-report-dialog";
 import { ReportAssignedStudiesBadges } from "@/components/ui/study-view/report-assigned-studies-badges";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
-import { useReportPdfPane } from "@/context/report-pdf-pane-context";
+import { PDF_PANE_TAB, useReportPdfPane } from "@/context/report-pdf-pane-context";
 import { ReportAbstractSlot, ReportCardExtrasSlot } from "@/context/study-report-slots-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import { deleteReportFlagByReportId } from "@/lib/api/reportApi";
@@ -29,6 +29,8 @@ export function ReportWidget({ reportId, editMode }: ReportWidgetProps) {
   const { reportAbstract } = useExtensionRegistry();
   const hasAbstractExtension = Boolean(reportAbstract);
   const pdfPane = useReportPdfPane();
+  // The pane may be open at an extension's tab rather than the PDF.
+  const pdfShown = pdfPane?.open === true && pdfPane.tab === PDF_PANE_TAB;
   const [flagTarget, setFlagTarget] = useState<FlagTarget | null>(null);
   const [isDeletingFlag, setIsDeletingFlag] = useState(false);
   const [abstractOpen, setAbstractOpen] = useState(false);
@@ -150,11 +152,13 @@ export function ReportWidget({ reportId, editMode }: ReportWidgetProps) {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  aria-pressed={pdfPane?.open ?? false}
-                  onClick={() => (pdfPane ? pdfPane.setOpen(!pdfPane.open) : void openReportPdf(report.reportId))}
+                  aria-pressed={pdfShown}
+                  onClick={() =>
+                    !pdfPane ? void openReportPdf(report.reportId) : pdfShown ? pdfPane.setOpen(false) : pdfPane.show()
+                  }
                 >
-                  {pdfPane?.open ? <PanelRightClose /> : <PanelRightOpen />}
-                  {pdfPane?.open ? "Hide PDF" : "View PDF"}
+                  {pdfShown ? <PanelRightClose /> : <PanelRightOpen />}
+                  {pdfShown ? "Hide PDF" : "View PDF"}
                 </Button>
               </ButtonGroup>
             )}

@@ -188,23 +188,37 @@
 
 
 /* The layout change of the report workbench when its sidebar folds away or out (report-split-view.tsx): the
-   sidebar and the two columns move from where they were to where they are now. Their snapshots keep their size
-   (no stretched text) and are clipped to the moving boxes. The parts are named only while it runs - a name changes
-   how an element is drawn (a stacking context of its own) - and the floating buttons on top of them (an
-   extension's, data-layout-part="report-chat-button", and the review's merge and delete, "review-actions") get a
-   layer of their own, so the moving columns do not cover them. The docked PDF pane and its handle move as well; the
-   pane shows only its new state, since its pages are drawn at its width - fading the old ones across would double
-   every line. */
+   sidebar, the frame of the workbench (with its header) and the two columns move from where they were to where
+   they are now. Their snapshots keep their size (no stretched text) and are clipped to the moving boxes. The columns'
+   groups are nested in the one of the frame's body ("view-transition-group: nearest"), which clips them as the body
+   does: a column that does not scroll on its own (next to the PDF) is captured whole, also where it is scrolled out of
+   the body, and would otherwise be drawn over the header and the page. The parts are named only while it runs - a
+   name changes how an element is drawn (a stacking context of its own) - and what lies on top of them (the foot of
+   the workbench, "report-footer", with whatever an extension shows over the columns from there, and the review's
+   floating merge and delete, "review-actions") get a layer of their own, so the moving columns do not cover them.
+   The docked PDF pane and its handle move as well; the pane shows only its new state, since its pages are drawn at
+   its width - fading the old ones across would double every line. */
 :root[data-layout-transition] [data-layout-part="report-sidebar"] {
   view-transition-name: report-sidebar;
 }
 
+:root[data-layout-transition] [data-layout-part="report-workbench"] {
+  view-transition-name: report-workbench;
+}
+
+:root[data-layout-transition] [data-layout-part="report-workbench-body"] {
+  view-transition-name: report-workbench-body;
+  view-transition-group: nearest;
+}
+
 :root[data-layout-transition] [data-layout-part="report-column"] {
   view-transition-name: report-column;
+  view-transition-group: nearest;
 }
 
 :root[data-layout-transition] [data-layout-part="study-column"] {
   view-transition-name: study-column;
+  view-transition-group: nearest;
 }
 
 :root[data-layout-transition] [data-layout-part="report-pdf"] {
@@ -215,8 +229,8 @@
   view-transition-name: report-pdf-handle;
 }
 
-:root[data-layout-transition] [data-layout-part="report-chat-button"] {
-  view-transition-name: report-chat-button;
+:root[data-layout-transition] [data-layout-part="report-footer"] {
+  view-transition-name: report-footer;
 }
 
 :root[data-layout-transition] [data-layout-part="review-actions"] {
@@ -224,6 +238,8 @@
 }
 
 ::view-transition-group(report-sidebar),
+::view-transition-group(report-workbench),
+::view-transition-group(report-workbench-body),
 ::view-transition-group(report-column),
 ::view-transition-group(study-column),
 ::view-transition-group(report-pdf),
@@ -235,6 +251,10 @@
 
 ::view-transition-old(report-sidebar),
 ::view-transition-new(report-sidebar),
+::view-transition-old(report-workbench),
+::view-transition-new(report-workbench),
+::view-transition-old(report-workbench-body),
+::view-transition-new(report-workbench-body),
 ::view-transition-old(report-column),
 ::view-transition-new(report-column),
 ::view-transition-old(study-column),

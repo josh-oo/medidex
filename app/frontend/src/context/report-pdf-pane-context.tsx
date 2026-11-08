@@ -15,13 +15,23 @@ export interface ComparedStudy {
   shortName: string
 }
 
-/** The PDF pane of the report workbench: the open report's PDF next to the workbench, in a resizable split. */
+/** The tab of the PDF pane that shows the PDF; the others are the extensions' (see ExtensionRegistry.reportPaneTabs). */
+export const PDF_PANE_TAB = "pdf"
+
+/**
+ * The PDF pane of the report workbench: the open report's PDF next to the workbench, in a resizable split, and the
+ * extensions' tabs next to the PDF.
+ */
 export interface ReportPdfPaneState {
   open: boolean
+  /** The tab shown: PDF_PANE_TAB or the id of an extension's tab. */
+  tab: string
+  /** Opens the pane at a tab. */
+  showTab: (tab: string) => void
   /** The passage the pane was last opened at, if any; a new object for every opening, even of the same passage. */
   focus: PdfFocus | null
   setOpen: (open: boolean) => void
-  /** Opens the pane, at the passage if one is given. */
+  /** Opens the pane at the PDF, at the passage if one is given. */
   show: (focus?: PdfFocus) => void
   /** The study compared with the open report (it belongs to the report and ends when another one opens). */
   compared: ComparedStudy | null

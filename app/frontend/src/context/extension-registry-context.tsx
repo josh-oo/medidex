@@ -106,6 +106,21 @@ export interface ReportPdfSlotProps {
   focus: PdfFocus | null
 }
 
+export interface ReportPaneTabProps {
+  reportId: number
+}
+
+/** A tab of the PDF pane of the report workbench, next to the PDF (see ReportPdfPaneState.showTab). */
+export interface ReportPaneTab {
+  /** Unique among the tabs, and other than PDF_PANE_TAB. */
+  id: string
+  label: string
+  icon?: ComponentType<{ className?: string }>
+  component: ComponentType<ReportPaneTabProps>
+  /** In the pane's header while the tab is shown, before its close button (e.g. a button to clear the tab). */
+  actions?: ComponentType<ReportPaneTabProps>
+}
+
 /**
  * An extra step of the curation of a project (e.g. a postprocessing of its reports), or null when
  * the project does not go through it. Extra steps come after the PDFs and before the linkage.
@@ -164,6 +179,8 @@ export interface ExtensionRegistry {
   pdfStatusPanel?: ComponentType<PdfStatusSlotProps>
   /** Replaces the PDF viewer of the PDF pane of the report workbench (e.g. with the extracted tags marked). */
   reportPdf?: ComponentType<ReportPdfSlotProps>
+  /** Tabs of the PDF pane of the report workbench, next to the PDF. */
+  reportPaneTabs: ReportPaneTab[]
   /** Replaces the rendering of a report's abstract in the expanded report card. */
   reportAbstract?: ComponentType<ReportAbstractSlotProps>
   addStudyTrigger?: ComponentType<AddStudyTriggerSlotProps>
@@ -187,6 +204,7 @@ const emptyExtensions: ExtensionRegistry = {
   reportBanners: [],
   reportStatuses: [],
   reportCardExtras: [],
+  reportPaneTabs: [],
   projectUploadOptions: [],
   projectSteps: [],
   reviewPanels: [],
