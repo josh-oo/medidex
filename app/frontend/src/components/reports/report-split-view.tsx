@@ -7,6 +7,7 @@ import { ReportNavigationProvider, useReportNavigation } from "@/context/report-
 import { PDF_PANE_TAB, ReportPdfPaneProvider, type ComparedStudy, type PdfFocus, type ReportPdfPaneState } from "@/context/report-pdf-pane-context";
 import { WorkbenchAsideProvider } from "@/context/workbench-aside-context";
 import { WorkbenchFooterProvider } from "@/context/workbench-footer-context";
+import { WorkbenchUnavailableProvider } from "@/context/workbench-unavailable-context";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { ReportList } from "@/components/ui/report-view/report-list";
 import { ReportWidget } from "@/components/reports/report-widget";
@@ -128,7 +129,9 @@ export function ReportSplitView({
   const [pdfFocus, setPdfFocus] = useState<PdfFocus | null>(null);
   // The study compared with the open report, under its PDF; a comparison belongs to the report.
   const [compared, setCompared] = useState<ComparedStudy | null>(null);
-  const showPdf = pdfOpen && hasReport;
+  // The panel could not load the report (see useWorkbenchUnavailable): it alone says so, without the report next to it.
+  const [unavailable, setUnavailable] = useState(false);
+  const showPdf = pdfOpen && hasReport && !unavailable;
   const pdfPane = useMemo<ReportPdfPaneState>(
     () => ({
       open: showPdf,
@@ -164,7 +167,7 @@ export function ReportSplitView({
   );
   // The report and the widgets next to it (see WorkbenchAside, e.g. adding a new study) in one column, the studies in the
   // other; next to the PDF the workbench is too narrow for two.
-  const twoColumns = useTwoColumns(collapsed) && !showPdf;
+  const twoColumns = useTwoColumns(collapsed) && !showPdf && !unavailable;
   const sidebarHidden = collapsed && isDesktop;
   const [aside, setAside] = useState<HTMLDivElement | null>(null);
   const [footer, setFooter] = useState<HTMLDivElement | null>(null);
@@ -321,7 +324,8 @@ export function ReportSplitView({
                 twoColumns ? "relative flex min-h-0 flex-1 flex-col" : "pb-6"
               )}
             >
-              <WorkbenchFooterProvider value={hasReport ? footer : null}>
+              <WorkbenchUnavailableProvider value={setUnavailable}>
+              <WorkbenchFooterProvider value={hasReport && !unavailable ? footer : null}>
               <WorkbenchAsideProvider value={twoColumns ? aside : null}>
                 <div
                   className={cn(
@@ -331,6 +335,7 @@ export function ReportSplitView({
                 >
                   {hasReport ? (
                     <>
+                      {!unavailable && (
                       <div
                         ref={reportColumnRef}
                         data-layout-part="report-column"
@@ -339,6 +344,7 @@ export function ReportSplitView({
                         <ReportWidget reportId={reportId} editMode={listProps.editMode} />
                         {twoColumns && <div ref={setAside} className="space-y-4 empty:hidden" />}
                       </div>
+                      )}
                       <div
                         ref={panelColumnRef}
                         data-layout-part="study-column"
@@ -354,6 +360,7 @@ export function ReportSplitView({
                 </div>
               </WorkbenchAsideProvider>
               </WorkbenchFooterProvider>
+              </WorkbenchUnavailableProvider>
               {/* Over the foot of both columns (see WorkbenchFooter), or of the page while it scrolls as one; clicks go
                   through it to the columns, except on what it shows. */}
               <div

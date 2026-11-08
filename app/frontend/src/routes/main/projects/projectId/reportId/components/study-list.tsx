@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { StudyCandidateDto } from "@/types/apiDTOs";
 import { getReferencedStudiesByReportId, getSimilarStudiesByReportId } from "@/lib/api/reportApi";
 import { ReportActionsSlot } from "@/context/study-report-slots-context";
+import { useWorkbenchUnavailable } from "@/context/workbench-unavailable-context";
 
 // A page of the list, as many as its skeleton shows.
 const PAGE_SIZE = STUDY_ROWS_PER_PAGE;
@@ -30,6 +31,8 @@ export default function StudyList() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  // Without its studies the report is not shown either: only the message below, in the middle of the workbench.
+  useWorkbenchUnavailable(notFound || loadError);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,22 +103,11 @@ export default function StudyList() {
     />
   );
 
-  if (notFound) {
+  if (notFound || loadError) {
     return (
       <div className="flex min-h-[40vh] w-full items-center justify-center text-sm text-muted-foreground">
-        Report not found.
+        Failed to load information.
       </div>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <>
-        <div className="flex min-h-[40vh] w-full items-center justify-center text-sm text-muted-foreground">
-          Failed to load studies for this report.
-        </div>
-        {actions}
-      </>
     );
   }
 
