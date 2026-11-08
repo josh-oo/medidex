@@ -137,11 +137,14 @@ class Tag(BaseModel):
 
 class StudyGraphNode(BaseModel):
     """A node of the graph of a study: an entity of a kind of config/medidex-study.yaml. A node that is a value holds it: the name
-    of the tag (with its id) or the text."""
+    of the tag (with its id) or the text. A tag read from another wording keeps it (`text`) and says whether the tag names the
+    same thing (`match` None, equal) or a broader thing the wording is a form of ("broader")."""
     id: str
     kind: str
     value: Optional[str] = None
     tagId: Optional[str] = None
+    text: Optional[str] = None
+    match: Optional[str] = None
 
 class StudyGraphEdge(BaseModel):
     """A relation between two nodes of a study's graph, by their ids (`study` is the study itself)."""

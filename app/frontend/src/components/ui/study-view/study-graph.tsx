@@ -38,6 +38,14 @@ const endOf = (schema: GraphSchemaDto, graph: StudyGraphDto, id: string): End | 
   return node && entity ? { entity, node } : undefined;
 };
 
+// A value as text: a tag read from another wording is that wording with its tag ("any respiratory AE [Adverse Events,
+// broader]").
+const valueText = (node: StudyGraphNodeDto): string => {
+  const name = node.value as string;
+  if (!node.text || (node.text.toLowerCase() === name.toLowerCase() && node.match !== "broader")) return name;
+  return node.match === "broader" ? `${node.text} [${name}, broader]` : `${node.text} [${name}]`;
+};
+
 // What a node says about itself: the values at the end of its attribute relations (the interventions, dosage, ... of an
 // arm), as [relation, values] in the order of the schema.
 const attributesOf = (schema: GraphSchemaDto, graph: StudyGraphDto, node: StudyGraphNodeDto) =>
@@ -47,7 +55,7 @@ const attributesOf = (schema: GraphSchemaDto, graph: StudyGraphDto, node: StudyG
       const values = graph.edges
         .filter((edge) => edge.relation === relation.key && edge.source === node.id)
         .flatMap((edge) => graph.nodes.filter((candidate) => candidate.id === edge.target && candidate.value));
-      return { relation, tags: Boolean(entityOf(schema, relation.target[0])?.value?.category), values: values.map((value) => value.value as string) };
+      return { relation, tags: Boolean(entityOf(schema, relation.target[0])?.value?.category), values: values.map(valueText) };
     })
     .filter(({ values }) => values.length > 0);
 

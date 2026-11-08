@@ -269,6 +269,9 @@ export interface StudyGraphNodeDto {
   kind: string;
   value: string | null;
   tagId: string | null;
+  // A tag read from another wording: that wording, and whether the tag names a broader thing it is a form of.
+  text?: string | null;
+  match?: "broader" | null;
 }
 
 export interface StudyGraphEdgeDto {
@@ -485,11 +488,11 @@ export interface DatabaseStorageDto {
 export interface TagDto {
   id: string;
   keyword: string;
+  acronym?: string | null;
+  labels?: string[];
 }
 
 export type GetPersonsResponseDto = Record<string, string[]>;
-  acronym?: string | null;
-  labels?: string[];
 
 // ---------------------------------------------------------------------------
 // Annotation DTOs
@@ -529,6 +532,8 @@ export interface ArmSuggestion {
   frequency?: string;
   route?: string;
   duration?: { value: number; unit: DurationUnit };
+  // The arm entity of the graph it was made from.
+  source?: string;
 }
 
 // Two arms that are compared, by their index in the arms of the suggestion: the evaluated arm and its comparator.

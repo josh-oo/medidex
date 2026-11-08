@@ -423,7 +423,10 @@ class StudyDatabaseService:
         if not graph.nodes:
             return None
         return {
-            "nodes": [{"id": node.id, "kind": node.kind, "value": node.value} for node in graph.nodes],
+            "nodes": [
+                {"id": node.id, "kind": node.kind, "value": node.value, **({"text": node.text} if node.text else {}), **({"match": node.match} if node.match else {})}
+                for node in graph.nodes
+            ],
             "edges": [edge.model_dump() for edge in graph.edges],
         }
 

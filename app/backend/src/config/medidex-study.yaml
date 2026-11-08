@@ -192,9 +192,10 @@ slots:
     required: true
     annotations: {icon: target, color: rose}
   has_time_point:
-    title: Time point
-    description: When an outcome is measured, e.g. at 12 weeks.
+    title: Time points
+    description: When an outcome is measured, e.g. at 12 weeks; one value per time point.
     range: TimePoint
+    multivalued: true
     annotations: {icon: clock, color: rose}
   in_country:
     title: Countries
@@ -212,6 +213,12 @@ slots:
     title: Trial ID
     description: A registration id of the study (NCT..., ISRCTN..., DRKS...).
     range: TrialId
+    multivalued: true
+    annotations: {icon: tag, color: slate}
+  has_trial_name:
+    title: Trial name
+    description: The name or acronym of the trial ("RECOVERY", "SPRINT").
+    range: TrialName
     multivalued: true
     annotations: {icon: tag, color: slate}
 
@@ -237,7 +244,7 @@ classes:
     title: Study
     description: The study as a whole.
     annotations: {icon: file-text, color: slate}
-    slots: [participated, has_intervention, has_outcome, has_primary_outcome, has_secondary_outcome, in_country, has_design, has_trial_id]
+    slots: [participated, has_intervention, has_outcome, has_primary_outcome, has_secondary_outcome, in_country, has_design, has_trial_id, has_trial_name]
     attributes:
       short_name:
         title: Name
@@ -427,6 +434,11 @@ classes:
   TrialId:
     title: Trial ID
     description: A registration id of a study in a trial registry, e.g. NCT01234567.
+    annotations: {icon: tag, color: slate}
+    slots: [value]
+  TrialName:
+    title: Trial name
+    description: The name or acronym of a trial, e.g. RECOVERY.
     annotations: {icon: tag, color: slate}
     slots: [value]
   TimePoint:

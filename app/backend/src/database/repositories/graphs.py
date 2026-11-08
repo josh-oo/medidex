@@ -202,9 +202,11 @@ class StudyGraphs:
             if category is None:
                 nodes.append(StudyGraphNode(id=node.id, kind=node.kind, value=None if node.value is None else str(node.value)))
             elif isinstance(node.value, str):  # a tag of a study of an update that is no tag of the core database yet
-                nodes.append(StudyGraphNode(id=node.id, kind=node.kind, value=node.value))
+                nodes.append(StudyGraphNode(id=node.id, kind=node.kind, value=node.value, text=node.text, match=node.match))
             elif node.value in names[category]:  # a tag that no longer exists is left out
-                nodes.append(StudyGraphNode(id=node.id, kind=node.kind, value=names[category][node.value], tagId=str(node.value)))  # type: ignore[index]
+                nodes.append(StudyGraphNode(
+                    id=node.id, kind=node.kind, value=names[category][node.value], tagId=str(node.value), text=node.text, match=node.match,  # type: ignore[index]
+                ))
         known = {node.id for node in nodes} | {self.config.root_id}
         edges = [
             StudyGraphEdge(relation=edge.relation, source=edge.source, target=edge.target)
