@@ -51,7 +51,13 @@ export function ReportPdfPane({ reportId, focus, docked, onClose }: ReportPdfPan
   }, [docked]);
 
   return (
-    <section ref={ref} aria-label="PDF" data-report-pdf-pane="" className="flex h-full min-h-0 flex-col bg-card">
+    <section
+      ref={ref}
+      aria-label="PDF"
+      data-report-pdf-pane=""
+      data-layout-part={docked ? "report-pdf" : undefined}
+      className="flex h-full min-h-0 flex-col bg-card"
+    >
       <header className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <h2 className="min-w-0 flex-1 truncate text-sm font-medium" title={title ?? undefined}>
           {title ?? `Report #${reportId}`}

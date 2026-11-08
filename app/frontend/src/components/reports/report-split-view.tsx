@@ -314,7 +314,7 @@ export function ReportSplitView({
           </ResizablePanel>
           {showPdf && isDesktop && (
             <>
-              <ResizableHandle withHandle />
+              <ResizableHandle withHandle data-layout-part="report-pdf-handle" />
               <ResizablePanel id="pdf" order={2} defaultSize={45} minSize={25}>
                 <ReportPdfPane reportId={reportId} focus={pdfFocus} docked onClose={() => pdfPane.setOpen(false)} />
               </ResizablePanel>
