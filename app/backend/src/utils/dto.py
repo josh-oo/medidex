@@ -131,6 +131,9 @@ class ReportIntake(ReportSources):
 class Tag(BaseModel):
     id: str
     keyword: str
+    # The details of the tag of the vocabulary (src/database/models.py's Tag), shown on hovering it in the study view.
+    acronym: Optional[str] = None
+    labels: List[str] = Field(default_factory=list)
 
 class StudyGraphNode(BaseModel):
     """A node of the graph of a study: an entity of a kind of config/medidex-study.yaml. A node that is a value holds it: the name

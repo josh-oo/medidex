@@ -45,6 +45,8 @@ trial_id_mapping = load_trial_id_mapping()
 # validation (src/utils/query_parser.py) before a Comparison ever reaches here, so
 # there's no "unknown field" case left to check or raise for at this layer.
 _TAG_FIELDS = {AdvancedSearchField(TAG_CATEGORIES[name].search_field): name for name in TAG_CATEGORIES}
+# What a tag of a study is shown with (StudyRepository._tag).
+_TAG_COLUMNS = (DbTag.id, DbTag.name, DbTag.acronym, DbTag.labels)
 
 def _authors_text(model):
     """The authors of the reports (of `model`, Report or UpdateReport) as one text, to match a part of a name in."""
@@ -557,13 +559,12 @@ class StudyRepository:
     # Study Aspects
 
     async def _get_study_aspect(self, stmt) -> Dict[int, List[Tag]]:
-        rows = (await self.db.execute(stmt)).all()  # -> [(StudyID, ID, Description), ...]
+        rows = (await self.db.execute(stmt)).all()  # -> [(StudyID, ID, Description, Acronym, Labels), ...]
 
         # --- Group results by StudyID ---
         final_result: Dict[int, List[Tag]] = {}
-        for study_id, aspect_id, description in rows:
-            item = Tag(id=str(aspect_id), keyword=description or "")
-            final_result.setdefault(study_id, []).append(item)
+        for study_id, *tag in rows:
+            final_result.setdefault(study_id, []).append(self._tag(*tag))
 
         return final_result
 
@@ -576,10 +577,15 @@ class StudyRepository:
         (rather than _get_study_aspect()'s raw {"ID", "Description"} dicts) since every
         caller of the *_single_page() methods below wants a Tag anyway - no reason to
         make them convert a second intermediate shape themselves."""
-        rows = (await self.db.execute(stmt.offset(offset).limit(limit + 1))).all()  # -> [(ID, Description), ...]
+        rows = (await self.db.execute(stmt.offset(offset).limit(limit + 1))).all()  # -> [(ID, Description, Acronym, Labels), ...]
         has_more = len(rows) > limit
-        items = [Tag(id=str(aspect_id), keyword=description or "") for aspect_id, description in rows[:limit]]
+        items = [self._tag(*tag) for tag in rows[:limit]]
         return items, has_more
+
+    @staticmethod
+    def _tag(tag_id, name, acronym, labels) -> Tag:
+        """A tag of the vocabulary as selected by _TAG_COLUMNS."""
+        return Tag(id=str(tag_id), keyword=name or "", acronym=acronym, labels=labels or [])
 
     async def get_study_tags(self, category: str, study_ids: List[int]) -> Dict[int, List[Tag]]:
         """The tags of a category (a key of config/medidex-study.yaml) of each of the studies, of the core database
@@ -601,16 +607,16 @@ class StudyRepository:
         tag_ids = self.graphs.tag_ids(study, category)
         if tag_ids:
             rows = (await self.db.execute(
-                select(DbTag.id, DbTag.name).where(DbTag.category == category, DbTag.id.in_(tag_ids)).order_by(DbTag.id)
+                select(*_TAG_COLUMNS).where(DbTag.category == category, DbTag.id.in_(tag_ids)).order_by(DbTag.id)
             )).all()
-            named = [Tag(id=str(tag_id), keyword=description) for tag_id, description in rows]
+            named = [self._tag(*tag) for tag in rows]
         return named + [Tag(id=name, keyword=name) for name in self.graphs.tag_names(study, category)]
 
     async def _core_study_tags(self, category: str, study_ids: List[int]) -> Dict[int, List[Tag]]:
         if not study_ids:
             return {}
         stmt = (
-            select(StudyTag.study_id, DbTag.id, DbTag.name)
+            select(StudyTag.study_id, *_TAG_COLUMNS)
             .join(DbTag, DbTag.id == StudyTag.tag_id)
             .where(StudyTag.study_id.in_(study_ids), DbTag.category == category)
             .order_by(DbTag.id)
@@ -627,7 +633,7 @@ class StudyRepository:
             tags = await self.get_study_tags_single(category, study_id)
             return tags[offset:offset + limit], len(tags) > offset + limit
         stmt = (
-            select(DbTag.id, DbTag.name)
+            select(*_TAG_COLUMNS)
             .join(StudyTag, StudyTag.tag_id == DbTag.id)
             .where(StudyTag.study_id == study_id, DbTag.category == category)
             .order_by(DbTag.id)

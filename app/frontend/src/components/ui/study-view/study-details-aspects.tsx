@@ -7,7 +7,7 @@ import {
   TagDto,
 } from "@/types/apiDTOs";
 import { getPersonsForStudy } from "@/lib/api/studiesApi";
-import { DetailChips, DetailRow } from "@/components/ui/study-view/detail-row";
+import { DetailChips, DetailRow, TagChips } from "@/components/ui/study-view/detail-row";
 
 // The persons shown before "+N more".
 const PERSONS_SHOWN = 6;
@@ -117,7 +117,7 @@ export function StudyAspects({
         return (
           <DetailRow key={category.key} icon={category.icon} label={category.label}>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <DetailChips values={items.map((item) => item.keyword)} />
+              <TagChips tags={items} />
               {nextCursor && (
                 <Button
                   variant="link"

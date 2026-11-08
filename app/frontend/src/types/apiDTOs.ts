@@ -488,6 +488,8 @@ export interface TagDto {
 }
 
 export type GetPersonsResponseDto = Record<string, string[]>;
+  acronym?: string | null;
+  labels?: string[];
 
 // ---------------------------------------------------------------------------
 // Annotation DTOs
