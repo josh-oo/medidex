@@ -42,14 +42,14 @@ export const getReferencedStudiesByReportId = (
     .catch(logAndRethrow(`Error fetching referenced studies for report ${reportId}:`));
 }
 
-// what PubMed, Europe PMC, ClinicalTrials.gov and OpenAlex know of the report's trial; searched on first use,
-// `refresh` searches again
-export const getExternalRecordsByReportId = (
+// searches PubMed, Europe PMC and ClinicalTrials.gov from the report's workbench: a registry id in every spelling,
+// anything else as typed
+export const searchExternalRecords = (
   reportId: number,
-  refresh = false,
+  query: string,
   config?: AxiosRequestConfig
 ): Promise<ExternalRecordsDto> => {
-  return apiClient.get<ExternalRecordsDto>(`/reports/${reportId}/external-records`, { ...config, params: { refresh } })
+  return apiClient.get<ExternalRecordsDto>(`/reports/${reportId}/external-records`, { ...config, params: { q: query } })
     .then(unwrap)
     .catch(logAndRethrow(`Error fetching external records for report ${reportId}:`));
 }

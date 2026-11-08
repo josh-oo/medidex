@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect} from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -14,7 +14,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StudyCard } from "./study-card";
 import { StudyDetails } from "./study-details";
-import { ExternalRecords } from "./external-records";
+import { ExternalRecordRow, sourceLabel, useFoundBy } from "./external-search-results";
 import { Widget } from "@/components/ui/widget";
 import { STUDY_ROWS_PER_PAGE, StudyRowSkeleton } from "@/components/reports/workbench-skeleton";
 import { AddStudyTriggerSlot } from "@/context/add-study-trigger-context";
@@ -22,12 +22,12 @@ import { AdvancedSearchDialog } from "./advanced-search-dialog";
 import { Pager } from "@/components/ui/pager";
 import { useClientPages } from "@/hooks/use-client-pages";
 import { WorkbenchAside } from "@/context/workbench-aside-context";
-import type { StudyCandidateDto, StudyDto, StudyBaseDto, Page } from "@/types/apiDTOs";
+import type { ExternalRecordsDto, StudyCandidateDto, StudyDto, StudyBaseDto, Page } from "@/types/apiDTOs";
 import { ReportBannerSlot, StudyBadgeSlot } from "@/context/study-report-slots-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import { cn } from "@/lib/utils";
 import { useExtensionRegistry, type StudyLinkReview } from "@/context/extension-registry-context";
-import { assignNewStudyToReportByReportId } from "@/lib/api/reportApi";
+import { assignNewStudyToReportByReportId, searchExternalRecords } from "@/lib/api/reportApi";
 import { searchStudies } from "@/lib/api/studiesApi";
 import { onStudySearchRequest } from "@/lib/study-search-request";
 import { getSimilarStudiesByReportId } from "@/lib/api/reportApi";
@@ -89,6 +89,12 @@ export function CandidateStudyTable({
   const [isLoadingMoreSearch, setIsLoadingMoreSearch] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isAdvancedSearch, setIsAdvancedSearch] = useState(false);
+  // The same query in PubMed, Europe PMC and ClinicalTrials.gov, run next to the search of the studies.
+  const [externalResults, setExternalResults] = useState<ExternalRecordsDto | null>(null);
+  const [isSearchingExternal, setIsSearchingExternal] = useState(false);
+  const [externalError, setExternalError] = useState(false);
+  // Only the latest external search may set the state: one still running when the query changes is dropped.
+  const latestExternal = useRef(0);
 
   const addAssignedStudy = useReportStore((state) => state.addAssignedStudy);
   const syncAssignedStudy = useReportStore((state) => state.syncAssignedStudy);
@@ -177,6 +183,19 @@ export function CandidateStudyTable({
     setSubmittedQuery(query);
     setIsAdvancedSearch(advanced);
 
+    // The other sources take no advanced query: those search the studies only.
+    const external = ++latestExternal.current;
+    const isLatest = () => external === latestExternal.current;
+    setExternalResults(null);
+    setExternalError(false);
+    setIsSearchingExternal(!advanced && reportId !== undefined);
+    if (!advanced && reportId !== undefined) {
+      searchExternalRecords(reportId, query)
+        .then((results) => isLatest() && setExternalResults(results))
+        .catch(() => isLatest() && setExternalError(true))
+        .finally(() => isLatest() && setIsSearchingExternal(false));
+    }
+
     try {
       const response = await searchStudiesForReport(reportId, query);
       setSearchResults(response.items);
@@ -252,6 +271,10 @@ export function CandidateStudyTable({
     setSearchNextCursor(null);
     setSearchError(null);
     setIsAdvancedSearch(false);
+    latestExternal.current++;
+    setExternalResults(null);
+    setIsSearchingExternal(false);
+    setExternalError(false);
   }, []);
 
   // Prefill the explicit search with the report's trial id - the confirmed one if a
@@ -313,15 +336,26 @@ export function CandidateStudyTable({
     loadMore: handleLoadMoreSearch,
     resetKey: `${reportId}-${submittedQuery}`,
   });
+  const externalPages = useClientPages({
+    items: externalResults?.records ?? [],
+    pageSize: SEARCH_PAGE_SIZE,
+    resetKey: `${reportId}-${submittedQuery}`,
+  });
+  const externalFoundBy = useFoundBy(externalResults);
+  const externalStudyNames = useMemo(
+    () => new Map((externalResults?.studies ?? []).map((study) => [study.studyId, study.shortName])),
+    [externalResults]
+  );
+  const unreachable = [...new Set((externalResults?.searches ?? []).filter((s) => s.error).map((s) => sourceLabel(s.source)))];
 
   return (
     // Room at the bottom for floating actions of extensions (e.g. a chat button).
     <div className="space-y-4 pb-20">
       <ReportBannerSlot reportId={reportId} />
 
-      {/* Global search across all studies */}
+      {/* One search of the studies of the database and, next to it, of PubMed, Europe PMC and ClinicalTrials.gov */}
       <Widget
-        title="Find a study"
+        title="Search resources"
         icon={Search}
         count={searchResults && !searchPages.canPrev && !searchPages.canNext ? searchResults.length : undefined}
         actions={
@@ -397,7 +431,7 @@ export function CandidateStudyTable({
               </p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Results for &ldquo;{submittedQuery}&rdquo;
+                Studies of the database for &ldquo;{submittedQuery}&rdquo;
               </p>
             )}
 
@@ -416,6 +450,47 @@ export function CandidateStudyTable({
             )}
           </div>
         )}
+
+        {(isSearchingExternal || externalResults || externalError) && (
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                PubMed, Europe PMC and ClinicalTrials.gov for &ldquo;{submittedQuery}&rdquo;
+              </p>
+              <Pager
+                range={externalPages.range}
+                canPrev={externalPages.canPrev}
+                canNext={externalPages.canNext}
+                onPrev={externalPages.prev}
+                onNext={externalPages.next}
+              />
+            </div>
+            {externalResults ? (
+              externalResults.records.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-muted-foreground rounded-xl bg-muted/50">
+                  <p className="text-sm font-medium">No matching records</p>
+                  <p className="text-xs mt-1">Try a different search query</p>
+                </div>
+              ) : (
+                externalPages.pageItems.map((record) => (
+                  <ExternalRecordRow
+                    key={record.key}
+                    record={record}
+                    sources={externalFoundBy.get(record.key) ?? []}
+                    studyNames={externalStudyNames}
+                  />
+                ))
+              )
+            ) : externalError ? (
+              <p className="text-xs text-muted-foreground">The other sources could not be searched.</p>
+            ) : (
+              Array.from({ length: 2 }, (_, index) => <StudyRowSkeleton key={index} />)
+            )}
+            {unreachable.length > 0 && (
+              <p className="text-xs text-muted-foreground">Not reachable: {unreachable.join(", ")}.</p>
+            )}
+          </div>
+        )}
       </Widget>
 
       {/* Studies of reports this report cites by DOI */}
@@ -425,11 +500,6 @@ export function CandidateStudyTable({
             {referencedStudies.map((study) => renderStudyCard("referenced", study))}
           </div>
         </Widget>
-      )}
-
-      {/* What other sources know of the report's trial */}
-      {reportId !== undefined && (
-        <ExternalRecords reportId={reportId} renderStudy={(study) => renderStudyCard("external", study)} />
       )}
 
       {/* Similar studies */}

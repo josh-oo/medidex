@@ -107,10 +107,10 @@ async def referenced_studies_by_report(report_id: int, ctx: RequestContext = Dep
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
         raise_for_report_access(exc)
 
-@router.get("/reports/{report_id}/external-records", dependencies=[Depends(is_verified_api_call)], summary="Get what PubMed, Europe PMC, ClinicalTrials.gov and OpenAlex know of the trial of a report: the searches for its registry ids and for its first author and title, the records they found (merged across sources) and the studies of the database those records belong to. Searched on first use and cached for a report of an update.")
-async def external_records_by_report(report_id: int, refresh: bool = Query(False, description="Search again instead of returning the cached searches."), ctx: RequestContext = Depends(get_context)) -> ExternalRecords:
+@router.get("/reports/{report_id}/external-records", dependencies=[Depends(is_verified_api_call)], summary="Search PubMed, Europe PMC and ClinicalTrials.gov from the workbench of a report: the records found (merged across sources), each with the studies of the report's database it is a report of. A query that is one registry id is searched in every spelling; any other is sent as typed.")
+async def external_records_by_report(report_id: int, q: str = Query(..., min_length=3, description="A registry id, or words as each source takes them."), ctx: RequestContext = Depends(get_context)) -> ExternalRecords:
     try:
-        return await ctx.external_record_service.get_external_records(report_id, ctx.user_id, refresh)
+        return await ctx.external_record_service.search(report_id, q, ctx.user_id)
     except (ReportNotFoundError, AuthenticationRequiredError, ReportAccessDeniedError) as exc:
         raise_for_report_access(exc)
 

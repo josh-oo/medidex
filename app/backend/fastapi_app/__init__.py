@@ -9,9 +9,7 @@ from typing import Iterable
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.background.postprocessing import postprocessor_registry
 from src.background.startup import Startup
-from src.services.external import ExternalSearchPostprocessor
 
 from . import auth, resources, core, projects, admin, maintenance, databases
 
@@ -27,10 +25,6 @@ def create_app(extra_routers: Iterable[APIRouter] = ()) -> FastAPI:
     here.
     """
     startup = Startup.from_env()
-    # The postprocessing of medidex itself (src/background/postprocessing.py), after those a downstream build registered
-    # before building the app: the postprocessors of a report run one after the other, and this one needs none of theirs.
-    if not any(isinstance(p, ExternalSearchPostprocessor) for p in postprocessor_registry.all()):
-        postprocessor_registry.register(ExternalSearchPostprocessor())
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

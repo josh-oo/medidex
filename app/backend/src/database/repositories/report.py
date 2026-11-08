@@ -65,15 +65,6 @@ class ReportRepository:
         report.referenced_dois = dois
         await self.db.commit()
 
-    async def set_external_records(self, report_id: int, records: Dict) -> None:
-        """Persists the searches of other sources for one report of an update (see UpdateReport.external_records);
-        silently skipped for a report of the core database, like set_fulltext_links."""
-        report = await self.db.get(UpdateReport, report_id)
-        if report is None:
-            return
-        report.external_records = records
-        await self.db.commit()
-
     async def get_fulltext_links_for_reports(self, report_ids: List[int]) -> Dict[int, List[str]]:
         """Bulk read of the cached UpdateReport.fulltext_links column (see its comment
         in models.py) for a page of reports - the intake list's version of

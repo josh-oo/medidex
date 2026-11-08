@@ -151,7 +151,6 @@ class RequestContext:
             study_repo=self.study_repo,
             project_repo=self.project_repo,
             study_similarity_service=self.study_similarity_service,
-            open_alex_service=self.open_alex_service,
         )
 
     @cached_property

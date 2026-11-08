@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from httpx import ReadTimeout
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional
 
 from .registry import ClinicalTrialsGovRegistry, IsrctnRegistry, OmonRegistry, RegistryRecord, TrialRegistry
 
@@ -293,18 +293,6 @@ class OpenAlexService:
     async def get_work_by_doi(self, doi: str) -> OpenAlexWork:
         works = await self.get_works_by_dois([doi])
         return works.get(normalize_doi(doi), OpenAlexWork())
-
-    async def search_works(self, filters: Dict[str, str], limit: int) -> Tuple[Optional[int], List[dict]]:
-        """The total and the first `limit` works matching every filter (e.g. {"title_and_abstract.search": "..."});
-        "," is filter syntax in OpenAlex and is dropped from the values. Raises on upstream errors."""
-        flt = ",".join(f"{name}:{value.replace(',', ' ')}" for name, value in filters.items())
-        async with httpx.AsyncClient(timeout=30) as client:
-            data = await self._get_json(client, {
-                "filter": flt,
-                "per-page": limit,
-                "select": "id,doi,ids,title,publication_year,authorships,primary_location",
-            })
-        return data.get('meta', {}).get('count'), data.get('results', [])
 
     async def get_pdf_links_by_doi(self, doi : str) -> List[str]:
         return set((await self.get_work_by_doi(doi)).pdf_links)
