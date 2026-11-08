@@ -35,7 +35,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Check, Plus, X } from "lucide-react";
+import { Check, ListChecks, Network, Plus, X } from "lucide-react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { toast } from "sonner";
 import { COUNTRY_OPTIONS } from "./constants";
 import { useStudyFieldValues } from "@/hooks/use-study-schema";
@@ -55,6 +56,7 @@ import {
   suggestionFromGraph,
 } from "@/lib/comparisonUtils";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useAbortableEffect } from "@/hooks/use-abortable-effect";
 import { getSimilarTagsByReportId, getSuggestedStudyName } from "@/lib/api/reportApi";
 import { getInterventions } from "@/lib/api/interventionsApi";
@@ -66,12 +68,11 @@ import type {
 } from "@/types/apiDTOs";
 import type {
   ArmComparison,
-  ArmRole,
   StudyArm,
   StudyDetails,
 } from "@/types/comparisons";
 import { ArmComparisonLanes, lanesWidth, useRowCenters } from "./arm-comparison-lanes";
-import { StudyOutcomeFields, StudyPopulationFields } from "./study-details-fields";
+import { ChipList, SexCheckboxes, StudyOutcomeFields, useVocabulary } from "./study-details-fields";
 
 const CATALOG_SEARCH_MIN_CHARS = 2;
 
@@ -136,10 +137,14 @@ export interface AddStudyDialogProps {
   /** Shows the form in place (e.g. as a widget of the report workbench) instead of behind a button and dialog. */
   inline?: boolean;
   /**
-   * Rendered beside the buttons of the form (e.g. a button that opens the whole graph): `current` gives the graph the
-   * form makes as it is filled in, `apply` fills the form in from a graph (one edited from it).
+   * An editor of the whole graph the form makes (e.g. with the passages of the report each value was read from): given,
+   * a switch at the top of the form shows it in place of the fields. It edits the graph the form had when switched to;
+   * switching back fills the form in from the edited graph, and the study can be saved from either.
    */
-  graphAction?: (current: () => StudyGraphDto, apply: (graph: StudyGraphDto) => void) => ReactNode;
+  graphEditor?: (graph: StudyGraphDto, onChange: (graph: StudyGraphDto) => void) => ReactNode;
+  /** Where the switch between the fields and the graph goes (e.g. the header of the card around an inline form); without
+   * it, it goes above the fields. */
+  toolbar?: HTMLElement | null;
 }
 
 const uniqueKeywords = (data: unknown): string[] => {
@@ -155,7 +160,8 @@ export function AddStudyDialog({
   suggestedValues,
   onSaveStudy,
   inline = false,
-  graphAction,
+  graphEditor,
+  toolbar,
 }: AddStudyDialogProps) {
   const [shortName, setShortName] = useState("");
   const statusOptions = useStudyFieldValues("status");
@@ -166,10 +172,10 @@ export function AddStudyDialog({
   const [durationUnit, setDurationUnit] = useState<DurationUnit | "">("");
   // Who the participants are, the design, trial ids and outcomes of the study.
   const [details, setDetails] = useState<StudyDetails>(() => detailsFromGraph());
-  // The graph the form is written onto (the suggested one, or one applied with `graphAction`).
+  // The graph the form is written onto (the suggested one, or one edited with `graphEditor`).
   const [baseGraph, setBaseGraph] = useState<StudyGraphDto | undefined>(undefined);
-
-  const [countryOpen, setCountryOpen] = useState(false);
+  // The graph shown in `graphEditor` in place of the fields; null while the fields are shown.
+  const [rawGraph, setRawGraph] = useState<StudyGraphDto | null>(null);
 
   // Exposed as a `data-highlighted` attribute below rather than a class here,
   // so a downstream build can style a suggestion-prefilled dialog however it
@@ -198,6 +204,8 @@ export function AddStudyDialog({
   const [addStudyDialogOpen, setAddStudyDialogOpen] = useState(false);
   // An inline form is always shown, so it loads its suggestions right away.
   const isFormShown = inline || addStudyDialogOpen;
+  // The tags offered in the chip fields (designs, conditions, ...).
+  const vocabulary = useVocabulary(isFormShown);
   const [creatingStudy, setCreatingStudy] = useState(false);
 
   const resetLocalFormState = useCallback(() => {
@@ -208,6 +216,7 @@ export function AddStudyDialog({
     setOpenedDetails({});
     setDetails(detailsFromGraph(suggestedValues?.graph));
     setBaseGraph(suggestedValues?.graph);
+    setRawGraph(null);
     if (suggestedValues) {
       setShortName(suggestedValues.short_name ?? "");
       setStatusOfStudy(suggestedValues.status_of_study ?? "");
@@ -330,19 +339,30 @@ export function AddStudyDialog({
       return;
     }
 
+    // Saved from the graph, the study is what the form would be filled in with from it.
+    const source = rawGraph ? formFromGraph(rawGraph) : null;
+    const formArms = source?.arms ?? arms;
+    const formComparisons = source?.comparisons ?? comparisons;
+    const formDetails = source?.details ?? details;
+    const participantsText = source ? source.participants : numberOfParticipants;
+    const duration = source
+      ? undefined
+      : durationValue.trim() && durationUnit
+        ? `${durationValue.trim()} ${durationUnit}`
+        : undefined;
+
     // Both overall values are optional: left empty, the study calculates them from its arms. Like everything of the form
     // they are written into the graph, the only source of what the study says (onto the graph it was prefilled from).
-    const participantsValue = numberOfParticipants.trim() === "" ? null : Number(numberOfParticipants);
+    const participantsValue = participantsText.trim() === "" ? null : Number(participantsText);
     if (participantsValue !== null && (Number.isNaN(participantsValue) || !Number.isInteger(participantsValue) || participantsValue < 0)) {
       toast.error("Enter a valid number of participants.");
       return;
     }
-    const duration = durationValue.trim() && durationUnit ? `${durationValue.trim()} ${durationUnit}` : undefined;
 
-    const graph = buildGraph(arms, comparisons, selectedCountries, baseGraph, {
+    const graph = buildGraph(formArms, formComparisons, source?.countries ?? selectedCountries, rawGraph ?? baseGraph, {
       duration,
       participants: participantsValue === null ? undefined : String(participantsValue),
-      details,
+      details: formDetails,
     });
     if (graph === null) {
       toast.error("Compare at least two arms that have interventions.");
@@ -384,29 +404,43 @@ export function AddStudyDialog({
       details,
     });
   };
-  const applyGraph = (graph: StudyGraphDto) => {
+  const formFromGraph = (graph: StudyGraphDto) => {
     const suggestion = suggestionFromGraph(graph, shortName);
     const initial = buildArmsFromSuggestion(suggestion);
-    setArms(orderArms(initial.arms));
-    setComparisons(initial.comparisons);
+    return {
+      arms: orderArms(initial.arms),
+      comparisons: initial.comparisons,
+      countries: suggestion.countries,
+      participants: suggestion.number_of_participants ? String(suggestion.number_of_participants) : "",
+      details: detailsFromGraph(graph),
+    };
+  };
+  const applyGraph = (graph: StudyGraphDto) => {
+    const form = formFromGraph(graph);
+    setArms(form.arms);
+    setComparisons(form.comparisons);
     setLinkingFrom(null);
     setOpenedDetails({});
-    setSelectedCountries(suggestion.countries);
-    setNumberOfParticipants(suggestion.number_of_participants ? String(suggestion.number_of_participants) : "");
+    setSelectedCountries(form.countries);
+    setNumberOfParticipants(form.participants);
     // A duration of the study is that of its arms in the graph.
     setDurationValue("");
     setDurationUnit("");
-    setDetails(detailsFromGraph(graph));
+    setDetails(form.details);
     setBaseGraph(graph);
   };
-
-  const toggleCountrySelection = (country: string) => {
-    setSelectedCountries((previous) =>
-      previous.includes(country)
-        ? previous.filter((entry) => entry !== country)
-        : [...previous, country]
-    );
+  // The fields, or the whole graph they make (edited there and filled back into the fields).
+  const showGraph = (shown: boolean) => {
+    if (shown && !rawGraph) {
+      setRawGraph(currentGraph());
+    } else if (!shown && rawGraph) {
+      applyGraph(rawGraph);
+      setRawGraph(null);
+    }
   };
+
+  const setDetail = <K extends keyof StudyDetails>(key: K) => (value: StudyDetails[K]) =>
+    setDetails((previous) => ({ ...previous, [key]: value }));
 
   // An arm keeps its place when its type changes; only the arms of a suggestion are ordered by type.
   const updateArm = (armId: string, changes: Partial<StudyArm>) => {
@@ -582,15 +616,30 @@ export function AddStudyDialog({
     );
 
     return (
-      <div key={arm.id} data-arm-row className="space-y-2 rounded-lg border border-border/60 bg-background p-2.5">
-        <div className="flex items-start gap-2">
+      <div key={arm.id} data-arm-row className="flex items-start gap-2 rounded-lg border border-border/60 bg-background p-2.5">
+        {/* The letter of the arm, and below it its type, which a click switches. */}
+        <div className="flex w-10 shrink-0 flex-col items-center gap-1">
           <span
-            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sm font-bold ${
+            className={`flex h-8 w-8 items-center justify-center rounded-md text-sm font-bold ${
               arm.role === "control" ? "bg-muted text-muted-foreground" : "bg-foreground/15 text-foreground"
             }`}
           >
             {letter}
           </span>
+          <button
+            type="button"
+            onClick={() => updateArm(arm.id, { role: arm.role === "control" ? "intervention" : "control" })}
+            aria-label={`Arm ${letter} is ${arm.role === "control" ? "a control" : "an intervention"} arm. Switch`}
+            title={`${arm.role === "control" ? "Control" : "Intervention"} arm: click to make it ${
+              arm.role === "control" ? "an intervention" : "a control"
+            } arm`}
+            className="w-full rounded px-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            {arm.role === "control" ? "Ctrl" : "Int"}
+          </button>
+        </div>
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex items-start gap-2">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 pt-1">
             {arm.interventions.map((value, position) => (
               <span
@@ -706,15 +755,6 @@ export function AddStudyDialog({
           </PopoverContent>
         </Popover>
           </div>
-          <Select value={arm.role} onValueChange={(value) => updateArm(arm.id, { role: value as ArmRole })}>
-            <SelectTrigger size="sm" className="h-8 w-[124px] shrink-0 text-xs" aria-label={`Type of arm ${letter}`}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="intervention">Intervention</SelectItem>
-              <SelectItem value="control">Control</SelectItem>
-            </SelectContent>
-          </Select>
           {arms.length > 2 && (
             <Button
               variant="ghost"
@@ -727,8 +767,8 @@ export function AddStudyDialog({
               <X className="h-4 w-4" />
             </Button>
           )}
-        </div>
-        <div className="flex flex-wrap items-end gap-1.5 pl-10">
+          </div>
+          <div className="flex flex-wrap items-end gap-1.5">
           {shownDetails.map(renderDetail)}
           {hiddenDetails.length > 0 && (
             <DropdownMenu modal={false}>
@@ -736,12 +776,12 @@ export function AddStudyDialog({
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   aria-label={`Add an attribute to arm ${letter}`}
-                  className="h-6 rounded-full border-dashed px-2.5 text-xs text-muted-foreground"
+                  title="Add an attribute (participants, dosage, duration, ...)"
+                  className="h-8 w-8 shrink-0 rounded-full border-dashed text-muted-foreground"
                 >
-                  <Plus className="h-3 w-3" />
-                  Attribute
+                  <Plus className="h-3.5 w-3.5" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" onCloseAutoFocus={(event) => event.preventDefault()}>
@@ -753,16 +793,16 @@ export function AddStudyDialog({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+          </div>
         </div>
       </div>
     );
   };
 
-  const normalizedCountry =
-    selectedCountries.length > 0 ? selectedCountries.join(", ") : "Unclear";
   const longestArm = longestArmDuration(arms);
   const armsSum = armParticipantsSum(arms);
-  const comparisonValid = hasValidComparisons(arms, comparisons);
+  const rawForm = rawGraph ? formFromGraph(rawGraph) : null;
+  const comparisonValid = rawForm ? hasValidComparisons(rawForm.arms, rawForm.comparisons) : hasValidComparisons(arms, comparisons);
 
   const isSubmitDisabled =
     creatingStudy ||
@@ -770,138 +810,157 @@ export function AddStudyDialog({
     statusOfStudy.trim().length === 0 ||
     !comparisonValid;
 
-  const formFields = (
+  const switchControl = graphEditor && (
+      <ToggleGroup
+        type="single"
+        variant="outline"
+        size="sm"
+        value={rawGraph ? "graph" : "form"}
+        onValueChange={(value) => value && showGraph(value === "graph")}
+        aria-label="Edit the new study as a form or as its graph"
+      >
+        <ToggleGroupItem value="form" className="gap-1.5 px-2.5 text-xs">
+          <ListChecks className="h-3.5 w-3.5" />
+          Form
+        </ToggleGroupItem>
+        <ToggleGroupItem value="graph" className="gap-1.5 px-2.5 text-xs">
+          <Network className="h-3.5 w-3.5" />
+          Graph
+        </ToggleGroupItem>
+      </ToggleGroup>
+  );
+  const viewSwitch =
+    switchControl && (toolbar ? createPortal(switchControl, toolbar) : <div className="flex justify-end">{switchControl}</div>);
+
+  // What identifies the study first, then its participants, its arms and its outcomes.
+  const formFields = rawGraph && graphEditor ? (
     <>
-          <div className="grid gap-4 grid-cols-1 sm:grid-cols-[7fr_3fr] w-full items-start">
-            <div className="space-y-2">
-              <Label htmlFor="study-short-name">Short name</Label>
-              <Input
-                id="study-short-name"
-                placeholder="e.g. Steiner 1995"
-                value={shortName}
-                onChange={(event) => setShortName(event.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Status of study</Label>
-              <Select
-                value={statusOfStudy}
-                onValueChange={(value) => setStatusOfStudy(value)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Choose status" />
-                </SelectTrigger>
-                <SelectContent>
-                  {statusOptions.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {status}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+      {viewSwitch}
+      {graphEditor(rawGraph, setRawGraph)}
+    </>
+  ) : (
+    <>
+      {viewSwitch}
+      <div className="grid w-full grid-cols-1 items-start gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)_minmax(0,2fr)]">
+        <div className="space-y-1.5">
+          <Label htmlFor="study-short-name" className="text-xs">Short name</Label>
+          <Input
+            id="study-short-name"
+            className="h-9"
+            placeholder="e.g. Steiner 1995"
+            value={shortName}
+            onChange={(event) => setShortName(event.target.value)}
+            required
+          />
+        </div>
+        <ChipList label="Trial IDs" values={details.trialIds} onChange={setDetail("trialIds")} placeholder="e.g. NCT01234567" />
+        <div className="space-y-1.5">
+          <Label className="text-xs">Status</Label>
+          <Select value={statusOfStudy} onValueChange={(value) => setStatusOfStudy(value)}>
+            <SelectTrigger className="h-9 w-full">
+              <SelectValue placeholder="Choose status" />
+            </SelectTrigger>
+            <SelectContent>
+              {statusOptions.map((status) => (
+                <SelectItem key={status} value={status}>
+                  {status}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid w-full grid-cols-1 items-start gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <ChipList label="Design" values={details.designs} onChange={setDetail("designs")} placeholder="Add a design" options={vocabulary("design")} />
+        <ChipList
+          label="Countries"
+          values={selectedCountries}
+          onChange={setSelectedCountries}
+          placeholder="Add a country"
+          options={COUNTRY_OPTIONS}
+          strict
+        />
+        <div className="space-y-1.5">
+          <Label htmlFor="study-duration" className="text-xs">Duration</Label>
+          <div className="flex gap-1.5">
+            <Input
+              id="study-duration"
+              type="number"
+              min="0"
+              className="h-9 w-20"
+              placeholder={longestArm.split(" ")[0] || "-"}
+              title={longestArm ? `Empty: the longest arm, ${longestArm}` : "Empty: the longest arm"}
+              value={durationValue}
+              onChange={(event) => setDurationValue(event.target.value)}
+            />
+            <Select value={durationUnit || undefined} onValueChange={(value) => setDurationUnit(value as DurationUnit)}>
+              <SelectTrigger className="h-9 w-28" aria-label="Unit of the duration of the study">
+                <SelectValue placeholder={longestArm.split(" ")[1] || "Unit"} />
+              </SelectTrigger>
+              <SelectContent>
+                {DURATION_UNITS.map((unit) => (
+                  <SelectItem key={unit} value={unit}>
+                    {unit}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="study-countries">Countries</Label>
-            <Popover open={countryOpen} onOpenChange={setCountryOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={countryOpen}
-                  className="w-full justify-between"
-                >
-                  {normalizedCountry}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[480px] max-w-screen-sm p-0 overflow-x-auto">
-                <Command className="min-w-[420px]">
-                  <CommandInput placeholder="Search country..." />
-                  <CommandList className="max-h-[300px] overflow-y-auto overflow-x-auto">
-                    <CommandEmpty>No country found.</CommandEmpty>
-                    <CommandGroup>
-                      {COUNTRY_OPTIONS.map((country) => {
-                        const isSelected = selectedCountries.includes(country);
-                        return (
-                          <CommandItem
-                            key={country}
-                            value={country}
-                            onSelect={() => toggleCountrySelection(country)}
-                            aria-pressed={isSelected}
-                          >
-                            <span className="flex-1">{country}</span>
-                            {isSelected && (
-                              <Check className="h-4 w-4 text-primary" />
-                            )}
-                          </CommandItem>
-                        );
-                      })}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+        </div>
+      </div>
+      <div className="space-y-3">
+        <Label className="text-sm font-semibold">Participants</Label>
+        <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-[6rem_minmax(0,1fr)_auto_9rem]">
+          <div className="space-y-1.5">
+            <Label htmlFor="study-participants" className="text-xs">Number</Label>
+            <Input
+              id="study-participants"
+              type="number"
+              min="0"
+              className="h-9"
+              placeholder={armsSum || "-"}
+              title={armsSum ? `Empty: the sum of the arms, ${armsSum}` : "Empty: the sum of the arms"}
+              value={numberOfParticipants}
+              onChange={(event) => setNumberOfParticipants(event.target.value)}
+            />
           </div>
-          <div className="grid gap-4 grid-cols-1 sm:grid-cols-[1fr_1fr] items-start">
-            <div className="space-y-2">
-              <Label htmlFor="study-participants">Number of participants</Label>
-              <Input
-                id="study-participants"
-                type="number"
-                min="0"
-                placeholder={armsSum ? `${armsSum} (sum of the arms)` : "Empty: the sum of the arms"}
-                value={numberOfParticipants}
-                onChange={(event) => setNumberOfParticipants(event.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="study-duration">Duration</Label>
-              <div className="grid grid-cols-[1fr_1fr] gap-2">
-                <Input
-                  id="study-duration"
-                  type="number"
-                  min="0"
-                  placeholder={longestArm || "Duration"}
-                  value={durationValue}
-                  onChange={(event) => setDurationValue(event.target.value)}
-                />
-                <Select value={durationUnit || undefined} onValueChange={(value) => setDurationUnit(value as DurationUnit)}>
-                  <SelectTrigger className="w-full" aria-label="Unit of the duration of the study">
-                    <SelectValue placeholder="Unit" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DURATION_UNITS.map((unit) => (
-                      <SelectItem key={unit} value={unit}>
-                        {unit}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+          <ChipList label="Conditions" values={details.conditions} onChange={setDetail("conditions")} placeholder="Add a condition" options={vocabulary("condition")} />
+          <SexCheckboxes values={details.sex} onChange={setDetail("sex")} />
+          <div className="space-y-1.5">
+            <Label htmlFor="study-age" className="text-xs">Age</Label>
+            <Input id="study-age" className="h-9 text-xs" placeholder="e.g. 18-65 years" value={details.age} onChange={(event) => setDetail("age")(event.target.value)} />
           </div>
-          <StudyPopulationFields details={details} onChange={setDetails} shown={isFormShown} />
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <Label className="text-sm font-semibold">Arms and comparisons</Label>
-              <Button type="button" variant="ghost" size="sm" onClick={addArm}>
-                + Add arm
-              </Button>
-            </div>
-            <div ref={setArmsElement} className="relative" style={{ paddingLeft: lanesWidth(arms, comparisons) }}>
-              <ArmComparisonLanes
-                arms={arms}
-                comparisons={comparisons}
-                rowCenters={rowCenters}
-                linkingFrom={linkingFrom}
-                onPort={handlePort}
-                onRemove={removeComparison}
-              />
-              <div className="space-y-2">{arms.map(renderArmRow)}</div>
-            </div>
-          </div>
-          <StudyOutcomeFields details={details} onChange={setDetails} shown={isFormShown} />
+        </div>
+      </div>
+      {details.interventions.length > 0 && (
+        <ChipList
+          label="Interventions without an arm"
+          values={details.interventions}
+          onChange={setDetail("interventions")}
+          placeholder="Add an intervention"
+          options={vocabulary("intervention")}
+        />
+      )}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <Label className="text-sm font-semibold">Arms and comparisons</Label>
+          <Button type="button" variant="ghost" size="sm" onClick={addArm}>
+            + Add arm
+          </Button>
+        </div>
+        <div ref={setArmsElement} className="relative" style={{ paddingLeft: lanesWidth(arms, comparisons) }}>
+          <ArmComparisonLanes
+            arms={arms}
+            comparisons={comparisons}
+            rowCenters={rowCenters}
+            linkingFrom={linkingFrom}
+            onPort={handlePort}
+            onRemove={removeComparison}
+          />
+          <div className="space-y-2">{arms.map(renderArmRow)}</div>
+        </div>
+      </div>
+      <StudyOutcomeFields details={details} onChange={setDetails} shown={isFormShown} />
     </>
   );
 
@@ -910,7 +969,6 @@ export function AddStudyDialog({
       <form className="space-y-4 w-full" onSubmit={handleAddStudySubmit}>
         {formFields}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            {graphAction && <div className="sm:mr-auto">{graphAction(currentGraph, applyGraph)}</div>}
             <Button
               type="button"
               variant="ghost"
@@ -958,7 +1016,6 @@ export function AddStudyDialog({
         <form className="space-y-4 w-full" onSubmit={handleAddStudySubmit}>
           {formFields}
           <DialogFooter>
-            {graphAction && <div className="sm:mr-auto">{graphAction(currentGraph, applyGraph)}</div>}
             <Button
               type="button"
               variant="ghost"

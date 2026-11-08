@@ -70,7 +70,7 @@ export interface ReportStatusSlotProps {
 
 export type AddStudyTriggerSlotProps = Pick<
   AddStudyDialogProps,
-  "currentReportId" | "onSaveStudy" | "inline"
+  "currentReportId" | "onSaveStudy" | "inline" | "toolbar"
 > & {
   /** The current report's `extensions` payload (see ReportCardSlotProps). */
   extensions?: Record<string, unknown>

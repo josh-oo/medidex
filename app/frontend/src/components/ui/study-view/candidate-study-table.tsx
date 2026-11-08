@@ -79,6 +79,8 @@ export function CandidateStudyTable({
 }: CandidateStudyTableProps) {
 
   const [searchQuery, setSearchQuery] = useState("");
+  // The header of the add-study card, where its form puts the switch between its fields and its graph.
+  const [addStudyToolbar, setAddStudyToolbar] = useState<HTMLDivElement | null>(null);
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searchNextCursor, setSearchNextCursor] = useState<string | null>(null);
@@ -461,7 +463,8 @@ export function CandidateStudyTable({
       {/* Only needed when none of the candidates above match */}
       <WorkbenchAside>
       <div inert={inert} className={cn("motion-safe:transition-opacity motion-safe:duration-200", inert && "opacity-50 motion-safe:delay-150")}>
-      <Widget title="Add new study" icon={Plus}>
+      {/* The form puts its switch between the fields and the graph into the header. */}
+      <Widget title="Add new study" icon={Plus} actions={<div ref={setAddStudyToolbar} className="contents" />}>
         <p className="-mt-1 mb-4 text-sm text-muted-foreground">
           None of the suggested studies match? Link this report to a new study.
         </p>
@@ -470,6 +473,7 @@ export function CandidateStudyTable({
           extensions={currentReport?.extensions}
           onSaveStudy={handleSaveNewStudy}
           inline
+          toolbar={addStudyToolbar}
         />
       </Widget>
       </div>
