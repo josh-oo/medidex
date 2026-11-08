@@ -11,14 +11,18 @@ import {
   Calendar,
   Plus,
   Check,
+  GitCompareArrows,
 } from "lucide-react";
 import type { StudyDto } from "@/types/apiDTOs";
 import type { ReactNode } from "react";
 import {
   ContextMenu,
   ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { useReportPdfPane } from "@/context/report-pdf-pane-context";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { StudyContextMenuSlot, useStudyCardClassName } from "@/context/study-report-slots-context";
 import { cn } from "@/lib/utils";
@@ -104,7 +108,10 @@ export function StudyCard({
   ...study
 }: StudyCardProps) {
   const extensionClassName = useStudyCardClassName({ reportId, studyId: study.studyId });
-  const hasContextMenu = useExtensionRegistry().studyContextMenuItems.length > 0;
+  const hasExtensionItems = useExtensionRegistry().studyContextMenuItems.length > 0;
+  // In the report workbench, the PDFs of the study's reports can be compared with the open report's.
+  const pdfPane = useReportPdfPane();
+  const canCompare = Boolean(pdfPane) && reportId !== undefined;
 
   const card = (
     <div
@@ -184,12 +191,19 @@ export function StudyCard({
     </div>
   );
 
-  if (!hasContextMenu) return card;
+  if (!hasExtensionItems && !canCompare) return card;
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{card}</ContextMenuTrigger>
       <ContextMenuContent>
+        {canCompare && (
+          <ContextMenuItem onSelect={() => pdfPane?.compare({ studyId: study.studyId, shortName: study.shortName })}>
+            <GitCompareArrows />
+            Compare fulltexts
+          </ContextMenuItem>
+        )}
+        {canCompare && hasExtensionItems && <ContextMenuSeparator />}
         <StudyContextMenuSlot reportId={reportId} study={study} />
       </ContextMenuContent>
     </ContextMenu>
