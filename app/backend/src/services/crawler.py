@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import httpx
 from bs4 import BeautifulSoup
 from httpx import ReadTimeout
@@ -159,6 +160,9 @@ def normalize_doi(doi: str) -> str:
             return doi[len(prefix):].strip()
     return doi
 
+class OpenAlexUnavailableError(Exception):
+    """OpenAlex turned a request down for its rate limit and does not take more for longer than is worth waiting."""
+
 @dataclass
 class OpenAlexWork:
     pdf_links: List[str] = field(default_factory=list)
@@ -169,17 +173,44 @@ class OpenAlexService:
     # Max values per OR-filter ("a|b|c") OpenAlex accepts, and the page size we ask for.
     BATCH_SIZE = 50
 
+    # A request turned down for the rate limit is tried again this often, if OpenAlex asks to wait at most MAX_WAIT
+    # seconds; a longer wait (the daily budget is used up) raises OpenAlexUnavailableError at once.
+    RETRIES = 3
+    MAX_WAIT = 10.0
+
     def __init__(self):
         # OPEN Alex is limited to 10 requests per second
         self.sem = asyncio.Semaphore(1)
+        # Without a key, every request from this IP shares one small free daily budget.
+        self.api_key = os.getenv("OPENALEX_API_KEY") or None
+
+    @staticmethod
+    def _retry_after(resp: httpx.Response) -> float:
+        for header in ("Retry-After", "X-RateLimit-Reset"):
+            try:
+                return float(resp.headers[header])
+            except (KeyError, ValueError):
+                continue
+        return 1.0
 
     async def _get_json(self, client: httpx.AsyncClient, params: dict) -> Any:
+        if self.api_key:
+            params = {**params, "api_key": self.api_key}
         async with self.sem:
-            try:
-                resp = await client.get(OpenAlexService.OPEN_ALEX_API, params=params)
-                resp.raise_for_status()
-            except ReadTimeout:
-                raise Exception("Upstream request timed out")
+            for attempt in range(self.RETRIES + 1):
+                try:
+                    resp = await client.get(OpenAlexService.OPEN_ALEX_API, params=params)
+                except ReadTimeout:
+                    raise Exception("Upstream request timed out")
+                if resp.status_code != 429:
+                    break
+                wait = self._retry_after(resp)
+                if attempt == self.RETRIES or wait > self.MAX_WAIT:
+                    raise OpenAlexUnavailableError(f"OpenAlex rate limit reached, next request in {wait:.0f}s")
+                await asyncio.sleep(wait)
+            if resp.is_error:
+                # Not raise_for_status(): its message holds the URL, and with it the key.
+                raise Exception(f"OpenAlex responded {resp.status_code} {resp.reason_phrase}")
             await asyncio.sleep(0.1)  # Non-blocking cooldown after each request
         return resp.json()
 

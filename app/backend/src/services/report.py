@@ -9,6 +9,7 @@ from ..database.repositories.report import Report
 from ..utils.dto import Study, studies_to_dto
 
 from ..utils.pdfs import PdfFiles
+from .crawler import OpenAlexUnavailableError
 
 import os
 from dotenv import load_dotenv
@@ -140,7 +141,11 @@ class ReportService:
         if report is None or not report.doi:
             return []
 
-        links = list(await self.open_alex_service.get_pdf_links_by_doi(report.doi))
+        try:
+            links = list(await self.open_alex_service.get_pdf_links_by_doi(report.doi))
+        except OpenAlexUnavailableError:
+            # Not cached: a later call tries again.
+            return []
         if update_report is not None:
             await self.report_repo.set_fulltext_links(report_id, links)
         return links
@@ -158,7 +163,11 @@ class ReportService:
         if report is None or not report.doi:
             return []
 
-        work = await self.open_alex_service.get_work_by_doi(report.doi)
+        try:
+            work = await self.open_alex_service.get_work_by_doi(report.doi)
+        except OpenAlexUnavailableError:
+            # Not cached: a later call tries again.
+            return []
         if update_report is not None:
             await self.report_repo.set_referenced_dois(report_id, work.referenced_dois)
         return work.referenced_dois
