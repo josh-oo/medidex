@@ -97,6 +97,25 @@ export interface ReportAbstractSlotProps {
   text: string | null
 }
 
+export interface ReportPdfViewProps {
+  reportId: number
+  extensions?: Record<string, unknown>
+  title: string | null
+}
+
+/** A way to view a report's PDF besides the PDF itself (e.g. its fulltext with the extracted tags marked). */
+export interface ReportPdfView {
+  label: string
+  icon: ComponentType<{ className?: string }>
+  open: () => void
+}
+
+export interface ReportPdfViews {
+  views: ReportPdfView[]
+  /** Rendered next to the PDF buttons (e.g. the dialog a view opens). */
+  dialog: ReactNode
+}
+
 /**
  * An extra step of the curation of a project (e.g. a postprocessing of its reports), or null when
  * the project does not go through it. Extra steps come after the PDFs and before the linkage.
@@ -153,6 +172,11 @@ export interface ExtensionRegistry {
   pdfStatusDot?: ComponentType<PdfStatusSlotProps>
   /** Rendered next to the preview in the PDF card of the PDF upload (e.g. how far the PDF has been processed). */
   pdfStatusPanel?: ComponentType<PdfStatusSlotProps>
+  /**
+   * Called as a React hook by the report card; its views join the PDF in the card's "View" menu.
+   * Must be stable across renders.
+   */
+  useReportPdfViews?: (props: ReportPdfViewProps) => ReportPdfViews
   /** Replaces the rendering of a report's abstract in the expanded report card. */
   reportAbstract?: ComponentType<ReportAbstractSlotProps>
   addStudyTrigger?: ComponentType<AddStudyTriggerSlotProps>
