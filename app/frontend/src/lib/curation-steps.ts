@@ -55,6 +55,13 @@ export const curationPaths = {
   review: (projectId: string) => `/curation/review/${encodeURIComponent(projectId)}`,
 };
 
+/** The reports are still being preprocessed or searched for their PDFs: nobody works on the project yet. */
+export const isPreparing = (project: ProjectDto) =>
+  project.numberReportsPreProcessed < project.numberReportsTotal ||
+  project.numberReportsAutoSearchedPdf < project.numberReportsTotal;
+
+const PREPARING_HINT = "Wait until the reports are preprocessed and searched for their PDFs.";
+
 const clampCount = (value: number | undefined, max: number) =>
   Math.min(Math.max(Number.isFinite(value) ? (value as number) : 0, 0), max);
 
@@ -73,6 +80,10 @@ export function projectSteps(project: ProjectDto, role: CurationRole, extraSteps
   const linked = project.assignees.length > 0 ? project.numberReportsReadyForReview : 0;
   const readyToLink = project.numberReportsReadyForProcessing;
   const finished = project.numberReportsMerged + project.numberReportsDeleted;
+  // Until then, no step a person works on is open to anyone.
+  const preparing = isPreparing(project);
+  const ownerCanAct = role.isOwner && !preparing;
+  const canLink = role.isAssignee && !preparing;
 
   return [
     makeStep({
@@ -83,6 +94,7 @@ export function projectSteps(project: ProjectDto, role: CurationRole, extraSteps
       ready: total,
       total,
       detail: `${project.numberReportsPreProcessed} / ${total}`,
+      hint: "Runs in the background.",
       group: "intake",
     }),
     makeStep({
@@ -93,6 +105,7 @@ export function projectSteps(project: ProjectDto, role: CurationRole, extraSteps
       ready: total,
       total,
       detail: `${searched} / ${total} searched`,
+      hint: "Runs in the background.",
       group: "intake",
     }),
     makeStep({
@@ -105,8 +118,12 @@ export function projectSteps(project: ProjectDto, role: CurationRole, extraSteps
       detail: `${withPdf} / ${Math.max(searched, withPdf)} uploaded`,
       manual: true,
       action: "Upload PDFs",
-      href: role.isOwner ? curationPaths.pdfUpload(project.projectId) : undefined,
-      hint: role.isOwner ? undefined : "Only the owner of this project uploads its missing PDFs.",
+      href: ownerCanAct ? curationPaths.pdfUpload(project.projectId) : undefined,
+      hint: preparing
+        ? PREPARING_HINT
+        : role.isOwner
+          ? undefined
+          : "Only the owner of this project uploads its missing PDFs.",
     }),
     ...extraSteps,
     makeStep({
@@ -119,8 +136,12 @@ export function projectSteps(project: ProjectDto, role: CurationRole, extraSteps
       detail: `${linked} / ${Math.max(readyToLink, linked)} linked`,
       manual: true,
       action: "Link",
-      href: role.isAssignee ? curationPaths.projects(project.projectId) : undefined,
-      hint: role.isAssignee ? undefined : "You are not assigned to this project yet.",
+      href: canLink ? curationPaths.projects(project.projectId) : undefined,
+      hint: preparing
+        ? PREPARING_HINT
+        : role.isAssignee
+          ? undefined
+          : "You are not assigned to this project yet.",
     }),
     makeStep({
       key: "review",
@@ -133,8 +154,12 @@ export function projectSteps(project: ProjectDto, role: CurationRole, extraSteps
       detail: `${finished} / ${Math.max(project.numberReportsReadyForMerge, finished)} merged`,
       manual: true,
       action: "Merge",
-      href: role.isOwner ? curationPaths.review(project.projectId) : undefined,
-      hint: role.isOwner ? undefined : "Only the owner of this update merges its links.",
+      href: ownerCanAct ? curationPaths.review(project.projectId) : undefined,
+      hint: preparing
+        ? PREPARING_HINT
+        : role.isOwner
+          ? undefined
+          : "Only the owner of this update merges its links.",
     }),
   ];
 }
