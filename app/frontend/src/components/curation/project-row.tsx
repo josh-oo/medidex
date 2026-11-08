@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -20,7 +20,9 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -64,9 +66,9 @@ const MAX_AVATARS = 3;
 interface ProjectRowProps {
   project: ProjectDto;
   assignableUsers?: UserDto[];
-  onAssigneesChange?: (payload: { projectId: string; userIds: string[] }) => void;
   onDeleted?: (projectId: string) => void;
-  onProjectUpdate?: (projectId: string) => void;
+  /** The project as its stream sends it: on each change of its progress, its assignees or their commits. */
+  onProjectUpdate?: (project: ProjectDto) => void;
 }
 
 const getUserInitials = (name?: string) => {
@@ -87,12 +89,10 @@ const getUserInitials = (name?: string) => {
 export function ProjectRow({
   project,
   assignableUsers = EMPTY_USERS,
-  onAssigneesChange,
   onDeleted,
   onProjectUpdate,
 }: ProjectRowProps) {
   const userId = useAuthStore((s) => s.user?.id);
-  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Optimistic assignee ids shown after a toggle until the parent hands down a fresh
   // `project.assignees`; an override made against an older array is ignored.
   const [assigneeOverride, setAssigneeOverride] = useState<{
@@ -115,33 +115,10 @@ export function ProjectRow({
   const isUpdatingAssignees = pendingAssigneeId !== null;
 
   useEffect(() => {
-    const scheduleRefresh = () => {
-      if (refreshTimeoutRef.current !== null) {
-        clearTimeout(refreshTimeoutRef.current);
-      }
-
-      refreshTimeoutRef.current = setTimeout(() => {
-        refreshTimeoutRef.current = null;
-        onProjectUpdate?.(project.projectId);
-      }, 200);
-    };
-
-    const stopStream = streamProjectUpdates(project.projectId, {
-      onEvent: () => {
-        scheduleRefresh();
-      },
-      onError: (error) => {
-        console.error(`Project stream error for ${project.projectId}:`, error);
-      },
-    });
-
-    return () => {
-      if (refreshTimeoutRef.current !== null) {
-        clearTimeout(refreshTimeoutRef.current);
-        refreshTimeoutRef.current = null;
-      }
-      stopStream();
-    };
+    if (!onProjectUpdate) return;
+    return streamProjectUpdates(project.projectId, onProjectUpdate, (error) =>
+      console.error(`Project stream error for ${project.projectId}:`, error)
+    );
   }, [project.projectId, onProjectUpdate]);
 
   const sortedUsers = useMemo(
@@ -219,7 +196,6 @@ export function ProjectRow({
           ? assigneeIds.filter((id) => id !== normalizedUserId)
           : [...assigneeIds, normalizedUserId];
         setAssigneeOverride({ base: project.assignees, ids: next });
-        onAssigneesChange?.({ projectId: project.projectId, userIds: next });
       } catch (error) {
         console.error(`Failed to update assignee ${normalizedUserId}`, error);
         window.alert(
@@ -231,7 +207,7 @@ export function ProjectRow({
         setPendingAssigneeId(null);
       }
     },
-    [assigneeIds, isUpdatingAssignees, onAssigneesChange, project.projectId, project.assignees, extraById]
+    [assigneeIds, isUpdatingAssignees, project.projectId, project.assignees, extraById]
   );
 
   const handleDeleteProject = useCallback(async () => {
@@ -311,7 +287,7 @@ export function ProjectRow({
             onClick={() => setIsAssignOpen(true)}
             disabled={finished}
             aria-label={resolvedAssignees.length > 0 ? `Assigned: ${assigneeNames}. Change` : "Assign people"}
-            className="flex h-11 items-center rounded-full px-1.5 transition-colors enabled:hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            className="flex h-11 min-w-11 items-center justify-center rounded-full px-0.5 transition-colors enabled:hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
             {resolvedAssignees.length > 0 ? (
               <span className="flex -space-x-1">
@@ -336,7 +312,7 @@ export function ProjectRow({
             ) : (
               <span className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground">
                 <UserPlus className="h-4 w-4" aria-hidden />
-                Assign
+                <span className="hidden sm:inline">Assign</span>
               </span>
             )}
           </button>
@@ -364,7 +340,24 @@ export function ProjectRow({
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuContent align="end" className="w-48 max-md:w-60">
+          {/* On a narrow screen the row leaves the assignees out; they are listed here. */}
+          <DropdownMenuGroup className="md:hidden">
+            <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Assignees</DropdownMenuLabel>
+            {resolvedAssignees.length > 0 ? (
+              resolvedAssignees.map(({ userId: id, name, completedReports, committed }) => (
+                <div key={id} className="flex items-center justify-between gap-3 px-2 py-1 text-sm">
+                  <span className="truncate">{name}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                    {committed ? "committed" : `${completedReports} / ${project.numberReportsTotal}`}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="px-2 py-1 text-sm text-muted-foreground">Nobody is assigned yet</p>
+            )}
+            <DropdownMenuSeparator />
+          </DropdownMenuGroup>
           <DropdownMenuItem onSelect={() => setIsAssignOpen(true)}>
             <UserPlus className="h-4 w-4" />
             Assign people…
@@ -450,7 +443,6 @@ export function ProjectRow({
             waitingFor={resolvedAssignees
               .filter((assignee) => !assignee.committed && assignee.userId !== userId)
               .map((assignee) => assignee.name)}
-            onCommitted={() => onProjectUpdate?.(project.projectId)}
           />
         ) : null
       }

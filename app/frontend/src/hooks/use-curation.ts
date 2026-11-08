@@ -18,6 +18,8 @@ export interface Curation {
   assignableUsers: UserDto[];
   refresh: () => void;
   removeProject: (projectId: string) => void;
+  /** Shows the project as it is now (from its stream), without loading anything. */
+  updateProject: (project: ProjectDto) => void;
 }
 
 type CurationData = Pick<Curation, "projects" | "tasks" | "userNameById" | "assignableUsers">;
@@ -116,5 +118,18 @@ export function useCuration(): Curation {
     }
   }, []);
 
-  return { loading, isAdmin, projects, tasks, userNameById, assignableUsers, refresh, removeProject };
+  const updateProject = useCallback((project: ProjectDto) => {
+    const replace = (prev: ProjectDto[]) => {
+      const index = prev.findIndex((other) => other.projectId === project.projectId);
+      // Unchanged (e.g. the state the stream starts with): no render.
+      if (index < 0 || JSON.stringify(prev[index]) === JSON.stringify(project)) return prev;
+      return prev.map((other, i) => (i === index ? project : other));
+    };
+    setProjects(replace);
+    if (cache) {
+      cache = { ...cache, data: { ...cache.data, projects: replace(cache.data.projects) } };
+    }
+  }, []);
+
+  return { loading, isAdmin, projects, tasks, userNameById, assignableUsers, refresh, removeProject, updateProject };
 }

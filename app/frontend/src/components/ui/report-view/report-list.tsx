@@ -128,6 +128,7 @@ export function ReportList({
 
   const {
     reports: filteredReports,
+    total,
     isLoading,
     isLoadingMore,
     hasMore,
@@ -162,10 +163,11 @@ export function ReportList({
     setNavigation({
       reportIds: reportIdsKey ? reportIdsKey.split(",").map(Number) : [],
       hasMore,
+      total,
       loadMore: () => loadMoreRef.current(),
       isLoading,
     });
-  }, [reportIdsKey, hasMore, isLoading, setNavigation]);
+  }, [reportIdsKey, hasMore, total, isLoading, setNavigation]);
 
   const selectedIndex = filteredReports.findIndex((report) => report.reportId === selectedReportId);
 
@@ -213,7 +215,7 @@ export function ReportList({
           </Button>
           <h2 className="text-base font-semibold tracking-tight">Reports</h2>
           <span className="text-sm text-muted-foreground tabular-nums">
-            {filteredReports.length}{hasMore ? "+" : ""}
+            {total ?? `${filteredReports.length}${hasMore ? "+" : ""}`}
           </span>
           {isLoading && <Spinner className="h-3.5 w-3.5 text-muted-foreground" />}
           {onCollapse && (

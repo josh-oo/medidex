@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import Integer, String, any_, bindparam, cast, func, or_
+from sqlalchemy import Integer, Select, String, any_, bindparam, cast, func, or_
 from sqlalchemy.dialects.postgresql import ARRAY, insert as pg_insert
 from sqlmodel import select, delete
 
@@ -100,6 +100,18 @@ class ReportRepository:
         rows = (await self.db.execute(stmt)).all()
         return {report_id: trial_id for report_id, trial_id in rows}
 
+    async def stored_pdf_ids(self, project_id: str) -> Set[int]:
+        """The reports of the project with a PDF file, for has_pdf_clause. Only the project's own reports that may
+        have one are looked up, so neither the lookup nor the array of has_pdf_clause grows with the PDFs of the
+        other projects."""
+        stmt = (
+            select(UpdateReport.id)
+            .where(UpdateReport.project_id == project_id)
+            .where(UpdateReport.auto_searched_pdf.is_(True))
+            .where(UpdateReport.no_pdf.is_(False))
+        )
+        return PdfFiles.stored((await self.db.execute(stmt)).scalars().all())
+
     async def get_readiness_sets(self, report_ids: List[int]) -> Tuple[Set[int], Set[int]]:
         """The given reports of an update that are embedded (UpdateReport.embedded) and those
         that have a PDF: their PDF search has run (UpdateReport.auto_searched_pdf) and there
@@ -125,8 +137,8 @@ class ReportRepository:
     @staticmethod
     def has_pdf_clause(stored_ids: Set[int]):
         """Whether a report of an update of a query on UpdateReport has a PDF (see
-        get_readiness_sets), given the ids of the reports with a file (PdfFiles.stored_ids).
-        The ids go in as one array, so their number doesn't matter."""
+        get_readiness_sets), given the ids of the reports with a file (see stored_pdf_ids).
+        The ids go in as one array."""
         stored = bindparam("stored_pdf_ids", sorted(stored_ids), type_=ARRAY(Integer))
         return UpdateReport.auto_searched_pdf.is_(True) & or_(UpdateReport.no_pdf.is_(True), UpdateReport.id == any_(stored))
 
@@ -298,11 +310,11 @@ class ReportRepository:
         (+ every linked study, + every flag) in the project and filter/sort/slice that
         in Python; this does the equivalent filtering/ordering in the database and only
         ever returns up to `limit` + 1 rows (the extra row is a cheap "is there a next
-        page" probe, so the caller never needs a separate COUNT).
+        page" probe). count_project_reports counts the same filtered list.
 
         `require_ready`/`with_pdf` read UpdateReport.embedded (see models.py) instead of
         calling Qdrant, and whether a report has a PDF from one listing of the PDF folder
-        (has_pdf_clause) instead of stat()-ing the filesystem per report.
+        (stored_pdf_ids, has_pdf_clause) instead of per report.
         `processed`/`flagged`/`new_study` are None ("any", no filter), True ("only") or
         False ("exclude") - the FilterMode -> bool translation happens in
         ProjectResourceService (src/services/project.py), which owns that enum
@@ -314,6 +326,43 @@ class ReportRepository:
         this method has no reason to know about. `exclude_ids` leaves that id set out - used
         by the curation view for the reports the caller has committed.
         """
+        stmt = await self._project_reports_stmt(
+            project_id,
+            require_ready=require_ready,
+            with_pdf=with_pdf,
+            search=search,
+            processed=processed,
+            flagged=flagged,
+            new_study=new_study,
+            restrict_to_ids=restrict_to_ids,
+            exclude_ids=exclude_ids,
+        )
+        if cursor_id is not None:
+            stmt = stmt.where(UpdateReport.id > cursor_id)
+        stmt = stmt.order_by(UpdateReport.id).limit(limit + 1)
+
+        return (await self.db.execute(stmt)).scalars().all()
+
+    async def count_project_reports(self, project_id: str, **filters) -> int:
+        """How many reports query_project_reports_page pages through with these filters (the same keywords, without
+        the cursor and limit), all pages together."""
+        stmt = await self._project_reports_stmt(project_id, **filters)
+        return (await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+
+    async def _project_reports_stmt(
+        self,
+        project_id: str,
+        *,
+        require_ready: bool,
+        with_pdf: Optional[bool] = None,
+        search: Optional[str] = None,
+        processed: Optional[bool] = None,
+        flagged: Optional[bool] = None,
+        new_study: Optional[bool] = None,
+        restrict_to_ids: Optional[Set[int]] = None,
+        exclude_ids: Optional[Set[int]] = None,
+    ) -> Select:
+        """The filtered select of a project's report list, unordered and unpaged (see query_project_reports_page)."""
         search = search.strip() if search else None
 
         stmt = (
@@ -324,7 +373,7 @@ class ReportRepository:
         )
 
         if require_ready or with_pdf is not None:
-            has_pdf = self.has_pdf_clause(PdfFiles.stored_ids())
+            has_pdf = self.has_pdf_clause(await self.stored_pdf_ids(project_id))
 
         if require_ready:
             stmt = stmt.where(UpdateReport.embedded.is_(True)).where(has_pdf)
@@ -339,9 +388,6 @@ class ReportRepository:
 
         if exclude_ids:
             stmt = stmt.where(UpdateReport.id.not_in(exclude_ids))
-
-        if cursor_id is not None:
-            stmt = stmt.where(UpdateReport.id > cursor_id)
 
         if search:
             # Escape LIKE metacharacters so a literal "%" or "_" in the search term is
@@ -383,9 +429,7 @@ class ReportRepository:
             ).exists()
             stmt = stmt.where(flagged_exists if flagged else ~flagged_exists)
 
-        stmt = stmt.order_by(UpdateReport.id).limit(limit + 1)
-
-        return (await self.db.execute(stmt)).scalars().all()
+        return stmt
 
     async def get_report_by_id(self, report_id: int) -> Optional[ReportFields]:
         """The report of the id, of an update (UpdateReport) or of the core database (Report)."""

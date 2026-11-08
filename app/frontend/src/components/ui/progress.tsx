@@ -19,8 +19,10 @@ function Progress({
     >
       <ProgressPrimitive.Indicator
         data-slot="progress-indicator"
-        className="bg-primary h-full w-full flex-1 transition-all"
-        style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
+        className="bg-primary h-full transition-all"
+        // Its width, not a translated full-width bar: Safari clips a translated child of the rounded, overflow-hidden
+        // track unreliably while it moves, and the bar jumps back and forth.
+        style={{ width: `${value || 0}%` }}
       />
     </ProgressPrimitive.Root>
   )

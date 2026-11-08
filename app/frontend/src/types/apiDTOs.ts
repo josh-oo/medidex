@@ -11,6 +11,9 @@ export type JsonValue =
 export interface Page<T> {
   items: T[];
   nextCursor: string | null;
+  // How many items all pages hold together, where the endpoint counts them (e.g. the first page of a project's
+  // report lists).
+  total?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -543,25 +546,4 @@ export interface NewStudySuggestion {
   // The graph the suggestion was made from (that of the report): the form is written back onto it, keeping what it does not
   // edit (the population of the study, its outcomes, designs, ...).
   graph?: StudyGraphDto;
-}
-
-export type StreamEventType = "node" | "complete" | "error" | "unknown";
-
-// Generic shape for any backend SSE stream (currently only
-// GET /projects/{id}/stream's batch-progress feed). `node`/`details` are
-// deliberately untyped beyond this - a downstream build consuming a
-// different stream can narrow them
-// to its own node/detail shapes without this type needing to know about it.
-export interface StreamEvent {
-  event: StreamEventType;
-  node?: string;
-  message?: string;
-  details?: Record<string, unknown>;
-  timestamp: number;
-}
-
-export interface StreamCallbacks {
-  onEvent: (event: StreamEvent) => void;
-  onComplete?: () => void;
-  onError: (error: Error) => void;
 }

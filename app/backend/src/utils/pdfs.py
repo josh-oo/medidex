@@ -14,8 +14,9 @@ load_dotenv()
 
 class PdfFiles:
     FOLDER = Path(os.getenv("DATABASE_VOLUME", "")) / "resources" / "report_pdfs"
-    # Up to this many reports are looked up a file at a time; more by listing the folder once.
-    STAT_LIMIT = 50
+    # Up to this many reports are looked up a file at a time; more by listing the folder once. A lookup takes about
+    # 20 µs, a listing about 0.5 µs per file of the folder (measured with ~31,000 PDFs: 500 lookups 10 ms, listing 15 ms).
+    STAT_LIMIT = 500
 
     @classmethod
     def path(cls, report_id: int) -> Path:

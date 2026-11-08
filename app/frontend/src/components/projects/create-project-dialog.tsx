@@ -48,8 +48,8 @@ export function CreateProjectDialog({ trigger, open: openProp, onOpenChange, onP
   );
 
   const uploadProject = useCallback(
-    async (file: File) => {
-      await createProject(file, { projectName: `Update ${number}`, databaseId: database.id, options });
+    async (file: File, onProgress: (loaded: number, total: number) => void) => {
+      await createProject(file, { projectName: `Update ${number}`, databaseId: database.id, options }, onProgress);
     },
     [number, options, database.id],
   );

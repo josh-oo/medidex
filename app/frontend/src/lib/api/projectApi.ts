@@ -12,8 +12,6 @@ import {
   TaskDto,
   ReportCurationDto,
   Page,
-  StreamCallbacks,
-  StreamEvent,
 } from "../../types/apiDTOs";
 
 // The bundle of an update: a .zip with update.json and the PDFs of its reports.
@@ -21,10 +19,11 @@ export const isUpdateBundle = (file: File): boolean => file.name.toLowerCase().e
 
 // A new project (an update of a database) with the reports of a bibliography file (.ris, .nbib) or of the bundle of an
 // update. A bundle holds PDFs and may be larger than a proxy lets through in one request, so it is uploaded with tus
-// first and named by its upload.
+// first and named by its upload. `onUpload` gets how many of the file's bytes are sent.
 export const createProject = async (
   file: File,
   fields: { projectName: string; databaseId: number; options: Record<string, unknown> },
+  onUpload?: (loaded: number, total: number) => void,
 ): Promise<ProjectDto> => {
   try {
     const formData = new FormData();
@@ -32,11 +31,15 @@ export const createProject = async (
     formData.append("databaseId", String(fields.databaseId));
     formData.append("options", JSON.stringify(fields.options));
     if (isUpdateBundle(file)) {
-      formData.append("uploadId", await uploadFile(file));
-    } else {
-      formData.append("file", file, file.name);
+      formData.append("uploadId", await uploadFile(file, onUpload));
+      return unwrap(await apiClient.post<ProjectDto>("/projects", formData));
     }
-    return unwrap(await apiClient.post<ProjectDto>("/projects", formData));
+    formData.append("file", file, file.name);
+    return unwrap(
+      await apiClient.post<ProjectDto>("/projects", formData, {
+        onUploadProgress: (event) => onUpload?.(event.loaded, event.total ?? file.size),
+      }),
+    );
   } catch (error) {
     return logAndRethrow("Error creating project:")(error);
   }
@@ -227,130 +230,51 @@ export const commitProjectWork = (projectId: string, config?: AxiosRequestConfig
     });
 };
 
+// The project as /projects returns it, at once and whenever what it shows changes (its progress, its assignees, their
+// commits). Returns a function that stops the stream.
 export const streamProjectUpdates = (
   projectId: string,
-  callbacks: StreamCallbacks,
-  config?: AxiosRequestConfig
+  onProject: (project: ProjectDto) => void,
+  onError?: (error: Error) => void
 ): (() => void) => {
-  const { onEvent, onComplete, onError } = callbacks;
   const abortController = new AbortController();
-
-  const path = `/projects/${projectId}/stream`;
-  const baseURL = apiClient.defaults.baseURL ?? "";
-  const url = `${baseURL}${path}`;
-
-  const headers: Record<string, string> = {
-    Accept: "text/event-stream",
-  };
-
-  if (config?.headers) {
-    Object.entries(config.headers as Record<string, unknown>).forEach(([k, v]) => {
-      if (v !== null && v !== undefined) {
-        headers[k] = String(v);
-      }
-    });
-  }
+  const url = `${apiClient.defaults.baseURL ?? ""}/projects/${projectId}/stream`;
 
   const startStream = async () => {
     try {
+      const headers: Record<string, string> = { Accept: "text/event-stream" };
       const token = await getAccessToken();
       if (token) {
         headers.Authorization = `Bearer ${token}`;
       }
-
-      const response = await fetch(url, {
-        method: "GET",
-        headers,
-        signal: abortController.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          `Project stream request failed: ${response.status} ${response.statusText}. ${errorText}`
-        );
-      }
-
-      if (!response.body) {
-        throw new Error("Response body is null");
+      const response = await fetch(url, { headers, signal: abortController.signal });
+      if (!response.ok || !response.body) {
+        throw new Error(`Project stream request failed: ${response.status} ${response.statusText}`);
       }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-
       while (true) {
         const { done, value } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
+        if (done) break;
         buffer += decoder.decode(value, { stream: true });
-
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
-
         for (const line of lines) {
-          if (!line.startsWith("data:")) {
-            continue;
-          }
-
-          const data = line.slice(5).trim();
-
-          if (!data) {
-            continue;
-          }
-
-          try {
-            const parsed = JSON.parse(data) as Partial<StreamEvent>;
-
-            if (parsed.event === "complete") {
-              onComplete?.();
-              return;
-            }
-
-            const streamEvent: StreamEvent = {
-              event: parsed.event ?? "unknown",
-              node: parsed.node,
-              message: parsed.message,
-              details: parsed.details,
-              timestamp: Date.now(),
-            };
-
-            onEvent(streamEvent);
-          } catch {
-            const streamEvent: StreamEvent = {
-              event: "unknown",
-              message: data,
-              timestamp: Date.now(),
-            };
-
-            onEvent(streamEvent);
-          }
+          const data = line.startsWith("data:") ? line.slice(5).trim() : "";
+          if (data) onProject(JSON.parse(data) as ProjectDto);
         }
       }
-
-      onComplete?.();
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        return;
-      }
-
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error(`Error streaming updates for project ${projectId}:`, error);
-      onError(
-        error instanceof Error
-          ? error
-          : new Error("Unknown project stream error occurred")
-      );
+      onError?.(error instanceof Error ? error : new Error("Unknown project stream error occurred"));
     }
   };
 
-  startStream();
-
-  return () => {
-    abortController.abort();
-  };
+  void startStream();
+  return () => abortController.abort();
 };
 
 // The intake row of every report of a project that changes (an uploaded PDF, a finished postprocessing), as

@@ -15,6 +15,9 @@ class Page(BaseModel, Generic[T]):
     src/utils/pagination.py for what the cursor itself encodes."""
     items: List[T]
     nextCursor: Optional[str] = None
+    # How many items all pages hold together, where the endpoint counts them (e.g. the first page of a project's
+    # report lists).
+    total: Optional[int] = None
 
 
 class FilterMode(str, Enum):

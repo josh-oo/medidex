@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 # reports; per-process, so shared across every project being processed at once.
 _write_semaphore = asyncio.Semaphore(1)
 _vectorstore_semaphore = asyncio.Semaphore(8)
+# Bounds the reports being postprocessed at once: each holds a DB session for as long as its postprocessors run
+# (a fulltext conversion, LLM calls), so the reports of a large upload would take every connection of the pool.
+_postprocess_semaphore = asyncio.Semaphore(8)
 
 
 class _InMemoryPdfUpload:
@@ -195,7 +198,7 @@ async def process_report(
     postprocess_tasks: List[asyncio.Future] = []
 
     async def postprocess(report):
-        async with AsyncSessionLocal() as session:
+        async with _postprocess_semaphore, AsyncSessionLocal() as session:
             write_ctx = RequestContext(db=session, user_id=ctx.user_id)
             if not await write_ctx.project_repo.get_project_by_id(project_id):  # project already deleted
                 return
@@ -272,7 +275,7 @@ async def run_pending_postprocessing(report_id: int, user_id: str) -> None:
     uploaded manually or marked as not available (they wait for the PDF, see process_report);
     a postprocessor that depends on the PDF is pending again after it changed (see
     ReportPostprocessor.pdf_changed). They run one after the other, in the order they were registered."""
-    async with AsyncSessionLocal() as session:
+    async with _postprocess_semaphore, AsyncSessionLocal() as session:
         ctx = RequestContext(db=session, user_id=user_id)
         project_id = await _pdf_changed(report_id, ctx)
         if project_id is None:

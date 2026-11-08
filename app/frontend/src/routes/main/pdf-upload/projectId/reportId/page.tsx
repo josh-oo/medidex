@@ -262,7 +262,11 @@ export default function PdfDetailsPage() {
               onUploadSuccess={handleUploadSuccess}
               allowedFileExtension=".pdf"
               hint="PDF files only"
-              onUpload={(file) => uploadPdf(reportIdNumber, file)}
+              onUpload={(file, onProgress) =>
+                uploadPdf(reportIdNumber, file, {
+                  onUploadProgress: (event) => onProgress(event.loaded, event.total ?? file.size),
+                })
+              }
             />
           </div>
         ) : (
