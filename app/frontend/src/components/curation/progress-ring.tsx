@@ -31,6 +31,8 @@ interface ProgressRingProps {
 export function ProgressRing({ step, size = "md", locked = false, className }: ProgressRingProps) {
   const Icon = step.icon;
   const actionable = Boolean(step.href) && !locked;
+  // An automatic step still at work pulses, so it never looks stuck.
+  const running = !step.manual && !locked && step.done < step.total;
   const label = locked
     ? `${step.label} · ${step.detail} · locked`
     : actionable && step.action
@@ -75,7 +77,11 @@ export function ProgressRing({ step, size = "md", locked = false, className }: P
         )}
       </svg>
       <Icon
-        className={cn(size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4", actionable ? "text-primary" : "text-muted-foreground")}
+        className={cn(
+          size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4",
+          actionable || running ? "text-primary" : "text-muted-foreground",
+          running && "motion-safe:animate-pulse"
+        )}
         aria-hidden
       />
       {locked && (

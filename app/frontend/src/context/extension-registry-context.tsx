@@ -7,6 +7,7 @@ import {
 import type { ProjectDto, StudyCandidateDto, StudyDto } from "@/types/apiDTOs"
 import type { AddStudyDialogProps } from "@/components/ui/study-view/add-study-dialog"
 import type { CurationStep } from "@/lib/curation-steps"
+import type { PdfFocus } from "@/context/report-pdf-pane-context"
 
 export interface ReportActionsSlotProps {
   reportId: number
@@ -70,7 +71,7 @@ export interface ReportStatusSlotProps {
 
 export type AddStudyTriggerSlotProps = Pick<
   AddStudyDialogProps,
-  "currentReportId" | "onSaveStudy" | "inline"
+  "currentReportId" | "onSaveStudy" | "inline" | "toolbar"
 > & {
   /** The current report's `extensions` payload (see ReportCardSlotProps). */
   extensions?: Record<string, unknown>
@@ -97,23 +98,12 @@ export interface ReportAbstractSlotProps {
   text: string | null
 }
 
-export interface ReportPdfViewProps {
+export interface ReportPdfSlotProps {
   reportId: number
   extensions?: Record<string, unknown>
   title: string | null
-}
-
-/** A way to view a report's PDF besides the PDF itself (e.g. its fulltext with the extracted tags marked). */
-export interface ReportPdfView {
-  label: string
-  icon: ComponentType<{ className?: string }>
-  open: () => void
-}
-
-export interface ReportPdfViews {
-  views: ReportPdfView[]
-  /** Rendered next to the PDF buttons (e.g. the dialog a view opens). */
-  dialog: ReactNode
+  /** Where to open the PDF (see ReportPdfPaneState). */
+  focus: PdfFocus | null
 }
 
 /**
@@ -172,11 +162,8 @@ export interface ExtensionRegistry {
   pdfStatusDot?: ComponentType<PdfStatusSlotProps>
   /** Rendered next to the preview in the PDF card of the PDF upload (e.g. how far the PDF has been processed). */
   pdfStatusPanel?: ComponentType<PdfStatusSlotProps>
-  /**
-   * Called as a React hook by the report card; its views join the PDF in the card's "View" menu.
-   * Must be stable across renders.
-   */
-  useReportPdfViews?: (props: ReportPdfViewProps) => ReportPdfViews
+  /** Replaces the PDF viewer of the PDF pane of the report workbench (e.g. with the extracted tags marked). */
+  reportPdf?: ComponentType<ReportPdfSlotProps>
   /** Replaces the rendering of a report's abstract in the expanded report card. */
   reportAbstract?: ComponentType<ReportAbstractSlotProps>
   addStudyTrigger?: ComponentType<AddStudyTriggerSlotProps>

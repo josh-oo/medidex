@@ -34,12 +34,12 @@ export type ArmComparison = {
 // Whether an outcome is a primary or secondary one of the study, or one it gives no role.
 export type OutcomeRole = "primary" | "secondary" | "other";
 
-// An outcome of the study being added: what it measures and when (its time points separated by "; ").
+// An outcome of the study being added: what it measures and when (each of its time points).
 export type OutcomeDraft = {
   id: string;
   role: OutcomeRole;
   measure: string;
-  timePoint: string;
+  timePoints: string[];
 };
 
 // What the study being added says besides its arms, countries, participants and duration: who its participants are,

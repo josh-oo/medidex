@@ -36,11 +36,12 @@ export const armFromSuggestion = (arm: ArmSuggestion): StudyArm => ({
   source: arm.source,
 });
 
-export const createOutcome = (role: OutcomeRole = "primary", measure = "", timePoint = ""): OutcomeDraft => ({
+// An outcome the form adds has no role (the extraction gives none either; only a registry record does).
+export const createOutcome = (role: OutcomeRole = "other", measure = "", timePoints: string[] = []): OutcomeDraft => ({
   id: createId("outcome"),
   role,
   measure,
-  timePoint,
+  timePoints,
 });
 
 export const emptyStudyDetails = (): StudyDetails => ({
@@ -120,9 +121,6 @@ function withoutFormParts(graph: StudyGraphDto): { nodes: { id: string; kind: st
   return { nodes, edges };
 }
 
-// The time points of an outcome as the form has them, in one field: "at 4 weeks; at 8 weeks".
-const TIME_POINT_SEPARATOR = "; ";
-
 const first = (graph: StudyGraphDto, relation: string, source: string): string | undefined => {
   const edge = graph.edges.find((candidate) => candidate.relation === relation && candidate.source === source);
   return graph.nodes.find((node) => node.id === edge?.target)?.value ?? undefined;
@@ -150,7 +148,7 @@ export function detailsFromGraph(graph?: StudyGraphDto): StudyDetails {
       .filter((edge) => edge.relation === relation && edge.source === "study" && !seen.has(edge.target))
       .map((edge) => {
         seen.add(edge.target);
-        return createOutcome(role, first(graph, "measures", edge.target) ?? "", all(graph, "has_time_point", edge.target).join(TIME_POINT_SEPARATOR));
+        return createOutcome(role, first(graph, "measures", edge.target) ?? "", all(graph, "has_time_point", edge.target));
       })
       .filter((outcome) => outcome.measure)
   );
@@ -301,9 +299,7 @@ export function graphFromForm(
     const id = add("outcome");
     link(OUTCOME_RELATIONS[outcome.role], "study", id);
     link("measures", id, valueNode("measure", outcome.measure.trim()));
-    for (const timePoint of outcome.timePoint.split(TIME_POINT_SEPARATOR.trim())) {
-      if (timePoint.trim()) link("has_time_point", id, valueNode("time_point", timePoint.trim()));
-    }
+    for (const timePoint of cleaned(outcome.timePoints)) link("has_time_point", id, valueNode("time_point", timePoint));
   }
   const used = new Set(edges.flatMap((edge) => [edge.source, edge.target]));
   return {

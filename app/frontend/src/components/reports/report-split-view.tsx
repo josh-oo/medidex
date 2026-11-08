@@ -1,14 +1,17 @@
-import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight, FileText, FileX, List, PanelLeftOpen } from "lucide-react";
 import { DetailsSheetProvider } from "@/context/details-sheet-context";
 import { ReportNavigationProvider, useReportNavigation } from "@/context/report-navigation-context";
+import { ReportPdfPaneProvider, type ComparedStudy, type PdfFocus, type ReportPdfPaneState } from "@/context/report-pdf-pane-context";
 import { WorkbenchAsideProvider } from "@/context/workbench-aside-context";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { ReportList } from "@/components/ui/report-view/report-list";
 import { ReportWidget } from "@/components/reports/report-widget";
+import { ReportPdfPane } from "@/components/reports/report-pdf-pane";
 import { Button } from "@/components/ui/button";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Widget } from "@/components/ui/widget";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useReportStore } from "@/hooks/use-report-store";
@@ -31,6 +34,8 @@ interface ReportSplitViewProps
 }
 
 const COLLAPSED_STORAGE_KEY = "medidex.report-sidebar-collapsed";
+// Where the panel group remembers how wide the workbench and the PDF pane were last.
+const PDF_SPLIT_STORAGE_KEY = "medidex.report-pdf-split";
 // The breakpoint (tailwind `md`) from which the report list is a sidebar rather than a drawer.
 const DESKTOP_QUERY = "(min-width: 768px)";
 // From these widths (tailwind `xl` / `2xl`) the workbench has two columns, with the sidebar collapsed / shown.
@@ -106,8 +111,39 @@ export function ReportSplitView({
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
-  // The report and the widgets next to it (see WorkbenchAside, e.g. adding a new study) in one column, the studies in the other.
-  const twoColumns = useTwoColumns(collapsed);
+  // The PDF of the open report, next to the workbench (on phones over it); it stays open from report to report.
+  const [pdfOpen, setPdfOpen] = useState(false);
+  // The passage of the open report that a source link opened the PDF at.
+  const [pdfFocus, setPdfFocus] = useState<PdfFocus | null>(null);
+  // The study compared with the open report, under its PDF; a comparison belongs to the report.
+  const [compared, setCompared] = useState<ComparedStudy | null>(null);
+  const showPdf = pdfOpen && hasReport;
+  const pdfPane = useMemo<ReportPdfPaneState>(
+    () => ({
+      open: showPdf,
+      focus: pdfFocus,
+      setOpen: (open) => {
+        setPdfOpen(open);
+        if (!open) {
+          setPdfFocus(null);
+          setCompared(null);
+        }
+      },
+      show: (focus) => {
+        setPdfFocus(focus ?? null);
+        setPdfOpen(true);
+      },
+      compared,
+      compare: (study) => {
+        setCompared(study);
+        if (study) setPdfOpen(true);
+      },
+    }),
+    [showPdf, pdfFocus, compared]
+  );
+  // The report and the widgets next to it (see WorkbenchAside, e.g. adding a new study) in one column, the studies in the
+  // other; next to the PDF the workbench is too narrow for two.
+  const twoColumns = useTwoColumns(collapsed) && !showPdf;
   const sidebarHidden = collapsed && isDesktop;
   const [aside, setAside] = useState<HTMLDivElement | null>(null);
 
@@ -124,7 +160,16 @@ export function ReportSplitView({
     for (const element of [mainRef.current, reportColumnRef.current, panelColumnRef.current]) {
       element?.scrollTo({ top: 0 });
     }
+    // A passage belongs to its report: the next one's PDF opens at its start, and a comparison ends.
+    setPdfFocus(null);
+    setCompared(null);
   }, [reportId]);
+
+  // In two columns the page stands still: a scroll it kept from one column (e.g. while the PDF was open) would shift
+  // both columns up, cut off at the top and empty at the bottom.
+  useLayoutEffect(() => {
+    if (twoColumns) mainRef.current?.scrollTo({ top: 0 });
+  }, [twoColumns]);
 
   const setCollapsedAndRemember = (value: boolean) => {
     writeCollapsed(value);
@@ -145,6 +190,7 @@ export function ReportSplitView({
   return (
     <DetailsSheetProvider>
       <ReportNavigationProvider>
+        <ReportPdfPaneProvider value={pdfPane}>
         <div className="relative flex h-full min-h-0 w-full bg-canvas">
           {listIsDrawer && drawerOpen && (
             <div
@@ -183,11 +229,18 @@ export function ReportSplitView({
             </div>
           </aside>
 
+          {/* Always a panel group, so that opening the PDF does not remount the workbench (and lose its state). */}
+          <ResizablePanelGroup
+            direction="horizontal"
+            autoSaveId={PDF_SPLIT_STORAGE_KEY}
+            className={cn("min-w-0 flex-1", !hasReport && "hidden md:flex")}
+          >
+          <ResizablePanel id="workbench" order={1} minSize={30}>
           {/* In two columns the page itself stands still and each column scrolls on its own. */}
           <main
             ref={mainRef}
             className={cn(
-              "relative min-h-0 min-w-0 flex-1",
+              "relative h-full min-h-0 min-w-0",
               twoColumns ? "flex flex-col overflow-hidden" : "overflow-y-auto",
               // On phones the list is the page while no report is open.
               !hasReport && (twoColumns ? "hidden md:flex" : "hidden md:block")
@@ -258,7 +311,25 @@ export function ReportSplitView({
               </WorkbenchAsideProvider>
             </div>
           </main>
+          </ResizablePanel>
+          {showPdf && isDesktop && (
+            <>
+              <ResizableHandle withHandle data-layout-part="report-pdf-handle" />
+              <ResizablePanel id="pdf" order={2} defaultSize={45} minSize={25}>
+                <ReportPdfPane reportId={reportId} focus={pdfFocus} docked onClose={() => pdfPane.setOpen(false)} />
+              </ResizablePanel>
+            </>
+          )}
+          </ResizablePanelGroup>
+
+          {/* Phones have no room for a split: the PDF covers the workbench until it is closed. */}
+          {showPdf && !isDesktop && (
+            <div className="fixed inset-0 z-[70]">
+              <ReportPdfPane reportId={reportId} focus={pdfFocus} docked={false} onClose={() => pdfPane.setOpen(false)} />
+            </div>
+          )}
         </div>
+        </ReportPdfPaneProvider>
         {sheet}
       </ReportNavigationProvider>
     </DetailsSheetProvider>

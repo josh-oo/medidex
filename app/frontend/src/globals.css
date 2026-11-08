@@ -192,7 +192,9 @@
    (no stretched text) and are clipped to the moving boxes. The parts are named only while it runs - a name changes
    how an element is drawn (a stacking context of its own) - and the floating buttons on top of them (an
    extension's, data-layout-part="report-chat-button", and the review's merge and delete, "review-actions") get a
-   layer of their own, so the moving columns do not cover them. */
+   layer of their own, so the moving columns do not cover them. The docked PDF pane and its handle move as well; the
+   pane shows only its new state, since its pages are drawn at its width - fading the old ones across would double
+   every line. */
 :root[data-layout-transition] [data-layout-part="report-sidebar"] {
   view-transition-name: report-sidebar;
 }
@@ -205,6 +207,14 @@
   view-transition-name: study-column;
 }
 
+:root[data-layout-transition] [data-layout-part="report-pdf"] {
+  view-transition-name: report-pdf;
+}
+
+:root[data-layout-transition] [data-layout-part="report-pdf-handle"] {
+  view-transition-name: report-pdf-handle;
+}
+
 :root[data-layout-transition] [data-layout-part="report-chat-button"] {
   view-transition-name: report-chat-button;
 }
@@ -215,7 +225,9 @@
 
 ::view-transition-group(report-sidebar),
 ::view-transition-group(report-column),
-::view-transition-group(study-column) {
+::view-transition-group(study-column),
+::view-transition-group(report-pdf),
+::view-transition-group(report-pdf-handle) {
   animation-duration: 380ms;
   animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
   overflow: hidden;
@@ -226,11 +238,20 @@
 ::view-transition-old(report-column),
 ::view-transition-new(report-column),
 ::view-transition-old(study-column),
-::view-transition-new(study-column) {
+::view-transition-new(study-column),
+::view-transition-new(report-pdf) {
   width: 100%;
   height: 100%;
   object-fit: none;
   object-position: left top;
+}
+
+::view-transition-old(report-pdf) {
+  display: none;
+}
+
+::view-transition-new(report-pdf) {
+  animation: none;
 }
 
 ::view-transition-old(root),

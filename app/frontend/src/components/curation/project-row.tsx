@@ -55,9 +55,10 @@ import {
 } from "@/context/assignee-options-context";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { useAuthStore } from "@/hooks/use-auth";
-import { projectSteps, type CurationStep } from "@/lib/curation-steps";
+import { isPreparing, projectSteps, type CurationStep } from "@/lib/curation-steps";
 import { CommitAction } from "./commit-action";
 import { CurationRow } from "./curation-row";
+import { StepChain } from "./step-chain";
 
 const EMPTY_USERS: UserDto[] = [];
 // Avatars shown in the row; the rest is counted.
@@ -162,13 +163,21 @@ export function ProjectRow({
 
   const isOwner = Boolean(userId) && project.owner === userId;
   const isAssignee = Boolean(userId) && assigneeIds.includes(userId!);
-  const steps = useMemo(() => {
+  const allSteps = useMemo(() => {
     const extraSteps = stepResolvers
       .map((resolve) => resolve(project))
       .filter((step): step is CurationStep => step !== null);
-    // The row shows the steps a person works on; the automatic ones run by themselves.
-    return projectSteps(project, { isOwner, isAssignee }, extraSteps).filter((step) => step.manual);
+    return projectSteps(project, { isOwner, isAssignee }, extraSteps);
   }, [project, stepResolvers, isOwner, isAssignee]);
+  // The row shows the steps a person works on; the automatic ones run by themselves.
+  const steps = useMemo(() => allSteps.filter((step) => step.manual), [allSteps]);
+  // While the reports are preprocessed and searched for their PDFs, the row shows those two steps in place of the
+  // others, side by side, and nothing can be done on the update but deleting it.
+  const preparing = isPreparing(project);
+  const intakeSteps = useMemo(
+    () => allSteps.filter((step) => step.group === "intake").map((step) => ({ ...step, group: undefined })),
+    [allSteps],
+  );
 
   const toggleAssignee = useCallback(
     async (assigneeId: string) => {
@@ -273,7 +282,7 @@ export function ProjectRow({
   const rowSteps = steps
     .filter((step) => step.key !== "review")
     .map((step) =>
-      step.key === "linkage" && !isAssignee && userId && !finished
+      step.key === "linkage" && !isAssignee && userId && !finished && !preparing
         ? { ...step, hintAction: { label: "Assign me", run: () => void toggleAssignee(userId) } }
         : step
     );
@@ -285,12 +294,12 @@ export function ProjectRow({
           <button
             type="button"
             onClick={() => setIsAssignOpen(true)}
-            disabled={finished}
+            disabled={finished || preparing}
             aria-label={resolvedAssignees.length > 0 ? `Assigned: ${assigneeNames}. Change` : "Assign people"}
-            className="flex h-11 min-w-11 items-center justify-center rounded-full px-0.5 transition-colors enabled:hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            className="flex h-11 min-w-11 shrink-0 items-center justify-center rounded-full px-0.5 transition-colors enabled:hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
             {resolvedAssignees.length > 0 ? (
-              <span className="flex -space-x-1">
+              <span className="flex shrink-0 -space-x-1">
                 {resolvedAssignees.slice(0, MAX_AVATARS).map(({ userId: id, name, icon: Icon, completedReports, committed }) => (
                   <AssigneeAvatar
                     key={id}
@@ -310,7 +319,7 @@ export function ProjectRow({
                 )}
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground">
+              <span className="flex items-center gap-1.5 px-2.5 text-xs font-medium text-muted-foreground">
                 <UserPlus className="h-4 w-4" aria-hidden />
                 <span className="hidden sm:inline">Assign</span>
               </span>
@@ -327,6 +336,7 @@ export function ProjectRow({
           ) : (
             <p>Nobody is assigned yet</p>
           )}
+          {preparing && <p>People can be assigned once the reports are prepared</p>}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -358,7 +368,7 @@ export function ProjectRow({
             )}
             <DropdownMenuSeparator />
           </DropdownMenuGroup>
-          <DropdownMenuItem onSelect={() => setIsAssignOpen(true)}>
+          <DropdownMenuItem disabled={preparing} onSelect={() => setIsAssignOpen(true)}>
             <UserPlus className="h-4 w-4" />
             Assign people…
           </DropdownMenuItem>
@@ -432,7 +442,7 @@ export function ProjectRow({
       }
       steps={rowSteps}
       action={
-        isAssignee && ownAssignment && !project.locked ? (
+        isAssignee && ownAssignment && !project.locked && !preparing ? (
           <CommitAction
             projectId={project.projectId}
             projectName={project.name}
@@ -447,7 +457,13 @@ export function ProjectRow({
         ) : null
       }
       locked={ownAssignment?.committed ?? false}
-      outcome={showMerge && review ? <MergeAction review={review} /> : undefined}
+      outcome={
+        preparing ? (
+          <StepChain steps={intakeSteps} />
+        ) : showMerge && review ? (
+          <MergeAction review={review} />
+        ) : undefined
+      }
       people={finished ? undefined : people}
       menu={
         finished ? (
@@ -573,7 +589,7 @@ function AssigneeAvatar({
   const circumference = 2 * Math.PI * 16;
   const done = committed ? total : Math.min(completed, total);
   return (
-    <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full bg-card">
+    <span className="relative grid aspect-square h-10 w-10 shrink-0 place-items-center rounded-full bg-card">
       <svg viewBox="0 0 36 36" className="absolute inset-0 h-full w-full -rotate-90" aria-hidden="true">
         <circle cx="18" cy="18" r="16" fill="none" className="stroke-border" strokeWidth="2.5" />
         {done > 0 && total > 0 && (
@@ -589,7 +605,7 @@ function AssigneeAvatar({
           />
         )}
       </svg>
-      <Avatar className="h-8 w-8 bg-muted">
+      <Avatar className="h-8 w-8 shrink-0 bg-muted">
         <AvatarFallback className="text-[11px] font-semibold">{children}</AvatarFallback>
       </Avatar>
       {committed && (
