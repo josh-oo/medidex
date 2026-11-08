@@ -38,10 +38,14 @@ function getUploadErrorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Failed to upload file";
 }
 
+const uploadPercent = ({ loaded, file }: UploadFile) =>
+  loaded && file.size ? Math.floor((100 * loaded) / file.size) : 0;
+
 interface UploadFile {
   id: string;
   file: File;
-  progress: number;
+  // The bytes sent so far, once the upload reports them.
+  loaded?: number;
   status: "pending" | "uploading" | "completed" | "error";
   error?: string;
 }
@@ -68,7 +72,8 @@ interface UploadSectionProps {
   uploadUrl?: string;
   // Takes precedence over uploadUrl when the endpoint needs something other
   // than a plain "POST FormData" (e.g. the PDF endpoint, which is a PUT).
-  onUpload?: (file: File) => Promise<void>;
+  // It may report how many of the file's bytes are sent (`onProgress`).
+  onUpload?: (file: File, onProgress: (loaded: number, total: number) => void) => Promise<void>;
 }
 
 export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>(function UploadSection(
@@ -125,7 +130,6 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
     const newFile: UploadFile = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       file: selectedFile,
-      progress: 0,
       status: "pending",
     };
 
@@ -141,25 +145,27 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
   };
 
   const uploadFileToServer = useCallback(async (uploadFile: UploadFile) => {
-    let progressInterval: NodeJS.Timeout | null = null;
-
     try {
       setCurrentFile((prev) =>
-        prev && prev.id === uploadFile.id ? { ...prev, status: "uploading", progress: 10 } : prev,
+        prev && prev.id === uploadFile.id ? { ...prev, status: "uploading", loaded: undefined } : prev,
       );
 
-      progressInterval = setInterval(() => {
+      // A part that is sent again (a retry) reports bytes already counted; the bar never goes back for it. The bar and
+      // its text only move by whole percents, not on every one of the many progress events.
+      const onProgress = (loaded: number) => {
         setCurrentFile((prev) => {
-          if (!prev || prev.id !== uploadFile.id || prev.status !== "uploading") {
-            return prev;
-          }
-          if (prev.progress >= 90) return prev;
-          return { ...prev, progress: Math.min(prev.progress + 10, 90) };
+          if (!prev || prev.id !== uploadFile.id || prev.status !== "uploading") return prev;
+          const next = { ...prev, loaded: Math.min(loaded, prev.file.size) };
+          const moved =
+            prev.loaded === undefined ||
+            uploadPercent(next) > uploadPercent(prev) ||
+            (next.loaded === prev.file.size && prev.loaded < prev.file.size);
+          return moved ? next : prev;
         });
-      }, 200);
+      };
 
       if (onUpload) {
-        await onUpload(uploadFile.file);
+        await onUpload(uploadFile.file, onProgress);
       } else {
         let formData: FormData;
         try {
@@ -179,25 +185,15 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
           return;
         }
 
-        await apiClient.post(uploadUrl, formData);
+        await apiClient.post(uploadUrl, formData, {
+          onUploadProgress: (event) => onProgress(event.loaded),
+        });
       }
 
-      if (progressInterval) {
-        clearInterval(progressInterval);
-      }
-
-      setCurrentFile((prev) =>
-        prev && prev.id === uploadFile.id
-          ? { ...prev, status: "completed", progress: 100 }
-          : prev,
-      );
+      setCurrentFile((prev) => (prev && prev.id === uploadFile.id ? { ...prev, status: "completed" } : prev));
 
       onUploadSuccess?.();
     } catch (error) {
-      if (progressInterval) {
-        clearInterval(progressInterval);
-      }
-
       const errorMessage = getUploadErrorMessage(error);
 
       setCurrentFile((prev) =>
@@ -246,7 +242,6 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
     const newFile: UploadFile = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       file: risFile,
-      progress: 0,
       status: "pending",
     };
 
@@ -276,7 +271,7 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
     const k = 1024;
     const sizes = ["Bytes", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${Math.round((bytes / Math.pow(k, i)) * 100) / 100} ${sizes[i]}`;
+    return `${(bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1)} ${sizes[i]}`;
   };
 
   return (
@@ -353,8 +348,14 @@ export const UploadSection = forwardRef<UploadSectionHandle, UploadSectionProps>
 
             {currentFile.status === "uploading" && (
               <div className="space-y-1">
-                <Progress value={currentFile.progress} className="h-2" />
-                <p className="text-xs text-gray-500 text-right">{currentFile.progress}%</p>
+                <Progress value={uploadPercent(currentFile)} className="h-2" />
+                <p className="text-xs text-gray-500 text-right tabular-nums">
+                  {currentFile.loaded === undefined
+                    ? "Starting upload…"
+                    : currentFile.loaded < currentFile.file.size
+                      ? `${formatFileSize(currentFile.loaded)} of ${formatFileSize(currentFile.file.size)} (${uploadPercent(currentFile)}%)`
+                      : "Uploaded, processing…"}
+                </p>
               </div>
             )}
 

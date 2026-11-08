@@ -65,6 +65,11 @@ class ProjectPubSubService:
                 data = data.decode()
             return str(data)
 
+    async def drain_project_updates(self, pubsub: PubSub) -> None:
+        """Drops the pings that are already waiting: a burst of them (e.g. one per processed report) needs one look."""
+        while await pubsub.get_message(timeout=0) is not None:
+            pass
+
     async def subscribe_to_project(self, project_id: str) -> PubSub:
         channel = self._channel_name(project_id)
 

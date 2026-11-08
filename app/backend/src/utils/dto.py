@@ -15,6 +15,9 @@ class Page(BaseModel, Generic[T]):
     src/utils/pagination.py for what the cursor itself encodes."""
     items: List[T]
     nextCursor: Optional[str] = None
+    # How many items all pages hold together, where the endpoint counts them (e.g. the first page of a project's
+    # report lists).
+    total: Optional[int] = None
 
 
 class FilterMode(str, Enum):
@@ -128,14 +131,20 @@ class ReportIntake(ReportSources):
 class Tag(BaseModel):
     id: str
     keyword: str
+    # The details of the tag of the vocabulary (src/database/models.py's Tag), shown on hovering it in the study view.
+    acronym: Optional[str] = None
+    labels: List[str] = Field(default_factory=list)
 
 class StudyGraphNode(BaseModel):
     """A node of the graph of a study: an entity of a kind of config/medidex-study.yaml. A node that is a value holds it: the name
-    of the tag (with its id) or the text."""
+    of the tag (with its id) or the text. A tag read from another wording keeps it (`text`) and says whether the tag names the
+    same thing (`match` None, equal) or a broader thing the wording is a form of ("broader")."""
     id: str
     kind: str
     value: Optional[str] = None
     tagId: Optional[str] = None
+    text: Optional[str] = None
+    match: Optional[str] = None
 
 class StudyGraphEdge(BaseModel):
     """A relation between two nodes of a study's graph, by their ids (`study` is the study itself)."""
@@ -508,6 +517,17 @@ class DatabaseReport(BaseModel):
     # Its fulltext PDF: the name of the file in the archive of the database (e.g. "pdfs/12.pdf", see utils/archive.py).
     pdf: Optional[str] = None
 
+class DatabaseTag(BaseModel):
+    """A tag of the vocabulary of a database in its exchange format, which lists every tag its studies name (by `name`).
+    `parent` is the name of a listed tag of the same category."""
+    category: str
+    name: str
+    acronym: Optional[str] = None
+    synonyms: List[str] = Field(default_factory=list)
+    labels: List[str] = Field(default_factory=list)
+    parent: Optional[str] = None
+    sourceNames: List[str] = Field(default_factory=list)
+
 class DatabaseStudy(StudyFields):
     """A study in the exchange format of a database: its fields (config/medidex-study.yaml), its graph with the tags by
     name, the names of its tags per category (those of its graph and those it has besides, e.g. its designs) and its
@@ -523,10 +543,11 @@ class DatabaseExport(BaseModel):
     its reports: what GET /databases/{id}/export returns and POST /databases/import reads (where the request names and
     describes the new database). Reports linked to several studies are listed under each of them (and imported once)."""
     format: str = "medidex-database"
-    version: int = 1
+    version: int = 2
     name: str
     description: Optional[str] = None
     eligibilityCriteria: List[EligibilityCriterion] = Field(default_factory=list)
+    tags: List[DatabaseTag]
     studies: List[DatabaseStudy] = Field(default_factory=list)
 
 class UpdateBundle(BaseModel):
@@ -539,14 +560,14 @@ class UpdateBundle(BaseModel):
     reports: List[DatabaseReport] = Field(default_factory=list)
 
 def tags_to_dto(tags) -> List[Tag]:
-    """Converts tag rows (src/database/models.py's Tag, or mappings with its "id"/"description") into Tag - used by the
+    """Converts tag rows (src/database/models.py's Tag, or mappings with its "id"/"name") into Tag - used by the
     "all tags of a category" endpoints (/interventions, /conditions, ...). StudyRepository's own study-scoped tag lookups
     build Tag directly instead of going through here."""
     result = []
     for tag in tags:
         tag_data = tag if isinstance(tag, Mapping) else tag.model_dump()
         tag_id = tag_data.get("id")
-        keyword = tag_data.get("description")
+        keyword = tag_data.get("name")
         result.append(Tag(id=str(tag_id) if tag_id is not None else "", keyword=keyword or ""))
     return result
 

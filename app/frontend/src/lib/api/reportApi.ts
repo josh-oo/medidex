@@ -115,7 +115,7 @@ export const getSimilarTagsByReportId = (
       params: requestParams,
     })
     .then(unwrap)
-    .catch(logAndRethrow(`Error fetching similar studies for report ${reportId}:`));
+    .catch(logAndRethrow(`Error fetching similar tags for report ${reportId}:`));
 }
 
 export const getReportPdf = (

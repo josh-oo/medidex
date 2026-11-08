@@ -145,10 +145,25 @@ class Tag(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     category: str
-    description: str
+    # What the tag is called wherever it is shown, to people and to the LLM alike.
+    name: str
+    acronym: Optional[str] = None
+    # Other names of the same thing (e.g. the Chinese name of a traditional remedy).
+    synonyms: List[str] = Field(default_factory=list, sa_type=ARRAY(Text), nullable=False)
+    # Free classifications, as the source register coded them ("Pharm", "WHO-N05AX12-…", "Adverse Event").
+    labels: List[str] = Field(default_factory=list, sa_type=ARRAY(Text), nullable=False)
+    # The broader tag of the same category this one is a kind of.
+    parent_id: Optional[int] = Field(default=None, foreign_key="tag.id", ondelete="SET NULL")
+    # The names the tag had in the registers it was imported from, as they were.
+    source_names: List[str] = Field(default_factory=list, sa_type=ARRAY(Text), nullable=False)
+
+    @property
+    def embedded_text(self) -> str:
+        """What the tag is found by in the vectorstore: its name with its acronym and synonyms."""
+        return "\n".join([f"{self.name} ({self.acronym})" if self.acronym else self.name, *self.synonyms])
 
 # Tags are matched by name ignoring case (StudyGraphs.resolve).
-Index("uq_tag_description", Tag.category, func.lower(Tag.description), unique=True)
+Index("uq_tag_name", Tag.category, func.lower(Tag.name), unique=True)
 
 class StudyTag(SQLModel, table=True):
     """A tag of a study of the core database: those of its graph and those added on their own (e.g. its designs)."""

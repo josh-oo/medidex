@@ -70,6 +70,9 @@ class ProjectAssigneeNotFoundError(Exception):
 class ProjectResourceService:
     """Project overview/progress logic."""
 
+    # How long stream_project_updates waits after a ping for the rest of its burst.
+    STREAM_COALESCE_SECONDS = 1.0
+
     def __init__(
         self,
         project_repo: ProjectRepository,
@@ -537,11 +540,11 @@ class ProjectResourceService:
     async def stream_project_updates(
         self, project_id: str, is_disconnected: Callable[[], Awaitable[bool]]
     ) -> AsyncIterator[str]:
-        """The data of an SSE event per pubsub update of a project, until
-        `is_disconnected` reports the caller has gone away. `is_disconnected`
-        abstracts over the one framework-specific bit here (Starlette's
-        Request.is_disconnected()), so the polling loop itself doesn't need
-        to import FastAPI.
+        """The project (see get_project_stats) as JSON, the data of an SSE event: once at the start, then whenever a
+        pubsub update of it changes what it shows, until `is_disconnected` reports the caller has gone away. The pings
+        of a burst (one per processed report) are looked at together, after STREAM_COALESCE_SECONDS. `is_disconnected`
+        abstracts over the one framework-specific bit here (Starlette's Request.is_disconnected()), so the polling
+        loop itself doesn't need to import FastAPI.
 
         Doesn't call ensure_project_access itself: this is a generator, so
         nothing in its body runs until the caller starts iterating it - too
@@ -551,13 +554,24 @@ class ProjectResourceService:
         fastapi_app/projects.py's stream route).
         """
         pubsub = await self.pubsub_service.subscribe_to_project(project_id)
+        last_sent = None
         try:
             while True:
                 if await is_disconnected():
                     break
-                data = await self.pubsub_service.get_next_project_update(pubsub)
-                yield data
+                # Ends the transaction of the last read: the session would hand back the project as it loaded it then.
+                await self.report_repo.db.rollback()
+                project = await self.project_repo.get_project_by_hash(project_id)
+                if project is not None:
+                    data = (await self.get_project_stats(project)).model_dump_json()
+                    if data != last_sent:
+                        last_sent = data
+                        yield data
+                await self.pubsub_service.get_next_project_update(pubsub)
+                await asyncio.sleep(self.STREAM_COALESCE_SECONDS)
+                await self.pubsub_service.drain_project_updates(pubsub)
         finally:
+            await self.report_repo.db.rollback()
             await self.pubsub_service.unsubscribe_from_project(project_id, pubsub)
 
     async def stream_intake_report_updates(
@@ -655,7 +669,12 @@ class ProjectResourceService:
         return candidate_ids
 
     async def hydrate_report_page(
-        self, page_rows: List[UpdateReport], limit: int, *, include_report_detail: bool = False
+        self,
+        page_rows: List[UpdateReport],
+        limit: int,
+        *,
+        include_report_detail: bool = False,
+        total: Optional[int] = None,
     ) -> Page[ReportCuration] | Page[ReportIntake]:
         """Turns a page of plain Report rows - as ReportRepository.query_project_reports_page
         returns them, including its +1 lookahead row - into the DTO shape, fetching only
@@ -667,6 +686,7 @@ class ProjectResourceService:
         unlike the single-report detail endpoint's live fallback) instead of flag/
         assignedStudies - intake reports haven't been curated yet, so those don't apply and
         this branch never queries for them. Only get_intake_reports_page sets this.
+        `total` is how many reports all pages hold together (see ReportRepository.count_project_reports).
         """
         has_more = len(page_rows) > limit
         page_rows = page_rows[:limit]
@@ -687,7 +707,7 @@ class ProjectResourceService:
                 for report in page_rows
             ]
             next_cursor = encode_cursor(page_ids[-1]) if has_more and page_ids else None
-            return Page[ReportIntake](items=items, nextCursor=next_cursor)
+            return Page[ReportIntake](items=items, nextCursor=next_cursor, total=total)
 
         all_linked_studies = await self.report_repo.get_linked_studies_for_reports(page_ids)
         report_flags = await self.report_repo.get_report_flags_for_reports(page_ids)
@@ -703,7 +723,14 @@ class ProjectResourceService:
             for report in page_rows
         ]
         next_cursor = encode_cursor(page_ids[-1]) if has_more and page_ids else None
-        return Page[ReportCuration](items=items, nextCursor=next_cursor)
+        return Page[ReportCuration](items=items, nextCursor=next_cursor, total=total)
+
+    async def count_reports_of_first_page(self, project_id: str, cursor_id: Optional[int], filters: dict) -> Optional[int]:
+        """How many reports a list holds, all pages together, counted for its first page only: the client keeps it
+        while it loads the next ones, which would count the same list again (and list the PDF folder again)."""
+        if cursor_id is not None:
+            return None
+        return await self.report_repo.count_project_reports(project_id, **filters)
 
     async def get_reports_page(
         self,
@@ -723,18 +750,19 @@ class ProjectResourceService:
         """
         await self.ensure_project_access(project_id)
         cursor_id = decode_cursor(cursor) if cursor else None
-        page_rows = await self.report_repo.query_project_reports_page(
-            project_id,
+        filters = dict(
             require_ready=True,
             exclude_ids=await self.project_repo.get_committed_report_ids(project_id),
             search=search,
             processed=filter_mode_to_bool(processed),
             flagged=filter_mode_to_bool(flagged),
             new_study=filter_mode_to_bool(new_study),
-            cursor_id=cursor_id,
-            limit=limit,
         )
-        return await self.hydrate_report_page(page_rows, limit)
+        page_rows = await self.report_repo.query_project_reports_page(
+            project_id, **filters, cursor_id=cursor_id, limit=limit
+        )
+        total = await self.count_reports_of_first_page(project_id, cursor_id, filters)
+        return await self.hydrate_report_page(page_rows, limit, total=total)
 
     async def get_intake_reports_page(
         self,
@@ -752,15 +780,12 @@ class ProjectResourceService:
         DOI/links straight off this list instead of a separate per-report fetch.
         """
         cursor_id = decode_cursor(cursor) if cursor else None
+        filters = dict(require_ready=False, with_pdf=filter_mode_to_bool(with_pdf), search=search)
         page_rows = await self.report_repo.query_project_reports_page(
-            project_id,
-            require_ready=False,
-            with_pdf=filter_mode_to_bool(with_pdf),
-            search=search,
-            cursor_id=cursor_id,
-            limit=limit,
+            project_id, **filters, cursor_id=cursor_id, limit=limit
         )
-        return await self.hydrate_report_page(page_rows, limit, include_report_detail=True)
+        total = await self.count_reports_of_first_page(project_id, cursor_id, filters)
+        return await self.hydrate_report_page(page_rows, limit, include_report_detail=True, total=total)
 
     async def get_review_reports_page(
         self,
@@ -776,13 +801,13 @@ class ProjectResourceService:
         deleted reports have left the project.
         """
         cursor_id = decode_cursor(cursor) if cursor else None
-        restrict_to_ids = await self.review_candidate_report_ids(project_id, consensus)
-        page_rows = await self.report_repo.query_project_reports_page(
-            project_id,
+        filters = dict(
             require_ready=True,
             search=search,
-            restrict_to_ids=restrict_to_ids,
-            cursor_id=cursor_id,
-            limit=limit,
+            restrict_to_ids=await self.review_candidate_report_ids(project_id, consensus),
         )
-        return await self.hydrate_report_page(page_rows, limit)
+        page_rows = await self.report_repo.query_project_reports_page(
+            project_id, **filters, cursor_id=cursor_id, limit=limit
+        )
+        total = await self.count_reports_of_first_page(project_id, cursor_id, filters)
+        return await self.hydrate_report_page(page_rows, limit, total=total)

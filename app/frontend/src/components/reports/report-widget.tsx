@@ -1,18 +1,23 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDown, Download, ExternalLink, FileText, Flag, FlagOff } from "lucide-react";
+import { ChevronDown, Download, ExternalLink, Eye, FileText, Flag, FlagOff } from "lucide-react";
 import { toast } from "sonner";
 import { Widget } from "@/components/ui/widget";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FlagReportDialog, type FlagTarget } from "@/components/ui/report-view/flag-report-dialog";
 import { ReportAssignedStudiesBadges } from "@/components/ui/study-view/report-assigned-studies-badges";
-import { useExtensionRegistry } from "@/context/extension-registry-context";
+import { useExtensionRegistry, type ReportPdfViews } from "@/context/extension-registry-context";
 import { ReportAbstractSlot, ReportCardExtrasSlot } from "@/context/study-report-slots-context";
 import { useReportStore } from "@/hooks/use-report-store";
 import { deleteReportFlagByReportId } from "@/lib/api/reportApi";
 import { downloadReportPdf, openReportPdf } from "@/lib/report-pdf";
 import { cn } from "@/lib/utils";
 import { ReportWidgetSkeleton } from "./workbench-skeleton";
+
+const noPdfViews: ReportPdfViews = { views: [], dialog: null };
+const useNoPdfViews = () => noPdfViews;
 
 interface ReportWidgetProps {
   reportId: number;
@@ -25,7 +30,9 @@ export function ReportWidget({ reportId, editMode }: ReportWidgetProps) {
   const report = useReportStore((state) => state.reports[reportId]);
   const setReportFlag = useReportStore((state) => state.setFlag);
   // An extension rendering the abstract may have content for reports without one (e.g. extracted tags).
-  const hasAbstractExtension = Boolean(useExtensionRegistry().reportAbstract);
+  const { reportAbstract, useReportPdfViews = useNoPdfViews } = useExtensionRegistry();
+  const hasAbstractExtension = Boolean(reportAbstract);
+  const pdfViews = useReportPdfViews({ reportId, extensions: report?.extensions, title: report?.title ?? null });
   const [flagTarget, setFlagTarget] = useState<FlagTarget | null>(null);
   const [isDeletingFlag, setIsDeletingFlag] = useState(false);
   const [abstractOpen, setAbstractOpen] = useState(false);
@@ -143,21 +150,54 @@ export function ReportWidget({ reportId, editMode }: ReportWidgetProps) {
             {/* Related actions share one control: the PDF, and the flag. */}
             {report.hasPdf && (
               <ButtonGroup aria-label="PDF">
-                <Button type="button" variant="ghost" size="sm" onClick={() => void openReportPdf(report.reportId)}>
-                  <ExternalLink />
-                  Open PDF
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void downloadReportPdf(report.reportId, report.title)}
-                >
-                  <Download />
-                  Download
-                </Button>
+                {/* With other views (from extensions), opening the PDF is one of them. */}
+                {pdfViews.views.length > 0 ? (
+                  // Not modal: a view may open a dialog, which must get the focus.
+                  <DropdownMenu modal={false}>
+                    <DropdownMenuTrigger asChild>
+                      <Button type="button" variant="ghost" size="sm">
+                        <Eye />
+                        View
+                        <ChevronDown />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem onSelect={() => void openReportPdf(report.reportId)}>
+                        <ExternalLink />
+                        PDF
+                      </DropdownMenuItem>
+                      {pdfViews.views.map((view) => (
+                        <DropdownMenuItem key={view.label} onSelect={view.open}>
+                          <view.icon />
+                          {view.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => void openReportPdf(report.reportId)}>
+                    <ExternalLink />
+                    Open PDF
+                  </Button>
+                )}
+                {/* The group is the PDF's, so the icon alone says what is downloaded; the tooltip names it. */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Download PDF"
+                      onClick={() => void downloadReportPdf(report.reportId, report.title)}
+                    >
+                      <Download />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Download PDF</TooltipContent>
+                </Tooltip>
               </ButtonGroup>
             )}
+            {report.hasPdf && pdfViews.dialog}
             {editMode && (
               <ButtonGroup aria-label="Flag">
                 <Button

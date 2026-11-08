@@ -150,17 +150,17 @@ class StudyDatabaseService:
         self._check_pdfs(archive, [report for report, _ in reports.values()])
         try:
             await self.database_repo.add_database(payload.name, payload.description, self._criteria(payload.eligibilityCriteria), database_id)
+            await self.study_repo.import_tags(document.tags)
             progress = await self.status_service.progress(database_id, DatabaseStage.importing, "studies", len(studies)).start()
             for study, values in zip(document.studies, studies):
-                new_study = await self.study_repo.import_study(values, database_id, self._utc(study.createdAt))
-                for category, names in study.tags.items():
-                    await self.study_repo.add_study_tags(new_study.id, category, names)
+                new_study = await self.study_repo.import_study(values, study.tags, database_id, self._utc(study.createdAt))
                 for report in study.reports:
                     study_ids = reports[self._report_key(report)][1]
                     # A study lists a report once, however many of its entries are that report.
                     if new_study.id not in study_ids:
                         study_ids.append(new_study.id)
                 await progress.advance()
+            await self._check_vocabulary(database_id, document)
             progress = await self.status_service.progress(database_id, DatabaseStage.importing, "reports", len(reports)).start()
             saved: List[Tuple[DbReport, Optional[str]]] = []
             for report, study_ids in reports.values():
@@ -181,6 +181,18 @@ class StudyDatabaseService:
             await asyncio.to_thread(self._store_pdf, archive, name, report.id)
             await progress.advance()
         return [report.id for report, _ in saved]
+
+    async def _check_vocabulary(self, database_id: int, document: DatabaseExport) -> None:
+        """Raises DatabaseImportError if the imported studies have a tag the vocabulary of the file does not list (by
+        their tags, their graphs or a field written into them, such as their countries)."""
+        listed = {(tag.category, tag.name.lower()) for tag in document.tags}
+        study_ids = [study.id for study in await self.study_repo.get_database_studies(database_id)]
+        unlisted = sorted({
+            f"{tag.category}: {tag.name}" for tag in await self.study_repo.get_tag_vocabulary(study_ids)
+            if (tag.category, tag.name.lower()) not in listed
+        })
+        if unlisted:
+            raise DatabaseImportError(f"Tags the studies name are not listed in `tags`: {', '.join(unlisted[:self.MAX_IMPORT_ERRORS])}")
 
     async def end_import(self, database_id: int, error: Optional[str] = None) -> None:
         """Ends the import of the database: it is listed as it is from now on, or, if the import failed with `error`,
@@ -241,6 +253,7 @@ class StudyDatabaseService:
             name=database.name,
             description=database.description,
             eligibilityCriteria=EligibilityCriteria.read(database.eligibility_criteria),
+            tags=await self.study_repo.get_tag_vocabulary(study_ids),
             studies=[
                 DatabaseStudy(
                     **self._fields(study),
@@ -351,8 +364,8 @@ class StudyDatabaseService:
             raise DatabaseImportError(f"The file is no JSON: {exc}") from exc
         if not isinstance(data, dict) or data.get("format") != "medidex-database":
             raise DatabaseImportError('The file is no Medidex database (a JSON object with "format": "medidex-database").')
-        if data.get("version", 1) != 1:
-            raise DatabaseImportError(f"Version {data.get('version')} of the database format is not supported (only 1).")
+        if data.get("version") != 2:
+            raise DatabaseImportError(f"Version {data.get('version')} of the database format is not supported (only 2).")
         try:
             document = DatabaseExport.model_validate(data)
         except ValidationError as exc:
@@ -362,6 +375,9 @@ class StudyDatabaseService:
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
             problems.append(f"Short names used by more than one study: {', '.join(duplicates[:cls.MAX_IMPORT_ERRORS])}")
+        for index, tag in enumerate(document.tags):
+            if tag.category not in TAG_CATEGORIES:
+                problems.append(f"tags[{index}] ({tag.name}): unknown tag category {tag.category} (known: {', '.join(TAG_CATEGORIES)})")
         for index, study in enumerate(document.studies):
             unknown = set(study.tags) - set(TAG_CATEGORIES)
             if unknown:
@@ -407,7 +423,10 @@ class StudyDatabaseService:
         if not graph.nodes:
             return None
         return {
-            "nodes": [{"id": node.id, "kind": node.kind, "value": node.value} for node in graph.nodes],
+            "nodes": [
+                {"id": node.id, "kind": node.kind, "value": node.value, **({"text": node.text} if node.text else {}), **({"match": node.match} if node.match else {})}
+                for node in graph.nodes
+            ],
             "edges": [edge.model_dump() for edge in graph.edges],
         }
 

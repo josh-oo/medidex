@@ -17,7 +17,8 @@ from ..models import Report, Study, StudyFields, Link, StudyTag, Tag as DbTag, U
 from .graphs import StudyGraphs
 
 from ...utils.postprocessing import normalize_author_names
-from ...utils.dto import StudyGraph, Tag, study_columns
+from ...utils.dto import DatabaseTag, StudyGraph, Tag, study_columns
+from ...utils.graph import GraphDocument
 from ...utils.studyconfig import GRAPH_FIELD, STUDY_CONFIG
 from ...utils.tagconfig import TAG_CATEGORIES
 from ...utils.query_parser import AdvancedSearchField, AndGroup, Comparison, OrGroup, QueryNode
@@ -44,15 +45,21 @@ trial_id_mapping = load_trial_id_mapping()
 # validation (src/utils/query_parser.py) before a Comparison ever reaches here, so
 # there's no "unknown field" case left to check or raise for at this layer.
 _TAG_FIELDS = {AdvancedSearchField(TAG_CATEGORIES[name].search_field): name for name in TAG_CATEGORIES}
+# What a tag of a study is shown with (StudyRepository._tag).
+_TAG_COLUMNS = (DbTag.id, DbTag.name, DbTag.acronym, DbTag.labels)
 
 def _authors_text(model):
     """The authors of the reports (of `model`, Report or UpdateReport) as one text, to match a part of a name in."""
     return func.array_to_string(model.authors, " ")
 
+def _tag_matches(pattern: str):
+    """A tag whose name or acronym matches the pattern ("CBT" finds Cognitive Behavior Therapy)."""
+    return or_(DbTag.name.ilike(pattern), DbTag.acronym.ilike(pattern))
+
 def _tag_exists(category: str, pattern: str):
     return (
         select(1)
-        .where(StudyTag.study_id == Study.id, StudyTag.tag_id == DbTag.id, DbTag.category == category, DbTag.description.ilike(pattern))
+        .where(StudyTag.study_id == Study.id, StudyTag.tag_id == DbTag.id, DbTag.category == category, _tag_matches(pattern))
         .exists()
     )
 
@@ -181,11 +188,28 @@ class StudyRepository:
             if references(table, "study_id", Study.__tablename__) and references(table, "update_study_id", UpdateStudy.__tablename__)
         ]
 
-    async def import_study(self, values: Mapping[str, Any], database_id: int, created_at: Optional[datetime] = None) -> Study:
-        """Adds a study of an imported database to the core database from its fields (see add_study), entered when the
-        database it comes from says (now without)."""
+    async def import_study(self, values: Mapping[str, Any], tags: Mapping[str, List[str]], database_id: int, created_at: Optional[datetime] = None) -> Study:
+        """Adds a study of an imported database to the core database from its fields (see add_study) and its tags by
+        category (e.g. interventions), by name; an unknown name becomes a new tag (see StudyGraphs.resolve). It is
+        entered when the database it comes from says (now without). The tags of a category the study holds in its graph
+        itself (its countries, see GraphConfig.study_relation) are added to its graph before it is stored, so that the
+        graph is stored and checked once."""
+        relations = {category: STUDY_CONFIG.graph.study_relation(category) for category in tags}
+        held = {category: names for category, names in tags.items() if relations[category] is not None}
+        if held:
+            document = self.graphs.stored.loads(values.get(GRAPH_FIELD)) or GraphDocument()
+            for category, names in held.items():
+                self.graphs.stored.add_study_values(document, relations[category], names)  # type: ignore[arg-type]
+            values = {**values, GRAPH_FIELD: self.graphs.stored.dumps(document)}
         new_study = await self._insert(values, database_id, created_at)
-        await self.db.refresh(new_study)
+        others = {category: names for category, names in tags.items() if category not in held and names}
+        if others:
+            existing = set((await self.db.execute(select(StudyTag.tag_id).where(StudyTag.study_id == new_study.id))).scalars())
+            for category, names in others.items():
+                for tag_id in await self.graphs.resolve(category, names):
+                    if tag_id not in existing:
+                        self.db.add(StudyTag(study_id=new_study.id, tag_id=tag_id))
+                        existing.add(tag_id)
         return new_study
 
     async def _insert(self, values: Mapping[str, Any], database_id: int, created_at: Optional[datetime] = None) -> Study:
@@ -214,23 +238,55 @@ class StudyRepository:
             raise DuplicateShortNameError("short_name already exists") from error
         raise error
 
-    async def add_study_tags(self, study_id: int, category: str, names: List[str]) -> None:
-        """Makes tags of a category (e.g. interventions) tags of the study, by name; an unknown name becomes a new tag
-        (see StudyGraphs.resolve). The tags of a category the study holds in its graph itself (its countries, see
-        GraphConfig.study_relation) are added to its graph."""
-        relation = STUDY_CONFIG.graph.study_relation(category)
-        if relation is not None:
-            study = await self.db.get(Study, study_id)
-            if study is None:
-                raise ValueError(f"Study {study_id} not found")
-            await self.graphs.add_study_values(study, relation, names)
-            return
-        existing = set((await self.db.execute(select(StudyTag.tag_id).where(StudyTag.study_id == study_id))).scalars())
-        for tag_id in await self.graphs.resolve(category, names):
-            if tag_id not in existing:
-                self.db.add(StudyTag(study_id=study_id, tag_id=tag_id))
-                existing.add(tag_id)
+    async def import_tags(self, tags: Sequence[DatabaseTag]) -> None:
+        """Adds the vocabulary of an imported database. A tag of the same name in its category (ignoring case) is the same
+        tag: it gets the labels, synonyms and source names listed for it besides its own, and the acronym and parent if it
+        has none. A parent that is no tag yet becomes one. The studies imported next find their tags in it without a
+        query each (see StudyGraphs.remember_tags)."""
+        if tags:
+            await self._merge_tags(tags)
+        await self.graphs.remember_tags()
+
+    async def _merge_tags(self, tags: Sequence[DatabaseTag]) -> None:
+        rows = (await self.db.execute(select(DbTag).where(DbTag.category.in_({tag.category for tag in tags})))).scalars().all()
+        known = {(row.category, row.name.lower()): row for row in rows}
+
+        def row_of(category: str, name: str) -> DbTag:
+            if (category, name.lower()) not in known:
+                known[(category, name.lower())] = DbTag(category=category, name=name)
+                self.db.add(known[(category, name.lower())])
+            return known[(category, name.lower())]
+
+        for tag in tags:
+            row = row_of(tag.category, tag.name)
+            row.acronym = row.acronym or tag.acronym
+            row.synonyms = list(dict.fromkeys([*row.synonyms, *tag.synonyms]))
+            row.labels = list(dict.fromkeys([*row.labels, *tag.labels]))
+            row.source_names = list(dict.fromkeys([*row.source_names, *tag.sourceNames]))
+        parents = [(row_of(tag.category, tag.name), row_of(tag.category, tag.parent)) for tag in tags if tag.parent]
         await self.db.flush()
+        for row, parent in parents:
+            if row.parent_id is None and parent is not row:
+                row.parent_id = parent.id
+        await self.db.flush()
+
+    async def get_tag_vocabulary(self, study_ids: List[int]) -> List[DatabaseTag]:
+        """The tags of the studies and their parents, as an export lists them (see import_tags)."""
+        if not study_ids:
+            return []
+        used = select(StudyTag.tag_id).where(StudyTag.study_id.in_(study_ids))
+        found = {row.id: row for row in (await self.db.execute(select(DbTag).where(DbTag.id.in_(used)))).scalars()}
+        missing = {row.parent_id for row in found.values() if row.parent_id is not None} - set(found)
+        while missing:
+            found.update({row.id: row for row in (await self.db.execute(select(DbTag).where(DbTag.id.in_(missing)))).scalars()})
+            missing = {row.parent_id for row in found.values() if row.parent_id is not None} - set(found)
+        return [
+            DatabaseTag(
+                category=row.category, name=row.name, acronym=row.acronym, synonyms=row.synonyms, labels=row.labels,
+                parent=found[row.parent_id].name if row.parent_id in found else None, sourceNames=row.source_names,
+            )
+            for row in sorted(found.values(), key=lambda row: row.id)  # type: ignore[arg-type, return-value]
+        ]
 
     async def update_study_fields(self, study_id: int, values: Mapping[str, Any]) -> None:
         """Sets primitive fields of a study (keys of STUDY_CONFIG.fields, valued as StudyFields has them); a field derived
@@ -314,7 +370,7 @@ class StudyRepository:
                 .outerjoin(StudyTag, StudyTag.study_id == Study.id)
                 .outerjoin(DbTag, and_(DbTag.id == StudyTag.tag_id, DbTag.category.in_(searched)))
             )
-            matches.append(DbTag.description.ilike(pattern))
+            matches.append(_tag_matches(pattern))
         id_stmt = (
             id_stmt
             .where(or_(*matches))
@@ -503,13 +559,12 @@ class StudyRepository:
     # Study Aspects
 
     async def _get_study_aspect(self, stmt) -> Dict[int, List[Tag]]:
-        rows = (await self.db.execute(stmt)).all()  # -> [(StudyID, ID, Description), ...]
+        rows = (await self.db.execute(stmt)).all()  # -> [(StudyID, ID, Description, Acronym, Labels), ...]
 
         # --- Group results by StudyID ---
         final_result: Dict[int, List[Tag]] = {}
-        for study_id, aspect_id, description in rows:
-            item = Tag(id=str(aspect_id), keyword=description or "")
-            final_result.setdefault(study_id, []).append(item)
+        for study_id, *tag in rows:
+            final_result.setdefault(study_id, []).append(self._tag(*tag))
 
         return final_result
 
@@ -522,10 +577,15 @@ class StudyRepository:
         (rather than _get_study_aspect()'s raw {"ID", "Description"} dicts) since every
         caller of the *_single_page() methods below wants a Tag anyway - no reason to
         make them convert a second intermediate shape themselves."""
-        rows = (await self.db.execute(stmt.offset(offset).limit(limit + 1))).all()  # -> [(ID, Description), ...]
+        rows = (await self.db.execute(stmt.offset(offset).limit(limit + 1))).all()  # -> [(ID, Description, Acronym, Labels), ...]
         has_more = len(rows) > limit
-        items = [Tag(id=str(aspect_id), keyword=description or "") for aspect_id, description in rows[:limit]]
+        items = [self._tag(*tag) for tag in rows[:limit]]
         return items, has_more
+
+    @staticmethod
+    def _tag(tag_id, name, acronym, labels) -> Tag:
+        """A tag of the vocabulary as selected by _TAG_COLUMNS."""
+        return Tag(id=str(tag_id), keyword=name or "", acronym=acronym, labels=labels or [])
 
     async def get_study_tags(self, category: str, study_ids: List[int]) -> Dict[int, List[Tag]]:
         """The tags of a category (a key of config/medidex-study.yaml) of each of the studies, of the core database
@@ -547,16 +607,16 @@ class StudyRepository:
         tag_ids = self.graphs.tag_ids(study, category)
         if tag_ids:
             rows = (await self.db.execute(
-                select(DbTag.id, DbTag.description).where(DbTag.category == category, DbTag.id.in_(tag_ids)).order_by(DbTag.id)
+                select(*_TAG_COLUMNS).where(DbTag.category == category, DbTag.id.in_(tag_ids)).order_by(DbTag.id)
             )).all()
-            named = [Tag(id=str(tag_id), keyword=description) for tag_id, description in rows]
+            named = [self._tag(*tag) for tag in rows]
         return named + [Tag(id=name, keyword=name) for name in self.graphs.tag_names(study, category)]
 
     async def _core_study_tags(self, category: str, study_ids: List[int]) -> Dict[int, List[Tag]]:
         if not study_ids:
             return {}
         stmt = (
-            select(StudyTag.study_id, DbTag.id, DbTag.description)
+            select(StudyTag.study_id, *_TAG_COLUMNS)
             .join(DbTag, DbTag.id == StudyTag.tag_id)
             .where(StudyTag.study_id.in_(study_ids), DbTag.category == category)
             .order_by(DbTag.id)
@@ -573,7 +633,7 @@ class StudyRepository:
             tags = await self.get_study_tags_single(category, study_id)
             return tags[offset:offset + limit], len(tags) > offset + limit
         stmt = (
-            select(DbTag.id, DbTag.description)
+            select(*_TAG_COLUMNS)
             .join(StudyTag, StudyTag.tag_id == DbTag.id)
             .where(StudyTag.study_id == study_id, DbTag.category == category)
             .order_by(DbTag.id)

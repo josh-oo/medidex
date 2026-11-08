@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -66,9 +66,9 @@ const MAX_AVATARS = 3;
 interface ProjectRowProps {
   project: ProjectDto;
   assignableUsers?: UserDto[];
-  onAssigneesChange?: (payload: { projectId: string; userIds: string[] }) => void;
   onDeleted?: (projectId: string) => void;
-  onProjectUpdate?: (projectId: string) => void;
+  /** The project as its stream sends it: on each change of its progress, its assignees or their commits. */
+  onProjectUpdate?: (project: ProjectDto) => void;
 }
 
 const getUserInitials = (name?: string) => {
@@ -89,12 +89,10 @@ const getUserInitials = (name?: string) => {
 export function ProjectRow({
   project,
   assignableUsers = EMPTY_USERS,
-  onAssigneesChange,
   onDeleted,
   onProjectUpdate,
 }: ProjectRowProps) {
   const userId = useAuthStore((s) => s.user?.id);
-  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Optimistic assignee ids shown after a toggle until the parent hands down a fresh
   // `project.assignees`; an override made against an older array is ignored.
   const [assigneeOverride, setAssigneeOverride] = useState<{
@@ -117,33 +115,10 @@ export function ProjectRow({
   const isUpdatingAssignees = pendingAssigneeId !== null;
 
   useEffect(() => {
-    const scheduleRefresh = () => {
-      if (refreshTimeoutRef.current !== null) {
-        clearTimeout(refreshTimeoutRef.current);
-      }
-
-      refreshTimeoutRef.current = setTimeout(() => {
-        refreshTimeoutRef.current = null;
-        onProjectUpdate?.(project.projectId);
-      }, 200);
-    };
-
-    const stopStream = streamProjectUpdates(project.projectId, {
-      onEvent: () => {
-        scheduleRefresh();
-      },
-      onError: (error) => {
-        console.error(`Project stream error for ${project.projectId}:`, error);
-      },
-    });
-
-    return () => {
-      if (refreshTimeoutRef.current !== null) {
-        clearTimeout(refreshTimeoutRef.current);
-        refreshTimeoutRef.current = null;
-      }
-      stopStream();
-    };
+    if (!onProjectUpdate) return;
+    return streamProjectUpdates(project.projectId, onProjectUpdate, (error) =>
+      console.error(`Project stream error for ${project.projectId}:`, error)
+    );
   }, [project.projectId, onProjectUpdate]);
 
   const sortedUsers = useMemo(
@@ -221,7 +196,6 @@ export function ProjectRow({
           ? assigneeIds.filter((id) => id !== normalizedUserId)
           : [...assigneeIds, normalizedUserId];
         setAssigneeOverride({ base: project.assignees, ids: next });
-        onAssigneesChange?.({ projectId: project.projectId, userIds: next });
       } catch (error) {
         console.error(`Failed to update assignee ${normalizedUserId}`, error);
         window.alert(
@@ -233,7 +207,7 @@ export function ProjectRow({
         setPendingAssigneeId(null);
       }
     },
-    [assigneeIds, isUpdatingAssignees, onAssigneesChange, project.projectId, project.assignees, extraById]
+    [assigneeIds, isUpdatingAssignees, project.projectId, project.assignees, extraById]
   );
 
   const handleDeleteProject = useCallback(async () => {
@@ -469,7 +443,6 @@ export function ProjectRow({
             waitingFor={resolvedAssignees
               .filter((assignee) => !assignee.committed && assignee.userId !== userId)
               .map((assignee) => assignee.name)}
-            onCommitted={() => onProjectUpdate?.(project.projectId)}
           />
         ) : null
       }

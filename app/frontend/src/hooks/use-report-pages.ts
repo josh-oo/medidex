@@ -40,6 +40,8 @@ export function useReportPages({
   // against another.
   const [nextCursor, setNextCursor] = useState<string | null>(initialPage.nextCursor);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  // How many reports all pages of the current search/filter combination hold, null where the server does not say.
+  const [total, setTotal] = useState<number | null>(initialPage.total ?? null);
 
   // Every effect/handler that starts a fetch bumps this first and checks it's still current
   // before applying the result.
@@ -60,6 +62,7 @@ export function useReportPages({
     requestIdRef.current += 1;
     setReports(initialPage.items);
     setNextCursor(initialPage.nextCursor);
+    setTotal(initialPage.total ?? null);
   }, [projectId, initialPage]);
 
   useEffect(() => {
@@ -81,6 +84,7 @@ export function useReportPages({
         if (cancelled || requestIdRef.current !== requestId) return;
         setReports(page.items);
         setNextCursor(page.nextCursor);
+        setTotal(page.total ?? null);
         addReports(page.items);
         onFirstPageRef.current?.(page, filtersActive);
       })
@@ -89,6 +93,7 @@ export function useReportPages({
         if (!cancelled && requestIdRef.current === requestId) {
           setReports([]);
           setNextCursor(null);
+          setTotal(null);
         }
       })
       .finally(() => {
@@ -126,5 +131,5 @@ export function useReportPages({
     setReports((prev) => prev.map((r) => (r.reportId === reportId ? { ...r, flag } : r)));
   }, []);
 
-  return { reports, isLoading, isLoadingMore, hasMore: nextCursor !== null, loadMore, patchFlag };
+  return { reports, total, isLoading, isLoadingMore, hasMore: nextCursor !== null, loadMore, patchFlag };
 }

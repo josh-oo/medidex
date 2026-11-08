@@ -2,7 +2,9 @@
 (config/medidex-study.yaml) defines. A node is an entity of a kind of the ontology with no properties, only edges to
 other nodes; what an entity says about itself is an edge to a node that is a value (the id of a tag, or a primitive). The
 study itself is the root node, with the id `study` and no JSON of its own. A value is one node however many edges lead to
-it. Creating a study also takes the tags by name instead of id; reading converts graphs of older formats."""
+it. A tag value can keep the wording it was read from (`text`, e.g. "any respiratory AE") and say how the tag relates to it
+(`match`: the tag names the same thing, `equal`, the default, or a broader one it is a kind of, `broader`); a person can
+decide that later. Creating a study also takes the tags by name instead of id; reading converts graphs of older formats."""
 
 import json
 import re
@@ -12,6 +14,8 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 from .studyconfig import GraphConfig
 
 Item = Union[int, str]
+# How the tag of a value relates to the wording it was read from: the same thing, or a broader one the wording is a kind of.
+MATCHES = ("equal", "broader")
 
 
 class GraphFormatError(ValueError):
@@ -23,6 +27,8 @@ class GraphNode:
     id: str
     kind: str
     value: Optional[Item] = None  # the id (or, in a payload, the name) of a tag, or the text of a primitive value
+    text: Optional[str] = None  # a tag value: the wording it was read from (None: the name of the tag)
+    match: Optional[str] = None  # a tag value: how its tag relates to the wording (MATCHES; None: equal)
 
 
 @dataclass
@@ -97,13 +103,25 @@ class StoredGraph:
     def _node(self, entry: Any) -> GraphNode:
         if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not entry["id"].strip():
             raise GraphFormatError("every node has an `id` (text) and a `kind`")
-        unknown = set(entry) - {"id", "kind", "value"}
+        unknown = set(entry) - {"id", "kind", "value", "text", "match"}
         kind = entry.get("kind")
         if unknown or kind not in self.config.entities or self.config.entities[kind].root:
             known = [key for key, entity in self.config.entities.items() if not entity.root]
             raise GraphFormatError(f"node {entry['id']!r}: it has a `kind` ({', '.join(known)}) and a `value` if the kind is a value")
-        node = GraphNode(entry["id"].strip(), kind, self._value(kind, entry.get("value")))
-        return node
+        text, match = self._wording(kind, entry.get("text"), entry.get("match"))
+        return GraphNode(entry["id"].strip(), kind, self._value(kind, entry.get("value")), text, match)
+
+    def _wording(self, kind: str, text: Any, match: Any) -> tuple:
+        """The wording of a tag value and how its tag relates to it, (None, None) for what is no tag."""
+        if text in (None, "") and match in (None, ""):
+            return None, None
+        config = self.config.entities[kind].value
+        if config is None or config.category is None:
+            raise GraphFormatError(f"only a tag has a `text` and a `match`, a node of kind '{kind}' is none")
+        if not isinstance(text, (str, type(None))) or match not in (None, "", *MATCHES):
+            raise GraphFormatError(f"a node of kind '{kind}' has a text as its `text` and one of {', '.join(MATCHES)} as its `match`")
+        wording = text.strip() if isinstance(text, str) and text.strip() else None
+        return wording, (match if match == "broader" else None)
 
     def _value(self, kind: str, value: Any) -> Optional[Item]:
         config = self.config.entities[kind].value
@@ -219,7 +237,10 @@ class StoredGraph:
             return None
         return {
             "nodes": [
-                {"id": node.id, "kind": node.kind, **({"value": node.value} if node.value is not None else {})}
+                {
+                    "id": node.id, "kind": node.kind, **({"value": node.value} if node.value is not None else {}),
+                    **({"text": node.text} if node.text else {}), **({"match": node.match} if node.match else {}),
+                }
                 for node in document.nodes
             ],
             "edges": [{"relation": edge.relation, "source": edge.source, "target": edge.target} for edge in document.edges],
@@ -296,15 +317,26 @@ class StoredGraph:
                 document.edges.append(GraphEdge(key, node.id, target))
         return node.id
 
-    def value_node(self, document: GraphDocument, kind: str, value: Any) -> str:
-        """The id of the node of this kind with this value; a new one if there is none yet."""
+    def value_node(self, document: GraphDocument, kind: str, value: Any, text: Optional[str] = None, match: Optional[str] = None) -> str:
+        """The id of the node of this kind with this value (and, of a tag, this wording and match); a new one if there is
+        none yet."""
         checked = self._value(kind, value)
+        wording, how = self._wording(kind, text, match)
+        wanted = self.value_key(GraphNode("", kind, checked, wording, how))
         for node in document.of_kind(kind):
-            if str(node.value).casefold() == str(checked).casefold():
+            if self.value_key(node) == wanted:
                 return node.id
-        node = GraphNode(self.new_id(document, kind), kind, checked)
+        node = GraphNode(self.new_id(document, kind), kind, checked, wording, how)
         document.nodes.append(node)
         return node.id
+
+    @staticmethod
+    def value_key(node: GraphNode) -> tuple:
+        """What makes two value nodes the same: the value, the wording and the match, ignoring case (a wording that is the
+        tag's own name is no wording of its own)."""
+        value = str(node.value).casefold()
+        text = (node.text or "").casefold()
+        return value, "" if text == value else text, node.match or "equal"
 
     @staticmethod
     def new_id(document: GraphDocument, kind: str) -> str:

@@ -29,6 +29,12 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Check, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { COUNTRY_OPTIONS } from "./constants";
@@ -42,10 +48,13 @@ import {
   comparisonsFromSuggestion,
   createComparison,
   createStudyArm,
+  detailsFromGraph,
+  graphFromForm,
   hasValidComparisons,
   orderArms,
+  suggestionFromGraph,
 } from "@/lib/comparisonUtils";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAbortableEffect } from "@/hooks/use-abortable-effect";
 import { getSimilarTagsByReportId, getSuggestedStudyName } from "@/lib/api/reportApi";
 import { getInterventions } from "@/lib/api/interventionsApi";
@@ -53,13 +62,16 @@ import type {
   DurationUnit,
   NewStudySuggestion,
   StudyBaseDto,
+  StudyGraphDto,
 } from "@/types/apiDTOs";
 import type {
   ArmComparison,
   ArmRole,
   StudyArm,
+  StudyDetails,
 } from "@/types/comparisons";
 import { ArmComparisonLanes, lanesWidth, useRowCenters } from "./arm-comparison-lanes";
+import { StudyOutcomeFields, StudyPopulationFields } from "./study-details-fields";
 
 const CATALOG_SEARCH_MIN_CHARS = 2;
 
@@ -70,6 +82,20 @@ const buildEmptyArms = (): { arms: StudyArm[]; comparisons: ArmComparison[] } =>
 };
 
 const DURATION_UNITS: DurationUnit[] = ["hours", "days", "weeks", "months", "years"];
+
+type ArmDetail = "participants" | "features" | "dosage" | "frequency" | "route" | "duration";
+
+const ARM_DETAILS: { key: ArmDetail; label: string; placeholder: string }[] = [
+  { key: "participants", label: "Participants", placeholder: "e.g. 40" },
+  { key: "features", label: "Features", placeholder: "group, nurse-led, ..." },
+  { key: "dosage", label: "Dosage", placeholder: "e.g. 5-10 mg" },
+  { key: "frequency", label: "Frequency", placeholder: "e.g. once daily" },
+  { key: "route", label: "Route", placeholder: "e.g. oral" },
+  { key: "duration", label: "Duration", placeholder: "e.g. 12" },
+];
+
+const hasDetail = (arm: StudyArm, key: ArmDetail): boolean =>
+  key === "duration" ? Boolean(arm.durationValue.trim() || arm.durationUnit) : Boolean(arm[key].trim());
 
 const UNIT_HOURS: Record<DurationUnit, number> = { hours: 1, days: 24, weeks: 168, months: 720, years: 8760 };
 
@@ -109,6 +135,11 @@ export interface AddStudyDialogProps {
   onSaveStudy: (values: StudyBaseDto) => Promise<void>;
   /** Shows the form in place (e.g. as a widget of the report workbench) instead of behind a button and dialog. */
   inline?: boolean;
+  /**
+   * Rendered beside the buttons of the form (e.g. a button that opens the whole graph): `current` gives the graph the
+   * form makes as it is filled in, `apply` fills the form in from a graph (one edited from it).
+   */
+  graphAction?: (current: () => StudyGraphDto, apply: (graph: StudyGraphDto) => void) => ReactNode;
 }
 
 const uniqueKeywords = (data: unknown): string[] => {
@@ -124,6 +155,7 @@ export function AddStudyDialog({
   suggestedValues,
   onSaveStudy,
   inline = false,
+  graphAction,
 }: AddStudyDialogProps) {
   const [shortName, setShortName] = useState("");
   const statusOptions = useStudyFieldValues("status");
@@ -132,6 +164,10 @@ export function AddStudyDialog({
   const [numberOfParticipants, setNumberOfParticipants] = useState("");
   const [durationValue, setDurationValue] = useState("");
   const [durationUnit, setDurationUnit] = useState<DurationUnit | "">("");
+  // Who the participants are, the design, trial ids and outcomes of the study.
+  const [details, setDetails] = useState<StudyDetails>(() => detailsFromGraph());
+  // The graph the form is written onto (the suggested one, or one applied with `graphAction`).
+  const [baseGraph, setBaseGraph] = useState<StudyGraphDto | undefined>(undefined);
 
   const [countryOpen, setCountryOpen] = useState(false);
 
@@ -148,6 +184,8 @@ export function AddStudyDialog({
   const [linkingFrom, setLinkingFrom] = useState<string | null>(null);
   const [armsElement, setArmsElement] = useState<HTMLDivElement | null>(null);
   const rowCenters = useRowCenters(armsElement);
+  // An arm shows only the details it has, and those added with "+ Attribute" until they are left empty.
+  const [openedDetails, setOpenedDetails] = useState<Record<string, ArmDetail[]>>({});
 
   // The arm whose intervention picker is open.
   const [activeSuggestionField, setActiveSuggestionField] = useState<string | null>(null);
@@ -167,6 +205,9 @@ export function AddStudyDialog({
     setArms(orderArms(initial.arms));
     setComparisons(initial.comparisons);
     setLinkingFrom(null);
+    setOpenedDetails({});
+    setDetails(detailsFromGraph(suggestedValues?.graph));
+    setBaseGraph(suggestedValues?.graph);
     if (suggestedValues) {
       setShortName(suggestedValues.short_name ?? "");
       setStatusOfStudy(suggestedValues.status_of_study ?? "");
@@ -298,9 +339,10 @@ export function AddStudyDialog({
     }
     const duration = durationValue.trim() && durationUnit ? `${durationValue.trim()} ${durationUnit}` : undefined;
 
-    const graph = buildGraph(arms, comparisons, selectedCountries, suggestedValues?.graph, {
+    const graph = buildGraph(arms, comparisons, selectedCountries, baseGraph, {
       duration,
       participants: participantsValue === null ? undefined : String(participantsValue),
+      details,
     });
     if (graph === null) {
       toast.error("Compare at least two arms that have interventions.");
@@ -332,6 +374,32 @@ export function AddStudyDialog({
     }
   };
 
+  // The graph the form makes as it is (whatever its comparisons), and the form filled in from a graph; the name and the
+  // status are not part of a graph and stay.
+  const currentGraph = () => {
+    const duration = durationValue.trim() && durationUnit ? `${durationValue.trim()} ${durationUnit}` : undefined;
+    return graphFromForm(arms, comparisons, selectedCountries, baseGraph, {
+      duration,
+      participants: numberOfParticipants.trim() || undefined,
+      details,
+    });
+  };
+  const applyGraph = (graph: StudyGraphDto) => {
+    const suggestion = suggestionFromGraph(graph, shortName);
+    const initial = buildArmsFromSuggestion(suggestion);
+    setArms(orderArms(initial.arms));
+    setComparisons(initial.comparisons);
+    setLinkingFrom(null);
+    setOpenedDetails({});
+    setSelectedCountries(suggestion.countries);
+    setNumberOfParticipants(suggestion.number_of_participants ? String(suggestion.number_of_participants) : "");
+    // A duration of the study is that of its arms in the graph.
+    setDurationValue("");
+    setDurationUnit("");
+    setDetails(detailsFromGraph(graph));
+    setBaseGraph(graph);
+  };
+
   const toggleCountrySelection = (country: string) => {
     setSelectedCountries((previous) =>
       previous.includes(country)
@@ -343,6 +411,14 @@ export function AddStudyDialog({
   // An arm keeps its place when its type changes; only the arms of a suggestion are ordered by type.
   const updateArm = (armId: string, changes: Partial<StudyArm>) => {
     setArms((previous) => previous.map((arm) => (arm.id !== armId ? arm : { ...arm, ...changes })));
+  };
+
+  const openDetail = (armId: string, key: ArmDetail) => {
+    setOpenedDetails((previous) => ({ ...previous, [armId]: [...(previous[armId] ?? []), key] }));
+  };
+
+  const closeDetail = (armId: string, key: ArmDetail) => {
+    setOpenedDetails((previous) => ({ ...previous, [armId]: (previous[armId] ?? []).filter((entry) => entry !== key) }));
   };
 
   const removeInterventionField = (armId: string, index: number) => {
@@ -449,16 +525,60 @@ export function AddStudyDialog({
       Boolean(trimmedQuery) &&
       !suggestedSet.has(normalizedQuery) &&
       !allInterventions.some((item) => item.toLowerCase() === normalizedQuery);
-    const detail = (key: "participants" | "dosage" | "frequency" | "route", label: string, placeholder: string) => (
-      <Input
-        aria-label={`${label} of arm ${letter}`}
-        placeholder={placeholder}
-        type={key === "participants" ? "number" : undefined}
-        min={key === "participants" ? "0" : undefined}
-        className="h-8 text-xs"
-        value={arm[key]}
-        onChange={(event) => updateArm(arm.id, { [key]: event.target.value })}
-      />
+    const opened = openedDetails[arm.id] ?? [];
+    const shownDetails = ARM_DETAILS.filter(({ key }) => hasDetail(arm, key) || opened.includes(key));
+    const hiddenDetails = ARM_DETAILS.filter((detail) => !shownDetails.includes(detail));
+    // A detail just added is focused; one left empty is hidden again.
+    const blurDetail = (key: ArmDetail) => (event: React.FocusEvent<HTMLElement>) => {
+      if (event.currentTarget.parentElement?.contains(event.relatedTarget as Node | null)) return;
+      if (!hasDetail(arm, key)) closeDetail(arm.id, key);
+    };
+    const renderDetail = ({ key, label, placeholder }: (typeof ARM_DETAILS)[number]) => (
+      <div key={key} className={`space-y-0.5 ${key === "duration" ? "w-[176px]" : key === "participants" ? "w-[96px]" : "w-[148px]"}`}>
+        <span className="block px-1 text-[10px] font-medium text-muted-foreground">{label}</span>
+        {key === "duration" ? (
+          <div className="flex gap-1">
+            <Input
+              aria-label={`Duration of arm ${letter}`}
+              placeholder={placeholder}
+              type="number"
+              min="0"
+              autoFocus={opened.includes(key) && !hasDetail(arm, key)}
+              className="h-8 w-[72px] text-xs"
+              value={arm.durationValue}
+              onChange={(event) => updateArm(arm.id, { durationValue: event.target.value })}
+              onBlur={blurDetail(key)}
+            />
+            <Select
+              value={arm.durationUnit || undefined}
+              onValueChange={(value) => updateArm(arm.id, { durationUnit: value as DurationUnit })}
+            >
+              <SelectTrigger size="sm" className="h-8 flex-1 text-xs" aria-label={`Unit of the duration of arm ${letter}`}>
+                <SelectValue placeholder="Unit" />
+              </SelectTrigger>
+              <SelectContent>
+                {DURATION_UNITS.map((unit) => (
+                  <SelectItem key={unit} value={unit}>
+                    {unit}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : (
+          <Input
+            aria-label={`${label} of arm ${letter}`}
+            placeholder={placeholder}
+            type={key === "participants" ? "number" : undefined}
+            min={key === "participants" ? "0" : undefined}
+            autoFocus={opened.includes(key) && !hasDetail(arm, key)}
+            className="h-8 text-xs"
+            value={arm[key]}
+            onChange={(event) => updateArm(arm.id, { [key]: event.target.value })}
+            onBlur={blurDetail(key)}
+          />
+        )}
+      </div>
     );
 
     return (
@@ -608,35 +728,31 @@ export function AddStudyDialog({
             </Button>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-1.5 pl-10 sm:grid-cols-[1fr_1fr_1fr_1fr_0.8fr_0.9fr]">
-          {detail("participants", "Participants", "Participants")}
-          {detail("dosage", "Dosage", "Dosage")}
-          {detail("frequency", "Frequency", "Frequency")}
-          {detail("route", "Route", "Route")}
-          <Input
-            aria-label={`Duration of arm ${letter}`}
-            placeholder="Duration"
-            type="number"
-            min="0"
-            className="h-8 text-xs"
-            value={arm.durationValue}
-            onChange={(event) => updateArm(arm.id, { durationValue: event.target.value })}
-          />
-          <Select
-            value={arm.durationUnit || undefined}
-            onValueChange={(value) => updateArm(arm.id, { durationUnit: value as DurationUnit })}
-          >
-            <SelectTrigger size="sm" className="h-8 w-full text-xs" aria-label={`Unit of the duration of arm ${letter}`}>
-              <SelectValue placeholder="Unit" />
-            </SelectTrigger>
-            <SelectContent>
-              {DURATION_UNITS.map((unit) => (
-                <SelectItem key={unit} value={unit}>
-                  {unit}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex flex-wrap items-end gap-1.5 pl-10">
+          {shownDetails.map(renderDetail)}
+          {hiddenDetails.length > 0 && (
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Add an attribute to arm ${letter}`}
+                  className="h-6 rounded-full border-dashed px-2.5 text-xs text-muted-foreground"
+                >
+                  <Plus className="h-3 w-3" />
+                  Attribute
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" onCloseAutoFocus={(event) => event.preventDefault()}>
+                {hiddenDetails.map(({ key, label }) => (
+                  <DropdownMenuItem key={key} className="text-xs" onSelect={() => openDetail(arm.id, key)}>
+                    {label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
     );
@@ -765,6 +881,7 @@ export function AddStudyDialog({
               </div>
             </div>
           </div>
+          <StudyPopulationFields details={details} onChange={setDetails} shown={isFormShown} />
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
               <Label className="text-sm font-semibold">Arms and comparisons</Label>
@@ -784,6 +901,7 @@ export function AddStudyDialog({
               <div className="space-y-2">{arms.map(renderArmRow)}</div>
             </div>
           </div>
+          <StudyOutcomeFields details={details} onChange={setDetails} shown={isFormShown} />
     </>
   );
 
@@ -792,6 +910,7 @@ export function AddStudyDialog({
       <form className="space-y-4 w-full" onSubmit={handleAddStudySubmit}>
         {formFields}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            {graphAction && <div className="sm:mr-auto">{graphAction(currentGraph, applyGraph)}</div>}
             <Button
               type="button"
               variant="ghost"
@@ -839,6 +958,7 @@ export function AddStudyDialog({
         <form className="space-y-4 w-full" onSubmit={handleAddStudySubmit}>
           {formFields}
           <DialogFooter>
+            {graphAction && <div className="sm:mr-auto">{graphAction(currentGraph, applyGraph)}</div>}
             <Button
               type="button"
               variant="ghost"

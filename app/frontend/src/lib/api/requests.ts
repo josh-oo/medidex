@@ -1,4 +1,4 @@
-import type { AxiosRequestConfig, AxiosResponse } from "axios";
+import { isCancel, type AxiosRequestConfig, type AxiosResponse } from "axios";
 import apiClient from "./apiClient";
 
 export const unwrap = <T>(response: AxiosResponse<T>): T => response.data;
@@ -6,12 +6,15 @@ export const unwrap = <T>(response: AxiosResponse<T>): T => response.data;
 /**
  * Catch handler that logs `message` with the error and rethrows it. With `messageOnly` it logs
  * just the error's message when it has one (e.g. to keep large axios errors out of the console).
+ * Aborted requests are rethrown without logging.
  */
 export const logAndRethrow =
   (message: string, messageOnly = false) =>
   (error: unknown): never => {
-    const detail = messageOnly && error instanceof Error && error.message ? error.message : error;
-    console.error(message, detail);
+    if (!isCancel(error)) {
+      const detail = messageOnly && error instanceof Error && error.message ? error.message : error;
+      console.error(message, detail);
+    }
     throw error;
   };
 

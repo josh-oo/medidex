@@ -277,7 +277,7 @@ interface ReportPagerProps {
 
 /** The position of the open report in the sidebar list, with previous/next (also K/J). */
 function ReportPager({ baseUrl, projectId, reportId, showExpand, onExpand, onOpenDrawer }: ReportPagerProps) {
-  const { reportIds, hasMore, loadMore } = useReportNavigation();
+  const { reportIds, hasMore, total, loadMore } = useReportNavigation();
   const navigate = useNavigate();
   const { search } = useLocation();
   const index = reportIds.indexOf(reportId);
@@ -336,7 +336,7 @@ function ReportPager({ baseUrl, projectId, reportId, showExpand, onExpand, onOpe
       )}
 
       <span className="px-1 text-xs text-muted-foreground tabular-nums">
-        {index >= 0 ? `Report ${index + 1} of ${reportIds.length}${hasMore ? "+" : ""}` : `Report #${reportId}`}
+        {index >= 0 ? `Report ${index + 1} of ${total ?? `${reportIds.length}${hasMore ? "+" : ""}`}` : `Report #${reportId}`}
       </span>
 
       <TooltipProvider>

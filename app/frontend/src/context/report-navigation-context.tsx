@@ -5,6 +5,8 @@ interface ReportNavigation {
   reportIds: number[]
   /** More reports follow the loaded ones. */
   hasMore: boolean
+  /** How many reports the list holds, all pages together; null where the server does not say. */
+  total: number | null
   /** Loads the next page of the sidebar list. */
   loadMore: () => void
   /** The list is still loading, so whether it has reports is not known yet. */
@@ -24,6 +26,7 @@ export function ReportNavigationProvider({ children }: { children: ReactNode }) 
   const [navigation, setNavigation] = useState<ReportNavigation>({
     reportIds: [],
     hasMore: false,
+    total: null,
     loadMore: noop,
     isLoading: true,
   })

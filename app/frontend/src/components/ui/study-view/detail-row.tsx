@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { iconByName } from "@/lib/icons";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { TagDto } from "@/types/apiDTOs";
 
 interface DetailRowProps {
   /** An icon name of the study schema (see iconByName). */
@@ -31,6 +33,49 @@ export function DetailChips({ values }: { values: string[] }) {
           {value}
         </li>
       ))}
+    </ul>
+  );
+}
+
+const CHIP_CLASS = "rounded-md bg-muted px-1.5 py-0.5 text-xs leading-snug";
+
+/** The tags of a detail as small chips, their acronym and labels shown on hovering one that has any. */
+export function TagChips({ tags }: { tags: TagDto[] }) {
+  return (
+    <ul className="flex flex-wrap gap-1">
+      {tags.map((tag, index) => {
+        const labels = tag.labels ?? [];
+        if (!tag.acronym && labels.length === 0) {
+          return (
+            <li key={`${tag.id}-${index}`} className={CHIP_CLASS}>
+              {tag.keyword}
+            </li>
+          );
+        }
+        return (
+          <Tooltip key={`${tag.id}-${index}`}>
+            <TooltipTrigger asChild>
+              <li className={`${CHIP_CLASS} cursor-default`}>{tag.keyword}</li>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs">
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5">
+                {tag.acronym && (
+                  <>
+                    <dt className="opacity-70">Acronym</dt>
+                    <dd>{tag.acronym}</dd>
+                  </>
+                )}
+                {labels.length > 0 && (
+                  <>
+                    <dt className="opacity-70">Labels</dt>
+                    <dd>{labels.join(", ")}</dd>
+                  </>
+                )}
+              </dl>
+            </TooltipContent>
+          </Tooltip>
+        );
+      })}
     </ul>
   );
 }

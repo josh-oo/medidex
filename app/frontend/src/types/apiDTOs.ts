@@ -11,6 +11,9 @@ export type JsonValue =
 export interface Page<T> {
   items: T[];
   nextCursor: string | null;
+  // How many items all pages hold together, where the endpoint counts them (e.g. the first page of a project's
+  // report lists).
+  total?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +269,9 @@ export interface StudyGraphNodeDto {
   kind: string;
   value: string | null;
   tagId: string | null;
+  // A tag read from another wording: that wording, and whether the tag names a broader thing it is a form of.
+  text?: string | null;
+  match?: "broader" | null;
 }
 
 export interface StudyGraphEdgeDto {
@@ -482,6 +488,8 @@ export interface DatabaseStorageDto {
 export interface TagDto {
   id: string;
   keyword: string;
+  acronym?: string | null;
+  labels?: string[];
 }
 
 export type GetPersonsResponseDto = Record<string, string[]>;
@@ -519,10 +527,13 @@ export interface ArmSuggestion {
   interventions: string[];
   role?: "intervention" | "control";
   participants?: number;
+  features?: string[];
   dosage?: string;
   frequency?: string;
   route?: string;
   duration?: { value: number; unit: DurationUnit };
+  // The arm entity of the graph it was made from.
+  source?: string;
 }
 
 // Two arms that are compared, by their index in the arms of the suggestion: the evaluated arm and its comparator.
@@ -542,25 +553,4 @@ export interface NewStudySuggestion {
   // The graph the suggestion was made from (that of the report): the form is written back onto it, keeping what it does not
   // edit (the population of the study, its outcomes, designs, ...).
   graph?: StudyGraphDto;
-}
-
-export type StreamEventType = "node" | "complete" | "error" | "unknown";
-
-// Generic shape for any backend SSE stream (currently only
-// GET /projects/{id}/stream's batch-progress feed). `node`/`details` are
-// deliberately untyped beyond this - a downstream build consuming a
-// different stream can narrow them
-// to its own node/detail shapes without this type needing to know about it.
-export interface StreamEvent {
-  event: StreamEventType;
-  node?: string;
-  message?: string;
-  details?: Record<string, unknown>;
-  timestamp: number;
-}
-
-export interface StreamCallbacks {
-  onEvent: (event: StreamEvent) => void;
-  onComplete?: () => void;
-  onError: (error: Error) => void;
 }

@@ -145,6 +145,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - DEBUG=${DEBUG:-false}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - OPENALEX_API_KEY=${OPENALEX_API_KEY:-}
     depends_on:
       app-init:
         condition: service_completed_successfully
