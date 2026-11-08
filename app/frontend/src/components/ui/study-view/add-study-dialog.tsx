@@ -72,7 +72,7 @@ import type {
   StudyDetails,
 } from "@/types/comparisons";
 import { ArmComparisonLanes, lanesWidth, useRowCenters } from "./arm-comparison-lanes";
-import { ChipList, SexCheckboxes, StudyOutcomeFields, useVocabulary } from "./study-details-fields";
+import { ChipList, SexToggles, StudyOutcomeFields, useVocabulary } from "./study-details-fields";
 
 const CATALOG_SEARCH_MIN_CHARS = 2;
 
@@ -568,7 +568,7 @@ export function AddStudyDialog({
       if (!hasDetail(arm, key)) closeDetail(arm.id, key);
     };
     const renderDetail = ({ key, label, placeholder }: (typeof ARM_DETAILS)[number]) => (
-      <div key={key} className={`space-y-0.5 ${key === "duration" ? "w-[176px]" : key === "participants" ? "w-[96px]" : "w-[148px]"}`}>
+      <div key={key} className={`min-w-0 space-y-0.5 ${key === "duration" ? "flex-[0_1_176px]" : key === "participants" ? "flex-[0_1_96px]" : "flex-[0_1_148px]"}`}>
         <span className="block px-1 text-[10px] font-medium text-muted-foreground">{label}</span>
         {key === "duration" ? (
           <div className="flex gap-1">
@@ -578,7 +578,7 @@ export function AddStudyDialog({
               type="number"
               min="0"
               autoFocus={opened.includes(key) && !hasDetail(arm, key)}
-              className="h-8 w-[72px] text-xs"
+              className="h-8 w-[72px] min-w-0 shrink text-xs"
               value={arm.durationValue}
               onChange={(event) => updateArm(arm.id, { durationValue: event.target.value })}
               onBlur={blurDetail(key)}
@@ -587,7 +587,7 @@ export function AddStudyDialog({
               value={arm.durationUnit || undefined}
               onValueChange={(value) => updateArm(arm.id, { durationUnit: value as DurationUnit })}
             >
-              <SelectTrigger size="sm" className="h-8 flex-1 text-xs" aria-label={`Unit of the duration of arm ${letter}`}>
+              <SelectTrigger size="sm" className="h-8 min-w-0 flex-1 text-xs" aria-label={`Unit of the duration of arm ${letter}`}>
                 <SelectValue placeholder="Unit" />
               </SelectTrigger>
               <SelectContent>
@@ -637,6 +637,19 @@ export function AddStudyDialog({
           >
             {arm.role === "control" ? "Ctrl" : "Int"}
           </button>
+          {arms.length > 2 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+              onClick={() => removeArm(arm.id)}
+              aria-label={`Remove arm ${letter}`}
+              title={`Remove arm ${letter}`}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex items-start gap-2">
@@ -678,7 +691,7 @@ export function AddStudyDialog({
               role="combobox"
               aria-expanded={isSuggestionFieldActive(arm.id)}
               aria-label={`Add an intervention to arm ${letter}`}
-              className="h-6 rounded-full border-dashed px-2.5 text-xs text-muted-foreground"
+              className="h-6 max-w-full rounded-full border-dashed px-2.5 text-xs text-muted-foreground"
             >
               + Intervention
             </Button>
@@ -755,18 +768,6 @@ export function AddStudyDialog({
           </PopoverContent>
         </Popover>
           </div>
-          {arms.length > 2 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              className="h-8 w-8 shrink-0 p-0"
-              onClick={() => removeArm(arm.id)}
-              aria-label={`Remove arm ${letter}`}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          )}
           </div>
           <div className="flex flex-wrap items-end gap-1.5">
           {shownDetails.map(renderDetail)}
@@ -841,8 +842,8 @@ export function AddStudyDialog({
   ) : (
     <>
       {viewSwitch}
-      <div className="grid w-full grid-cols-1 items-start gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)_minmax(0,2fr)]">
-        <div className="space-y-1.5">
+      <div className="flex w-full flex-wrap items-start gap-4 @2xl:grid @2xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)_minmax(0,2fr)]">
+        <div className="min-w-0 grow basis-40 space-y-1.5">
           <Label htmlFor="study-short-name" className="text-xs">Short name</Label>
           <Input
             id="study-short-name"
@@ -853,8 +854,8 @@ export function AddStudyDialog({
             required
           />
         </div>
-        <ChipList label="Trial IDs" values={details.trialIds} onChange={setDetail("trialIds")} placeholder="e.g. NCT01234567" />
-        <div className="space-y-1.5">
+        <ChipList label="Trial IDs" className="min-w-0 grow basis-56" values={details.trialIds} onChange={setDetail("trialIds")} placeholder="e.g. NCT01234567" />
+        <div className="min-w-0 grow basis-40 space-y-1.5">
           <Label className="text-xs">Status</Label>
           <Select value={statusOfStudy} onValueChange={(value) => setStatusOfStudy(value)}>
             <SelectTrigger className="h-9 w-full">
@@ -870,24 +871,25 @@ export function AddStudyDialog({
           </Select>
         </div>
       </div>
-      <div className="grid w-full grid-cols-1 items-start gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-        <ChipList label="Design" values={details.designs} onChange={setDetail("designs")} placeholder="Add a design" options={vocabulary("design")} />
+      <div className="flex w-full flex-wrap items-start gap-4 @2xl:grid @2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <ChipList label="Design" className="min-w-0 grow basis-48" values={details.designs} onChange={setDetail("designs")} placeholder="Add a design" options={vocabulary("design")} />
         <ChipList
           label="Countries"
+          className="min-w-0 grow basis-48"
           values={selectedCountries}
           onChange={setSelectedCountries}
           placeholder="Add a country"
           options={COUNTRY_OPTIONS}
           strict
         />
-        <div className="space-y-1.5">
+        <div className="min-w-0 grow basis-48 space-y-1.5">
           <Label htmlFor="study-duration" className="text-xs">Duration</Label>
           <div className="flex gap-1.5">
             <Input
               id="study-duration"
               type="number"
               min="0"
-              className="h-9 w-20"
+              className="h-9 w-20 grow @2xl:grow-0"
               placeholder={longestArm.split(" ")[0] || "-"}
               title={longestArm ? `Empty: the longest arm, ${longestArm}` : "Empty: the longest arm"}
               value={durationValue}
@@ -910,8 +912,8 @@ export function AddStudyDialog({
       </div>
       <div className="space-y-3">
         <Label className="text-sm font-semibold">Participants</Label>
-        <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-[6rem_minmax(0,1fr)_auto_9rem]">
-          <div className="space-y-1.5">
+        <div className="flex flex-wrap items-start gap-4 @2xl:grid @2xl:grid-cols-[6rem_auto_minmax(0,1fr)_9rem]">
+          <div className="min-w-0 grow basis-20 space-y-1.5">
             <Label htmlFor="study-participants" className="text-xs">Number</Label>
             <Input
               id="study-participants"
@@ -924,9 +926,9 @@ export function AddStudyDialog({
               onChange={(event) => setNumberOfParticipants(event.target.value)}
             />
           </div>
-          <ChipList label="Conditions" values={details.conditions} onChange={setDetail("conditions")} placeholder="Add a condition" options={vocabulary("condition")} />
-          <SexCheckboxes values={details.sex} onChange={setDetail("sex")} />
-          <div className="space-y-1.5">
+          <SexToggles className="grow" values={details.sex} onChange={setDetail("sex")} />
+          <ChipList label="Conditions" className="min-w-0 grow basis-56" values={details.conditions} onChange={setDetail("conditions")} placeholder="Add a condition" options={vocabulary("condition")} />
+          <div className="min-w-0 grow basis-36 space-y-1.5">
             <Label htmlFor="study-age" className="text-xs">Age</Label>
             <Input id="study-age" className="h-9 text-xs" placeholder="e.g. 18-65 years" value={details.age} onChange={(event) => setDetail("age")(event.target.value)} />
           </div>
@@ -966,7 +968,7 @@ export function AddStudyDialog({
 
   if (inline) {
     return (
-      <form className="space-y-4 w-full" onSubmit={handleAddStudySubmit}>
+      <form className="@container space-y-4 w-full" onSubmit={handleAddStudySubmit}>
         {formFields}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button
@@ -1013,7 +1015,7 @@ export function AddStudyDialog({
             Link this report to a new study.
           </DialogDescription>
         </DialogHeader>
-        <form className="space-y-4 w-full" onSubmit={handleAddStudySubmit}>
+        <form className="@container space-y-4 w-full" onSubmit={handleAddStudySubmit}>
           {formFields}
           <DialogFooter>
             <Button

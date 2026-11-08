@@ -1,11 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useStudySchema } from "@/hooks/use-study-schema";
 import { useTagCatalogs } from "@/hooks/use-tag-catalog";
 import { createOutcome } from "@/lib/comparisonUtils";
+import { cn } from "@/lib/utils";
 import type { OutcomeDraft, StudyDetails } from "@/types/comparisons";
 
 const SEX_VALUES = ["female", "male", "other"];
@@ -21,11 +22,12 @@ interface ChipListProps {
   options?: string[];
   // Only the options can be added (e.g. countries).
   strict?: boolean;
+  className?: string;
 }
 
 // A list of values as chips in one line, with an input that adds one on Enter (or when it is left). More chips than fit
 // scroll sideways instead of making the field taller; one added scrolls the line to its end, where the input is.
-export function ChipList({ label, values, onChange, placeholder, options = [], strict = false }: ChipListProps) {
+export function ChipList({ label, values, onChange, placeholder, options = [], strict = false, className }: ChipListProps) {
   const id = useId();
   const [text, setText] = useState("");
   const lineRef = useRef<HTMLDivElement>(null);
@@ -43,7 +45,7 @@ export function ChipList({ label, values, onChange, placeholder, options = [], s
     onChange([...values, option ?? value]);
   };
   return (
-    <div className="space-y-1.5">
+    <div className={cn("space-y-1.5", className)}>
       <Label htmlFor={id} className="text-xs">{label}</Label>
       <div
         ref={lineRef}
@@ -95,30 +97,37 @@ export function ChipList({ label, values, onChange, placeholder, options = [], s
   );
 }
 
-// The sexes of the participants as a checkbox each; a value of the graph that is none of them gets its own box.
-export function SexCheckboxes({ values, onChange }: { values: string[]; onChange: (values: string[]) => void }) {
+// The sexes of the participants as one segmented control, a toggle each; a value of the graph that is none of them
+// gets its own toggle.
+export function SexToggles({
+  values,
+  onChange,
+  className,
+}: {
+  values: string[];
+  onChange: (values: string[]) => void;
+  className?: string;
+}) {
+  const id = useId();
   const options = [...SEX_VALUES, ...values.filter((value) => !SEX_VALUES.some((option) => same(option, value)))];
-  const toggle = (option: string, checked: boolean) =>
-    onChange(checked ? [...values, option] : values.filter((value) => !same(value, option)));
   return (
-    <fieldset className="space-y-1.5">
-      <legend className="mb-1.5 text-xs font-medium">Sex</legend>
-      <div className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-1">
-        {options.map((option) => {
-          const id = `study-sex-${option}`;
-          return (
-            <div key={option} className="flex items-center gap-1.5">
-              <Checkbox
-                id={id}
-                checked={values.some((value) => same(value, option))}
-                onCheckedChange={(checked) => toggle(option, checked === true)}
-              />
-              <Label htmlFor={id} className="text-xs font-normal">{option}</Label>
-            </div>
-          );
-        })}
-      </div>
-    </fieldset>
+    <div className={cn("space-y-1.5", className)}>
+      <Label id={id} className="text-xs">Sex</Label>
+      <ToggleGroup
+        className="w-full"
+        type="multiple"
+        variant="outline"
+        aria-labelledby={id}
+        value={options.filter((option) => values.some((value) => same(value, option)))}
+        onValueChange={onChange}
+      >
+        {options.map((option) => (
+          <ToggleGroupItem key={option} value={option} className="h-9 flex-1 px-2.5 text-xs font-normal">
+            {option}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </div>
   );
 }
 
@@ -149,7 +158,7 @@ export function StudyOutcomeFields({ details, onChange, shown }: StudyDetailsFie
       {details.outcomes.length === 0 ? (
         <p className="text-xs text-muted-foreground">No outcomes.</p>
       ) : (
-        <div className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-x-4 gap-y-1 @xl:grid-cols-2">
           {details.outcomes.map((outcome, index) => (
             <div key={outcome.id} className="group min-w-0 rounded-md px-1 py-1 hover:bg-muted/40">
               <div className="flex items-center gap-1">
