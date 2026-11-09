@@ -7,7 +7,7 @@ import os
 
 from keycloak import KeycloakAdmin
 
-from .auth import KEYCLOAK_URL, KEYCLOAK_REALM, is_admin, get_user
+from .auth import KEYCLOAK_URL, KEYCLOAK_REALM, is_admin, is_verified_user
 
 load_dotenv()
 
@@ -98,8 +98,8 @@ async def list_users(_: str = Depends(is_admin)) -> List[UserSummary]:
         for user in users
     ]
 
-@router.get("/admin/users/names", summary="Resolve display names for a comma-separated list of user ids.")
-async def get_user_names(ids: str = "", _: dict = Depends(get_user)) -> Dict[str, str]:
+@router.get("/admin/users/names", dependencies=[Depends(is_verified_user)], summary="Resolve display names for a comma-separated list of user ids.")
+async def get_user_names(ids: str = "") -> Dict[str, str]:
     names: Dict[str, str] = {}
     for user_id in [i for i in ids.split(",") if i]:
         try:

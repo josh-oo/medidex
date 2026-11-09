@@ -52,16 +52,23 @@ FastAPI-specific presentation tier.
 keycloak_openid = create_keycloak_openid(KEYCLOAK_CLIENT_ID)
 
 async def decode_token(token: Optional[str]) -> dict:
-    """Decode a Keycloak-issued access token into its claims, or raise HTTPException."""
+    """Decode a Keycloak-issued access token into its claims, or raise HTTPException.
+
+    Only tokens issued to the frontend client (azp) are accepted: the realm signs the tokens of all its clients alike,
+    and python-keycloak checks neither audience nor authorized party, so without it the token of any other client of
+    the realm would act on the REST API as a user of the UI."""
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        return await verify_keycloak_token(token, keycloak_openid)
+        decoded = await verify_keycloak_token(token, keycloak_openid)
     except TokenExpiredError:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
     except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token. Please log in again.")
+    if decoded.get("azp") != KEYCLOAK_CLIENT_ID:
+        raise HTTPException(status_code=401, detail="Invalid token. Please log in again.")
+    return decoded
 
 async def get_roles(token: str = Security(oauth2_scheme)):
     decoded = await decode_token(token)
@@ -111,6 +118,17 @@ def is_verified_api_call(
     deployable can swap in additional credential types via
     `app.dependency_overrides[is_verified_api_call]`.
     """
+    if claims:
+        return True
+    raise HTTPException(status_code=401, detail="Not authenticated")
+
+def is_verified_user(
+    claims: Optional[dict] = Depends(get_user, use_cache=False),
+):
+    """Require an approved user signed in to the UI (JWT in the Authorization header).
+
+    Unlike is_verified_api_call it is never overridden to accept other credentials: the routes of the UI only (who the
+    users are, personal settings) depend on it, administrative ones on is_admin."""
     if claims:
         return True
     raise HTTPException(status_code=401, detail="Not authenticated")

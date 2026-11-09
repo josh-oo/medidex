@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from .auth import is_verified_api_call
+from .auth import is_admin
 
 from src.context import RequestContext
 from .deps import get_context
@@ -10,7 +10,7 @@ from typing import Dict, Any
 
 router = APIRouter(tags=["maintenance"])
 
-@router.post("/maintenance/vectorstore/clean_up", dependencies=[Depends(is_verified_api_call)], summary="Clean up vectorstore, remove orphan nodes.")
+@router.post("/maintenance/vectorstore/clean_up", dependencies=[Depends(is_admin)], summary="Clean up vectorstore, remove orphan nodes.")
 async def vectorstore_clean_up(ctx: RequestContext = Depends(get_context)):
     return await ctx.maintenance_service.vectorstore_clean_up()
 

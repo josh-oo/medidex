@@ -94,7 +94,7 @@
       "enabled": true,
       "serviceAccountClientId": "medidex-backoffice",
       "clientRoles": {
-        "realm-management": ["manage-users", "view-users", "query-groups", "view-realm", "manage-clients", "view-clients"]
+        "realm-management": ["manage-users", "view-users", "query-groups", "view-realm"]
       }
     }
   ]

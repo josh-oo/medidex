@@ -123,61 +123,9 @@ if [ -z "$kc_backoffice_token" ]; then
     exit 1
 fi
 
-# --- 3a. grant medidex-backoffice its realm-management client roles -------
-# Needed so the backend's admin API (app/backend/fastapi_app/admin.py) can
-# manage users. realm-medidex.json
-# declares these too, but that file is only applied on a fresh realm import,
-# so this makes an already-provisioned realm self-heal on every run.
-#
-# This has to run as the actual Keycloak master-realm admin, not as
-# medidex-backoffice itself: granting the role requires view-clients to even
-# look up the realm-management client's id, which is exactly the permission
-# medidex-backoffice doesn't have yet (chicken-and-egg).
-KEYCLOAK_ADMIN="${KEYCLOAK_ADMIN:-admin}"
-KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:?is not set; must be the Keycloak master-realm admin password}"
-
-kc_master_token=$(curl -sf -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
-    -d "grant_type=password" \
-    -d "client_id=admin-cli" \
-    -d "username=$KEYCLOAK_ADMIN" \
-    -d "password=$KEYCLOAK_ADMIN_PASSWORD" | jq -r '.access_token // empty')
-if [ -z "$kc_master_token" ]; then
-    echo "app-init: ERROR: could not obtain a Keycloak master-realm admin token" >&2
-    exit 1
-fi
-
-kc_token="$kc_master_token"
-realm_mgmt_client_id=$(kc_call GET "$KC_ADMIN_URL/clients?clientId=realm-management&exact=true" "200" \
-    | jq -r '.[0].id // empty')
-backoffice_sa_user_id=$(kc_call GET "$KC_ADMIN_URL/users?username=service-account-$KEYCLOAK_ADMIN_CLIENT_ID&exact=true" "200" \
-    | jq -r '.[0].id // empty')
-
-if [ -n "$realm_mgmt_client_id" ] && [ -n "$backoffice_sa_user_id" ]; then
-    current_roles=$(kc_call GET "$KC_ADMIN_URL/users/$backoffice_sa_user_id/role-mappings/clients/$realm_mgmt_client_id" "200" \
-        | jq -r '[.[].name] | join(",")')
-    roles_to_grant=""
-    for role_name in manage-clients view-clients; do
-        case ",$current_roles," in
-            *",$role_name,"*) ;;
-            *) roles_to_grant="$roles_to_grant $role_name" ;;
-        esac
-    done
-    if [ -n "$roles_to_grant" ]; then
-        echo "app-init: granting$roles_to_grant to $KEYCLOAK_ADMIN_CLIENT_ID's service account"
-        available_roles=$(kc_call GET "$KC_ADMIN_URL/clients/$realm_mgmt_client_id/roles" "200")
-        grant_payload=$(printf '%s\n' $roles_to_grant | jq -R . | jq -s --argjson available "$available_roles" \
-            '[ .[] as $name | $available[] | select(.name == $name) ]')
-        kc_call POST "$KC_ADMIN_URL/users/$backoffice_sa_user_id/role-mappings/clients/$realm_mgmt_client_id" "204" \
-            -H 'Content-Type: application/json' --data "$grant_payload" >/dev/null
-    else
-        echo "app-init: $KEYCLOAK_ADMIN_CLIENT_ID's service account already has manage-clients/view-clients"
-    fi
-else
-    echo "app-init: WARNING: could not resolve realm-management client or $KEYCLOAK_ADMIN_CLIENT_ID's service account; skipping client-role grant" >&2
-fi
-
-# Back to medidex-backoffice's own token for everything below - it already
-# has the permissions (manage-users) that the rest of this script needs.
+# --- 3. the backend's admin token ---------------------------------------
+# medidex-backoffice has the permissions (manage-users) the rest of this script needs; its roles come from
+# realm-medidex.json and are not widened here.
 kc_token="$kc_backoffice_token"
 
 # --- 3b. optional admin bootstrap account ----------------------------------
