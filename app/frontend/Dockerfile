@@ -1,11 +1,11 @@
 # 1. Install dependencies
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
 # 2. Build the application
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -25,7 +25,7 @@ RUN npm run build
 
 # 3. Production runner - the app is a static SPA, so a plain web server
 # replaces the persistent Node process Next.js needed.
-FROM nginx:1.27-alpine AS runner
+FROM nginx:1.30-alpine AS runner
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf

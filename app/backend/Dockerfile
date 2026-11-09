@@ -1,5 +1,5 @@
 # Main app
-FROM python:3.13.11-slim
+FROM python:3.13.18-slim
 
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 

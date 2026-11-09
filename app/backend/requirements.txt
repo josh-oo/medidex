@@ -9,9 +9,8 @@ rispy==0.10.0
 nbib==0.3.2
 python-keycloak==7.1.1
 jwcrypto==1.6.1
-pydantic[email]==2.13.5
+pydantic==2.13.5
 nameparser==2.3.0
-RapidFuzz==3.14.6
 pyparsing==3.2.1
 beautifulsoup4==4.15.0
 lxml==6.1.3
@@ -19,7 +18,6 @@ psycopg[binary]==3.3.6
 redis==8.1.0
 openai>=1.0.0
 weasyprint==70.0
-pypdf==6.19.0
-PyYAML==6.0.2
+pypdf==6.21.4
 linkml-runtime==1.12.0
 sse-starlette==3.6.0
