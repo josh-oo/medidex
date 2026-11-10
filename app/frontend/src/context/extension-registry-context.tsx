@@ -191,6 +191,8 @@ export interface ExtensionRegistry {
   useStudyLinkReview?: () => StudyLinkReview
   /** Rendered on the review page of a report, below the final selection; each can hold the merge back. */
   reviewPanels: ComponentType<ReviewPanelSlotProps>[]
+  /** Rendered below every page of the signed-in app (e.g. links to the privacy policy and imprint). */
+  footer?: ComponentType
   routes?: ReactNode
 }
 

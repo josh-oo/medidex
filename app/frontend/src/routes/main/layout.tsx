@@ -3,11 +3,13 @@ import { Outlet, useLocation } from "react-router-dom";
 import { AppHeader } from "@/components/header/app-header";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { Spinner } from "@/components/ui/spinner";
+import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { inPageTransition, pageCommitted, pageKey } from "@/lib/page-transition";
 import { cn } from "@/lib/utils";
 
 export default function Layout() {
   const { pathname } = useLocation();
+  const { footer: Footer } = useExtensionRegistry();
   // The new page is in the DOM: a page transition waiting for it goes ahead (see lib/page-transition.tsx).
   useLayoutEffect(() => {
     pageCommitted(pathname);
@@ -31,6 +33,7 @@ export default function Layout() {
               <Outlet />
             </Suspense>
           </Page>
+          {Footer && <Footer />}
         </main>
       </div>
     </AuthGuard>
