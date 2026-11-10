@@ -116,7 +116,8 @@ export function StudyCard({
   const card = (
     <div
       className={cn(
-        "relative w-full max-w-full overflow-hidden rounded-xl border border-transparent bg-muted/60 transition-colors hover:bg-muted",
+        // A container, so the card (and the badges of extensions in it) can go compact when it is narrow.
+        "@container relative w-full max-w-full overflow-hidden rounded-xl border border-transparent bg-muted/60 transition-colors hover:bg-muted",
         expanded && "bg-muted",
         extensionClassName,
       )}
@@ -163,7 +164,7 @@ export function StudyCard({
           </div>
         </div>
 
-        {/* Fixed width, so the button keeps its size when it turns into "Linked" */}
+        {/* Fixed width, so the button keeps its size when it turns into "Linked"; only the icon on a narrow card */}
         <Button
           type="button"
           size="sm"
@@ -174,14 +175,15 @@ export function StudyCard({
             event.stopPropagation();
             if (!isAssigned) onAssign(study);
           }}
+          aria-label={isAssigned ? "Linked" : "Link"}
           className={cn(
-            "w-24 shrink-0 bg-card",
+            "w-8 shrink-0 bg-card has-[>svg]:px-0 @sm:w-24 @sm:has-[>svg]:px-2.5",
             isAssigned &&
               "disabled:opacity-100 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
           )}
         >
           {isAssigned ? <Check /> : <Plus />}
-          {isAssigned ? "Linked" : "Link"}
+          <span className="hidden @sm:inline">{isAssigned ? "Linked" : "Link"}</span>
         </Button>
       </div>
 

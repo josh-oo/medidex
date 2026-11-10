@@ -371,7 +371,7 @@ export function CandidateStudyTable({
           )
         }
       >
-        <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
+        <form onSubmit={handleSearchSubmit} className="@container flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -381,7 +381,7 @@ export function CandidateStudyTable({
                 setSearchQuery(e.target.value);
                 setSearchError(null);
               }}
-              className="pl-9 pr-8 bg-muted/60 border-transparent"
+              className="pl-9 pr-8 bg-muted/60 border-transparent text-sm"
             />
             {isSearching ? (
               <Spinner className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

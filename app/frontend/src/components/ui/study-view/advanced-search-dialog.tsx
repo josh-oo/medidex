@@ -573,13 +573,15 @@ export function AdvancedSearchDialog({ onSearch }: AdvancedSearchDialogProps) {
         type="button"
         variant="outline"
         size="sm"
-        className="h-9 gap-1.5"
+        // Only the icon when the search form around it is narrow (a container there).
+        className="h-9 w-9 gap-1.5 has-[>svg]:px-0 @sm:w-auto @sm:has-[>svg]:px-2.5"
+        aria-label="Advanced search"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}
       >
         <SlidersHorizontal className="h-3.5 w-3.5" />
-        Advanced
+        <span className="hidden @sm:inline">Advanced</span>
       </Button>
       <DialogContent className="max-w-[640px] w-[min(92vw,640px)] max-h-[85vh] overflow-y-auto">
         <DialogHeader>
