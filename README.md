@@ -44,13 +44,13 @@ or imported from the export of another deployment.
   migrations: start new versions from a clean deployment and bring data over with an export and import.
 
 # Accounts
-- **Approval.** New users wait until an admin approves them on the **User management** page, where admins also change
+- **Approval.** New users wait until an admin approves them under **Settings › Users**, where admins also change
   roles. Admins create and import study databases.
 - **Owners.** A study database and its updates belong to the user who created or imported it. Only the owner changes,
   exports and transfers the database, and uploads, assigns, reviews, merges and deletes its updates. The owner
   transfers the ownership to any approved user from the card of the database.
-- **Deleting an account.** Users delete their own account from the user menu, or from the page where they wait for
-  approval. Whoever still owns a study database transfers its ownership first, and the only admin cannot delete theirs. Their
+- **Deleting an account.** Users delete their own account under **Settings › Account**, or from the page where they
+  wait for approval. Whoever still owns a study database transfers its ownership first, and the only admin cannot delete theirs. Their
   assignments end with the account (what they did not commit no longer counts; they are warned about it); what they
   contributed stays, without their name.
 - **Removing a user.** Admins cannot delete users in medidex. To remove someone else's account, use the Keycloak admin

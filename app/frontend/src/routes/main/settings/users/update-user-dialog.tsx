@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { UserDto } from "../../../types/user/user.dto";
-import { Role } from "../../../enums/role.enum";
-import { updateUserRoles } from "../../../lib/api/adminApi";
+import { UserDto } from "@/types/user/user.dto";
+import { Role } from "@/enums/role.enum";
+import { updateUserRoles } from "@/lib/api/adminApi";
 import {
   Dialog,
   DialogContent,
@@ -9,10 +9,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "../../../components/ui/dialog";
-import { Button } from "../../../components/ui/button";
-import { Checkbox } from "../../../components/ui/checkbox";
-import { Label } from "../../../components/ui/label";
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
 interface Props {

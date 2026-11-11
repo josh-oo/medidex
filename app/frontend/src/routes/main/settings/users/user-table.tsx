@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { UserDto } from "../../../types/user/user.dto";
+import { UserDto } from "@/types/user/user.dto";
 import { PencilIcon, CheckCircle, XCircle } from "lucide-react";
-import { Button } from "../../../components/ui/button";
+import { Button } from "@/components/ui/button";
 import { UpdateUserDialog } from "./update-user-dialog";
-import { approveUser } from "../../../lib/api/adminApi";
+import { approveUser } from "@/lib/api/adminApi";
 import { toast } from "sonner";
 
 interface Props {

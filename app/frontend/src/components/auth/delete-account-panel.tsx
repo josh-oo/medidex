@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useRef, useState, type ComponentProps } from "react";
 import { AlertTriangle, Ban, UserX } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -9,10 +10,24 @@ import { PageLink } from "@/lib/page-transition";
 import { getKeycloak } from "@/lib/client/keycloak";
 import { deleteAccount, getAccountDeletion, type AccountDeletion } from "@/lib/api/accountApi";
 
-interface DeleteAccountPanelProps {
-  /** Runs before anything is loaded, e.g. to restore the Keycloak session on a page outside the app layout. */
-  prepare?: () => Promise<unknown>;
-  /** Whether the user can reach the pages of the app (links to the Curation page and User management). */
+/** What the panel shows: what stands in the way of the deletion, and the email address that confirms it. */
+export interface LoadedAccountDeletion {
+  deletion: AccountDeletion;
+  email: string;
+}
+
+/**
+ * Loads what the panel shows. The caller loads it before showing the panel, so the dialog opens at its final size.
+ * `prepare` runs first, e.g. to restore the Keycloak session on a page outside the app layout.
+ */
+export async function loadAccountDeletion(prepare?: () => Promise<unknown>): Promise<LoadedAccountDeletion> {
+  await prepare?.();
+  const deletion = await getAccountDeletion();
+  return { deletion, email: (getKeycloak().tokenParsed as { email?: string } | undefined)?.email ?? "" };
+}
+
+interface DeleteAccountPanelProps extends LoadedAccountDeletion {
+  /** Whether the user can reach the pages of the app (links to the Curation page and the users in the settings). */
   inApp?: boolean;
 }
 
@@ -27,42 +42,9 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
  * Deleting the account of the signed-in user: what stands in the way (what they own, being the only administrator),
  * what they have not handed in, and the deletion itself, confirmed with their email address.
  */
-export function DeleteAccountPanel({ prepare, inApp = true }: DeleteAccountPanelProps) {
-  const [deletion, setDeletion] = useState<AccountDeletion | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [email, setEmail] = useState("");
+export function DeleteAccountPanel({ deletion, email, inApp = true }: DeleteAccountPanelProps) {
   const [confirmation, setConfirmation] = useState("");
   const [deleting, setDeleting] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        await prepare?.();
-        const status = await getAccountDeletion();
-        if (cancelled) return;
-        setEmail((getKeycloak().tokenParsed as { email?: string } | undefined)?.email ?? "");
-        setDeletion(status);
-      } catch (error) {
-        console.error("Failed to load what stands in the way of deleting the account:", error);
-        if (!cancelled) setLoadFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [prepare]);
-
-  if (loadFailed) {
-    return <p className="text-sm text-destructive">Could not load your account. Please try again later.</p>;
-  }
-  if (deletion === null) {
-    return (
-      <div className="flex justify-center py-6">
-        <Spinner className="h-6 w-6" />
-      </div>
-    );
-  }
 
   const owns = deletion.ownedDatabases.length > 0;
   const blocked = owns || deletion.onlyAdmin;
@@ -130,8 +112,8 @@ export function DeleteAccountPanel({ prepare, inApp = true }: DeleteAccountPanel
                 <>
                   {" "}
                   (
-                  <PageLink to="/user-management" className="underline underline-offset-4 hover:text-foreground">
-                    User management
+                  <PageLink to="/settings/users" className="underline underline-offset-4 hover:text-foreground">
+                    Settings › Users
                   </PageLink>
                   )
                 </>
@@ -185,5 +167,63 @@ export function DeleteAccountPanel({ prepare, inApp = true }: DeleteAccountPanel
         </Button>
       </div>
     </div>
+  );
+}
+
+// How long the load may take before the button shows that it is loading.
+const SPINNER_DELAY_MS = 400;
+
+type DeleteAccountButtonProps = Omit<ComponentProps<typeof Button>, "onClick"> & {
+  prepare?: () => Promise<unknown>;
+  inApp?: boolean;
+};
+
+/**
+ * A button that opens the deletion in a dialog. It loads what the panel shows first (spinning meanwhile), so the dialog
+ * does not open small and then grow, which would move it as it stays centred.
+ */
+export function DeleteAccountButton({ prepare, inApp = true, children, disabled, ...buttonProps }: DeleteAccountButtonProps) {
+  const [loaded, setLoaded] = useState<LoadedAccountDeletion | null>(null);
+  const [open, setOpen] = useState(false);
+  // A quick load changes nothing on the button (a spinner shown for a moment flickers); a slow one spins and disables it.
+  const loading = useRef(false);
+  const [slow, setSlow] = useState(false);
+  // Counts the openings: each starts with a fresh panel (and confirmation).
+  const [opening, setOpening] = useState(0);
+
+  const openDialog = async () => {
+    if (loading.current) return;
+    loading.current = true;
+    const slowTimer = window.setTimeout(() => setSlow(true), SPINNER_DELAY_MS);
+    try {
+      setLoaded(await loadAccountDeletion(prepare));
+      setOpening((count) => count + 1);
+      setOpen(true);
+    } catch (error) {
+      console.error("Failed to load what stands in the way of deleting the account:", error);
+      toast.error("Could not load your account. Please try again later.");
+    } finally {
+      window.clearTimeout(slowTimer);
+      loading.current = false;
+      setSlow(false);
+    }
+  };
+
+  return (
+    <>
+      <Button {...buttonProps} disabled={disabled || slow} aria-busy={slow || undefined} onClick={() => void openDialog()}>
+        {slow ? <Spinner className="h-4 w-4" /> : <UserX className="h-4 w-4" />}
+        {children}
+      </Button>
+      {/* The content stays while the dialog closes. */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Delete account</DialogTitle>
+          </DialogHeader>
+          {loaded && <DeleteAccountPanel key={opening} {...loaded} inApp={inApp} />}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

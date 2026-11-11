@@ -1,4 +1,4 @@
-import { ChevronDown, LogOut, Users, UserX } from "lucide-react";
+import { ChevronDown, LogOut, Settings } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -10,17 +10,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { getKeycloak } from "@/lib/client/keycloak";
-import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { usePageNavigate } from "@/lib/page-transition";
+import { getInitials } from "@/lib/utils";
 
-function getInitials(name: string) {
-  const names = name.split(" ");
-  if (names.length >= 2) {
-    return `${names[0][0]}${names[1][0]}`.toUpperCase();
-  }
-  return name.slice(0, 2).toUpperCase();
-}
-
+/** The user menu: who is signed in, the settings (with the account, the users and the extensions' sections) and logging out. */
 export function HeaderUser({
   user,
 }: {
@@ -32,7 +25,6 @@ export function HeaderUser({
   };
 }) {
   const initials = getInitials(user.name);
-  const { userMenuItems } = useExtensionRegistry();
   const navigate = usePageNavigate();
 
   const handleLogout = () => {
@@ -71,19 +63,9 @@ export function HeaderUser({
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {user.isAdmin && (
-          <DropdownMenuItem onClick={() => navigate("/user-management")}>
-            <Users className="mr-2 h-4 w-4" />
-            User management
-          </DropdownMenuItem>
-        )}
-        {userMenuItems.map((MenuItem, index) => (
-          <MenuItem key={`${MenuItem.displayName || MenuItem.name || "item"}-${index}`} user={user} />
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => navigate("/account")}>
-          <UserX className="mr-2 h-4 w-4" />
-          Delete account
+        <DropdownMenuItem onClick={() => navigate("/settings")}>
+          <Settings className="mr-2 h-4 w-4" />
+          Settings
         </DropdownMenuItem>
         <DropdownMenuItem onClick={handleLogout}>
           <LogOut className="mr-2 h-4 w-4" />
@@ -93,4 +75,3 @@ export function HeaderUser({
     </DropdownMenu>
   );
 }
-

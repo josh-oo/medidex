@@ -3,10 +3,11 @@ import { UserTable } from "./user-table";
 import { listUsers } from "@/lib/api/adminApi";
 import { UserDto } from "@/types/user/user.dto";
 import { AdminGuard } from "@/components/auth/admin-guard";
+import { SettingsHeader } from "@/components/settings/settings-header";
 import { useAuthStore } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
 
-export default function UserManagementPage() {
+export default function UsersPage() {
   const isAdmin = useAuthStore((s) => s.user?.isAdmin ?? false);
   const [users, setUsers] = useState<UserDto[] | null>(null);
 
@@ -23,22 +24,16 @@ export default function UserManagementPage() {
 
   return (
     <AdminGuard>
-      <div className="p-4 md:px-8 md:py-6 max-w-6xl mx-auto w-full">
-        <h1 className="text-2xl font-bold">User Management</h1>
-        <p className="text-sm text-muted-foreground">
-          Welcome to the user management page
-        </p>
-        <div className="mt-4"></div>
-        {users === null ? (
-          <div className="flex justify-center py-10">
-            <Spinner className="h-6 w-6" />
-          </div>
-        ) : users.length > 0 ? (
-          <UserTable initialUsers={users} />
-        ) : (
-          <div className="text-center text-muted-foreground py-6">No users found</div>
-        )}
-      </div>
+      <SettingsHeader title="Users" description="Approve new users and change their roles." />
+      {users === null ? (
+        <div className="flex justify-center py-10">
+          <Spinner className="h-6 w-6" />
+        </div>
+      ) : users.length > 0 ? (
+        <UserTable initialUsers={users} />
+      ) : (
+        <div className="py-6 text-center text-muted-foreground">No users found</div>
+      )}
     </AdminGuard>
   );
 }

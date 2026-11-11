@@ -8,8 +8,9 @@ import PendingApprovalPage from "./routes/auth/pending-approval/page";
 import RootLayout from "./routes/main/layout";
 
 const HomePage = lazy(() => import("./routes/main/page"));
-const UserManagementPage = lazy(() => import("./routes/main/user-management/page"));
-const AccountPage = lazy(() => import("./routes/main/account/page"));
+const SettingsLayout = lazy(() => import("./routes/main/settings/layout"));
+const AccountPage = lazy(() => import("./routes/main/settings/account/page"));
+const UsersPage = lazy(() => import("./routes/main/settings/users/page"));
 const CurationPage = lazy(() => import("./routes/main/curation/page"));
 const PdfUploadProjectLayout = lazy(() => import("./routes/main/pdf-upload/projectId/layout"));
 const PdfUploadProjectPage = lazy(() => import("./routes/main/pdf-upload/projectId/page"));
@@ -34,7 +35,7 @@ function LegacyCurationRedirect() {
 }
 
 export function AppRoutes() {
-  const { routes } = useExtensionRegistry();
+  const { routes, settingsSections } = useExtensionRegistry();
 
   return (
     <Suspense fallback={<RouteFallback />}>
@@ -45,8 +46,14 @@ export function AppRoutes() {
 
         <Route element={<RootLayout />}>
           <Route index element={<HomePage />} />
-          <Route path="user-management" element={<UserManagementPage />} />
-          <Route path="account" element={<AccountPage />} />
+          <Route path="settings" element={<SettingsLayout />}>
+            <Route index element={<Navigate to="account" replace />} />
+            <Route path="account" element={<AccountPage />} />
+            <Route path="users" element={<UsersPage />} />
+            {settingsSections.map((section) => (
+              <Route key={section.path} path={section.path} element={section.element} />
+            ))}
+          </Route>
 
           <Route path="curation">
             <Route index element={<CurationPage />} />

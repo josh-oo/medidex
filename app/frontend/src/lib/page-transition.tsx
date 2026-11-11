@@ -10,9 +10,13 @@ import { Link, useNavigate } from "react-router-dom";
 // The longest the old page is held for a new one that is slow to render.
 const MAX_WAIT_MS = 1500;
 
-/** The page a path shows: a project's workbench is one page for all of its reports (/curation/projects/:id/...). */
+/**
+ * The page a path shows: a project's workbench is one page for all of its reports (/curation/projects/:id/...), and the
+ * settings are one page for all of their sections (/settings/...).
+ */
 export const pageKey = (pathname: string) => {
   const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] === "settings") return "settings";
   return parts[0] === "curation" && parts.length > 2 ? parts.slice(0, 3).join("/") : parts.join("/");
 };
 

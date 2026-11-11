@@ -14,12 +14,19 @@ export interface ReportActionsSlotProps {
   studies: StudyCandidateDto[]
 }
 
-export interface UserMenuItemProps {
-  user: {
-    name: string
-    email: string
-    avatar: string
-  }
+/**
+ * A section of the settings, at /settings/<path>. Listed in the navigation of the settings after the account (or,
+ * adminOnly, under Administration after the users), in the order of the registry.
+ */
+export interface SettingsSection {
+  /** The path below /settings (one segment); other than "account" and "users". */
+  path: string
+  label: string
+  icon: ComponentType<{ className?: string }>
+  /** The content of the section; the settings layout gives it its width, padding and scrolling. */
+  element: ReactNode
+  /** Listed only for administrators (the element guards itself). */
+  adminOnly?: boolean
 }
 
 export interface AssigneeOption {
@@ -154,7 +161,8 @@ export interface StudyLinkReview {
 }
 
 export interface ExtensionRegistry {
-  userMenuItems: ComponentType<UserMenuItemProps>[]
+  /** Sections of the settings (the user menu's "Settings"). */
+  settingsSections: SettingsSection[]
   reportActions: ComponentType<ReportActionsSlotProps>[]
   assigneeOptions: AssigneeOptionsResolver[]
   studyBadges: ComponentType<StudyBadgeSlotProps>[]
@@ -197,7 +205,7 @@ export interface ExtensionRegistry {
 }
 
 const emptyExtensions: ExtensionRegistry = {
-  userMenuItems: [],
+  settingsSections: [],
   reportActions: [],
   assigneeOptions: [],
   studyBadges: [],

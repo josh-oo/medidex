@@ -1,9 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DeleteAccountPanel } from "@/components/auth/delete-account-panel";
-import { Clock, LogOut, UserX } from "lucide-react";
-import { useEffect, useState } from "react";
+import { DeleteAccountButton } from "@/components/auth/delete-account-panel";
+import { Clock, LogOut } from "lucide-react";
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { getKeycloak, initKeycloak } from "@/lib/client/keycloak";
 
@@ -23,7 +22,6 @@ const signOut = async () => {
 
 export default function PendingApprovalPage() {
   const navigate = useNavigate();
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
   useEffect(() => {
     // Poll for approval; forcing a token refresh (updateToken(-1) always
@@ -55,7 +53,17 @@ export default function PendingApprovalPage() {
   }, [navigate]);
 
   return (
-    <div className="bg-muted flex min-h-svh flex-col items-center justify-center p-6 md:p-10">
+    <div className="bg-muted relative flex min-h-svh flex-col items-center justify-center p-6 md:p-10">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute right-4 top-4 text-muted-foreground"
+        aria-label="Sign out"
+        title="Sign out"
+        onClick={() => void signOut()}
+      >
+        <LogOut className="h-4 w-4" />
+      </Button>
       <div className="w-full max-w-md">
         <Card>
           <CardHeader className="text-center">
@@ -75,26 +83,13 @@ export default function PendingApprovalPage() {
             <p className="text-sm text-muted-foreground">
               If you have any questions, please contact your system administrator.
             </p>
-            <div className="flex flex-wrap justify-center gap-2">
-              <Button variant="outline" size="sm" className="gap-2" onClick={() => void signOut()}>
-                <LogOut className="h-4 w-4" />
-                Sign out
-              </Button>
-              <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground" onClick={() => setIsDeleteOpen(true)}>
-                <UserX className="h-4 w-4" />
+            <div className="flex justify-center">
+              <DeleteAccountButton variant="ghost" size="sm" className="gap-2 text-muted-foreground" prepare={restoreSession} inApp={false}>
                 Delete account
-              </Button>
+              </DeleteAccountButton>
             </div>
           </CardContent>
         </Card>
-        <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
-          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Delete account</DialogTitle>
-            </DialogHeader>
-            <DeleteAccountPanel prepare={restoreSession} inApp={false} />
-          </DialogContent>
-        </Dialog>
       </div>
     </div>
   );
