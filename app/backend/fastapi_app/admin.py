@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -98,6 +98,20 @@ async def list_users(_: str = Depends(is_admin)) -> List[UserSummary]:
         for user in users
     ]
 
+class UserName(BaseModel):
+    id: str
+    name: str
+
+@router.get("/users", dependencies=[Depends(is_verified_user)], summary="List the approved users, by name (to assign them or hand a study database over to them).")
+async def list_approved_users() -> List[UserName]:
+    users = []
+    for user_id in await get_approved_user_ids():
+        try:
+            users.append(UserName(id=user_id, name=display_name(await keycloak_admin.a_get_user(user_id))))
+        except Exception:
+            continue
+    return sorted(users, key=lambda user: user.name.lower())
+
 @router.get("/admin/users/names", dependencies=[Depends(is_verified_user)], summary="Resolve display names for a comma-separated list of user ids.")
 async def get_user_names(ids: str = "") -> Dict[str, str]:
     names: Dict[str, str] = {}
@@ -135,7 +149,17 @@ async def approve_user(user_id: str, _: str = Depends(is_admin)) -> UserSummary:
     await keycloak_admin.a_group_user_add(user_id, group_id)
     return await build_user_summary(user_id)
 
-@router.delete("/admin/users/{user_id}", summary="Delete a user.", status_code=204)
-async def delete_user(user_id: str, _: str = Depends(is_admin)):
+async def require_owner_candidate(user_id: str) -> None:
+    """Raises 400 unless the user can own a study database: any approved user."""
+    if user_id not in await get_approved_user_ids():
+        raise HTTPException(status_code=400, detail="Only an approved user can own a study database")
+
+async def is_only_admin(user_id: str) -> bool:
+    """Whether the user is the only one with the role ADMIN: nobody could approve users or merge updates without them."""
+    admins = await keycloak_admin.a_get_realm_role_members("ADMIN", query={"max": 1000})
+    return {admin["id"] for admin in admins} == {user_id}
+
+async def delete_keycloak_user(user_id: str) -> None:
+    """Deletes the user in Keycloak, with their sessions. Only for the deletion of their own account (fastapi_app/account.py):
+    administrators delete no users in medidex, only in the Keycloak admin console."""
     await keycloak_admin.a_delete_user(user_id)
-    return Response(status_code=204)

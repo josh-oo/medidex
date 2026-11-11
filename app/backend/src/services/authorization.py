@@ -77,7 +77,7 @@ async def require_report_read(
         raise AuthenticationRequiredError("Authenticated user required")
 
     if project_id not in await project_repo.readable_project_ids():
-        raise ReportAccessDeniedError("You can only access reports of projects you uploaded or are assigned to")
+        raise ReportAccessDeniedError("You can only access reports of projects you own or are assigned to")
 
 
 async def get_authorized_project_id(

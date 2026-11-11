@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from dataclasses import dataclass
-from sqlalchemy import exists, func
+from sqlalchemy import exists, func, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, delete, insert
 from collections import defaultdict
@@ -10,6 +10,7 @@ from ..models import (
     Study,
     ReportFlag,
     Project,
+    StudyDatabase,
     ProjectInnerScore,
     ProjectAssignees,
     ReportCommit,
@@ -33,6 +34,13 @@ class ProjectRepository:
     def __init__(self, db : AsyncSession, user_id : str):
         self.db = db
         self.user_id = str(user_id)
+
+    def _owned(self):
+        """The projects the caller owns: those of the study databases they own."""
+        return Project.database_id.in_(select(StudyDatabase.id).where(StudyDatabase.owner == self.user_id))
+
+    async def get_database_owner(self, database_id: int) -> Optional[str]:
+        return (await self.db.execute(select(StudyDatabase.owner).where(StudyDatabase.id == database_id))).scalar_one_or_none()
 
     async def add_new_project(self, project_id : str, batch_description : str, reports : List[UpdateReport], database_id : int):
         """Adds the project (the update) with its reports; None if the project exists already."""
@@ -92,7 +100,7 @@ class ProjectRepository:
             raise ValueError("User ID is required to retrieve projects.")
 
         stmt = select(Project).where(Project.id == project_id)
-        stmt = stmt.where(Project.created_by == self.user_id)
+        stmt = stmt.where(self._owned())
 
         project = await self.db.execute(stmt)
         return project.scalar_one_or_none()
@@ -102,7 +110,7 @@ class ProjectRepository:
             raise ValueError("User ID is required to retrieve projects.")
 
         stmt = select(Project)
-        stmt = stmt.where(Project.created_by == self.user_id)
+        stmt = stmt.where(self._owned())
 
         result = await self.db.execute(stmt)
         return result.scalars().all()
@@ -138,10 +146,10 @@ class ProjectRepository:
         await self.db.flush()
 
     async def readable_project_ids(self) -> Set[str]:
-        """The projects whose reports the caller may read: those they uploaded and those they are assigned to."""
+        """The projects whose reports the caller may read: those they own (of their databases) and those they are assigned to."""
         if not self.user_id:
             return set()
-        owned = select(Project.id).where(Project.created_by == self.user_id)
+        owned = select(Project.id).where(self._owned())
         assigned = select(ProjectAssignees.project_id).where(ProjectAssignees.assignee == self.user_id)
         return set((await self.db.execute(owned.union(assigned))).scalars().all())
 
@@ -267,8 +275,8 @@ class ProjectRepository:
         their links, and the studies created in it (the foreign keys of the tables of the updates, see UPDATE_DATA).
         The core database stays as it is, the reports already merged into it included.
 
-        Only the uploader can delete a project. Returns None, deleting nothing, if there is no such project
-        or it was uploaded by somebody else; otherwise what is left to remove outside the database.
+        Only the owner of its study database can delete a project. Returns None, deleting nothing, if there is no such
+        project or the caller does not own it; otherwise what is left to remove outside the database.
         """
         if not self.user_id:
             raise ValueError("User ID is required to delete a project")
@@ -276,7 +284,7 @@ class ProjectRepository:
         stmt = (
             select(Project)
             .where(Project.id == project_id)
-            .where(Project.created_by == self.user_id)
+            .where(self._owned())
         )
         project = (await self.db.execute(stmt)).scalar_one_or_none()
         if project is None:
@@ -459,7 +467,7 @@ class ProjectRepository:
         ownership_stmt = (
             select(Project.id)
             .where(Project.id == project_id)
-            .where(Project.created_by == self.user_id)
+            .where(self._owned())
             .limit(1)
         )
         ownership_result = await self.db.execute(ownership_stmt)
@@ -482,7 +490,7 @@ class ProjectRepository:
         ownership_stmt = (
             select(Project.id)
             .where(Project.id == project_id)
-            .where(Project.created_by == self.user_id)
+            .where(self._owned())
             .limit(1)
         )
         ownership_result = await self.db.execute(ownership_stmt)
@@ -502,6 +510,21 @@ class ProjectRepository:
         )
         await self.db.commit()
         return bool(result.rowcount)
+
+    async def remove_assignments_of(self, assignee: str) -> List[str]:
+        """Removes every assignment of the user with their commits (as remove_project_assignee does for one project),
+        without committing: the deletion of their account commits it (AccountService). Returns the projects."""
+        result = await self.db.execute(
+            delete(ProjectAssignees).where(ProjectAssignees.assignee == assignee).returning(ProjectAssignees.project_id)
+        )
+        await self.db.execute(delete(ReportCommit).where(ReportCommit.assignee == assignee))
+        return sorted(set(result.scalars().all()))
+
+    async def commit(self) -> None:
+        await self.db.commit()
+
+    async def rollback(self) -> None:
+        await self.db.rollback()
 
     async def get_database_id_by_report_id(self, report_id: int) -> Optional[int]:
         """The study database of the report's project, None for a report of the core database."""

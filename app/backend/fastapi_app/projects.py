@@ -12,7 +12,7 @@ from src.utils.archive import DatabaseArchiveError, UpdateArchive
 from src.utils.ris_parser import RisParseError
 from src.utils.logger import setup_logging
 
-from .auth import is_verified_api_call, is_admin
+from .auth import is_verified_api_call, is_verified_user
 from .enrichment import report_enrichers
 
 from src.context import RequestContext
@@ -54,7 +54,7 @@ BUNDLE_EXTENSIONS = (".zip", ".json")
 
 @router.post(
     "/projects",
-    dependencies=[Depends(is_admin)],
+    dependencies=[Depends(is_verified_user)],
     summary="Upload a project (batch of new reports that need to be assigned to studies): a bibliography file (.ris, .nbib) or the bundle of an update with the PDFs of its reports (.zip with update.json and pdfs/).",
     description="The file is sent as `file`, or, if it is too large for one request, uploaded with tus to "
                 "POST /databases/uploads and named by `uploadId` (a bundle only; the upload is used up, also when "
@@ -64,9 +64,7 @@ BUNDLE_EXTENSIONS = (".zip", ".json")
 )
 async def upload_file(background_tasks: BackgroundTasks, file: Optional[UploadFile] = File(None, description="The .ris/.nbib file with the reports, or the .zip bundle of the update (update.json and the PDFs of its reports)."), uploadId: Optional[str] = Form(None, description="Instead of `file`: the id of a bundle uploaded with tus (POST /databases/uploads)."), projectName: str = Form(...), databaseId: int = Form(..., description="The study database whose studies the reports are matched against and added to."), options: str = Form("{}", description="JSON object of upload options; each registered report postprocessor reads its own keys (see src/background/postprocessing.py)."), ctx: RequestContext = Depends(get_context)) -> Project:
 
-    # dependencies=[Depends(is_admin)] above is the actual (and only) admin check -
-    # who's allowed to create a project is an API-layer permission, not a business
-    # rule, so ProjectResourceService.create_project doesn't re-check it.
+    # Only the owner of the database uploads its updates (ProjectResourceService._ensure_upload_allowed).
     try:
         parsed_options = json.loads(options)
     except json.JSONDecodeError as exc:
@@ -96,6 +94,8 @@ async def upload_file(background_tasks: BackgroundTasks, file: Optional[UploadFi
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DatabaseNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProjectAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except (DatabaseIndexingError, OpenUpdateExistsError) as exc:
         # Not 409, which the upload dialog reads as "already uploaded".
         raise HTTPException(status_code=423, detail=str(exc)) from exc
@@ -110,11 +110,11 @@ async def upload_file(background_tasks: BackgroundTasks, file: Optional[UploadFi
 
     return project
 
-@router.get("/projects", dependencies=[Depends(is_admin)], summary="Get an overview of all current projects.", description="For each project the current progress of embedding calculation and the number of already assigned reports is returned")
+@router.get("/projects", dependencies=[Depends(is_verified_user)], summary="Get an overview of all current projects.", description="For each project the current progress of embedding calculation and the number of already assigned reports is returned")
 async def get_available_projects(ctx: RequestContext = Depends(get_context)) -> List[Project]:
     return await ctx.project_service.get_all_project_stats()
 
-@router.delete("/projects/{project_id}", dependencies=[Depends(is_admin)], summary="Delete a project and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
+@router.delete("/projects/{project_id}", dependencies=[Depends(is_verified_user)], summary="Delete a project and all its associated reports (including calculated embedding vectors) from the temporary storage.", status_code=204)
 async def delete_project(project_id : str, ctx: RequestContext = Depends(get_context)):
     try:
         await ctx.project_service.delete_project(project_id)
@@ -125,7 +125,7 @@ async def delete_project(project_id : str, ctx: RequestContext = Depends(get_con
 
     return Response(status_code=204)
 
-@router.post("/projects/{project_id}/assignees", dependencies=[Depends(is_admin)],summary="Assign a user to a project",status_code=201,)
+@router.post("/projects/{project_id}/assignees", dependencies=[Depends(is_verified_user)],summary="Assign a user to a project",status_code=201,)
 async def assign_user_to_project(
     project_id: str = project_id_path,
     assignee_user_id: str = Body(..., embed=False, description="User ID to assign"),
@@ -146,7 +146,7 @@ async def assign_user_to_project(
 
     return assignee
 
-@router.delete("/projects/{project_id}/assignees/{user_id}", dependencies=[Depends(is_admin)],summary="Remove a user assignment from a project",status_code=204,)
+@router.delete("/projects/{project_id}/assignees/{user_id}", dependencies=[Depends(is_verified_user)],summary="Remove a user assignment from a project",status_code=204,)
 async def remove_user_from_project(
     project_id: str = project_id_path,
     user_id: str = Path(..., description="The user ID to remove from the project"),
@@ -185,7 +185,7 @@ class MergeRequest(BaseModel):
     studyIds: List[int]
 
 
-@router.post("/reports/{report_id}/merge", dependencies=[Depends(is_admin)], summary="Merge a report of an update into the core database.", description="Once every assignee of its update has committed their links of the report, its owner merges it with the studies they select among those linked: the links become links of the core database, which every scope sees, the report leaves the update, and what the update knew of it is archived. Returns the ids of the studies it was merged into.")
+@router.post("/reports/{report_id}/merge", dependencies=[Depends(is_verified_user)], summary="Merge a report of an update into the core database.", description="Once every assignee of its update has committed their links of the report, its owner merges it with the studies they select among those linked: the links become links of the core database, which every scope sees, the report leaves the update, and what the update knew of it is archived. Returns the ids of the studies it was merged into.")
 async def merge_report(report_id: int, body: MergeRequest, ctx: RequestContext = Depends(get_context)) -> List[int]:
     try:
         return await ctx.merge_service.merge_report(report_id, body.studyIds)
@@ -196,13 +196,11 @@ async def merge_report(report_id: int, body: MergeRequest, ctx: RequestContext =
     except (ReportNotMergeableError, GraphFormatError) as exc:  # e.g. a merge hook finding the graph of a study would break the study ontology
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-async def check_project_access(project_id: str, ctx: RequestContext = Depends(get_context)) -> None:
-    """403 unless the caller uploaded the project or is assigned to it: an admin sees only their own projects
-    (GET /projects), and neither their reports."""
-    try:
-        await ctx.project_service.ensure_project_access(project_id)
-    except ProjectAccessDeniedError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+async def check_project_owner(project_id: str, ctx: RequestContext = Depends(get_context)) -> None:
+    """404 unless the caller owns the project (owns its study database): the views of its owner (intake, review). The
+    projects of others are not found, as in GET /projects."""
+    if not ctx.user_id or await ctx.project_repo.get_project_by_id(project_id) is None:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
 
 
 _search_query = Query(None, description="Filter reports by title, abstract or report id (case-insensitive substring match).")
@@ -248,7 +246,7 @@ async def get_project_reports(
 
 @router.get(
     "/projects/{project_id}/reports/intake",
-    dependencies=[Depends(is_admin), Depends(check_project_access)],
+    dependencies=[Depends(check_project_owner)],
     summary="Get incoming reports for a project, including still-processing ones - the admin intake view.",
     description="Unlike /reports, always includes reports that have been auto-searched for a PDF but "
                 "aren't fully processed yet, so an admin can watch reports as they arrive.",
@@ -277,7 +275,7 @@ async def get_project_reports_intake(
 
 @router.get(
     "/projects/{project_id}/reports/intake/stream",
-    dependencies=[Depends(is_admin), Depends(check_project_access)],
+    dependencies=[Depends(check_project_owner)],
     summary="Stream the intake row of every report of a project that changes.",
     description="An SSE event per changed report (an uploaded PDF, a finished postprocessing), its data the row "
                 "as /reports/intake returns it, with the same `include`.",
@@ -298,7 +296,7 @@ async def stream_project_reports_intake(
 
 @router.get(
     "/projects/{project_id}/reports/review",
-    dependencies=[Depends(is_admin), Depends(check_project_access)],
+    dependencies=[Depends(check_project_owner)],
     summary="Get fully-annotated reports for a project - the admin annotator-review view.",
     description="Always restricted to reports every project assignee has completed annotating, "
                 "regardless of search/filter - this used to be a client-side pre-filter that only "
@@ -325,7 +323,7 @@ async def get_project_reports_review(
     except InvalidCursorError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-@router.get( "/projects/{project_id}/annotations",dependencies=[Depends(is_admin), Depends(check_project_access)],summary="Get reports annotated by all assigned users in a project.")
+@router.get( "/projects/{project_id}/annotations",dependencies=[Depends(check_project_owner)],summary="Get reports annotated by all assigned users in a project.")
 async def get_project_annotations(project_id: str, ctx: RequestContext = Depends(get_context)) -> Dict[int, Dict[str, List[Dict[str, Any]]]]:
     return await ctx.project_service.get_project_annotations(project_id)
 

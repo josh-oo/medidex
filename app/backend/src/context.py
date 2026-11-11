@@ -19,6 +19,7 @@ from .database.repositories.project import ProjectRepository
 from .database.repositories.report import ReportRepository
 from .database.repositories.study import StudyRepository
 
+from .services.account import AccountService
 from .services.aspects import TagScoringService, TagSimilaritySearchService
 from .services.authors import AuthorFeatureService
 from .services.core import RelatedTagSearchService, StudySimilaritySearchService
@@ -69,7 +70,7 @@ class RequestContext:
 
     @cached_property
     def study_repo(self) -> StudyRepository:
-        return StudyRepository(db=self.db, user_id=self.user_id, see_all=self.is_admin)
+        return StudyRepository(db=self.db, user_id=self.user_id)
 
     @cached_property
     def database_repo(self) -> DatabaseRepository:
@@ -228,4 +229,13 @@ class RequestContext:
             pubsub_service=self.pubsub_service,
             document_service=self.document_service,
             archive_repo=self.archive_repo,
+        )
+
+    @cached_property
+    def account_service(self) -> AccountService:
+        return AccountService(
+            project_repo=self.project_repo,
+            database_repo=self.database_repo,
+            project_service=self.project_service,
+            pubsub_service=self.pubsub_service,
         )

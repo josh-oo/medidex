@@ -467,6 +467,8 @@ export interface DatabaseDto {
   description?: string | null;
   eligibilityCriteria: EligibilityCriterion[];
   createdAt: string;
+  // The user id of who is responsible for it; null: nobody.
+  owner?: string | null;
   // Not all its reports are in the vectorstore yet (e.g. right after an import): its studies are found by the search
   // but not yet suggested for new reports, and no projects can be uploaded into it.
   indexing: boolean;

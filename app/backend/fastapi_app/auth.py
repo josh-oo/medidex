@@ -83,6 +83,11 @@ async def is_admin(token: str = Security(oauth2_scheme)) -> dict:
         raise HTTPException(status_code=401, detail="Not allowed")
     return decoded
 
+async def get_signed_in_user(token: Optional[str] = Security(oauth2_scheme)) -> dict:
+    """The claims of a user signed in to the UI, approved or not: for the routes of their own account (deleting it),
+    which a user waiting for approval needs as well. Everything else depends on get_user."""
+    return await decode_token(token)
+
 async def get_user(token: Optional[str] = Security(oauth2_scheme)) -> Optional[dict]:
     """Decode the caller's token, requiring the APPROVED role if a token was
     given at all. Returns the decoded claims when valid, or None when no

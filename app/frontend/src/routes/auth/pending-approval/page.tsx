@@ -1,11 +1,29 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Clock } from "lucide-react";
-import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DeleteAccountPanel } from "@/components/auth/delete-account-panel";
+import { Clock, LogOut, UserX } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getKeycloak, initKeycloak } from "@/lib/client/keycloak";
 
+// The page is outside the app layout: on a reload nothing has restored the Keycloak session before it.
+const restoreSession = () =>
+  initKeycloak({
+    onLoad: "check-sso",
+    checkLoginIframe: false,
+    silentCheckSsoRedirectUri: `${window.location.origin}/silent-check-sso.html`,
+  });
+
+const signOut = async () => {
+  // keycloak-js knows where to sign out only once it is initialised.
+  await restoreSession();
+  await getKeycloak().logout({ redirectUri: `${window.location.origin}/login` });
+};
+
 export default function PendingApprovalPage() {
   const navigate = useNavigate();
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
   useEffect(() => {
     // Poll for approval; forcing a token refresh (updateToken(-1) always
@@ -14,11 +32,7 @@ export default function PendingApprovalPage() {
     const checkApproval = async () => {
       if (document.hidden) return;
       try {
-        const authenticated = await initKeycloak({
-          onLoad: "check-sso",
-          checkLoginIframe: false,
-          silentCheckSsoRedirectUri: `${window.location.origin}/silent-check-sso.html`,
-        });
+        const authenticated = await restoreSession();
         if (!authenticated) return;
 
         await getKeycloak().updateToken(-1);
@@ -61,8 +75,26 @@ export default function PendingApprovalPage() {
             <p className="text-sm text-muted-foreground">
               If you have any questions, please contact your system administrator.
             </p>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button variant="outline" size="sm" className="gap-2" onClick={() => void signOut()}>
+                <LogOut className="h-4 w-4" />
+                Sign out
+              </Button>
+              <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground" onClick={() => setIsDeleteOpen(true)}>
+                <UserX className="h-4 w-4" />
+                Delete account
+              </Button>
+            </div>
           </CardContent>
         </Card>
+        <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Delete account</DialogTitle>
+            </DialogHeader>
+            <DeleteAccountPanel prepare={restoreSession} inApp={false} />
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

@@ -361,13 +361,14 @@ function CurationHint() {
           .filter((step): step is CurationStep => step !== null);
         return hasOpen(projectSteps(project, role, extraSteps));
       }),
-      // An admin's own tasks are among the projects already.
+      // The owner's own tasks are among the projects already.
       ...tasks.filter((task) => !projectIds.has(task.projectId)).map((task) => hasOpen(taskSteps(task))),
     ].filter(Boolean).length;
   }, [projects, tasks, userId, stepResolvers]);
 
-  // Only for the people who take part in the curation; admins can always start a project there.
-  if (loading || (!isAdmin && tasks.length === 0)) return null;
+  // Only for the people who take part in the curation (they own a database or have tasks); admins create databases
+  // there.
+  if (loading || (!isAdmin && tasks.length === 0 && projects.length === 0)) return null;
 
   return (
     <div

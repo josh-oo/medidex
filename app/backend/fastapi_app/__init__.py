@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.background.startup import Startup
 
-from . import auth, resources, core, projects, admin, maintenance, databases
+from . import account, auth, resources, core, projects, admin, maintenance, databases
 
 
 def create_app(extra_routers: Iterable[APIRouter] = ()) -> FastAPI:
@@ -57,6 +57,7 @@ def create_app(extra_routers: Iterable[APIRouter] = ()) -> FastAPI:
 
     app.include_router(auth.router)
     app.include_router(admin.router)
+    app.include_router(account.router)
     app.include_router(projects.router)
     app.include_router(databases.router)
     app.include_router(core.router)

@@ -46,6 +46,10 @@ class DatabaseIndexingError(Exception):
     and indexing)."""
 
 
+class DatabaseOwnerError(PermissionError):
+    """Only the owner of a database changes it (and its updates)."""
+
+
 class DatabaseImportError(ValueError):
     """The file is no database of the exchange format (see DatabaseExport in utils/dto.py)."""
 
@@ -115,6 +119,29 @@ class StudyDatabaseService:
             values["eligibility_criteria"] = self._criteria(update.eligibilityCriteria)
         try:
             database = await self.database_repo.update_database(database, values)
+            await self.database_repo.commit()
+        except Exception:
+            await self.database_repo.rollback()
+            raise
+        return await self._with_numbers(database)
+
+    async def ensure_owner(self, database_id: int) -> None:
+        """Raises DatabaseNotFoundError, or DatabaseOwnerError unless the caller owns the database."""
+        database = await self.database_repo.get_database(database_id)
+        if database is None:
+            raise DatabaseNotFoundError(f"Database {database_id} not found")
+        if database.owner != self.database_repo.user_id:
+            raise DatabaseOwnerError(f"Only the owner of database {database.name} can do this")
+
+    async def transfer_database(self, database_id: int, owner: str) -> Database:
+        """Hands the caller's database, with its updates, over to `owner` (whom the caller checked to be an approved
+        user). Raises DatabaseNotFoundError or DatabaseOwnerError."""
+        await self.ensure_owner(database_id)
+        database = await self.database_repo.get_database(database_id)
+        if owner == database.owner:
+            raise ValueError("You own this database already")
+        try:
+            database = await self.database_repo.update_database(database, {"owner": owner})
             await self.database_repo.commit()
         except Exception:
             await self.database_repo.rollback()
@@ -513,6 +540,7 @@ class StudyDatabaseService:
             description=database.description,
             eligibilityCriteria=EligibilityCriteria.read(database.eligibility_criteria),
             createdAt=database.created_at,
+            owner=database.owner,
             numberStudies=studies,
             numberReports=reports,
             numberReportsIndexed=indexed,

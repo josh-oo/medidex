@@ -162,7 +162,7 @@ class ProjectResourceService:
             numberReportsDeleted=outcomes.get(DELETED, 0),
             numberReportsPostprocessing=postprocessing_total + finished,
             numberReportsPostprocessed=postprocessing_finished + finished,
-            owner=project.created_by,
+            owner=await self.project_repo.get_database_owner(project.database_id) or "",
             assignees=assignee_payload,
             locked=bool(assignee_ids)
             and all(self._has_committed_all(commit_counts, report_ids, finished, user_id) for user_id in assignee_ids),
@@ -224,7 +224,7 @@ class ProjectResourceService:
                 Task(
                     projectId=project.id,
                     name=project.description,
-                    owner=project.created_by,
+                    owner=await self.project_repo.get_database_owner(project.database_id) or "",
                     createdAt=project.created_at,
                     databaseId=project.database_id,
                     numberReportsTotal=len(report_ids) + finished,
@@ -410,14 +410,16 @@ class ProjectResourceService:
         }
 
     async def _ensure_upload_allowed(self, database_id: int) -> None:
-        """Raises DatabaseNotFoundError, DatabaseIndexingError or OpenUpdateExistsError if the database takes no new
-        update now."""
+        """Raises DatabaseNotFoundError, ProjectAccessDeniedError (the caller does not own it), DatabaseIndexingError or
+        OpenUpdateExistsError if the database takes no new update now."""
         database = await self.database_service.get_database(database_id)
         if database.importing or database.indexing:
             # Its reports would be matched against studies the vectorstore does not know yet.
             raise DatabaseIndexingError(
                 f"Database {database.name} is still being {'imported' if database.importing else 'indexed'}; upload projects once it is available"
             )
+        if database.owner != self.project_repo.user_id:
+            raise ProjectAccessDeniedError(f"Only the owner of database {database.name} uploads its updates")
         if await self.project_repo.get_open_project_id(database_id) is not None:
             raise OpenUpdateExistsError(
                 f"Database {database.name} has an update that is not merged yet; merge it before uploading the next one"
@@ -436,8 +438,7 @@ class ProjectResourceService:
         """Delete a project and everything it brought in, so that nothing of it is left: its reports
         (also those already linked to a study), the studies created through it that have no other report,
         the vectors of the reports and their PDF files. Raises ProjectNotFoundError if the project doesn't exist or was
-        uploaded by somebody else (only the uploader can delete a project). Who's allowed to call this
-        (ADMIN role) is enforced at the API layer, same as create_project.
+        of a database somebody else owns (only its owner can delete a project).
         """
         await self._ensure_not_finished(project_id)
         deleted = await self.project_repo.delete_project(project_id)
@@ -505,7 +506,7 @@ class ProjectResourceService:
         ProjectAccessDeniedError if the caller is not assigned to it, or ProjectWorkIncompleteError when there is no
         such report.
         """
-        # Not get_project_by_id: that only finds the projects the caller uploaded, and assignees commit.
+        # Not get_project_by_id: that only finds the projects the caller owns, and assignees commit.
         project = await self.project_repo.get_project_by_hash(project_id)
         if project is None:
             raise ProjectNotFoundError(f"Project {project_id} not found")
@@ -526,13 +527,14 @@ class ProjectResourceService:
         await self.pubsub_service.publish_project_update(project_id)
 
     async def ensure_project_access(self, project_id: str) -> None:
-        """Raise ProjectAccessDeniedError unless the caller uploaded this
+        """Raise ProjectAccessDeniedError unless the caller owns this
         project or is assigned to it. Exposed for callers that don't have a
         more specific project_service operation to attach the check to (e.g.
         stream_project_updates below).
         """
         project = await self.project_repo.get_project_by_id(project_id)
-        if project is not None and project.created_by == self.project_repo.user_id:
+        # Only the owner of its database finds it.
+        if project is not None:
             return
         if not await self.project_repo.is_project_assignee(project_id):
             raise ProjectAccessDeniedError(f"Not assigned to project {project_id}")
@@ -746,7 +748,7 @@ class ProjectResourceService:
         """The normal curation view: never includes reports that are still being
         processed (not yet embedded/PDF-ready) - see get_intake_reports_page for that -
         nor those the caller has committed their links of (they are done with them).
-        Restricted to project assignees (or whoever uploaded it).
+        Restricted to project assignees (or its owner).
         """
         await self.ensure_project_access(project_id)
         cursor_id = decode_cursor(cursor) if cursor else None

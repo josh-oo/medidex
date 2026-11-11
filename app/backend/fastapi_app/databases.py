@@ -10,13 +10,14 @@ from starlette.background import BackgroundTask
 
 from src.background.wrapper import run_criteria_changed, run_import_database
 from src.context import RequestContext
-from src.services.database import DatabaseImportError, DatabaseNotFoundError
+from src.services.database import DatabaseImportError, DatabaseNotFoundError, DatabaseOwnerError
 from src.services.upload import UploadLengthError, UploadNotFoundError, UploadOffsetError
 from src.utils.archive import DatabaseArchive, DatabaseArchiveError
-from src.utils.dto import Database, DatabaseImport, DatabasePayload, DatabaseStage, DatabaseStorage, DatabaseUpdate, EligibilityCategory, EligibilitySchema
+from src.utils.dto import Database, DatabaseImport, DatabasePayload, OwnerTransfer, DatabaseStage, DatabaseStorage, DatabaseUpdate, EligibilityCategory, EligibilitySchema
 from src.utils.eligibility import ELIGIBILITY_CONFIG, EligibilityCriterion
 
-from .auth import is_admin, is_verified_api_call
+from .admin import require_owner_candidate
+from .auth import is_admin, is_verified_api_call, is_verified_user
 from .deps import get_context
 
 router = APIRouter(tags=["databases"])
@@ -27,6 +28,16 @@ def _file_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:60] or "database"
 
 database_id_path = Path(..., description="The id of the study database")
+
+
+async def check_database_owner(database_id: int = database_id_path, ctx: RequestContext = Depends(get_context)) -> None:
+    """404/403 unless the caller owns the study database: only its owner changes, exports and hands it over."""
+    try:
+        await ctx.database_service.ensure_owner(database_id)
+    except DatabaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DatabaseOwnerError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 upload_id_path = Path(..., description="The id of the upload: the last segment of its URL (POST /databases/uploads)")
 
 
@@ -56,7 +67,7 @@ async def create_database(payload: DatabasePayload, ctx: RequestContext = Depend
 
 @router.patch(
     "/databases/{database_id}",
-    dependencies=[Depends(is_admin)],
+    dependencies=[Depends(check_database_owner)],
     summary="Rename a study database or change its description or eligibility criteria.",
     description="Changed criteria are checked again for the reports of its updates in the background (see ReportPostprocessor.criteria_changed).",
 )
@@ -77,9 +88,27 @@ async def update_database(
     return database
 
 
+@router.put(
+    "/databases/{database_id}/owner",
+    dependencies=[Depends(check_database_owner)],
+    summary="Hand a study database, with its updates, over to another user.",
+    description="Only its owner can, to any approved user. From then on the new owner changes and exports it and uploads, assigns, merges and deletes its updates.",
+)
+async def transfer_database(
+    body: OwnerTransfer, database_id: int = database_id_path, ctx: RequestContext = Depends(get_context)
+) -> Database:
+    await require_owner_candidate(body.ownerId)
+    try:
+        return await ctx.database_service.transfer_database(database_id, body.ownerId)
+    except DatabaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get(
     "/databases/{database_id}/storage",
-    dependencies=[Depends(is_admin)],
+    dependencies=[Depends(check_database_owner)],
     summary="What a study database takes in storage: its data, its search index and its PDFs (estimates).",
 )
 async def get_database_storage(database_id: int = database_id_path, ctx: RequestContext = Depends(get_context)) -> DatabaseStorage:
@@ -116,7 +145,7 @@ async def describe_uploads() -> Response:
 
 @router.post(
     "/databases/uploads",
-    dependencies=[Depends(is_admin), Depends(tus_resumable)],
+    dependencies=[Depends(is_verified_user), Depends(tus_resumable)],
     summary="Start the upload of an exported database (tus creation); its URL is the Location of the answer.",
     status_code=201,
 )
@@ -132,7 +161,7 @@ async def start_upload(
 
 @router.head(
     "/databases/uploads/{upload_id}",
-    dependencies=[Depends(is_admin), Depends(tus_resumable)],
+    dependencies=[Depends(is_verified_user), Depends(tus_resumable)],
     summary="How much of an upload has arrived (Upload-Offset): where its next part starts.",
 )
 async def get_upload(upload_id: str = upload_id_path, ctx: RequestContext = Depends(get_context)) -> Response:
@@ -148,7 +177,7 @@ async def get_upload(upload_id: str = upload_id_path, ctx: RequestContext = Depe
 
 @router.patch(
     "/databases/uploads/{upload_id}",
-    dependencies=[Depends(is_admin), Depends(tus_resumable)],
+    dependencies=[Depends(is_verified_user), Depends(tus_resumable)],
     summary="Append the next part of an upload, the raw bytes as the body (application/offset+octet-stream).",
     description="Upload-Offset is where the part starts: what has arrived so far, or the request is rejected (409) and "
                 "nothing appended. A part that broke off is kept as far as it came; HEAD says where to go on from.",
@@ -172,7 +201,7 @@ async def append_upload(
 
 @router.delete(
     "/databases/uploads/{upload_id}",
-    dependencies=[Depends(is_admin), Depends(tus_resumable)],
+    dependencies=[Depends(is_verified_user), Depends(tus_resumable)],
     summary="Discard an upload that is not to be imported (tus termination).",
     status_code=204,
 )
@@ -254,7 +283,7 @@ async def stream_database_status(request: Request, database_id: int = database_i
 
 @router.get(
     "/databases/{database_id}/export",
-    dependencies=[Depends(is_admin)],
+    dependencies=[Depends(check_database_owner)],
     summary="Export a study database as a zip archive: database.json (its studies with their fields, graphs, tags and reports) and the PDFs of its reports, which POST /databases/import reads.",
     response_class=FileResponse,
 )

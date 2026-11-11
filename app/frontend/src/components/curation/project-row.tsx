@@ -123,7 +123,7 @@ export function ProjectRow({
   }, [project.projectId, onProjectUpdate]);
 
   const sortedUsers = useMemo(
-    () => [...assignableUsers].sort((a, b) => a.email.localeCompare(b.email)),
+    () => [...assignableUsers].sort((a, b) => a.name.localeCompare(b.name)),
     [assignableUsers],
   );
 

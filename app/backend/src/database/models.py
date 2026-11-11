@@ -54,7 +54,10 @@ class StudyDatabase(SQLModel, table=True):
     # See EligibilityCriterion in src/utils/eligibility.py.
     eligibility_criteria: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
     created_at: Optional[datetime.datetime] = server_now()
-    created_by: Optional[str] = None
+    # Who is responsible for it and its updates: whoever created or imported it, until they hand it over (PUT
+    # /databases/{id}/owner). Only the owner changes, exports and hands over the database and uploads, assigns, merges
+    # and deletes its updates. A user who owns a database cannot delete their account.
+    owner: str = Field(index=True)
 
 class ReportFields(SQLModel):
     """The fields of a report, of the core database (Report) and of an update (UpdateReport) alike."""
@@ -185,6 +188,7 @@ class Project(SQLModel, table=True):
     id: str = Field(primary_key=True)
     description: str
     created_at: Optional[datetime.datetime] = server_now()
+    # Who uploaded it; it belongs to the owner of its database (StudyDatabase.owner).
     created_by: str
     database_id: int = Field(foreign_key="study_database.id")
 

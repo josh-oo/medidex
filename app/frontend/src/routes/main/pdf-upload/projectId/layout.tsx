@@ -1,9 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { useParams, Outlet } from "react-router-dom";
-import { AdminGuard } from "@/components/auth/admin-guard";
 import { getProjectReportsIntake, streamProjectIntakeUpdates } from "@/lib/api/projectApi";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
-import { useAuthStore } from "@/hooks/use-auth";
 import { useReportStore } from "@/hooks/use-report-store";
 import { useProjectResource } from "@/hooks/use-project-resource";
 import { ProjectNotFound } from "@/components/reports/project-not-found";
@@ -22,7 +20,6 @@ const reportFilterDimensions: ReportFilterDimension[] = [
 
 export default function PdfUploadPage() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
-  const isAdmin = useAuthStore((s) => s.user?.isAdmin ?? false);
   const { reportIncludes } = useExtensionRegistry();
   const updateReport = useReportStore((state) => state.updateReport);
   const fetchReports = useCallback(
@@ -32,20 +29,19 @@ export default function PdfUploadPage() {
   const { data: firstPage, notFound } = useProjectResource(
     () => fetchReports(projectId).then((result) => result ?? emptyPage),
     emptyPage,
-    [projectId],
-    isAdmin
+    [projectId]
   );
 
   // A report that changes (its PDF arrives, its postprocessing moves on) comes in again as a whole; started once the list has
   // filled the store (the split view does that), so it is not reset over the newer rows.
   const loaded = firstPage !== null;
   useEffect(() => {
-    if (!isAdmin || !loaded) return;
+    if (!loaded) return;
     return streamProjectIntakeUpdates(projectId, updateReport, reportIncludes);
-  }, [projectId, isAdmin, loaded, updateReport, reportIncludes]);
+  }, [projectId, loaded, updateReport, reportIncludes]);
 
   return (
-    <AdminGuard>
+    <>
       {notFound ? (
         <ProjectNotFound />
       ) : firstPage === null ? (
@@ -68,7 +64,7 @@ export default function PdfUploadPage() {
           </div>
         </div>
       )}
-    </AdminGuard>
+    </>
   );
 }
 

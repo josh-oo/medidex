@@ -434,6 +434,35 @@ class Task(BaseModel):
     # The assignees (user ids) who have not committed their links yet: whom the update waits for.
     pendingAssignees: List[str] = Field(default_factory=list)
 
+class OwnerTransfer(BaseModel):
+    """The body of PUT /databases/{id}/owner."""
+    ownerId: str = Field(min_length=1, description="The user id of the new owner: an approved user.")
+
+class OwnedDatabase(BaseModel):
+    databaseId: int
+    name: str
+
+class OpenTask(BaseModel):
+    """A project the user is assigned to and has not handed in every report of."""
+    projectId: str
+    name: str
+    # Reports they linked or flagged but did not commit, and reports they did not get to.
+    numberReportsUncommitted: int
+    numberReportsOpen: int
+
+class AccountDeletion(BaseModel):
+    """What stands in the way of deleting the account of the caller (GET /users/me/deletion)."""
+    # Owning a database (and so its updates) blocks the deletion: hand it over first (PUT /databases/{id}/owner).
+    ownedDatabases: List[OwnedDatabase] = Field(default_factory=list)
+    # The only administrator cannot delete their account either.
+    onlyAdmin: bool = False
+    # Only warned about: their assignments go, and with them what they did not commit.
+    openTasks: List[OpenTask] = Field(default_factory=list)
+
+    @property
+    def blocked(self) -> bool:
+        return bool(self.ownedDatabases or self.onlyAdmin)
+
 class DatabasePayload(BaseModel):
     """What describes a study database; the body of POST /databases."""
     name: str = Field(min_length=1, max_length=200)
@@ -482,6 +511,8 @@ class Database(BaseModel):
     description: Optional[str] = None
     eligibilityCriteria: List[EligibilityCriterion]
     createdAt: datetime
+    # The user responsible for it and its updates (see StudyDatabase.owner); None while it is being imported.
+    owner: Optional[str] = None
     numberStudies: int = 0
     numberReports: int = 0
 

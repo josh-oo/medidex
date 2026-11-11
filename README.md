@@ -43,6 +43,19 @@ or imported from the export of another deployment.
   `deploy/data/runtime/`. The databases and the vector collection are created on the first start. There are no
   migrations: start new versions from a clean deployment and bring data over with an export and import.
 
+# Accounts
+- **Approval.** New users wait until an admin approves them on the **User management** page, where admins also change
+  roles. Admins create and import study databases.
+- **Owners.** A study database and its updates belong to the user who created or imported it. Only the owner changes,
+  exports and transfers the database, and uploads, assigns, reviews, merges and deletes its updates. The owner
+  transfers the ownership to any approved user from the card of the database.
+- **Deleting an account.** Users delete their own account from the user menu, or from the page where they wait for
+  approval. Whoever still owns a study database transfers its ownership first, and the only admin cannot delete theirs. Their
+  assignments end with the account (what they did not commit no longer counts; they are warned about it); what they
+  contributed stays, without their name.
+- **Removing a user.** Admins cannot delete users in medidex. To remove someone else's account, use the Keycloak admin
+  console; this removes the account only, so their assignments stay until the owner of each update removes them.
+
 # Study databases
 A study database is a register of studies of its own (e.g. that of one review group), with a name, a description and
 eligibility criteria: what a study needs to belong in it, each about an element of PICO or the study as a whole (the
@@ -52,14 +65,14 @@ its updates ("Update 7"); they are matched against and linked to the studies of 
 one open update at a time.
 
 Working on an update:
-1. An admin creates the update from the card of the database and assigns curators to it. The new reports come as a
+1. The owner of the database creates the update from its card and assigns curators to it. The new reports come as a
    RIS or NBIB file, or as a bundle that brings their PDFs along (`<name>.medidex-update.zip`, laid out like an export:
    `update.json` with the reports and `pdfs/`). Medidex searches the PDFs a bundle does not bring, as for a RIS file.
    A bundle is uploaded in parts with tus, like an import (see below). The format of a bundle is specified in
    [`docs/update-bundle.md`](docs/update-bundle.md).
 2. Each curator links the reports to their studies (or creates new studies) and commits the reports when done. Curators
    work independently and do not see each other's links.
-3. Once everyone has committed a report, the admin reviews it on the review page and merges it into the database (or
+3. Once everyone has committed a report, the owner reviews it on the review page and merges it into the database (or
    deletes it). Merged reports and the studies created for them become visible to everyone.
 
 **Export and import.** The download button on the card of a database exports it as `<name>.medidex.zip` (the studies with their

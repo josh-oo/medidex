@@ -14,7 +14,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getUserNamesByIds } from "@/lib/api/adminApi";
 import { updateDatabase } from "@/lib/api/databaseApi";
+import { useAuthStore } from "@/hooks/use-auth";
 import { refreshStudyDatabases, type StudyDatabase } from "@/lib/databases";
 import type { EligibilityCriterion } from "@/types/apiDTOs";
 import { EligibilityCriteriaEditor, EligibilityCriteriaList, criteriaComplete, trimCriteria } from "./eligibility-criteria";
@@ -23,13 +25,13 @@ interface DatabaseDetailsDialogProps {
   database: StudyDatabase;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Admins can edit the name, the description and the eligibility criteria. */
+  /** Its owner can edit the name, the description and the eligibility criteria. */
   canEdit: boolean;
-  /** Opens straight into editing (admins only). */
+  /** Opens straight into editing (its owner only). */
   editing?: boolean;
 }
 
-/** The name, description and eligibility criteria of a database; admins edit them here. */
+/** The name, description, owner and eligibility criteria of a database; its owner edits them here. */
 export function DatabaseDetailsDialog({
   database,
   open,
@@ -43,6 +45,22 @@ export function DatabaseDetailsDialog({
   const [eligibilityCriteria, setEligibilityCriteria] = useState<EligibilityCriterion[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [ownerName, setOwnerName] = useState<string | null>(null);
+  const userId = useAuthStore((s) => s.user?.id);
+
+  useEffect(() => {
+    if (!open || !database.owner) {
+      setOwnerName(null);
+      return;
+    }
+    if (database.owner === userId) {
+      setOwnerName("You");
+      return;
+    }
+    getUserNamesByIds([database.owner])
+      .then((names) => setOwnerName(names.get(database.owner!) ?? null))
+      .catch(() => setOwnerName(null));
+  }, [open, database.owner, userId]);
 
   const startEdit = () => {
     setName(database.name);
@@ -140,6 +158,9 @@ export function DatabaseDetailsDialog({
               <DialogTitle>{database.name}</DialogTitle>
               <DialogDescription>{database.description ?? "Which studies belong in this database."}</DialogDescription>
             </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              Owner: <span className="font-medium text-foreground">{database.owner ? ownerName ?? "unknown" : "nobody"}</span>
+            </p>
             <section aria-labelledby="database-criteria-heading" className="space-y-2">
               <h3 id="database-criteria-heading" className="text-sm font-medium">
                 Eligibility criteria

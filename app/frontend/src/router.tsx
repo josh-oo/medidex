@@ -9,6 +9,7 @@ import RootLayout from "./routes/main/layout";
 
 const HomePage = lazy(() => import("./routes/main/page"));
 const UserManagementPage = lazy(() => import("./routes/main/user-management/page"));
+const AccountPage = lazy(() => import("./routes/main/account/page"));
 const CurationPage = lazy(() => import("./routes/main/curation/page"));
 const PdfUploadProjectLayout = lazy(() => import("./routes/main/pdf-upload/projectId/layout"));
 const PdfUploadProjectPage = lazy(() => import("./routes/main/pdf-upload/projectId/page"));
@@ -45,6 +46,7 @@ export function AppRoutes() {
         <Route element={<RootLayout />}>
           <Route index element={<HomePage />} />
           <Route path="user-management" element={<UserManagementPage />} />
+          <Route path="account" element={<AccountPage />} />
 
           <Route path="curation">
             <Route index element={<CurationPage />} />

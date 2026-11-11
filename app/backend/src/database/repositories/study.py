@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from typing import Any, List, Mapping, Optional, Dict, Sequence, Tuple
 
-from ..models import Report, Study, StudyFields, Link, StudyTag, Tag as DbTag, UpdateLink, UpdateReport, UpdateStudy
+from ..models import Report, Study, StudyDatabase, StudyFields, Link, StudyTag, Tag as DbTag, UpdateLink, UpdateReport, UpdateStudy
 from .graphs import StudyGraphs
 
 from ...utils.postprocessing import normalize_author_names
@@ -101,18 +101,18 @@ def _query_node_to_condition(node: QueryNode):
     return _comparison_to_condition(node)
 
 class StudyRepository:
-    def __init__(self, db : AsyncSession, user_id : str, see_all: bool = False):
+    def __init__(self, db : AsyncSession, user_id : str):
         self.db = db
         self.user_id = str(user_id)
-        self.see_all = see_all
         self.graphs = StudyGraphs(db)
 
     def _visible_drafts(self):
         """The studies of the updates this scope may see (see README, "Scopes"): those it created itself, besides every
         study of the core database. Studies another scope created stay invisible until a report linked to them is
-        merged, so that users, MediBot and MCP clients work without interfering. A reviewer (see_all) sees every
-        study."""
-        return true() if self.see_all else UpdateStudy.created_by == self.user_id
+        merged, so that users, MediBot and MCP clients work without interfering. The owner of a study database reviews
+        its updates and sees every study of them."""
+        owned = select(StudyDatabase.id).where(StudyDatabase.owner == self.user_id)
+        return or_(UpdateStudy.created_by == self.user_id, UpdateStudy.database_id.in_(owned))
 
     @staticmethod
     def _in_databases(model, databases: Optional[Sequence[int]]):

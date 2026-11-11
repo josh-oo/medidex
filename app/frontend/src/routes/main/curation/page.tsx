@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Database, DatabaseZap, Download, ListChecks, MoreHorizontal, Pencil, Plus } from "lucide-react";
+import { Database, DatabaseZap, Download, ListChecks, MoreHorizontal, Pencil, Plus, UserRoundCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,13 +19,15 @@ import { NewDatabaseDialog } from "@/components/databases/new-database-dialog";
 import { CurationList } from "@/components/curation/curation-list";
 import { useCuration, type Curation } from "@/hooks/use-curation";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { exportDatabase } from "@/lib/api/databaseApi";
-import { projectDatabaseId, useStudyDatabases, type DatabaseUpload, type StudyDatabase } from "@/lib/databases";
+import { exportDatabase, transferDatabase } from "@/lib/api/databaseApi";
+import { TransferOwnerDialog } from "@/components/auth/transfer-owner-dialog";
+import { useAuthStore } from "@/hooks/use-auth";
+import { projectDatabaseId, refreshStudyDatabases, useStudyDatabases, type DatabaseUpload, type StudyDatabase } from "@/lib/databases";
 import { cn } from "@/lib/utils";
 
 // The maintenance of the study databases in the background: one card per database, with its updates (batches of new
-// reports, numbered per database) below it, one row each, with what the admin and the assignees have to do next.
-// Admins create databases (empty or imported) here, and the updates on the card of their database.
+// reports, numbered per database) below it, one row each, with what the owner and the assignees have to do next.
+// Admins create databases (empty or imported) here; the owner of a database adds its updates on its card.
 export default function DatabaseManagementPage() {
   const curation = useCuration();
   const { loading, isAdmin } = curation;
@@ -116,7 +118,11 @@ function nextUpdateNumber(names: string[]): number {
 // A database: its name (the description shows on hovering it), what it holds and its actions, with its updates below.
 // Its eligibility criteria (they can be long) are in a dialog, where admins also edit them, its name and description.
 function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase; curation: Curation; fadeIn: boolean }) {
-  const { loading, isAdmin, projects, tasks, refresh } = curation;
+  const { loading, projects, tasks, refresh } = curation;
+  const userId = useAuthStore((s) => s.user?.id);
+  // Its owner changes, exports and transfers it, and uploads, assigns and merges its updates.
+  const isOwner = Boolean(userId) && database.owner === userId;
+  const [transferOpen, setTransferOpen] = useState(false);
   const [details, setDetails] = useState<"view" | "edit" | null>(null);
   const [exporting, setExporting] = useState(false);
   const [newUpdateOpen, setNewUpdateOpen] = useState(false);
@@ -161,11 +167,11 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
 
   const actions = wide ? (
     <div className="ml-auto flex shrink-0 items-center gap-1">
-      {/* Admins see the eligibility criteria in the edit dialog. */}
-      {!isAdmin && (
+      {/* Its owner sees the eligibility criteria in the edit dialog. */}
+      {!isOwner && (
         <CardAction icon={ListChecks} label="Eligibility criteria" onClick={() => setDetails("view")} dialog />
       )}
-      {isAdmin && (
+      {isOwner && (
         <CardAction
           icon={Pencil}
           label="Edit the name, description and eligibility criteria"
@@ -174,7 +180,7 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
           dialog
         />
       )}
-      {isAdmin && (
+      {isOwner && (
         <CardAction
           icon={Download}
           label="Export: the studies and reports as a file another Medidex can import"
@@ -182,7 +188,16 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
           disabled={exporting || database.importing}
         />
       )}
-      {isAdmin && (
+      {isOwner && (
+        <CardAction
+          icon={UserRoundCog}
+          label="Transfer database ownership"
+          onClick={() => setTransferOpen(true)}
+          disabled={database.importing}
+          dialog
+        />
+      )}
+      {isOwner && (
         <Button
           size="sm"
           className="ml-2 gap-1.5"
@@ -204,7 +219,7 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        {isAdmin && (
+        {isOwner && (
           <>
             <DropdownMenuItem disabled={busy} onSelect={() => setNewUpdateOpen(true)}>
               <Plus className="h-4 w-4" />
@@ -213,22 +228,28 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
             <DropdownMenuSeparator />
           </>
         )}
-        {!isAdmin && (
+        {!isOwner && (
           <DropdownMenuItem onSelect={() => setDetails("view")}>
             <ListChecks className="h-4 w-4" />
             Eligibility criteria…
           </DropdownMenuItem>
         )}
-        {isAdmin && (
+        {isOwner && (
           <DropdownMenuItem disabled={database.importing} onSelect={() => setDetails("edit")}>
             <Pencil className="h-4 w-4" />
             Edit…
           </DropdownMenuItem>
         )}
-        {isAdmin && (
+        {isOwner && (
           <DropdownMenuItem disabled={exporting || database.importing} onSelect={() => void download()}>
             <Download className="h-4 w-4" />
             Export
+          </DropdownMenuItem>
+        )}
+        {isOwner && (
+          <DropdownMenuItem disabled={database.importing} onSelect={() => setTransferOpen(true)}>
+            <UserRoundCog className="h-4 w-4" />
+            Transfer ownership…
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -267,7 +288,7 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
                   database.name
                 )}
               </h2>
-              {isAdmin && !database.importing && <DatabaseStoragePopover database={database} />}
+              {isOwner && !database.importing && <DatabaseStoragePopover database={database} />}
             </div>
             {(database.importing || database.indexing) && <ProgressBadge database={database} />}
           </div>
@@ -288,7 +309,7 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
               curation={own}
               empty={
                 <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-                  {isAdmin
+                  {isOwner
                     ? "No updates yet. New update uploads a batch of new reports to link to the studies of this database."
                     : "Nothing to curate in this database right now."}
                 </p>
@@ -298,7 +319,7 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
         )}
       </div>
 
-      {isAdmin && !busy && (
+      {isOwner && !busy && (
         <CreateProjectDialog
           database={database}
           number={nextUpdateNumber(own.projects.map((project) => project.name))}
@@ -311,9 +332,22 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
         database={database}
         open={details !== null}
         onOpenChange={(open) => !open && setDetails(null)}
-        canEdit={isAdmin}
+        canEdit={isOwner}
         editing={details === "edit"}
       />
+      {isOwner && (
+        <TransferOwnerDialog
+          open={transferOpen}
+          onOpenChange={setTransferOpen}
+          name={database.name}
+          onTransfer={async (ownerId) => {
+            await transferDatabase(database.id, ownerId);
+            await refreshStudyDatabases();
+            // Its updates are no longer among the user's projects.
+            refresh();
+          }}
+        />
+      )}
     </section>
   );
 }

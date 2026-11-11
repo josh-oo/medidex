@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { UserDto } from "../../../types/user/user.dto";
-import { PencilIcon, TrashIcon, CheckCircle, XCircle } from "lucide-react";
+import { PencilIcon, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import { UpdateUserDialog } from "./update-user-dialog";
-import { DeleteUserDialog } from "./delete-user-dialog";
 import { approveUser } from "../../../lib/api/adminApi";
 import { toast } from "sonner";
 
@@ -16,8 +15,6 @@ export const UserTable: React.FC<Props> = (props) => {
   const [users, setUsers] = useState<UserDto[]>(initialUsers);
   const [selectedUser, setSelectedUser] = useState<UserDto | null>(null);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
-  const [userToDelete, setUserToDelete] = useState<UserDto | null>(null);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [approvingUserId, setApprovingUserId] = useState<string | null>(null);
 
   const handleEditClick = (user: UserDto) => {
@@ -25,19 +22,10 @@ export const UserTable: React.FC<Props> = (props) => {
     setIsUpdateDialogOpen(true);
   };
 
-  const handleDeleteClick = (user: UserDto) => {
-    setUserToDelete(user);
-    setIsDeleteDialogOpen(true);
-  };
-
   const handleUserUpdated = (updatedUser: UserDto) => {
     setUsers((prev) =>
       prev.map((user) => (user.id === updatedUser.id ? updatedUser : user))
     );
-  };
-
-  const handleUserDeleted = (userId: string) => {
-    setUsers((prev) => prev.filter((user) => user.id !== userId));
   };
 
   const handleApproveUser = async (userId: string) => {
@@ -125,13 +113,6 @@ export const UserTable: React.FC<Props> = (props) => {
                   >
                     <PencilIcon className="h-4 w-4" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleDeleteClick(user)}
-                  >
-                    <TrashIcon className="h-4 w-4" />
-                  </Button>
                 </div>
               </td>
             </tr>
@@ -143,12 +124,6 @@ export const UserTable: React.FC<Props> = (props) => {
         open={isUpdateDialogOpen}
         onOpenChange={setIsUpdateDialogOpen}
         onUserUpdated={handleUserUpdated}
-      />
-      <DeleteUserDialog
-        user={userToDelete}
-        open={isDeleteDialogOpen}
-        onOpenChange={setIsDeleteDialogOpen}
-        onUserDeleted={handleUserDeleted}
       />
     </div>
   );

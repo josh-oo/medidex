@@ -1,4 +1,4 @@
-import { ChevronDown, LogOut, Users } from "lucide-react";
+import { ChevronDown, LogOut, Users, UserX } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -80,7 +80,11 @@ export function HeaderUser({
         {userMenuItems.map((MenuItem, index) => (
           <MenuItem key={`${MenuItem.displayName || MenuItem.name || "item"}-${index}`} user={user} />
         ))}
-        {(user.isAdmin || userMenuItems.length > 0) && <DropdownMenuSeparator />}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => navigate("/account")}>
+          <UserX className="mr-2 h-4 w-4" />
+          Delete account
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={handleLogout}>
           <LogOut className="mr-2 h-4 w-4" />
           Log out

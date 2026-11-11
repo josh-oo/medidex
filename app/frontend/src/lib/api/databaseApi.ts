@@ -32,6 +32,13 @@ export const updateDatabase = (databaseId: number, update: DatabaseUpdate): Prom
     .then(unwrap)
     .catch(logAndRethrow(`Error updating database ${databaseId}:`));
 
+// Hands the caller's database, with its updates, over to another approved user.
+export const transferDatabase = (databaseId: number, ownerId: string): Promise<DatabaseDto> =>
+  apiClient
+    .put<DatabaseDto>(`/databases/${databaseId}/owner`, { ownerId })
+    .then(unwrap)
+    .catch(logAndRethrow(`Error handing over database ${databaseId}:`));
+
 // The parts an upload is sent in stay below what a proxy in front of the backend lets through in one request (a
 // Cloudflare tunnel: 100 MB).
 const UPLOAD_PART_BYTES = 64 * 1024 * 1024;

@@ -20,7 +20,7 @@ from src.utils.query_parser import QuerySyntaxError, SEARCH_QUERY_DESCRIPTION
 from src.context import RequestContext
 from src.services.authorization import ProjectAccessDeniedError
 from src.services.project import ProjectNotFoundError
-from .deps import check_report_read, get_context
+from .deps import check_report_pdf_write, check_report_read, get_context
 
 from src.utils.dto import Study, StudyFull, StudySchema, StudyFieldSchema, StudyMetaSchema, StudyGraph, GraphSchema, GraphEntitySchema, GraphRelationSchema, TagCategorySchema, ReportPreview, ReportSources, Page, FlagPayload, Flag, Tag, tags_to_dto, studies_to_dto, reports_to_dto, reports_to_base_dto, report_flag_to_dto
 from src.utils.studyconfig import STUDY_CONFIG
@@ -242,7 +242,7 @@ async def get_report_studies_by_id(
     result = await ctx.report_repo.get_linked_studies(report_id, date_from, date_to)
     return studies_to_dto(result)
 
-@router.put("/reports/{report_id}/pdf", dependencies=[Depends(is_admin), Depends(check_report_read)], summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
+@router.put("/reports/{report_id}/pdf", dependencies=[Depends(check_report_read), Depends(check_report_pdf_write)], summary="Upload the fulltext pdf for a given report", responses={200: {"description": "PDF file uploaded successfully"}})
 async def uploaed_pdf(background_tasks: BackgroundTasks, report_id: int = report_id_path, file: UploadFile = File(None, description="PDF file to upload"), ctx: RequestContext = Depends(get_context)) -> Dict[str, Any]:
     # Validate file is a PDF
     if file:
@@ -271,7 +271,7 @@ async def get_pdf(report_id : int, ctx: RequestContext = Depends(get_context)) -
     except:
         raise HTTPException(status_code=404, detail="PDF file not found.")
 
-@router.delete("/reports/{report_id}/pdf", dependencies=[Depends(is_admin), Depends(check_report_read)], summary="Delete the fulltext pdf for a given report")
+@router.delete("/reports/{report_id}/pdf", dependencies=[Depends(check_report_read), Depends(check_report_pdf_write)], summary="Delete the fulltext pdf for a given report")
 async def delete_pdf(report_id : int, ctx: RequestContext = Depends(get_context)) -> Dict[str, Any]:
     try:
         result = await ctx.document_service.delete_pdf(report_id)

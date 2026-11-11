@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getProjects, getTasks } from "@/lib/api/projectApi";
-import { getUserNamesByIds, listUsers } from "@/lib/api/adminApi";
+import { getUserNamesByIds, listApprovedUsers } from "@/lib/api/adminApi";
 import { useAuthStore } from "@/hooks/use-auth";
 import type { ProjectDto, TaskDto } from "@/types/apiDTOs";
 import type { UserDto } from "@/types/user/user.dto";
@@ -44,22 +44,19 @@ export function useCuration(): Curation {
   const loadData = useCallback(
     async (cancelledRef?: { current: boolean }) => {
       const [projectsResult, tasksResult, users] = await Promise.all([
-        isAdmin
-          ? getProjects().catch((error) => {
-              console.error("Failed to fetch projects:", error);
-              return [] as ProjectDto[];
-            })
-          : Promise.resolve([] as ProjectDto[]),
+        // The projects of the databases the user owns (none for most).
+        getProjects().catch((error) => {
+          console.error("Failed to fetch projects:", error);
+          return [] as ProjectDto[];
+        }),
         getTasks().catch((error) => {
           console.error("Failed to fetch tasks:", error);
           return [] as TaskDto[];
         }),
-        isAdmin
-          ? listUsers().catch((error) => {
-              console.error("Failed to fetch assignable users:", error);
-              return [] as UserDto[];
-            })
-          : Promise.resolve([] as UserDto[]),
+        listApprovedUsers().catch((error) => {
+          console.error("Failed to fetch assignable users:", error);
+          return [] as UserDto[];
+        }),
       ]);
 
       const userIds = Array.from(
@@ -87,7 +84,7 @@ export function useCuration(): Curation {
       setAssignableUsers(users);
       setLoading(false);
     },
-    [isAdmin, userKey]
+    [userKey]
   );
 
   useEffect(() => {

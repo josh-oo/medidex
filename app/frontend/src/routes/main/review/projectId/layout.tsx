@@ -3,11 +3,9 @@ import { useParams, Outlet, useNavigate } from "react-router-dom";
 import { refreshStudyDatabases } from "@/lib/databases";
 import { curationPaths } from "@/lib/curation-steps";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
-import { AdminGuard } from "@/components/auth/admin-guard";
 import type { GetProjectReportsParams, Page, ProjectAnnotationsDto, ReportCurationDto, ReportFilterDimension } from "@/types/apiDTOs";
 import { getAnnotations, getProjectReportsReview } from "@/lib/api/projectApi";
 import { ReviewAnnotationsProvider } from "./components/review-annotations-context";
-import { useAuthStore } from "@/hooks/use-auth";
 import { useProjectResource } from "@/hooks/use-project-resource";
 import { ProjectNotFound } from "@/components/reports/project-not-found";
 import { ReportSplitView, ReportSplitViewSkeleton } from "@/components/reports/report-split-view";
@@ -29,7 +27,6 @@ const emptyReviewData: ProjectReviewData = { reportsPage: { items: [], nextCurso
 
 export default function AnnotationsReviewPage() {
   const { projectId } = useParams<{ projectId: string }>() as { projectId: string };
-  const isAdmin = useAuthStore((s) => s.user?.isAdmin ?? false);
   const { reportIncludes } = useExtensionRegistry();
   // Bumped when a report is merged or deleted: it has left the review, so the list is loaded again, and the numbers of
   // the database change.
@@ -53,8 +50,7 @@ export default function AnnotationsReviewPage() {
       return { reportsPage: reportsPage ?? emptyReviewData.reportsPage, annotations: annotations ?? {} };
     },
     emptyReviewData,
-    [projectId, version],
-    isAdmin
+    [projectId, version]
   );
 
   // The last report is merged or deleted: there is nothing left to review, back to the updates.
@@ -65,7 +61,7 @@ export default function AnnotationsReviewPage() {
   }, [version, data, navigate]);
 
   return (
-    <AdminGuard>
+    <>
       {notFound ? (
         <ProjectNotFound />
       ) : data === null ? (
@@ -90,7 +86,7 @@ export default function AnnotationsReviewPage() {
           </div>
         </div>
       )}
-    </AdminGuard>
+    </>
   );
 }
 

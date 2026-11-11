@@ -12,6 +12,8 @@ export interface StudyDatabase {
   name: string;
   description?: string;
   eligibilityCriteria: EligibilityCriterion[];
+  /** The user id of who is responsible for it; none: nobody. */
+  owner?: string;
   numberStudies: number;
   numberReports: number;
   /** Its reports are still being added to the vectorstore (see DatabaseDto.indexing). */
@@ -60,6 +62,7 @@ const toStudyDatabase = (dto: DatabaseDto): StudyDatabase => ({
   name: dto.name,
   description: dto.description || undefined,
   eligibilityCriteria: dto.eligibilityCriteria,
+  owner: dto.owner || undefined,
   numberStudies: dto.numberStudies,
   numberReports: dto.numberReports,
   indexing: dto.indexing,

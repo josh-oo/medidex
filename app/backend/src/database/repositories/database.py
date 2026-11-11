@@ -42,6 +42,20 @@ class DatabaseRepository:
         stmt = select(StudyDatabase).order_by(StudyDatabase.created_at, StudyDatabase.id)
         return list((await self.db.execute(stmt)).scalars().all())
 
+    async def get_owners_of_report(self, report_id: int) -> List[str]:
+        """The owners of the databases a report of the core database is linked into."""
+        stmt = (
+            select(StudyDatabase.owner).distinct()
+            .join(Study, Study.database_id == StudyDatabase.id)
+            .join(Link, Link.study_id == Study.id)
+            .where(Link.report_id == report_id)
+        )
+        return list((await self.db.execute(stmt)).scalars().all())
+
+    async def get_databases_of_owner(self, owner: str) -> List[StudyDatabase]:
+        stmt = select(StudyDatabase).where(StudyDatabase.owner == owner).order_by(StudyDatabase.created_at, StudyDatabase.id)
+        return list((await self.db.execute(stmt)).scalars().all())
+
     async def get_database(self, database_id: int) -> Optional[StudyDatabase]:
         return await self.db.get(StudyDatabase, database_id)
 
@@ -71,7 +85,7 @@ class DatabaseRepository:
             name=name.strip(),
             description=(description or "").strip() or None,
             eligibility_criteria=eligibility_criteria,
-            created_by=self.user_id,
+            owner=self.user_id,
         )
         self.db.add(database)
         await self.db.flush()

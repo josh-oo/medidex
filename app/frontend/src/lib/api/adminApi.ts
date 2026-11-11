@@ -29,6 +29,13 @@ export const listUsers = (config?: AxiosRequestConfig): Promise<UserDto[]> => {
     .then((response) => response.data.map(toUserDto));
 };
 
+// The approved users by name, for every approved user (to assign them, or hand a study database over to them).
+export const listApprovedUsers = (config?: AxiosRequestConfig): Promise<UserDto[]> => {
+  return apiClient
+    .get<{ id: string; name: string }[]>("/users", config)
+    .then((response) => response.data.map((user) => ({ id: user.id, name: user.name, email: "", roles: [], isApproved: true })));
+};
+
 export const updateUserRoles = (
   id: string,
   roles: Role[],
@@ -43,10 +50,6 @@ export const approveUser = (id: string, config?: AxiosRequestConfig): Promise<Us
   return apiClient
     .put<UserSummaryResponse>(`/admin/users/${id}/approve`, {}, config)
     .then((response) => toUserDto(response.data));
-};
-
-export const deleteUser = (id: string, config?: AxiosRequestConfig): Promise<void> => {
-  return apiClient.delete(`/admin/users/${id}`, config).then(() => undefined);
 };
 
 export const getUserNamesByIds = async (
