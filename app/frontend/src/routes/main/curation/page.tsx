@@ -118,7 +118,7 @@ function nextUpdateNumber(names: string[]): number {
 // A database: its name (the description shows on hovering it), what it holds and its actions, with its updates below.
 // Its eligibility criteria (they can be long) are in a dialog, where admins also edit them, its name and description.
 function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase; curation: Curation; fadeIn: boolean }) {
-  const { loading, projects, tasks, refresh } = curation;
+  const { loading, projects, tasks, assignableUsers, refresh } = curation;
   const userId = useAuthStore((s) => s.user?.id);
   // Its owner changes, exports and transfers it, and uploads, assigns and merges its updates.
   const isOwner = Boolean(userId) && database.owner === userId;
@@ -135,6 +135,8 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
     projects: projects.filter((project) => projectDatabaseId(project) === database.id),
     tasks: tasks.filter((task) => projectDatabaseId(task) === database.id),
   };
+  // The owner is an approved user, so among the users an update can be assigned to.
+  const ownerName = isOwner ? "you" : assignableUsers.find((user) => user.id === database.owner)?.name;
   const updateCount = new Set([...own.projects, ...own.tasks].map((update) => update.projectId)).size;
 
   const download = async () => {
@@ -295,6 +297,7 @@ function DatabaseCard({ database, curation, fadeIn }: { database: StudyDatabase;
           <span className="truncate text-xs text-muted-foreground">
             {database.numberStudies} {database.numberStudies === 1 ? "study" : "studies"} · {database.numberReports}{" "}
             {database.numberReports === 1 ? "report" : "reports"} · {updateCount} {updateCount === 1 ? "update" : "updates"}
+            {ownerName && <> · Owner: {ownerName}</>}
           </span>
         </div>
         {actions}

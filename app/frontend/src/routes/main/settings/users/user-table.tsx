@@ -7,12 +7,12 @@ import { approveUser } from "@/lib/api/adminApi";
 import { toast } from "sonner";
 
 interface Props {
-  initialUsers: UserDto[];
+  users: UserDto[];
+  /** Takes an update of the current users. */
+  onChange: (update: (users: UserDto[]) => UserDto[]) => void;
 }
 
-export const UserTable: React.FC<Props> = (props) => {
-  const { initialUsers } = props;
-  const [users, setUsers] = useState<UserDto[]>(initialUsers);
+export const UserTable: React.FC<Props> = ({ users, onChange: setUsers }) => {
   const [selectedUser, setSelectedUser] = useState<UserDto | null>(null);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [approvingUserId, setApprovingUserId] = useState<string | null>(null);

@@ -6,7 +6,7 @@ import { CurationRow } from "./curation-row";
 
 interface TaskRowProps {
   task: TaskDto;
-  /** The names of the owner and of the assignees the task waits for. */
+  /** The names of the assignees the task waits for (its owner is the database's, shown on the database's card). */
   userNameById: Map<string, string>;
   onCommitted?: () => void;
 }
@@ -16,7 +16,6 @@ interface TaskRowProps {
  * of their links of the reports they are done with.
  */
 export function TaskRow({ task, userNameById, onCommitted }: TaskRowProps) {
-  const ownerName = userNameById.get(task.owner);
   const total = task.numberReportsTotal || task.numberReportsReadyForProcessing;
 
   return (
@@ -25,7 +24,7 @@ export function TaskRow({ task, userNameById, onCommitted }: TaskRowProps) {
       createdAt={task.createdAt}
       subtitle={
         <>
-          {total} reports · <RelativeTime date={task.createdAt} /> by {ownerName ?? task.owner}
+          {total} reports · <RelativeTime date={task.createdAt} />
         </>
       }
       steps={taskSteps(task)}

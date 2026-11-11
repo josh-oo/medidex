@@ -3,7 +3,6 @@ import { Outlet, useLocation } from "react-router-dom";
 import { ChevronRight, PanelLeft, UserRound, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Spinner } from "@/components/ui/spinner";
 import { useExtensionRegistry } from "@/context/extension-registry-context";
 import { useAuthStore } from "@/hooks/use-auth";
 import { PageLink } from "@/lib/page-transition";
@@ -126,14 +125,8 @@ export default function SettingsLayout() {
         </div>
 
         <div className="mx-auto w-full max-w-5xl space-y-6 px-4 pb-10 pt-4 md:px-8 md:pt-6">
-          {/* The sections are lazy chunks: while one loads the navigation stays. */}
-          <Suspense
-            fallback={
-              <div className="flex justify-center py-10">
-                <Spinner className="h-6 w-6" />
-              </div>
-            }
-          >
+          {/* The sections are lazy chunks: while one loads the navigation stays, and the section is blank (no spinner). */}
+          <Suspense fallback={null}>
             <Outlet />
           </Suspense>
         </div>

@@ -62,7 +62,7 @@ export function useCuration(): Curation {
       const userIds = Array.from(
         new Set(
           tasksResult
-            .flatMap((task) => [task.owner, ...task.pendingAssignees])
+            .flatMap((task) => task.pendingAssignees)
             .filter((userId): userId is string => Boolean(userId))
         )
       );
