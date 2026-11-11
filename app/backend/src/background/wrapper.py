@@ -1,9 +1,9 @@
 """Background jobs kicked off after a request/tool call already returned its
 response: each opens its own DB session(s) via AsyncSessionLocal rather than
 reusing the caller's (which closes once the request/tool call itself
-returns). Framework-agnostic on purpose - both fastapi_app (via Starlette's
-BackgroundTasks) and mcp_server (via a bare asyncio.create_task) schedule
-these as fire-and-forget, without either needing to know how the other does
+returns). Framework-agnostic on purpose - fastapi_app (via Starlette's
+BackgroundTasks) and any other caller (e.g. via a bare asyncio.create_task)
+schedule these as fire-and-forget, without needing to know how the others do
 it.
 """
 

@@ -3,7 +3,7 @@
 A downstream deployable registers an enricher under a key; a client asks for it by passing that key
 in the list endpoint's `include` query parameter, and gets the enricher's value for each report in
 `ReportCuration.extensions[key]`. Without `include` nothing runs, so the core response, the services
-and every other caller (e.g. an MCP head) never see enriched data.
+and every other caller never see enriched data.
 
 Enrichment happens in the route function, after the service has checked access and built the page,
 and only for the ids of that page.

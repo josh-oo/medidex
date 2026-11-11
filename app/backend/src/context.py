@@ -49,9 +49,9 @@ class RequestContext:
 
     def __init__(self, db: AsyncSession, user_id: Optional[str], is_admin: bool = False):
         self.db = db
-        # The scope the request acts in (see README, "Scopes"): a user, "bot", or an MCP client.
+        # The scope the request acts in: a user, "bot", or another client acting for a user.
         self.user_id = user_id
-        # Admins (reviewers) see the work of every scope; an MCP client acting for an admin does not.
+        # Admins (reviewers) see the work of every scope; a client acting for an admin does not.
         self.is_admin = is_admin
 
     # Repositories

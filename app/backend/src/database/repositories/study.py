@@ -107,9 +107,9 @@ class StudyRepository:
         self.graphs = StudyGraphs(db)
 
     def _visible_drafts(self):
-        """The studies of the updates this scope may see (see README, "Scopes"): those it created itself, besides every
+        """The studies of the updates this scope may see: those it created itself, besides every
         study of the core database. Studies another scope created stay invisible until a report linked to them is
-        merged, so that users, MediBot and MCP clients work without interfering. The owner of a study database reviews
+        merged, so that users, MediBot and other clients work without interfering. The owner of a study database reviews
         its updates and sees every study of them."""
         owned = select(StudyDatabase.id).where(StudyDatabase.owner == self.user_id)
         return or_(UpdateStudy.created_by == self.user_id, UpdateStudy.database_id.in_(owned))
